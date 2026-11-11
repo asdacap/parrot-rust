@@ -101,7 +101,14 @@ async fn actual_live_activity_clock_records_nonzero_success_elapsed_and_failure_
         let sent = bounded(
             runtime
                 .session
-                .send_text_message("timed question".into(), Arc::new(NeverCancelled)),
+                .send_and_select_execution(
+                    vec![ConversationPart::text("timed question")],
+                    parrot_domain::values::identifiers::Identifier::message_id().unwrap(),
+                    parrot_domain::protocol::messages::parrot::InputSource::INPUT_SOURCE_UNSPECIFIED,
+                    Arc::new(NeverCancelled),
+                )
+                .unwrap()
+                .wait(&NeverCancelled),
         )
         .await
         .unwrap();

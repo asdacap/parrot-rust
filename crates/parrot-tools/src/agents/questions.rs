@@ -32,9 +32,6 @@ impl<Q, S> QuestionTool<Q, S> {
             security: PhantomData,
         }
     }
-    pub fn name(&self) -> &'static str {
-        "question"
-    }
 }
 impl<Q, S> Tool for QuestionTool<Q, S>
 where
@@ -142,9 +139,6 @@ impl<A, S> AskTool<A, S> {
             security: PhantomData,
         }
     }
-    pub fn name(&self) -> &'static str {
-        "ask"
-    }
 }
 impl<A, S> Tool for AskTool<A, S>
 where
@@ -218,9 +212,6 @@ impl<A, S> ReplyTool<A, S> {
             templates,
             security: PhantomData,
         }
-    }
-    pub fn name(&self) -> &'static str {
-        "reply"
     }
 }
 impl<A, S> Tool for ReplyTool<A, S>

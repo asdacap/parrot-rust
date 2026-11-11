@@ -63,7 +63,7 @@ async fn actual_spawn_preserves_captured_alias_fork_batch_running_and_normalized
         let selected = child.selection().capture().unwrap();
         assert_eq!(selected.profile.id, "worker");
         assert_eq!(selected.model.requested_selector.value, "fast");
-        assert_eq!(selected.model.canonical_base(), "scripted/first");
+        assert_eq!(selected.model.canonical_model.selector(), "scripted/first");
         assert_eq!(h.provider.requests.lock().unwrap()[0].model, "first");
         assert!(child.identity().prompt_scope.format(1).unwrap().contains("bounded research"));
         let seeded = history_text(&child).await;
@@ -90,7 +90,7 @@ async fn actual_spawn_preserves_captured_alias_fork_batch_running_and_normalized
         let selected = resumed.selection().capture().unwrap();
         assert_eq!(selected.profile.id, "revised");
         assert_eq!(selected.model.requested_selector.value, "slow");
-        assert_eq!(selected.model.canonical_base(), "scripted/second");
+        assert_eq!(selected.model.canonical_model.selector(), "scripted/second");
         assert!(!resumed.identity().prompt_scope.format(1).unwrap().contains("must not replace"));
         assert_eq!(services(&resumed).settle().await.status, ExecutionStatus::Succeeded);
         assert!(history_text(&resumed).await.contains(&"first prompt".into()));

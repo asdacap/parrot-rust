@@ -11,8 +11,9 @@ use std::{
 use super::support::{Artifacts, NoCancel, Selection, Services, Snapshot};
 use parrot_domain::contracts::{async_ops::BoxFuture, security::InvocationContext};
 use parrot_foundation::{config::Configuration, template_catalog::PromptTemplateCatalog};
+use parrot_provider::sessions::model::Tool;
 use parrot_tools::{
-    catalog::{self, Catalog, Invocation},
+    catalog::{self, Catalog, Factory, Invocation},
     files::WorkspacePaths,
     process::ownership::owner::ShellProcessOwner,
     web_fetch::{
@@ -188,6 +189,23 @@ impl Fixture {
             web,
         }
     }
+    pub fn find(&self, name: &str) -> Option<&Factory<Snapshot, Selection>> {
+        self.catalog.factories().iter().find(|factory| {
+            factory.supports() && (factory.name() == name || factory.aliases().contains(&name))
+        })
+    }
+    pub fn definitions(&self, is_permitted: impl Fn(&str) -> bool) -> Vec<Tool> {
+        self.catalog
+            .factories()
+            .iter()
+            .filter(|factory| factory.supports() && is_permitted(factory.name()))
+            .map(|factory| Tool {
+                name: factory.name().into(),
+                description: factory.definition().description.clone(),
+                parameters_json: factory.definition().parameters_json.clone(),
+            })
+            .collect()
+    }
     pub async fn invoke(
         &self,
         name: &str,
@@ -197,8 +215,7 @@ impl Fixture {
         let mut invocation = Invocation::new("catalog-call", arguments.to_string());
         invocation.assistant_sequence = 9_007_199_254_740_993;
         invocation.prompt_templates = Some(self.templates.clone());
-        let snapshot = self.catalog.snapshot().unwrap();
-        let tool = snapshot.find(name).unwrap().create();
+        let tool = self.find(name).unwrap().create();
         tool.invoke(
             invocation,
             InvocationContext::new(

@@ -2,13 +2,17 @@ use super::{admission_publisher::AdmissionPublisher, fixture::*};
 use crate::tool_execution_support::tool_execution_config;
 use parrot_domain::{
     contracts::{
+        agent_state::AgentStateStore,
         async_ops::{BoxFuture, Cancellation},
         filenames::FilenameGenerator,
         paths::{ResolvedRead, RootOrigin, SelectedSessionRoot},
         security::{AccessSnapshot, RestrictableAccessSnapshot},
     },
     protocol::messages::parrot::{self as protocol, Event},
-    values::config::ModelProfiles,
+    values::{
+        agent_state::{ExecutionCheckpoint, TaskResponseReference, TaskResultClaim},
+        config::ModelProfiles,
+    },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::{
@@ -25,7 +29,10 @@ use parrot_runtime::{
     active_work::exit_reminders::ExitReminders,
     agent_turn::{
         engine::{RuntimeBackend, RuntimeConfig},
-        lifecycle::{AgentSession, DrainState, Execution, IncomingActivity},
+        lifecycle::{
+            AgentSession, DrainBackend, DrainState, Execution, IncomingActivity, LifecycleError,
+            SendResult,
+        },
         provider_call::{OutputWriter, ProviderActivity},
         services::*,
     },
@@ -545,7 +552,7 @@ impl Factory {
                 (id, handle)
             })
             .collect();
-        let backend = RuntimeBackend::new(RuntimeConfig {
+        let runtime_config = RuntimeConfig {
             tool_execution: tool_execution_config(&history, templates.clone(), publisher.clone()),
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_max_turns: false,
@@ -569,7 +576,11 @@ impl Factory {
             parent_completion: prepared.parent_completion,
             ancestors,
             event_id: Arc::new(id),
-        })
+        };
+        let backend = RuntimeBackend::with_sessions(
+            runtime_config,
+            parrot_provider::sessions::ProviderSessions::new(),
+        )
         .await
         .unwrap();
         let session = AgentSession::with_state(
@@ -743,9 +754,6 @@ impl Provider for Scripted {
     fn id(&self) -> &str {
         "scripted"
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.call_impl(request)
-    }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         Ok(Arc::new(self.clone()))
     }
@@ -842,4 +850,206 @@ pub async fn send(
     )
     .await
     .unwrap()
+}
+pub struct TaskSessionAdapter<B: DrainBackend> {
+    identity: Arc<AgentIdentity>,
+    session: AgentSession<B>,
+    state: Arc<dyn AgentStateStore>,
+}
+impl<B: DrainBackend> TaskSessionAdapter<B> {
+    pub fn new(
+        identity: Arc<AgentIdentity>,
+        session: AgentSession<B>,
+        state: Arc<dyn AgentStateStore>,
+    ) -> Self {
+        Self {
+            identity,
+            session,
+            state,
+        }
+    }
+    pub fn session(&self) -> &AgentSession<B> {
+        &self.session
+    }
+}
+impl<B: DrainBackend> TaskSession for TaskSessionAdapter<B> {
+    fn identity(&self) -> &Arc<AgentIdentity> {
+        &self.identity
+    }
+    fn capture_execution(&self) -> BoxFuture<'_, ChildResult<Option<ExecutionCheckpoint>>> {
+        Box::pin(async move {
+            Ok(self
+                .state
+                .load()
+                .await
+                .map_err(|error| ChildError::failure("io", error.to_string()))?
+                .ok_or_else(|| ChildError::registry("worker state is missing"))?
+                .execution)
+        })
+    }
+    fn recover(&self) -> ChildResult<TaskExecution> {
+        let handles = self.session.recover_owned_reserved()?;
+        Ok(TaskExecution {
+            execution: Operation::start(async move {
+                handles.execution.join().await.map_err(Into::into)
+            }),
+            reservation: Operation::start(async move {
+                handles.reservation.join().await.map_err(Into::into)
+            }),
+        })
+    }
+    fn cancel_recovered(&self, prompt_id: &str) -> ChildResult<Operation<Execution>> {
+        let operation = self.session.cancel_recovered_execution(prompt_id)?;
+        Ok(Operation::start(async move {
+            operation.join().await.map_err(Into::into)
+        }))
+    }
+    fn suspend(&self) -> BoxFuture<'_, ChildResult<()>> {
+        Box::pin(async move { self.session.suspend().await.map_err(Into::into) })
+    }
+    fn enqueue_claimed(
+        &self,
+        parts: Vec<ConversationPart>,
+        message_id: String,
+        claim: TaskResultClaim,
+        cancellation: Arc<dyn Cancellation>,
+    ) -> ChildResult<TaskExecution> {
+        let handles =
+            self.session
+                .enqueue_claimed_execution(parts, message_id, claim, cancellation)?;
+        Ok(TaskExecution {
+            execution: Operation::start(async move {
+                handles.execution.join().await.map_err(Into::into)
+            }),
+            reservation: Operation::start(async move {
+                handles.reservation.join().await.map_err(Into::into)
+            }),
+        })
+    }
+    fn capture_result<'a>(
+        &'a self,
+        prompt_id: &'a str,
+        claim: &'a TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<TaskResponseReference>> {
+        Box::pin(async move {
+            self.session
+                .capture_claimed_result(prompt_id, claim)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn acknowledge_result<'a>(
+        &'a self,
+        reference: &'a TaskResponseReference,
+        claim: &'a TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<()>> {
+        Box::pin(async move {
+            self.session
+                .acknowledge_claimed_result(reference, claim)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn acknowledge_retired_result<'a>(
+        &'a self,
+        reference: &'a TaskResponseReference,
+        claim: &'a TaskResultClaim,
+    ) -> BoxFuture<'a, ChildResult<()>> {
+        Box::pin(async move {
+            self.session
+                .acknowledge_retired_result(reference, claim)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn cancel_notification<'a>(&'a self, message_id: &'a str) -> BoxFuture<'a, ChildResult<()>> {
+        Box::pin(async move {
+            self.session
+                .cancel_recorded_notification(message_id)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn restore_response<'a>(
+        &'a self,
+        reference: &'a TaskResponseReference,
+    ) -> BoxFuture<'a, ChildResult<Execution>> {
+        Box::pin(async move {
+            self.session
+                .restore_saved_response(reference)
+                .await
+                .map_err(Into::into)
+        })
+    }
+    fn enqueue(
+        &self,
+        parts: Vec<ConversationPart>,
+        message_id: String,
+        cancellation: Arc<dyn Cancellation>,
+    ) -> ChildResult<Operation<Execution>> {
+        let execution =
+            self.session
+                .enqueue_execution(parts, message_id, None, None, cancellation)?;
+        // Join, rather than cancellation-sensitive observation: stop recording and
+        // a restarted run must follow the actual execution's terminal callbacks.
+        Ok(Operation::start(async move {
+            execution.join().await.map_err(Into::into)
+        }))
+    }
+    fn record(
+        &self,
+        parts: Vec<ConversationPart>,
+        message_id: String,
+        delivery: protocol::Delivery,
+    ) -> BoxFuture<'_, ChildResult<()>> {
+        Box::pin(async move {
+            self.session
+                .record_handle(
+                    parts,
+                    message_id,
+                    delivery,
+                    protocol::InputSource::INPUT_SOURCE_NOTIFICATION,
+                    Arc::new(NeverCancelled),
+                )?
+                .join()
+                .await?;
+            Ok(())
+        })
+    }
+    fn send(
+        &self,
+        parts: Vec<ConversationPart>,
+        message_id: String,
+        delivery: protocol::Delivery,
+        activity: IncomingActivity,
+    ) -> BoxFuture<'_, ChildResult<()>> {
+        Box::pin(async move {
+            self.session
+                .send_handle(
+                    parts,
+                    message_id,
+                    delivery,
+                    activity,
+                    Arc::new(NeverCancelled),
+                )?
+                .join()
+                .await?;
+            Ok(())
+        })
+    }
+}
+pub async fn send_text<B: DrainBackend>(
+    session: &AgentSession<B>,
+    text: &str,
+) -> Result<SendResult, LifecycleError> {
+    let caller: Arc<dyn Cancellation> = Arc::new(NeverCancelled);
+    session
+        .send_and_select_execution(
+            vec![ConversationPart::text(text)],
+            parrot_domain::values::identifiers::Identifier::message_id().unwrap(),
+            protocol::InputSource::INPUT_SOURCE_UNSPECIFIED,
+            caller.clone(),
+        )?
+        .wait(caller.as_ref())
+        .await
 }

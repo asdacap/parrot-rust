@@ -196,27 +196,6 @@ impl LinuxBubblewrapSandbox {
         launch.retain_launch_thread = true;
         Ok(launch)
     }
-
-    /// The PTY service owns the bridge and descriptors; this supplies its inner argv.
-    pub fn pseudo_terminal_arguments(
-        &self,
-        policy: &LinuxSandboxPolicy,
-        helper: &Path,
-        command: &str,
-        working_directory: &Path,
-        environment: &[(String, String)],
-    ) -> io::Result<Vec<OsString>> {
-        let launch = self.pipe_launch(policy, command, working_directory, environment)?;
-        if !helper.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "the PTY attach helper does not exist",
-            ));
-        }
-        let mut args = vec![launch.program.into_os_string()];
-        args.extend(policy.arguments(command, working_directory, environment, Some(helper)));
-        Ok(args)
-    }
 }
 
 fn trusted_parent_chain(path: &Path) -> io::Result<bool> {
@@ -242,19 +221,6 @@ fn trusted_parent_chain(path: &Path) -> io::Result<bool> {
 
 /// Unsupported platforms must fail, not silently select the explicit escape hatch.
 pub struct UnavailableProcessSandbox;
-
-impl UnavailableProcessSandbox {
-    pub fn sandbox_available(&self) -> bool {
-        false
-    }
-
-    pub fn pipe_launch(&self) -> io::Result<LaunchSpec> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Sandboxed shell commands require Linux or macOS.",
-        ))
-    }
-}
 
 /// Only an explicit authorization gate may choose this unconfined adapter.
 pub struct UnsandboxedProcessSandbox;

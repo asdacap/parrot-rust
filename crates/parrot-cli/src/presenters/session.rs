@@ -39,7 +39,6 @@ pub struct EnhancedSessionPresenter {
     columns: usize,
     color: bool,
     replay: Arc<Mutex<SessionReplayContext>>,
-    observe_replay: bool,
     was_replaying: bool,
     hierarchy: AgentSessionHierarchy,
     registry: Arc<ToolPresenterRegistry>,
@@ -67,29 +66,6 @@ pub struct EnhancedSessionPresenter {
 }
 
 impl EnhancedSessionPresenter {
-    pub fn new(columns: usize, color: bool, replaying: bool) -> Self {
-        let mut result = Self::with_replay_context(
-            columns,
-            color,
-            Arc::new(Mutex::new(SessionReplayContext::new(replaying))),
-        );
-        result.observe_replay = true;
-        result
-    }
-
-    pub fn with_replay_context(
-        columns: usize,
-        color: bool,
-        replay: Arc<Mutex<SessionReplayContext>>,
-    ) -> Self {
-        Self::with_registry(
-            columns,
-            color,
-            replay,
-            Arc::new(ToolPresenterRegistry::standard(Vec::new())),
-        )
-    }
-
     pub fn with_registry(
         columns: usize,
         color: bool,
@@ -104,7 +80,6 @@ impl EnhancedSessionPresenter {
             columns: columns.max(1),
             color,
             replay,
-            observe_replay: false,
             was_replaying,
             hierarchy: AgentSessionHierarchy::default(),
             turn: EnhancedTurnRenderer::new(columns, color),
@@ -132,22 +107,13 @@ impl EnhancedSessionPresenter {
         }
     }
 
-    pub fn observe(&mut self, published: &wire::Event) -> PresenterResult<PresentationUpdate> {
-        let mut update = self.apply_event(published)?;
-        update.live = self.snapshot()?;
-        Ok(update)
-    }
-
     /// Applies an event and returns its durable and interaction effects without materializing live items.
     pub fn apply_event(&mut self, published: &wire::Event) -> PresenterResult<PresentationUpdate> {
         let (replaying, replay_completed) = {
-            let mut replay = self
+            let replay = self
                 .replay
                 .lock()
                 .map_err(|_| PresenterError("The session replay state is poisoned.".into()))?;
-            if self.observe_replay {
-                replay.observe(published);
-            }
             let replaying = replay.is_replaying();
             let completed = if self.was_replaying && !replaying {
                 Some(replay.busy())
@@ -344,22 +310,6 @@ impl EnhancedSessionPresenter {
         Ok(update)
     }
 
-    pub fn flush_response(&mut self, owner: &str) -> PresenterResult<PresentationUpdate> {
-        let mut update = PresentationUpdate::default();
-        let flushed = self.turn.flush_response(owner)?;
-        if !flushed.commits.is_empty() {
-            self.flush_reasoning_before_output(owner, &mut update)?;
-        }
-        update.commits.extend(flushed.commits);
-        Self::merge_activity(
-            self.activity.flush_response(owner)?,
-            &mut update,
-            &mut self.main_activity,
-        );
-        update.live = self.snapshot()?;
-        Ok(update)
-    }
-
     pub fn finish(&mut self) -> PresenterResult<PresentationUpdate> {
         let mut update = PresentationUpdate::default();
         Self::merge_activity(
@@ -381,12 +331,6 @@ impl EnhancedSessionPresenter {
 
     pub fn cancel(&mut self) -> PresenterResult<PresentationUpdate> {
         self.finish()
-    }
-
-    pub fn tick(&mut self, elapsed: Duration) -> PresenterResult<PresentationUpdate> {
-        let mut update = self.advance_time(elapsed)?;
-        update.live = self.snapshot()?;
-        Ok(update)
     }
 
     /// Advances animation and delayed commits without materializing live items.

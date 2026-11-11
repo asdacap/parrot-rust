@@ -1500,24 +1500,6 @@
       "repeat": 1
     },
     {
-      "case_id": "bucket-dispatch-timeout",
-      "family": "bucket",
-      "mode": "timeout",
-      "endpoint": "https://minio.example.com:9000",
-      "bucket": "b",
-      "prefix": "parrot/",
-      "public_base": "",
-      "region": "us-east-1",
-      "media_type": "image/png",
-      "body_hex": "000102",
-      "exists": true,
-      "status": 200,
-      "credentials": "environment",
-      "access_env": "PARROT_TEST_T34_S3_ACCESS",
-      "secret_env": "PARROT_TEST_T34_S3_SECRET",
-      "repeat": 1
-    },
-    {
       "case_id": "bucket-caller-cancel",
       "family": "bucket",
       "mode": "cancel",
@@ -1594,13 +1576,6 @@
       "mode": "failure",
       "session": false,
       "failure": "visible"
-    },
-    {
-      "case_id": "linking-failure-timeout",
-      "family": "linking",
-      "mode": "failure",
-      "session": false,
-      "failure": "timeout"
     },
     {
       "case_id": "linking-failure-permanent",

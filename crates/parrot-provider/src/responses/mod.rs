@@ -10,8 +10,8 @@ mod view;
 
 pub use request::{PreparedResponsesRequest, ResponsesPrepareError, prepare};
 pub use stream::{
-    ResponsesCompletion, ResponsesError, ResponsesEvent, ResponsesEventStream, ResponsesParser,
-    ResponsesReasoningKind, ResponsesStreamError, ResponsesToolCall,
+    ResponsesCompletion, ResponsesError, ResponsesEvent, ResponsesParser, ResponsesReasoningKind,
+    ResponsesToolCall,
 };
 pub use view::{
     ResponsesContentKind, ResponsesContentView, ResponsesMessageView, ResponsesRequestView,

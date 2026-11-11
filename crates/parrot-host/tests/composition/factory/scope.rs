@@ -62,7 +62,7 @@ use parrot_provider::{
 };
 use parrot_runtime::{
     agent_turn::{
-        lifecycle::DrainBackend,
+        lifecycle::{DrainBackend, LifecycleError, SendResult},
         provider_call::OutputWriter,
         services::{SelectionSource, SessionOutput, TurnSelection},
     },
@@ -229,14 +229,6 @@ impl LocalProvider {
 impl Provider for LocalProvider {
     fn id(&self) -> &str {
         "local"
-    }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        LocalSession(
-            self.requests.clone(),
-            self.scripts.clone(),
-            self.turn_barriers.clone(),
-        )
-        .call(request)
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(false) })
@@ -1893,7 +1885,7 @@ async fn actual_drain_and_external_observer_share_live_routing_and_same_prepared
     let replacement = fixture.routing.prepare("local/model", vec![alias]).unwrap();
     assert_eq!(replacement.revision, 1);
     fixture.routing.publish(replacement.clone());
-    assert_eq!(fixture.router.routing_revision(), 1);
+    assert_eq!(fixture.routing.capture().revision, 1);
     // The original source is deliberately still revision zero: only the actual
     // constructor's RoutedSelection must re-resolve it for the real drain.
     assert_eq!(
@@ -2339,9 +2331,7 @@ async fn shared_provider_routes_actual_turn_diagnostics(interrupt: bool) {
             .unwrap()
             .insert(marker.into(), barrier.clone());
         let session = scope.get_service::<RuntimeSession<Security>>().unwrap();
-        let sent = bounded(session.send_text_message(marker.into(), Arc::new(NeverCancelled)))
-            .await
-            .unwrap();
+        let sent = bounded(send_text(&session, marker)).await.unwrap();
         bounded(barrier.entered.notified()).await;
         executions.push(sent.execution);
         sessions.push(session);
@@ -2759,6 +2749,22 @@ mod ordinary_workspace_binding {
         );
         bounded(hosted.close()).await.unwrap();
     }
+}
+
+async fn send_text(
+    session: &RuntimeSession<Security>,
+    text: &str,
+) -> Result<SendResult, LifecycleError> {
+    let caller: Arc<dyn Cancellation> = Arc::new(NeverCancelled);
+    session
+        .send_and_select_execution(
+            vec![ConversationPart::text(text)],
+            Identifier::message_id().unwrap(),
+            parrot_domain::protocol::messages::parrot::InputSource::INPUT_SOURCE_UNSPECIFIED,
+            caller.clone(),
+        )?
+        .wait(caller.as_ref())
+        .await
 }
 
 mod fast_mode;

@@ -16,7 +16,7 @@ use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_host::web::router::WebClient;
 use tonic::Status;
 
-use crate::slash_sessions::{SlashCommand, SlashFailure};
+use crate::slash_sessions::SlashFailure;
 
 pub use auth::{AuthCommand, AuthPresetSelectCommand, AuthPresetSetCommand, AuthServices};
 pub use fast_mode::FastCommand;
@@ -32,25 +32,6 @@ pub use settings::{
 pub struct SettingsServices {
     pub client: WebClient,
     pub auth: Arc<AuthServices>,
-}
-
-/// Supplies real handlers to T67's source-ordered registry, not a second registry.
-/// T67 inserts these at the corresponding original `SlashCommands.Create` slots.
-pub fn commands(services: SettingsServices) -> Vec<Box<dyn SlashCommand>> {
-    let wizard = ModelWizard::new(services.client.clone());
-    vec![
-        Box::new(AuthCommand::new(services.auth.clone())),
-        Box::new(AuthPresetSelectCommand::new(services.auth.clone())),
-        Box::new(AuthPresetSetCommand::new(services.auth)),
-        Box::new(EffortCommand::new(services.client.clone())),
-        Box::new(FastCommand),
-        Box::new(ModelCommand::new(wizard.clone())),
-        Box::new(ModelAliasCommand::new(services.client.clone(), wizard)),
-        Box::new(ModelPresetSelectCommand),
-        Box::new(ModelPresetSetCommand),
-        Box::new(ModelsCommand::new(services.client)),
-        Box::new(SetContextLimitCommand),
-    ]
 }
 
 pub(crate) fn check_cancelled(cancellation: &dyn Cancellation) -> Result<(), SlashFailure> {

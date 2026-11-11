@@ -5,7 +5,7 @@ use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::responses::{ResponsesError, ResponsesEvent, ResponsesReasoningKind};
 use parrot_provider::responses_websocket::{
     ConnectedSocket, Connector, FrameKind, Headers, ReceivedFrame, ResponsesWebSocket, Socket,
-    SocketErrorCode, SocketState, WebSocketClient, WebSocketError, has_authority,
+    SocketErrorCode, SocketState, WebSocketClient, WebSocketError,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -246,14 +246,18 @@ async fn probes(
 }
 
 pub fn observe_case(input: &Value) -> Value {
-    tokio::runtime::Builder::new_current_thread().enable_all().start_paused(true).build().unwrap().block_on(async {
-        match input["kind"].as_str().unwrap() {
-            "send" => observe_send(input).await,
-            "client" => observe_client(input).await,
-            "authority" => json!({"case_id":input["case_id"],"has_authority":has_authority(input["endpoint"].as_str().unwrap_or(""),input["authority"].as_str().unwrap())}),
-            kind => panic!("unknown fixture kind {kind}"),
-        }
-    })
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .start_paused(true)
+        .build()
+        .unwrap()
+        .block_on(async {
+            match input["kind"].as_str().unwrap() {
+                "send" => observe_send(input).await,
+                "client" => observe_client(input).await,
+                kind => panic!("unknown fixture kind {kind}"),
+            }
+        })
 }
 async fn observe_send(input: &Value) -> Value {
     let tick = Arc::new(Mutex::new(number(input, "initial_tick", 0)));
@@ -386,9 +390,6 @@ impl Connector for FakeConnector {
                     Some(WebSocketError::Transport("scripted connect timeout".into()))
                 }
                 Some("cancelled") => Some(WebSocketError::Cancelled),
-                Some("invalid-operation") => Some(WebSocketError::InvalidOperation(
-                    "scripted invalid operation".into(),
-                )),
                 None => None,
                 Some(other) => panic!("unknown injected connector failure {other}"),
             };
@@ -491,9 +492,8 @@ fn error_json(error: WebSocketError, input: &Value, _begin: bool) -> Value {
             return json!({"type":"Parrot.Llm.Wire.ResponsesWebSocketUpgradeException","message":message,"status_code":status});
         }
         WebSocketError::Socket { code, .. } => {
-            return json!({"type":"System.Net.WebSockets.WebSocketException","message":message,"websocket_error_code":match code { SocketErrorCode::NotAWebSocket=>"NotAWebSocket",SocketErrorCode::ConnectionClosedPrematurely=>"ConnectionClosedPrematurely",SocketErrorCode::Faulted=>"Faulted",SocketErrorCode::Other=>"Other" }});
+            return json!({"type":"System.Net.WebSockets.WebSocketException","message":message,"websocket_error_code":match code { SocketErrorCode::NotAWebSocket=>"NotAWebSocket",SocketErrorCode::ConnectionClosedPrematurely=>"ConnectionClosedPrematurely",SocketErrorCode::Faulted=>"Faulted" }});
         }
-        WebSocketError::InvalidOperation(_) => "System.InvalidOperationException",
         WebSocketError::InvalidRequest(_) => "Parrot.Llm.Wire.ProviderHttpException",
         WebSocketError::Disposed => "System.ObjectDisposedException",
         WebSocketError::Response(error) => return response_error(error),

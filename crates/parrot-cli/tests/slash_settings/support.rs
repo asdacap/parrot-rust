@@ -13,8 +13,7 @@ use std::{
 use parrot_cli::{
     dispatch::dialog::{DialogOption, SlashDialog},
     slash_sessions::{
-        CommandContext, ExistingSessionBinding, SkillRefresh, SlashActivity, SlashCommand,
-        SlashFailure, SlashSession,
+        CommandContext, SkillRefresh, SlashActivity, SlashCommand, SlashFailure, SlashSession,
     },
 };
 use parrot_domain::{
@@ -405,14 +404,6 @@ impl SlashSession for Session {
     }
     fn start_new<'a>(
         &'a mut self,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), SlashFailure>> {
-        unused_session(cancellation)
-    }
-    fn load_existing<'a>(
-        &'a mut self,
-        _: wire::UserSession,
-        _: &'a mut dyn ExistingSessionBinding,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         unused_session(cancellation)

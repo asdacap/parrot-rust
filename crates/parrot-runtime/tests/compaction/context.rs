@@ -311,9 +311,6 @@ impl Provider for Scripted {
     fn id(&self) -> &str {
         "scripted"
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.call_impl(request)
-    }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         Ok(Arc::new(self.clone()))
     }
@@ -644,8 +641,10 @@ async fn actual_checkpoint_compaction_reopen_and_full_fork_preserve_tool_causali
     );
     let child = Fixture::history_for(&reopened, "child");
     child
-        .initialize_fork(
+        .repository()
+        .initialize_forked_agent_history(
             "agent".into(),
+            child.agent_session_id().into(),
             HistoryForkBoundary::AfterCompletedHistory,
             HistoryForkSelection::parse("full"),
             None,
@@ -658,8 +657,10 @@ async fn actual_checkpoint_compaction_reopen_and_full_fork_preserve_tool_causali
     );
     let named = Fixture::history_for(&reopened, "named");
     named
-        .initialize_fork(
+        .repository()
+        .initialize_forked_agent_history(
             "agent".into(),
+            named.agent_session_id().into(),
             HistoryForkBoundary::AfterCompletedHistory,
             HistoryForkSelection::parse("cut"),
             None,
@@ -772,61 +773,6 @@ async fn second_compaction_uses_snapshot_once_and_advances_only_after_new_histor
         "new tail"
     );
     drop(requests);
-    sessions.close().await.unwrap();
-    fixture
-        .repository
-        .events()
-        .database()
-        .close()
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn calibrated_prepare_awaits_new_epoch_and_resets_budget_only_after_commit() {
-    let fixture = Fixture::new();
-    let history = fixture.history();
-    user(&history, "old").await;
-    user(&history, "tail").await;
-    let provider = Scripted::default();
-    let selection = provider.selection(10000);
-    let sessions = ProviderSessions::new();
-    let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
-    let mut prompt = EpochPrompt::default();
-    let status = Status::default();
-    let events = Events::new(history.clone());
-    let mut controller = fixture.controller(history.clone(), 90);
-    controller.budget_mut().observe_usage(
-        "scripted/model",
-        1,
-        &Completion {
-            input_tokens: 9500,
-            ..Completion::default()
-        },
-    );
-    let prepared = controller
-        .prepare_epoch(
-            input(
-                &selection,
-                &mut conversation,
-                &mut prompt,
-                &sessions,
-                &status,
-                &events,
-            ),
-            &NeverCancelled,
-        )
-        .await
-        .unwrap();
-    assert!(prepared.reduced);
-    assert_eq!(prompt.sampled.load(Ordering::SeqCst), 2);
-    assert_eq!(
-        controller
-            .budget()
-            .estimate_input_tokens("scripted/model", 1),
-        1
-    );
-    assert_eq!(provider.closed.load(Ordering::Relaxed), 1);
     sessions.close().await.unwrap();
     fixture
         .repository

@@ -5,12 +5,14 @@ mod termimad_live;
 
 use std::sync::Arc;
 
-use parrot_cli::presenters::{EnhancedSessionPresenter, EnhancedTurnRenderer};
+use parrot_cli::presenters::EnhancedTurnRenderer;
 use parrot_cli::terminal_frames::{
     LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
 };
 use parrot_domain::protocol::messages::parrot::{self as wire, event::Payload};
 use protobuf::Message;
+
+use super::support::SessionHarness;
 
 pub(crate) fn event(owner: &str, payload: Payload) -> wire::Event {
     wire::Event {
@@ -89,19 +91,19 @@ pub(crate) fn live(items: &[Arc<dyn LiveBufferItem>], columns: usize) -> String 
 #[test]
 fn resize_retains_the_same_live_response_and_commits_at_the_new_width() {
     let mut renderer = EnhancedTurnRenderer::new(80, false);
-    renderer.observe(&start("root"), false).unwrap();
+    renderer.apply_event(&start("root"), false).unwrap();
     let pending = renderer
-        .observe(&text("root", "abcdefghij"), false)
+        .apply_event(&text("root", "abcdefghij"), false)
         .unwrap();
     assert!(pending.commits.is_empty());
-    assert_eq!(live(&pending.live, 80), "● abcdefghij\n");
+    assert_eq!(live(&renderer.snapshot(), 80), "● abcdefghij\n");
 
     renderer.resize(8);
     assert_eq!(live(&renderer.snapshot(), 8), "● abcdef\n");
-    let appended = renderer.observe(&text("root", "klmn"), false).unwrap();
+    let appended = renderer.apply_event(&text("root", "klmn"), false).unwrap();
     assert!(appended.commits.is_empty());
     assert_eq!(appended.completion, None);
-    let committed = renderer.observe(&completed("root"), false).unwrap();
+    let committed = renderer.apply_event(&completed("root"), false).unwrap();
     assert_eq!(committed.completion, Some(true));
     // Render the real committed item at a wide frame: its narrow rows must come
     // from resizing the still-pending Markdown accumulator, not frame clipping.
@@ -109,7 +111,7 @@ fn resize_retains_the_same_live_response_and_commits_at_the_new_width() {
         commits(&committed.commits, 80),
         "● abcdef\r\n  ghijkl\r\n  mn\r\n"
     );
-    assert!(committed.live.is_empty());
+    assert!(renderer.snapshot().is_empty());
     assert!(renderer.finish().unwrap().commits.is_empty());
 }
 
@@ -278,7 +280,7 @@ fn typed_turn_events_render_cumulative_text_and_sanitize_terminal_content() {
     let mut errors = Vec::new();
     let mut completion = None;
     for published in &events {
-        let update = renderer.observe(published, false).unwrap();
+        let update = renderer.apply_event(published, false).unwrap();
         output.push_str(&commits(&update.commits, 8));
         errors.extend(update.errors);
         completion = update.completion.or(completion);
@@ -319,7 +321,7 @@ fn split_markdown_chunks_are_promoted_to_scrollback_once() {
         ended(""),
         completed(""),
     ] {
-        let update = renderer.observe(&published, false).unwrap();
+        let update = renderer.apply_event(&published, false).unwrap();
         output.push_str(&commits(&update.commits, 80));
         completion = update.completion.or(completion);
         assert!(update.errors.is_empty());
@@ -334,8 +336,8 @@ fn split_markdown_chunks_are_promoted_to_scrollback_once() {
 #[test]
 fn session_turn_renders_main_notices_and_leaves_child_notices_to_activity() {
     let mut renderer = EnhancedTurnRenderer::new(80, false);
-    renderer.observe(&start("main"), false).unwrap();
-    renderer.observe(&child("main"), false).unwrap();
+    renderer.apply_event(&start("main"), false).unwrap();
+    renderer.apply_event(&child("main"), false).unwrap();
     let mut output = String::new();
     let mut lines = 0;
     for owner in ["child", "main"] {
@@ -386,14 +388,14 @@ fn session_turn_renders_main_notices_and_leaves_child_notices_to_activity() {
             ),
         ];
         for notice in notices {
-            let update = renderer.observe(&notice, false).unwrap();
+            let update = renderer.apply_event(&notice, false).unwrap();
             lines += update.commits.len();
             output.push_str(&commits(&update.commits, 80));
         }
     }
     assert_eq!(
         renderer
-            .observe(&completed("main"), false)
+            .apply_event(&completed("main"), false)
             .unwrap()
             .completion,
         Some(true)
@@ -414,7 +416,7 @@ fn session_turn_renders_main_notices_and_leaves_child_notices_to_activity() {
 
 #[test]
 fn turn_stream_commits_only_monitor_receipts_without_contents_or_promotion_duplicates() {
-    let mut presenter = EnhancedSessionPresenter::new(120, false, false);
+    let mut presenter = SessionHarness::new(120, false, false);
     let mut output = String::new();
     let mut events = vec![
         start("root"),
@@ -502,7 +504,7 @@ fn turn_stream_commits_only_monitor_receipts_without_contents_or_promotion_dupli
 #[test]
 fn enhanced_turn_ignores_agent_statistics_events() {
     let mut renderer = EnhancedTurnRenderer::new(8, false);
-    renderer.observe(&start("main"), false).unwrap();
+    renderer.apply_event(&start("main"), false).unwrap();
     let stats = event(
         "main",
         Payload::AgentStatisticsUpdated(wire::AgentStatisticsUpdatedEvent {
@@ -514,13 +516,13 @@ fn enhanced_turn_ignores_agent_statistics_events() {
             ..Default::default()
         }),
     );
-    let update = renderer.observe(&stats, false).unwrap();
+    let update = renderer.apply_event(&stats, false).unwrap();
     assert!(update.commits.is_empty());
     assert!(update.errors.is_empty());
-    renderer.observe(&ended("main"), false).unwrap();
+    renderer.apply_event(&ended("main"), false).unwrap();
     assert_eq!(
         renderer
-            .observe(&completed("main"), false)
+            .apply_event(&completed("main"), false)
             .unwrap()
             .completion,
         Some(true)
@@ -552,16 +554,16 @@ fn child_turn_completion_does_not_complete_the_foreground_turn() {
         ),
     ] {
         assert_eq!(
-            renderer.observe(&published, false).unwrap().completion,
+            renderer.apply_event(&published, false).unwrap().completion,
             None
         );
     }
     renderer
-        .observe(&text("main-session", "main continues"), false)
+        .apply_event(&text("main-session", "main continues"), false)
         .unwrap();
     output.push_str(&commits(
         &renderer
-            .observe(
+            .apply_event(
                 &event(
                     "main-session",
                     Payload::TurnEnded(wire::TurnEnded {
@@ -575,7 +577,9 @@ fn child_turn_completion_does_not_complete_the_foreground_turn() {
             .commits,
         8,
     ));
-    let done = renderer.observe(&completed("main-session"), false).unwrap();
+    let done = renderer
+        .apply_event(&completed("main-session"), false)
+        .unwrap();
     output.push_str(&commits(&done.commits, 8));
     assert_eq!(done.completion, Some(true));
     assert!(done.errors.is_empty());
@@ -586,10 +590,10 @@ fn child_turn_completion_does_not_complete_the_foreground_turn() {
 #[test]
 fn failure_commits_live_suffix_and_reports_sanitized_error() {
     let mut renderer = EnhancedTurnRenderer::new(8, false);
-    renderer.observe(&start(""), false).unwrap();
-    renderer.observe(&text("", "partial"), false).unwrap();
+    renderer.apply_event(&start(""), false).unwrap();
+    renderer.apply_event(&text("", "partial"), false).unwrap();
     let update = renderer
-        .observe(
+        .apply_event(
             &event(
                 "",
                 Payload::TurnFailed(wire::TurnFailed {
@@ -614,10 +618,10 @@ fn failure_commits_live_suffix_and_reports_sanitized_error() {
 fn child_provider_failure_reports_its_response_body() {
     let mut renderer = EnhancedTurnRenderer::new(8, false);
     for published in [start("main"), child("main"), start("child")] {
-        renderer.observe(&published, false).unwrap();
+        renderer.apply_event(&published, false).unwrap();
     }
     let update = renderer
-        .observe(
+        .apply_event(
             &event(
                 "child",
                 Payload::TurnFailed(wire::TurnFailed {
@@ -632,10 +636,10 @@ fn child_provider_failure_reports_its_response_body() {
     assert_eq!(update.completion, None);
     assert!(update.errors.join("\n").contains("  provider response:"));
     assert!(update.errors.join("\n").contains("{\"child\":true}"));
-    renderer.observe(&ended("main"), false).unwrap();
+    renderer.apply_event(&ended("main"), false).unwrap();
     assert_eq!(
         renderer
-            .observe(&completed("main"), false)
+            .apply_event(&completed("main"), false)
             .unwrap()
             .completion,
         Some(true)
@@ -684,7 +688,7 @@ fn task_progress_is_not_committed_by_standalone_turn_renderer() {
             ..Default::default()
         };
         let update = renderer
-            .observe(
+            .apply_event(
                 &event(
                     "",
                     Payload::ToolSnapshot(wire::ToolSnapshot {
@@ -703,209 +707,9 @@ fn task_progress_is_not_committed_by_standalone_turn_renderer() {
     assert!(renderer.finish().unwrap().commits.is_empty());
 }
 
-#[derive(Default)]
-struct RuntimeCancellation {
-    cancelled: std::sync::atomic::AtomicBool,
-    notify: tokio::sync::Notify,
-}
-impl RuntimeCancellation {
-    fn cancel(&self) {
-        self.cancelled
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-        self.notify.notify_waiters();
-    }
-}
-impl parrot_domain::contracts::async_ops::Cancellation for RuntimeCancellation {
-    fn is_cancelled(&self) -> bool {
-        self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
-    }
-    fn cancelled(&self) -> parrot_domain::contracts::async_ops::BoxFuture<'_, ()> {
-        Box::pin(async move {
-            loop {
-                let notified = self.notify.notified();
-                tokio::pin!(notified);
-                notified.as_mut().enable();
-                if self.cancelled.load(std::sync::atomic::Ordering::SeqCst) {
-                    return;
-                }
-                notified.await;
-            }
-        })
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn before_render_runs_before_each_event_on_actual_stream_renderer() {
-    let mut renderer = EnhancedTurnRenderer::new(80, false);
-    let events = [
-        ("none", wire::Event::default()),
-        (
-            "admitted-before-turn",
-            event(
-                "",
-                Payload::InputAdmitted(wire::InputAdmitted {
-                    content: "sent".into(),
-                    ..Default::default()
-                }),
-            ),
-        ),
-        (
-            "promoted",
-            event(
-                "",
-                Payload::InputPromoted(wire::InputPromoted {
-                    input_id: "input".into(),
-                    ..Default::default()
-                }),
-            ),
-        ),
-        (
-            "retry",
-            event(
-                "",
-                Payload::RetryNotice(wire::RetryNotice {
-                    attempt: 1,
-                    ..Default::default()
-                }),
-            ),
-        ),
-        ("started", start("")),
-        (
-            "tool-chunk",
-            event(
-                "",
-                Payload::ToolCallChunk(wire::ToolCallChunk {
-                    tool_name: "shell".into(),
-                    ..Default::default()
-                }),
-            ),
-        ),
-        ("first-visible", text("", "answer")),
-        (
-            "later-visible",
-            event(
-                "",
-                Payload::ToolStarted(wire::ToolStarted {
-                    tool_name: "shell".into(),
-                    ..Default::default()
-                }),
-            ),
-        ),
-        ("ended", ended("")),
-        ("ended-mode", completed("")),
-    ]
-    .into_iter()
-    .map(|(id, mut event)| {
-        event.id = id.into();
-        Ok(event)
-    });
-    let mut stream = futures_util::stream::iter(events);
-    let ids = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let output = Arc::new(std::sync::Mutex::new(String::new()));
-    let before_ids = ids.clone();
-    let before_output = output.clone();
-    let commit_output = output.clone();
-    let completed = renderer
-        .render_session_turn(
-            &mut stream,
-            move |published, _| {
-                let id = published.id.clone();
-                before_ids.lock().unwrap().push(id.clone());
-                before_output
-                    .lock()
-                    .unwrap()
-                    .push_str(&format!("before:{id}|"));
-                Box::pin(async { Ok(()) })
-            },
-            |_, _| Box::pin(async { Ok(()) }),
-            |_, _| Box::pin(async { Ok(()) }),
-            move |item, _, _| {
-                commit_output
-                    .lock()
-                    .unwrap()
-                    .push_str(&commits(&[item], 80));
-                Box::pin(async { Ok(()) })
-            },
-            |errors, _| {
-                assert!(errors.is_empty());
-                Box::pin(async { Ok(()) })
-            },
-            || false,
-            &RuntimeCancellation::default(),
-        )
-        .await
-        .unwrap();
-    assert!(completed);
-    assert_eq!(
-        ids.lock().unwrap().join(","),
-        "none,admitted-before-turn,promoted,retry,started,tool-chunk,first-visible,later-visible,ended,ended-mode"
-    );
-    let rendered = output.lock().unwrap();
-    assert!(rendered.starts_with("before:none|"));
-    assert!(rendered.contains("retry 1 in 0 ms:"));
-}
-
-async fn interrupted_stream_case(cancel: bool) {
-    let mut renderer = EnhancedTurnRenderer::new(80, false);
-    let token = Arc::new(RuntimeCancellation::default());
-    let after_token = token.clone();
-    let mut fragment = text("root", "partial");
-    fragment.id = "fragment".into();
-    let mut events = vec![Ok(start("root")), Ok(fragment)];
-    if !cancel {
-        events.push(Err(tonic::Status::aborted("stream failed")));
-    }
-    let mut stream = futures_util::stream::iter(events);
-    let output = Arc::new(std::sync::Mutex::new(String::new()));
-    let captured = output.clone();
-    let result = renderer
-        .render_session_turn(
-            &mut stream,
-            |_, _| Box::pin(async { Ok(()) }),
-            move |published, _| {
-                if cancel && published.id == "fragment" {
-                    after_token.cancel();
-                }
-                Box::pin(async { Ok(()) })
-            },
-            |_, _| Box::pin(async { Ok(()) }),
-            move |item, _, cancellation| {
-                assert!(!cancellation.is_cancelled());
-                captured.lock().unwrap().push_str(&commits(&[item], 80));
-                Box::pin(async { Ok(()) })
-            },
-            |errors, _| {
-                assert!(errors.is_empty());
-                Box::pin(async { Ok(()) })
-            },
-            || false,
-            token.as_ref(),
-        )
-        .await;
-    if cancel {
-        assert!(!result.unwrap());
-    } else {
-        let error = result.unwrap_err();
-        assert_eq!(error.code(), tonic::Code::Aborted);
-        assert_eq!(error.message(), "stream failed");
-    }
-    let rendered = output.lock().unwrap();
-    assert!(rendered.contains("● partial\r\n"));
-    assert_eq!(rendered.matches("partial").count(), 1);
-    assert!(renderer.finish().unwrap().commits.is_empty());
-}
-#[tokio::test(flavor = "current_thread")]
-async fn actual_stream_cancellation_flushes_suffix_with_uncancelled_cleanup() {
-    interrupted_stream_case(true).await;
-}
-#[tokio::test(flavor = "current_thread")]
-async fn actual_stream_error_flushes_suffix_and_propagates_original_status() {
-    interrupted_stream_case(false).await;
-}
-
 #[test]
 fn actual_live_commit_routes_json_through_existing_final_yaml_formatter_once() {
-    let mut presenter = EnhancedSessionPresenter::new(80, false, false);
+    let mut presenter = SessionHarness::new(80, false, false);
     presenter.observe(&start("root")).unwrap();
     let preview = presenter
         .observe(&text("root", "{\"path\":\"src/App.cs\",\"enabled\":true}"))

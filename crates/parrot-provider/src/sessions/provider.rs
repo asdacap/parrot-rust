@@ -54,11 +54,6 @@ pub trait OAuthTokenSource: Send + Sync {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<bool, Error>>;
 }
-/// Optional request metadata injection. The caller retains ownership of logical
-/// call terminal/cancellation recording; this is not a diagnostic decorator.
-pub trait CallTraceFactory: Send + Sync {
-    fn start(&self, request: &Request) -> Arc<CallTrace>;
-}
 pub trait ImageTokenCalculator: Send + Sync {
     fn calculate(&self, model: &Model, content: &super::Content) -> i64;
 }
@@ -95,7 +90,6 @@ pub struct CompatibleOptions {
     pub external_models: Vec<Model>,
     pub decoder: CatalogDecoderSelection,
     pub image_token_calculator: Arc<dyn ImageTokenCalculator>,
-    pub trace_factory: Option<Arc<dyn CallTraceFactory>>,
 }
 impl CompatibleOptions {
     pub fn new(
@@ -123,7 +117,6 @@ impl CompatibleOptions {
             external_models: Vec::new(),
             decoder: CatalogDecoderSelection::Standard,
             image_token_calculator: Arc::new(FallbackImageTokenCalculator),
-            trace_factory: None,
         }
     }
 }
@@ -136,7 +129,6 @@ pub struct ChatGptOptions {
     pub models: Vec<Model>,
     pub model_defaults: Vec<Model>,
     pub external_models: Vec<Model>,
-    pub trace_factory: Option<Arc<dyn CallTraceFactory>>,
 }
 impl ChatGptOptions {
     pub fn new(tokens: Arc<dyn OAuthTokenSource>) -> Self {
@@ -149,7 +141,6 @@ impl ChatGptOptions {
             models: Vec::new(),
             model_defaults: Vec::new(),
             external_models: Vec::new(),
-            trace_factory: None,
         }
     }
 }
@@ -179,7 +170,6 @@ struct Core {
     defaults: Vec<Model>,
     external: Vec<Model>,
     decoder: CatalogDecoderSelection,
-    trace_factory: Option<Arc<dyn CallTraceFactory>>,
     image_token_calculator: Option<Arc<dyn ImageTokenCalculator>>,
 }
 impl Core {
@@ -286,11 +276,6 @@ impl Core {
         if !turn_state.is_empty() {
             set_header(&mut headers, "x-codex-turn-state", turn_state.into());
         }
-        let trace = trace.or_else(|| {
-            self.trace_factory
-                .as_ref()
-                .map(|factory| factory.start(&prepared))
-        });
         Ok(HttpDriver::new(
             self.transport.clone(),
             self.endpoint.clone(),
@@ -462,7 +447,6 @@ fn stream_options(header: i64, idle: i64, maximum: usize) -> Result<StreamOption
 
 pub struct OpenAICompatibleProvider {
     core: Arc<Core>,
-    direct_session_id: String,
     images: Option<ImageGenerationClient>,
 }
 impl OpenAICompatibleProvider {
@@ -509,7 +493,6 @@ impl OpenAICompatibleProvider {
             http_stream::validate_headers(&[(options.session_header.clone(), String::new())])?;
         }
         Ok(Self {
-            direct_session_id: random_session_id()?,
             images: None,
             core: Arc::new(Core {
                 id: options.id,
@@ -532,7 +515,6 @@ impl OpenAICompatibleProvider {
                 defaults: options.model_defaults,
                 external: options.external_models,
                 decoder: options.decoder,
-                trace_factory: options.trace_factory,
                 image_token_calculator: Some(options.image_token_calculator),
             }),
         })
@@ -569,14 +551,6 @@ impl OpenAICompatibleProvider {
             }),
         }
     }
-    pub fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        Ok(lazy_http(
-            self.core.clone(),
-            self.direct_session_id.clone(),
-            request,
-            None,
-        ))
-    }
     pub async fn has_credential(&self, cancellation: &dyn Cancellation) -> Result<bool, Error> {
         self.core.has_credential(cancellation).await
     }
@@ -594,10 +568,6 @@ impl Provider for OpenAICompatibleProvider {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<ImageGenerationResult, Error>> {
         Self::generate_image(self, request, cancellation)
-    }
-
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        Self::call(self, request)
     }
     fn has_credential<'a>(
         &'a self,
@@ -628,7 +598,6 @@ impl Provider for OpenAICompatibleProvider {
 
 pub struct ChatGptProvider {
     core: Arc<Core>,
-    direct_session_id: String,
     usage_reporter: Arc<dyn super::decorators::UsageReporter>,
     images: Option<ImageGenerationClient>,
 }
@@ -640,7 +609,6 @@ impl ChatGptProvider {
         transport: Arc<dyn HttpTransport>,
         connector: Arc<dyn Connector>,
     ) -> Result<Self, Error> {
-        let direct_session_id = random_session_id()?;
         let core = Arc::new(Core {
             id: Self::PROVIDER_ID.into(),
             protocol: Protocol::Responses,
@@ -666,13 +634,11 @@ impl ChatGptProvider {
             defaults: options.model_defaults,
             external: options.external_models,
             decoder: CatalogDecoderSelection::Legacy(decode_chatgpt_models),
-            trace_factory: options.trace_factory,
             image_token_calculator: None,
         });
         let usage_reporter = Arc::new(ChatGptUsageReporter { core: core.clone() });
         Ok(Self {
             core,
-            direct_session_id,
             usage_reporter,
             images: None,
         })
@@ -708,14 +674,6 @@ impl ChatGptProvider {
             }),
         }
     }
-    pub fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        Ok(lazy_http(
-            self.core.clone(),
-            self.direct_session_id.clone(),
-            request,
-            None,
-        ))
-    }
     pub async fn has_credential(&self, cancellation: &dyn Cancellation) -> Result<bool, Error> {
         self.core.has_credential(cancellation).await
     }
@@ -733,10 +691,6 @@ impl Provider for ChatGptProvider {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<ImageGenerationResult, Error>> {
         Self::generate_image(self, request, cancellation)
-    }
-
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        Self::call(self, request)
     }
     fn has_credential<'a>(
         &'a self,
@@ -790,12 +744,6 @@ impl ResponseCallFactory for Factory {
         request: Request,
         trace: Option<Arc<CallTrace>>,
     ) -> Result<ResponsePrepared, Error> {
-        let trace = trace.or_else(|| {
-            self.core
-                .trace_factory
-                .as_ref()
-                .map(|factory| factory.start(&request))
-        });
         let core = self.core.clone();
         let websocket_request = request.clone();
         Ok(ResponsePrepared {
@@ -823,14 +771,6 @@ struct Fallback {
 impl HttpFallback for Fallback {
     fn open_unprepared<'a>(
         &'a self,
-        turn_state: String,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, Error>> {
-        self.open(Vec::new(), turn_state, cancellation)
-    }
-    fn open<'a>(
-        &'a self,
-        _body: Vec<u8>,
         turn_state: String,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, Error>> {

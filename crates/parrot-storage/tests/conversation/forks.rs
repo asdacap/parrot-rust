@@ -1,3 +1,4 @@
+use super::conversation_state;
 use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
 use parrot_domain::protocol::messages::parrot::Event;
 use parrot_storage::conversation::forks::ForkError;
@@ -187,7 +188,7 @@ async fn completed_checkpoint_call_is_available_without_separate_registration() 
         owner
     );
     assert_eq!(
-        repo.read_conversation_state("agent".into())
+        conversation_state(&repo, "agent")
             .await
             .unwrap()
             .checkpoint_sequences,
@@ -279,7 +280,7 @@ async fn checkpoint_reads_validate_arguments_and_require_successful_owned_result
                 .await
                 .unwrap();
         }
-        let state = repo.read_conversation_state("agent".into()).await.unwrap();
+        let state = conversation_state(&repo, "agent").await.unwrap();
         assert_eq!(
             state.checkpoint_sequences,
             expected.map(|_| owner).into_iter().collect::<Vec<_>>(),
@@ -302,13 +303,7 @@ async fn checkpoint_reads_validate_arguments_and_require_successful_owned_result
         );
         repo.events().database().close().await.unwrap();
         let reopened = fixture.repository();
-        assert_eq!(
-            reopened
-                .read_conversation_state("agent".into())
-                .await
-                .unwrap(),
-            state
-        );
+        assert_eq!(conversation_state(&reopened, "agent").await.unwrap(), state);
         reopened.events().database().close().await.unwrap();
     }
 }
@@ -337,7 +332,7 @@ async fn raw_conversation_without_summary_keeps_noncontiguous_ownership_and_arti
         .unwrap();
     append(&repo, "other", message(MessageRole::User, "other agent")).await;
 
-    let state = repo.read_conversation_state("agent".into()).await.unwrap();
+    let state = conversation_state(&repo, "agent").await.unwrap();
     assert_eq!(state.snapshot, None);
     assert_eq!(state.checkpoint_sequences, vec![owner]);
     assert_eq!(state.items.len(), 4);
@@ -399,16 +394,13 @@ async fn noncontiguous_members_survive_reopen_forks_and_owner_deletion() {
         )
         .await
         .unwrap();
-    let state = repo.read_conversation_state("agent".into()).await.unwrap();
+    let state = conversation_state(&repo, "agent").await.unwrap();
     assert_eq!(state.items.len(), 5);
     assert_eq!(state.items[2].tool_owner_sequence, Some(owner));
     assert_eq!(state.items[4].tool_owner_sequence, Some(owner));
     repo.events().database().close().await.unwrap();
     let repo = fixture.repository();
-    assert_eq!(
-        repo.read_conversation_state("agent".into()).await.unwrap(),
-        state
-    );
+    assert_eq!(conversation_state(&repo, "agent").await.unwrap(), state);
     let groups = repo
         .effective_conversation_groups("agent".into())
         .await
@@ -434,10 +426,7 @@ async fn noncontiguous_members_survive_reopen_forks_and_owner_deletion() {
         )
         .await
         .unwrap();
-        let copied = repo
-            .read_conversation_state(selection.into())
-            .await
-            .unwrap();
+        let copied = conversation_state(&repo, selection).await.unwrap();
         assert_eq!(copied.items.len(), 5);
         let copied_owner = copied.items[0].item.sequence;
         assert_ne!(copied_owner, owner);
@@ -465,7 +454,7 @@ async fn noncontiguous_members_survive_reopen_forks_and_owner_deletion() {
         })
         .await
         .unwrap();
-    let remaining = repo.read_conversation_state("agent".into()).await.unwrap();
+    let remaining = conversation_state(&repo, "agent").await.unwrap();
     assert_eq!(remaining.items.len(), 4);
     assert!(
         remaining
@@ -486,15 +475,9 @@ async fn noncontiguous_members_survive_reopen_forks_and_owner_deletion() {
     );
     repo.events().database().close().await.unwrap();
     let repo = fixture.repository();
-    assert_eq!(
-        repo.read_conversation_state("agent".into()).await.unwrap(),
-        remaining
-    );
+    assert_eq!(conversation_state(&repo, "agent").await.unwrap(), remaining);
     for selection in ["full", "handoff"] {
-        let copied = repo
-            .read_conversation_state(selection.into())
-            .await
-            .unwrap();
+        let copied = conversation_state(&repo, selection).await.unwrap();
         let copied_owner = copied.items[0].item.sequence;
         assert_eq!(copied.items[1].tool_owner_sequence, Some(copied_owner));
         assert_eq!(copied.items[2].tool_owner_sequence, Some(copied_owner));
@@ -525,7 +508,7 @@ async fn raw_conversation_snapshot_keeps_flat_tail_status_and_latest_active_chec
     settle(&repo, "agent", latest, "latest").await;
     append(&repo, "agent", message(MessageRole::User, "tail")).await;
 
-    let state = repo.read_conversation_state("agent".into()).await.unwrap();
+    let state = conversation_state(&repo, "agent").await.unwrap();
     assert_eq!(state.snapshot, Some(snapshot));
     assert_eq!(state.checkpoint_sequences, vec![latest]);
     assert_eq!(state.items.len(), 7);
@@ -559,13 +542,7 @@ async fn raw_conversation_snapshot_keeps_flat_tail_status_and_latest_active_chec
     );
     repo.events().database().close().await.unwrap();
     let reopened = fixture.repository();
-    assert_eq!(
-        reopened
-            .read_conversation_state("agent".into())
-            .await
-            .unwrap(),
-        state
-    );
+    assert_eq!(conversation_state(&reopened, "agent").await.unwrap(), state);
     reopened.events().database().close().await.unwrap();
 }
 
@@ -995,7 +972,7 @@ async fn complete_message_group_without_result_metadata_rolls_back() {
     let repo = fixture.repository();
     let owner = assistant(&repo, "agent", "call", "read").await;
     settle(&repo, "agent", owner, "call").await;
-    let source = repo.read_conversation_state("agent".into()).await.unwrap();
+    let source = conversation_state(&repo, "agent").await.unwrap();
     repo.events()
         .transaction(|tx| {
             tx.execute(
@@ -1029,7 +1006,7 @@ async fn complete_message_group_without_result_metadata_rolls_back() {
     )
     .await
     .unwrap();
-    let copied = repo.read_conversation_state("child".into()).await.unwrap();
+    let copied = conversation_state(&repo, "child").await.unwrap();
     assert_eq!(copied.items.len(), 2);
     assert_eq!(
         copied.items[1].tool_owner_sequence,
@@ -1103,7 +1080,7 @@ async fn original_full_fork_copies_settled_batches_and_checkpoints_both_paramete
         );
         assert_eq!(
             repo.events()
-                .tool_terminals("child".into())
+                .tool_terminals_of_calls("child".into(), vec!["checkpoint".into()])
                 .await
                 .unwrap()
                 .len(),

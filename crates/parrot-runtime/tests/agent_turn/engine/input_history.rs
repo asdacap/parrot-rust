@@ -45,7 +45,7 @@ async fn root_runtime(
     );
     let output = Arc::new(Output::default());
     let activity = Arc::new(Activity::new(trace.clone()));
-    let backend = RuntimeBackend::new(RuntimeConfig {
+    let runtime_config = RuntimeConfig {
         tool_execution: tool_execution_config(&fixture.history, templates.clone(), erased.clone()),
         agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
             disable_max_turns: false,
@@ -89,7 +89,11 @@ async fn root_runtime(
         parent_completion: Arc::new(Parent(trace)),
         ancestors: vec![],
         event_id: Arc::new(id),
-    })
+    };
+    let backend = RuntimeBackend::with_sessions(
+        runtime_config,
+        parrot_provider::sessions::ProviderSessions::new(),
+    )
     .await
     .unwrap();
     Runtime {
@@ -101,7 +105,21 @@ async fn root_runtime(
 }
 
 async fn assert_history(fixture: &Fixture, expected: &[&str]) {
-    assert_eq!(fixture.history.messages().await.unwrap(), expected);
+    let history: Vec<String> = fixture
+        .history
+        .conversation()
+        .await
+        .unwrap()
+        .iter()
+        .map(|item| {
+            format!(
+                "{}: {}",
+                item.message.role.as_str(),
+                parrot_storage::events::content(&item.message.parts)
+            )
+        })
+        .collect();
+    assert_eq!(history, expected);
     let projected: Vec<String> = fixture
         .jsonl()
         .lines()

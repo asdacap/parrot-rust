@@ -220,9 +220,16 @@ async fn cold_cancellation_rejects_another_unfinished_input_without_changing_it(
     );
     assert!(provider.requests.lock().unwrap().is_empty());
     assert_eq!(
-        bounded(runtime.session.recover_owned().unwrap().join())
-            .await
-            .unwrap(),
+        bounded(
+            runtime
+                .session
+                .recover_owned_reserved()
+                .unwrap()
+                .execution
+                .join()
+        )
+        .await
+        .unwrap(),
         Execution::succeeded("original answer")
     );
     assert_eq!(provider.requests.lock().unwrap().len(), 1);

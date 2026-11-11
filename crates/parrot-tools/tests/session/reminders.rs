@@ -264,11 +264,7 @@ async fn reminder_cancellation_and_service_errors_never_fabricate_success_or_mut
             Err(OperationError::Cancelled)
         );
         assert_eq!(fixture.calls(), std::slice::from_ref(&call));
-        for failure_kind in [
-            FailureKind::Argument,
-            FailureKind::InputConflict,
-            FailureKind::Io,
-        ] {
+        for failure_kind in [FailureKind::Argument, FailureKind::Io] {
             let failure = Failure::new(failure_kind, "reminder failed");
             fixture.services.0.lock().unwrap().failure = Some((stage, failure.clone()));
             let result = fixture
@@ -285,7 +281,7 @@ async fn reminder_cancellation_and_service_errors_never_fabricate_success_or_mut
             );
         }
         let mut state = fixture.services.0.lock().unwrap();
-        assert_eq!(state.calls, vec![call; 4]);
+        assert_eq!(state.calls, vec![call; 3]);
         state.failure = None;
     }
 }

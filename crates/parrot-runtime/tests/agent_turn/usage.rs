@@ -9,9 +9,7 @@ use parrot_domain::{
 use parrot_provider::{
     catalogs::{Model, ModelMetadataFields, ModelVariant},
     routing::registry::ProviderModel,
-    sessions::{
-        Completion, Content, Error, EventStream, Provider, Reasoning, Request, Session, ToolCall,
-    },
+    sessions::{Completion, Content, Error, Provider, Reasoning, Session, ToolCall},
 };
 use parrot_runtime::{agent_turn::usage::SessionUsageRecorder, event_broker::EventBroker};
 use parrot_storage::{
@@ -92,9 +90,6 @@ struct UnusedProvider;
 impl Provider for UnusedProvider {
     fn id(&self) -> &str {
         "actual-provider"
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        panic!("usage must not call provider")
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         panic!("usage must not read credentials")

@@ -1,5 +1,5 @@
 //! Minimal borrowed caller views consumed by the Responses wire adapter.
-use std::{io, path::Path};
+use std::io;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResponsesRole {
@@ -18,7 +18,6 @@ pub enum ResponsesContentKind {
 pub trait ResponsesContentView {
     fn kind(&self) -> ResponsesContentKind;
     fn text(&self) -> &str;
-    fn image_path(&self) -> &Path;
     fn image_url(&self) -> &str;
     fn image_media_type(&self) -> &str;
     /// Reads image bytes only when this adapter encodes an inline image.
@@ -67,5 +66,4 @@ pub trait ResponsesRequestView {
     fn reasoning_summary(&self) -> &str;
     /// Empty means unset; non-empty must be an opaque JSON object.
     fn provider_preferences(&self) -> &str;
-    fn include_router_metadata(&self) -> bool;
 }

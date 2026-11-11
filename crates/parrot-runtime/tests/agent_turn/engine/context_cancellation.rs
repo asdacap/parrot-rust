@@ -155,10 +155,7 @@ async fn native_initialization_failure_finishes_its_started_activity_without_ent
 #[ignore = "legacy fake TurnTools propagated summary cancellation; real leaf tool execution settles it as a tool result"]
 async fn actual_inline_summary_provider_typed_cancellations_are_interrupted_and_join_stream_cleanup()
  {
-    for error in [
-        Error::Cancelled,
-        Error::Cancellation("transport-owned cancellation text".into()),
-    ] {
+    for error in [Error::Cancelled] {
         let fixture = Fixture::new();
         fixture.seed().await;
         let tools = Arc::new(Tools::with_names(&["compact_context"]));
@@ -349,7 +346,7 @@ async fn oversized_recovery_summary_cancellation_records_failure_after_joining_t
         parrot_provider::http_stream::HttpError::RequestTooLarge(1),
     ));
     let mut summary = Step::complete("must not persist");
-    summary.completion = Err(Error::Cancellation("summary transport canceled".into()));
+    summary.completion = Err(Error::Cancelled);
     let provider = Scripted::new(vec![oversized, summary]);
     let runtime = fixture
         .runtime(
@@ -393,7 +390,7 @@ async fn oversized_recovery_summary_cancellation_records_failure_after_joining_t
     assert_eq!(failed.len(), 1);
     assert_eq!(
         failed[0].compaction_failed().message,
-        "summary transport canceled"
+        "The operation was canceled."
     );
     assert!(!events.iter().any(|event| event.has_compaction_finished()));
     runtime.close().await;

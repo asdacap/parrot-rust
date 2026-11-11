@@ -165,9 +165,9 @@ pub async fn list(
 
 fn provider_failure(failure: ProviderError) -> DispatchError {
     match failure {
-        ProviderError::Cancelled
-        | ProviderError::Cancellation(_)
-        | ProviderError::Http(HttpError::Cancelled) => DispatchError::Cancelled,
+        ProviderError::Cancelled | ProviderError::Http(HttpError::Cancelled) => {
+            DispatchError::Cancelled
+        }
         other => DispatchError::Command(other.to_string()),
     }
 }
@@ -214,7 +214,7 @@ mod tests {
     use super::*;
     use parrot_provider::{
         catalogs::Model,
-        sessions::{EventStream, Provider, Request, Session},
+        sessions::{Provider, Session},
     };
     use std::{collections::BTreeMap, io};
 
@@ -227,11 +227,6 @@ mod tests {
     impl Provider for ListedProvider {
         fn id(&self) -> &str {
             &self.id
-        }
-        fn call(&self, _: Request) -> Result<Box<dyn EventStream>, ProviderError> {
-            Err(ProviderError::InvalidOperation(
-                "not used by model listing".into(),
-            ))
         }
         fn has_credential<'a>(
             &'a self,

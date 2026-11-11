@@ -559,44 +559,6 @@ impl ProductionPolicyMaterializer {
         );
         Ok(snapshot)
     }
-
-    pub fn approve(
-        &self,
-        scratch: &AgentScratchDirectory,
-        targets: &[ProductionWriteTarget],
-    ) -> Result<(), FileReadError> {
-        for target in targets {
-            target.validate()?;
-        }
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| denied("Policy materializer is unavailable."))?;
-        let agent = state
-            .agents
-            .get_mut(scratch.root())
-            .ok_or_else(|| denied("The agent policy has not been materialized."))?;
-        if agent.raw_policy.is_read_only() {
-            return Err(denied("The current security policy is read-only."));
-        }
-        for target in targets {
-            target.validate()?;
-        }
-        agent.approvals.retain(|target| target.validate().is_ok());
-        for target in targets {
-            if !agent
-                .approvals
-                .iter()
-                .any(|existing| existing.contains(target))
-            {
-                agent
-                    .approvals
-                    .retain(|existing| !target.contains(existing));
-                agent.approvals.push(target.clone());
-            }
-        }
-        Ok(())
-    }
 }
 
 impl RetainedModePolicyMaterializer<ProductionPolicy> for ProductionPolicyMaterializer {
@@ -632,7 +594,6 @@ impl RetainedModePolicyMaterializer<ProductionPolicy> for ProductionPolicyMateri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parrot_domain::contracts::paths::ReadOrigin;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -770,31 +731,13 @@ mod tests {
         fs::write(fixture.root.join("outside"), b"x").unwrap();
         assert!(
             materializer
-                .approve(
+                .approve_for_agent(
+                    &policy,
                     &fixture.scratch,
                     &[ProductionWriteTarget::resolve(&fixture.root.join("outside")).unwrap()]
                 )
                 .is_err()
         );
-    }
-
-    #[test]
-    fn approvals_do_not_mutate_old_capture_and_files_never_grant_subtrees() {
-        let fixture = Fixture::new();
-        let materializer = fixture.materializer();
-        let before = fixture.capture(&materializer, &raw(false));
-        let path = fixture.root.join("approved-file");
-        fs::write(&path, b"x").unwrap();
-        materializer
-            .approve(
-                &fixture.scratch,
-                &[ProductionWriteTarget::resolve(&path).unwrap()],
-            )
-            .unwrap();
-        let after = fixture.capture(&materializer, &raw(false));
-        assert!(!before.allows_write(&path));
-        assert!(after.allows_write(&path));
-        assert!(!after.allows_write(&path.join("child")));
     }
 
     #[test]
@@ -924,11 +867,12 @@ mod tests {
     fn directory_approval_includes_children_but_not_siblings() {
         let fixture = Fixture::new();
         let materializer = fixture.materializer();
-        fixture.capture(&materializer, &raw(false));
+        let current = fixture.capture(&materializer, &raw(false));
         let path = fixture.root.join("approved-dir");
         fs::create_dir(&path).unwrap();
         materializer
-            .approve(
+            .approve_for_agent(
+                &current,
                 &fixture.scratch,
                 &[ProductionWriteTarget::resolve(&path).unwrap()],
             )
@@ -942,12 +886,12 @@ mod tests {
     fn replacing_approval_revokes_old_and_future_captures() {
         let fixture = Fixture::new();
         let materializer = fixture.materializer();
-        fixture.capture(&materializer, &raw(false));
+        let current = fixture.capture(&materializer, &raw(false));
         let path = fixture.root.join("approved-file");
         fs::write(&path, b"x").unwrap();
         let target = ProductionWriteTarget::resolve(&path).unwrap();
         materializer
-            .approve(&fixture.scratch, std::slice::from_ref(&target))
+            .approve_for_agent(&current, &fixture.scratch, std::slice::from_ref(&target))
             .unwrap();
         let old = fixture.capture(&materializer, &raw(false));
         fs::rename(&path, fixture.root.join("old-file")).unwrap();
@@ -999,11 +943,7 @@ mod tests {
         ] {
             assert!(
                 profile
-                    .check_read(&ResolvedRead::new(
-                        lexical.into(),
-                        actual.into(),
-                        ReadOrigin::Explicit
-                    ))
+                    .check_read(&ResolvedRead::new(lexical.into(), actual.into()))
                     .is_err()
             );
         }
@@ -1111,7 +1051,8 @@ mod tests {
         let path = fixture.root.join("approved-file");
         fs::write(&path, b"x").unwrap();
         materializer
-            .approve(
+            .approve_for_agent(
+                &before,
                 &fixture.scratch,
                 &[ProductionWriteTarget::resolve(&path).unwrap()],
             )
@@ -1131,11 +1072,12 @@ mod tests {
     fn new_session_registration_clears_future_grants_without_mutating_old_capture() {
         let fixture = Fixture::new();
         let materializer = fixture.materializer();
-        fixture.capture(&materializer, &raw(false));
+        let current = fixture.capture(&materializer, &raw(false));
         let path = fixture.root.join("approved-file");
         fs::write(&path, b"x").unwrap();
         materializer
-            .approve(
+            .approve_for_agent(
+                &current,
                 &fixture.scratch,
                 &[ProductionWriteTarget::resolve(&path).unwrap()],
             )
@@ -1165,9 +1107,10 @@ mod tests {
         )
         .unwrap();
         let materializer = fixture.materializer();
-        fixture.capture(&materializer, &raw);
+        let current = fixture.capture(&materializer, &raw);
         materializer
-            .approve(
+            .approve_for_agent(
+                &current,
                 &fixture.scratch,
                 &[ProductionWriteTarget::resolve(&path).unwrap()],
             )

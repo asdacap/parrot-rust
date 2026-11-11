@@ -57,7 +57,10 @@ fn fallback(registry: &ToolPresenterRegistry, tool: &str, args: &str, result: &s
 fn actual_registry_spawn_preserves_full_prompt_under_nested_activity_decoration() {
     use parrot_domain::protocol::messages::parrot as wire;
     use std::sync::Arc;
-    let registry = Arc::new(ToolPresenterRegistry::standard(vec![]));
+    let registry = Arc::new(ToolPresenterRegistry::standard_with_skill_read_paths(
+        vec![],
+        std::sync::Arc::new(tools::read::SkillReadPathFormatter::default()),
+    ));
     let prompt = vec!["one two three four five"; 110].join("\n");
     let call = ToolCallPresentation::new(
         "agent_spawn",
@@ -141,7 +144,10 @@ fn actual_registry_spawn_preserves_full_prompt_under_nested_activity_decoration(
 
 #[test]
 fn actual_registry_queue_push_malformed_sources_preserve_generic_yaml() {
-    let registry = ToolPresenterRegistry::standard(vec![]);
+    let registry = ToolPresenterRegistry::standard_with_skill_read_paths(
+        vec![],
+        std::sync::Arc::new(tools::read::SkillReadPathFormatter::default()),
+    );
     for args in [
         r#"{"name":"work"}"#,
         r#"{"name":"work","items":[],"source_file":"items.txt"}"#,
@@ -162,7 +168,10 @@ fn actual_registry_queue_push_malformed_sources_preserve_generic_yaml() {
 
 #[test]
 fn actual_registry_queue_take_invalid_counts_and_malformed_schemas_fall_back() {
-    let registry = ToolPresenterRegistry::standard(vec![]);
+    let registry = ToolPresenterRegistry::standard_with_skill_read_paths(
+        vec![],
+        std::sync::Arc::new(tools::read::SkillReadPathFormatter::default()),
+    );
     for count in [
         serde_json::json!(0),
         serde_json::json!(-1),
@@ -196,7 +205,10 @@ fn actual_registry_queue_take_invalid_counts_and_malformed_schemas_fall_back() {
 
 #[test]
 fn actual_registry_get_agent_tasks_invalid_and_nested_execution_state_fall_back() {
-    let registry = ToolPresenterRegistry::standard(vec![]);
+    let registry = ToolPresenterRegistry::standard_with_skill_read_paths(
+        vec![],
+        std::sync::Arc::new(tools::read::SkillReadPathFormatter::default()),
+    );
     for (args, result) in [
         ("{}", "not json"),
         ("{}", "{}"),
@@ -217,7 +229,10 @@ fn actual_registry_get_agent_tasks_invalid_and_nested_execution_state_fall_back(
 
 #[test]
 fn actual_registry_ask_and_reply_invalid_arguments_preserve_generic_output() {
-    let registry = ToolPresenterRegistry::standard(vec![]);
+    let registry = ToolPresenterRegistry::standard_with_skill_read_paths(
+        vec![],
+        std::sync::Arc::new(tools::read::SkillReadPathFormatter::default()),
+    );
     for (tool, target) in [("ask", "name"), ("reply", "request_id")] {
         for args in [
             serde_json::json!({}),
@@ -243,7 +258,10 @@ fn actual_registry_ask_and_reply_invalid_arguments_preserve_generic_output() {
 
 #[test]
 fn actual_registry_write_stdin_specialization_never_echoes_sensitive_input_or_results() {
-    let registry = ToolPresenterRegistry::standard(vec![]);
+    let registry = ToolPresenterRegistry::standard_with_skill_read_paths(
+        vec![],
+        std::sync::Arc::new(tools::read::SkillReadPathFormatter::default()),
+    );
     for (args, expected) in [
         (
             r#"{"name":"build","input":"secret 🔒","yield_after_ms":0}"#,

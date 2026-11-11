@@ -272,7 +272,7 @@ impl Fixture {
         let trace = tools.trace.clone();
         let output = Arc::new(Output::default());
         let activity = Arc::new(Activity::new(trace.clone()));
-        let backend = RuntimeBackend::new(RuntimeConfig {
+        let runtime_config = RuntimeConfig {
             tool_execution: tool_execution_config(&self.history, templates.clone(), erased.clone()),
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_max_turns: false,
@@ -320,7 +320,11 @@ impl Fixture {
                 .unwrap_or_else(|| Arc::new(Parent(trace))),
             ancestors: vec![],
             event_id: Arc::new(id),
-        })
+        };
+        let backend = RuntimeBackend::with_sessions(
+            runtime_config,
+            parrot_provider::sessions::ProviderSessions::new(),
+        )
         .await
         .unwrap();
         let session = match overrides.state {
@@ -473,7 +477,6 @@ impl SelectionSource<Security> for Selection {
 #[derive(Clone, Default)]
 struct Tools {
     trace: Arc<Trace>,
-    inline_prepare: Arc<AtomicBool>,
     inline_compact: Arc<AtomicBool>,
     prompt_cancelled: Arc<AtomicBool>,
     executions: Arc<AtomicUsize>,
@@ -610,37 +613,6 @@ impl BorrowedTool<Security> for FixtureTool {
                     })?;
                 assert!(result.reduced);
                 self.tools.trace.push("inline-compacted");
-            }
-            if self.tools.inline_prepare.swap(false, Ordering::SeqCst) {
-                let epoch = resources
-                    .context
-                    .prepare_epoch(
-                        EpochInput {
-                            selection: &context.selection.model,
-                            tools: &[],
-                            conversation: resources.conversation,
-                            prompt: resources.prompt,
-                            sessions: resources.sessions,
-                            status: resources.status,
-                            events: resources.events,
-                        },
-                        cancellation,
-                    )
-                    .await
-                    .map_err(|error| {
-                        let error = TurnError::Context(error);
-                        if error.is_cancelled() {
-                            OperationError::Cancelled
-                        } else {
-                            OperationError::Failed(ToolFailure::new(
-                                error.to_string(),
-                                parrot_storage::diagnostics::FailureKind::InvalidOperation,
-                            ))
-                        }
-                    })?;
-                self.tools
-                    .trace
-                    .push(format!("inline:{}", epoch.instructions));
             }
             Ok(ToolOutput::text(self.text))
         })
@@ -912,9 +884,6 @@ impl Provider for Scripted {
     fn id(&self) -> &str {
         "scripted"
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.call_impl(request)
-    }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         Ok(Arc::new(self.clone()))
     }
@@ -1105,62 +1074,6 @@ async fn epoch_status_and_skill_input_order_is_awaited_in_actual_turn() {
             .await
             .iter()
             .filter(|event| event.has_input_promoted())
-            .count(),
-        1
-    );
-    runtime.close().await;
-}
-#[tokio::test]
-async fn borrowed_tool_context_prepare_runs_inline_and_is_used_by_the_next_provider() {
-    let fixture = Fixture::new();
-    let tools = Arc::new(Tools::with_names(&["prepare_context"]));
-    tools.inline_prepare.store(true, Ordering::SeqCst);
-    let trace = tools.trace.clone();
-    let mut first = Step::complete("");
-    first
-        .completion
-        .as_mut()
-        .unwrap()
-        .tool_calls
-        .push(sessions::ToolCall {
-            id: "prepare-context".into(),
-            name: "prepare_context".into(),
-            arguments_json: "{}".into(),
-        });
-    let provider = Scripted::new(vec![first, Step::complete("inline result")]);
-    let runtime = fixture
-        .runtime(provider.clone(), tools, vec![], Arc::new(Signal::new()), 0)
-        .await;
-    let sent = runtime
-        .send("question", protocol::Delivery::DELIVERY_STEER)
-        .await;
-    assert_eq!(
-        bounded(sent.execution.join()).await.unwrap().status,
-        ExecutionStatus::Succeeded
-    );
-    assert!(
-        trace
-            .values()
-            .iter()
-            .any(|entry| entry == "inline:sampled epoch instructions")
-    );
-    let requests = provider.requests.lock().unwrap().clone();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 1);
-    assert_eq!(requests[1].instructions, "sampled epoch instructions");
-    assert!(
-        requests[1]
-            .messages
-            .iter()
-            .any(|message| message.role == sessions::Role::Tool
-                && message.content() == "fake tool result")
-    );
-    assert_eq!(
-        fixture
-            .events()
-            .await
-            .iter()
-            .filter(|event| event.has_turn_started())
             .count(),
         1
     );

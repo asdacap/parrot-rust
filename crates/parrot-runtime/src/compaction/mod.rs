@@ -21,6 +21,5 @@ pub use parrot_domain::values::{
     context::{ContextCompactionPolicy, ContextSize, ContextSnapshot, TokenEstimator},
 };
 pub use planning::{
-    CompactionGroup, CompactionPlanner, CompactionSettings, PlanningInput, RetentionPlan,
-    group_messages, is_complete, is_eligible_for_spill,
+    CompactionGroup, CompactionPlanner, CompactionSettings, PlanningInput, group_messages,
 };

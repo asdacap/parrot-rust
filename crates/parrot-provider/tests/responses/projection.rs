@@ -1,9 +1,9 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
-use parrot_provider::http_stream::{ByteStream, HttpError};
+use parrot_provider::http_stream::{ByteStream, HttpError, SseDecoder};
 use parrot_provider::responses::{
     ResponsesContentKind, ResponsesContentView, ResponsesError, ResponsesEvent,
-    ResponsesEventStream, ResponsesMessageView, ResponsesRequestView, ResponsesRole,
-    ResponsesStreamError, ResponsesToolCallView, ResponsesToolDefinitionView, prepare,
+    ResponsesMessageView, ResponsesParser, ResponsesRequestView, ResponsesRole,
+    ResponsesToolCallView, ResponsesToolDefinitionView, prepare,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -11,10 +11,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use std::{
-    io,
-    path::{Path, PathBuf},
-};
+use std::{io, path::PathBuf};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Request {
@@ -130,9 +127,6 @@ impl ResponsesRequestView for Request {
     fn provider_preferences(&self) -> &str {
         &self.provider_preferences
     }
-    fn include_router_metadata(&self) -> bool {
-        self.include_router_metadata
-    }
 }
 impl ResponsesMessageView for Message {
     type Content = Content;
@@ -178,9 +172,6 @@ impl ResponsesContentView for Content {
     }
     fn text(&self) -> &str {
         &self.text
-    }
-    fn image_path(&self) -> &Path {
-        &self.path
     }
     fn image_url(&self) -> &str {
         &self.url
@@ -266,30 +257,48 @@ pub fn observe_stream_async_for_provider(
         bytes: chunks,
         position: 0,
     };
-    let mut stream = ResponsesEventStream::new(&mut source, 1_048_576, provider_id);
+    let mut sse = SseDecoder::new(1_048_576);
+    let mut parser = ResponsesParser::new(provider_id);
     let cancel_after = input["cancel_after_events"].as_i64().unwrap_or(-1);
     let mut events = Vec::new();
-    let mut exception = None;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
-    loop {
-        let next = runtime.block_on(stream.next(&cancellation));
-        match next {
-            Ok(Some(event)) => {
+    let mut bytes = [0_u8; 8192];
+    let exception = 'stream: loop {
+        let read = match runtime.block_on(source.read(&mut bytes, &cancellation)) {
+            Ok(read) => read,
+            Err(error) => break Some(transport_error_json(error)),
+        };
+        let records = if read == 0 {
+            sse.finish()
+        } else {
+            sse.feed(&bytes[..read])
+        };
+        for record in records {
+            let parsed = match record.map(|record| parser.push_data(&record.data)) {
+                Ok(Ok(parsed)) => parsed,
+                Ok(Err(error)) => break 'stream Some(error_json(error)),
+                Err(error) => break 'stream Some(transport_error_json(error)),
+            };
+            let terminal = parsed
+                .iter()
+                .any(|event| matches!(event, ResponsesEvent::Completed(_)));
+            for event in parsed {
                 events.push(event_json(&event));
                 if events.len() as i64 == cancel_after {
                     cancellation.cancel();
                 }
             }
-            Ok(None) => break,
-            Err(error) => {
-                exception = Some(stream_error_json(error));
-                break;
+            if terminal {
+                break 'stream None;
             }
         }
-    }
+        if read == 0 {
+            break parser.finish().err().map(error_json);
+        }
+    };
     (events, exception)
 }
 
@@ -465,18 +474,15 @@ fn error_json(error: ResponsesError) -> Value {
         }
     }
 }
-fn stream_error_json(error: ResponsesStreamError) -> Value {
+fn transport_error_json(error: HttpError) -> Value {
     match error {
-        ResponsesStreamError::Protocol(error) => error_json(error),
-        ResponsesStreamError::Transport(HttpError::Cancelled) => {
+        HttpError::Cancelled => {
             json!({"type":"System.Threading.Tasks.TaskCanceledException","message":"A task was canceled."})
         }
-        ResponsesStreamError::Transport(HttpError::Wire(message)) => {
+        HttpError::Wire(message) => {
             json!({"type":"Parrot.Llm.Wire.WireProtocolException","message":message})
         }
-        ResponsesStreamError::Transport(error) => {
-            json!({"type":"TransportError","message":error.to_string()})
-        }
+        error => json!({"type":"TransportError","message":error.to_string()}),
     }
 }
 

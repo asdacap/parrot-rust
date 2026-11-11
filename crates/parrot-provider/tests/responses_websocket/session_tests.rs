@@ -6,7 +6,6 @@ use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
     io,
-    path::Path,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -139,21 +138,23 @@ impl Connector for Scripts {
 }
 #[derive(Default)]
 struct Http {
-    calls: Mutex<Vec<(Vec<u8>, String)>>,
+    calls: Mutex<Vec<String>>,
 }
 struct HttpStream {
     sent: bool,
 }
 impl HttpEvents for HttpStream {
-    fn next<'a>(
+    fn next_event<'a>(
         &'a mut self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, ProviderError>> {
+    ) -> BoxFuture<'a, Result<Option<SessionEvent>, ProviderError>> {
         let event = if self.sent {
             None
         } else {
             self.sent = true;
-            Some(ResponsesEvent::TextDelta("http".into()))
+            Some(SessionEvent::Response(ResponsesEvent::TextDelta(
+                "http".into(),
+            )))
         };
         Box::pin(async move { Ok(event) })
     }
@@ -162,13 +163,12 @@ impl HttpEvents for HttpStream {
     }
 }
 impl HttpFallback for Http {
-    fn open<'a>(
+    fn open_unprepared<'a>(
         &'a self,
-        body: Vec<u8>,
         state: String,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, ProviderError>> {
-        self.calls.lock().unwrap().push((body, state));
+        self.calls.lock().unwrap().push(state);
         Box::pin(async { Ok(Box::new(HttpStream { sent: false }) as Box<dyn HttpEvents>) })
     }
 }
@@ -180,9 +180,6 @@ impl ResponsesContentView for Empty {
     }
     fn text(&self) -> &str {
         ""
-    }
-    fn image_path(&self) -> &Path {
-        Path::new("")
     }
     fn image_url(&self) -> &str {
         ""
@@ -282,9 +279,6 @@ impl ResponsesRequestView for Request {
     }
     fn provider_preferences(&self) -> &str {
         ""
-    }
-    fn include_router_metadata(&self) -> bool {
-        false
     }
 }
 fn request(items: &[&str], replay: Option<&str>, instructions: &str) -> WebSocketRequest {
@@ -467,20 +461,26 @@ async fn source_pinned_live_sessions_share_connector_but_not_http_selection_or_s
     let http = Http::default();
     let cancel = Cancel(AtomicBool::new(false));
     drain(
-        &mut first.call(request(&["one"], None, ""), &http).unwrap(),
+        &mut first
+            .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+            .unwrap(),
         &cancel,
     )
     .await
     .unwrap();
     assert!(first.try_fall_back_to_http().unwrap());
     drain(
-        &mut first.call(request(&["two"], None, ""), &http).unwrap(),
+        &mut first
+            .call_lazy(|| Ok(request(&["two"], None, "")), &http)
+            .unwrap(),
         &cancel,
     )
     .await
     .unwrap();
     drain(
-        &mut second.call(request(&["three"], None, ""), &http).unwrap(),
+        &mut second
+            .call_lazy(|| Ok(request(&["three"], None, "")), &http)
+            .unwrap(),
         &cancel,
     )
     .await
@@ -513,10 +513,6 @@ async fn source_pinned_session_failure_categories_preserve_or_wrap_exact_types()
             code: SocketErrorCode::ConnectionClosedPrematurely,
             message: "private-sentinel".into(),
         },
-        WebSocketError::Socket {
-            code: SocketErrorCode::Other,
-            message: "private-sentinel".into(),
-        },
         WebSocketError::Wire("private-sentinel".into()),
         WebSocketError::Upgrade {
             status: 503,
@@ -528,7 +524,7 @@ async fn source_pinned_session_failure_categories_preserve_or_wrap_exact_types()
     for failure in failures {
         let (mut session, wire, http, cancel) = setup(vec![Err(failure.clone())], false);
         let actual = session
-            .call(request(&["private-sentinel"], None, ""), &http)
+            .call_lazy(|| Ok(request(&["private-sentinel"], None, "")), &http)
             .unwrap()
             .next(&cancel)
             .await
@@ -573,7 +569,9 @@ async fn source_generic_catch_wraps_actual_t27_parser_errors_with_their_causes()
                 vec![Ok(messages), Ok(vec![completed("fresh", json!([]))])],
                 false,
             );
-            let mut call = session.call(request(&["one"], None, ""), &http).unwrap();
+            let mut call = session
+                .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+                .unwrap();
             if visible {
                 assert!(matches!(
                     call.next(&cancel).await.unwrap(),
@@ -599,7 +597,9 @@ async fn source_generic_catch_wraps_actual_t27_parser_errors_with_their_causes()
             assert!(http.calls.lock().unwrap().is_empty());
             drop(call);
             drain(
-                &mut session.call(request(&["two"], None, ""), &http).unwrap(),
+                &mut session
+                    .call_lazy(|| Ok(request(&["two"], None, "")), &http)
+                    .unwrap(),
                 &cancel,
             )
             .await
@@ -631,9 +631,12 @@ async fn source_pinned_zero_connect_timeout_reaches_connector_unchanged() {
             provider_id,
             provider_id == "chatgpt",
         );
-        let events = drain(&mut session.call(request, &http).unwrap(), &cancel)
-            .await
-            .unwrap();
+        let events = drain(
+            &mut session.call_lazy(move || Ok(request), &http).unwrap(),
+            &cancel,
+        )
+        .await
+        .unwrap();
         assert!(matches!(
             events.last(),
             Some(SessionEvent::Response(ResponsesEvent::Completed(_)))
@@ -661,7 +664,7 @@ async fn source_pinned_one_byte_request_limit_rejects_websocket_before_payload()
         assert_eq!(prepared["model"], "model");
         assert_eq!(prepared["input"][0]["content"][0]["text"], "hello");
         let failure = session
-            .call(request, &http)
+            .call_lazy(move || Ok(request), &http)
             .unwrap()
             .next(&cancel)
             .await
@@ -684,14 +687,12 @@ async fn source_pinned_one_byte_request_limit_rejects_websocket_before_payload()
 async fn source_pinned_http_limit_error_routes_without_websocket_or_error_replay() {
     struct OneByteHttp(AtomicUsize);
     impl HttpFallback for OneByteHttp {
-        fn open<'a>(
+        fn open_unprepared<'a>(
             &'a self,
-            body: Vec<u8>,
             _: String,
             _: &'a dyn Cancellation,
         ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, ProviderError>> {
             self.0.fetch_add(1, Ordering::SeqCst);
-            assert!(body.len() > 1);
             Box::pin(async {
                 Err(ProviderError::Socket(WebSocketError::RequestTooLarge {
                     maximum: 1,
@@ -718,7 +719,7 @@ async fn source_pinned_http_limit_error_routes_without_websocket_or_error_replay
                 provider_id,
                 provider_id == "chatgpt",
             );
-            let mut call = session.call(request, &http).unwrap();
+            let mut call = session.call_lazy(move || Ok(request), &http).unwrap();
             if fallback {
                 assert!(matches!(
                     call.next(&cancel).await.unwrap(),
@@ -744,7 +745,9 @@ async fn default_http_captures_first_turn_state_and_begin_turn_clears_it() {
     let (mut session, wire, http, cancel) = setup(vec![], true);
     for _ in 0..2 {
         drain(
-            &mut session.call(request(&["one"], None, ""), &http).unwrap(),
+            &mut session
+                .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+                .unwrap(),
             &cancel,
         )
         .await
@@ -752,24 +755,15 @@ async fn default_http_captures_first_turn_state_and_begin_turn_clears_it() {
     }
     session.begin_turn();
     drain(
-        &mut session.call(request(&["two"], None, ""), &http).unwrap(),
+        &mut session
+            .call_lazy(|| Ok(request(&["two"], None, "")), &http)
+            .unwrap(),
         &cancel,
     )
     .await
     .unwrap();
-    let calls = http.calls.lock().unwrap();
-    assert_eq!(
-        calls
-            .iter()
-            .map(|(_, state)| state.as_str())
-            .collect::<Vec<_>>(),
-        ["", "http-state", ""]
-    );
+    assert_eq!(*http.calls.lock().unwrap(), ["", "http-state", ""]);
     assert_eq!(wire.connects.load(Ordering::SeqCst), 0);
-    assert_eq!(
-        serde_json::from_slice::<Value>(&calls[0].0).unwrap()["input"][0]["output"],
-        "one"
-    );
 }
 
 #[tokio::test]
@@ -783,7 +777,9 @@ async fn continuation_uses_completed_raw_output_prefix_and_only_sends_suffix() {
         false,
     );
     let events = drain(
-        &mut session.call(request(&["one"], None, ""), &http).unwrap(),
+        &mut session
+            .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+            .unwrap(),
         &cancel,
     )
     .await
@@ -799,7 +795,7 @@ async fn continuation_uses_completed_raw_output_prefix_and_only_sends_suffix() {
         .unwrap();
     drain(
         &mut session
-            .call(request(&["one", "two"], Some(&replay), ""), &http)
+            .call_lazy(|| Ok(request(&["one", "two"], Some(&replay), "")), &http)
             .unwrap(),
         &cancel,
     )
@@ -832,14 +828,16 @@ async fn changed_settings_or_non_growing_history_sends_full_request() {
             false,
         );
         drain(
-            &mut session.call(request(&["one"], None, ""), &http).unwrap(),
+            &mut session
+                .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+                .unwrap(),
             &cancel,
         )
         .await
         .unwrap();
         drain(
             &mut session
-                .call(request(&items, None, instructions), &http)
+                .call_lazy(|| Ok(request(&items, None, instructions)), &http)
                 .unwrap(),
             &cancel,
         )
@@ -865,14 +863,16 @@ async fn named_recovery_is_once_full_and_fresh_without_replaying_output() {
             false,
         );
         drain(
-            &mut session.call(request(&["one"], None, ""), &http).unwrap(),
+            &mut session
+                .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+                .unwrap(),
             &cancel,
         )
         .await
         .unwrap();
         let events = drain(
             &mut session
-                .call(request(&["one", "two"], None, ""), &http)
+                .call_lazy(|| Ok(request(&["one", "two"], None, "")), &http)
                 .unwrap(),
             &cancel,
         )
@@ -901,14 +901,10 @@ async fn generic_socket_errors_preserve_cause_and_existing_transport_errors_pass
         message: "existing transport".into(),
         cause: Box::new(socket.clone()),
     };
-    for failure in [
-        socket,
-        WebSocketError::InvalidOperation("synthetic invalid operation".into()),
-        wrapped.clone(),
-    ] {
+    for failure in [socket, wrapped.clone()] {
         let (mut session, _, http, cancel) = setup(vec![Ok(vec![Err(failure.clone())])], false);
         let actual = session
-            .call(request(&["one"], None, ""), &http)
+            .call_lazy(|| Ok(request(&["one"], None, "")), &http)
             .unwrap()
             .next(&cancel)
             .await
@@ -937,7 +933,9 @@ async fn second_named_error_is_not_recovered_again() {
         ],
         false,
     );
-    let mut call = session.call(request(&["one"], None, ""), &http).unwrap();
+    let mut call = session
+        .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+        .unwrap();
     assert!(matches!(
         call.next(&cancel).await.unwrap(),
         Some(SessionEvent::Retry { attempt: 1, .. })
@@ -959,7 +957,9 @@ async fn unsupported_upgrade_selects_sticky_http_but_other_status_throws() {
             })],
             false,
         );
-        let mut call = session.call(request(&["one"], None, ""), &http).unwrap();
+        let mut call = session
+            .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+            .unwrap();
         if matches!(status, 404 | 405 | 426) {
             assert!(matches!(
                 call.next(&cancel).await.unwrap(),
@@ -971,7 +971,9 @@ async fn unsupported_upgrade_selects_sticky_http_but_other_status_throws() {
             drain(&mut call, &cancel).await.unwrap();
             drop(call);
             drain(
-                &mut session.call(request(&["two"], None, ""), &http).unwrap(),
+                &mut session
+                    .call_lazy(|| Ok(request(&["two"], None, "")), &http)
+                    .unwrap(),
                 &cancel,
             )
             .await
@@ -995,7 +997,9 @@ async fn visible_failure_throws_without_replay_and_only_future_calls_use_http() 
         Err(WebSocketError::Transport("broken".into())),
     ] {
         let (mut session, wire, http, cancel) = setup(vec![Ok(vec![text(), failure])], false);
-        let mut call = session.call(request(&["one"], None, ""), &http).unwrap();
+        let mut call = session
+            .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+            .unwrap();
         assert!(
             matches!(call.next(&cancel).await.unwrap(), Some(SessionEvent::Response(ResponsesEvent::TextDelta(text))) if text == "visible")
         );
@@ -1008,7 +1012,9 @@ async fn visible_failure_throws_without_replay_and_only_future_calls_use_http() 
         assert!(http.calls.lock().unwrap().is_empty());
         drop(call);
         drain(
-            &mut session.call(request(&["two"], None, ""), &http).unwrap(),
+            &mut session
+                .call_lazy(|| Ok(request(&["two"], None, "")), &http)
+                .unwrap(),
             &cancel,
         )
         .await
@@ -1035,14 +1041,16 @@ async fn invisible_transport_failure_and_cancellation_keep_websockets_enabled() 
         );
         assert_eq!(
             session
-                .call(request(&["one"], None, ""), &http)
+                .call_lazy(|| Ok(request(&["one"], None, "")), &http)
                 .unwrap()
                 .next(&cancel)
                 .await,
             Err(ProviderError::Socket(failure))
         );
         drain(
-            &mut session.call(request(&["two"], None, ""), &http).unwrap(),
+            &mut session
+                .call_lazy(|| Ok(request(&["two"], None, "")), &http)
+                .unwrap(),
             &cancel,
         )
         .await
@@ -1085,7 +1093,9 @@ async fn credential_socket_cancellation_preserves_the_original_error_after_calle
         false,
     );
     let http = Http::default();
-    let mut call = session.call(request(&["one"], None, ""), &http).unwrap();
+    let mut call = session
+        .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+        .unwrap();
     assert_eq!(
         call.next(cancel.as_ref()).await,
         Err(ProviderError::Socket(WebSocketError::Cancelled))
@@ -1102,14 +1112,18 @@ async fn cancellation_after_visible_output_does_not_make_http_sticky() {
         vec![Ok(vec![text()]), Ok(vec![completed("fresh", json!([]))])],
         false,
     );
-    let mut call = session.call(request(&["one"], None, ""), &http).unwrap();
+    let mut call = session
+        .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+        .unwrap();
     call.next(&cancel).await.unwrap();
     cancel.0.store(true, Ordering::SeqCst);
     assert_eq!(call.next(&cancel).await, Err(ProviderError::Cancelled));
     drop(call);
     cancel.0.store(false, Ordering::SeqCst);
     drain(
-        &mut session.call(request(&["two"], None, ""), &http).unwrap(),
+        &mut session
+            .call_lazy(|| Ok(request(&["two"], None, "")), &http)
+            .unwrap(),
         &cancel,
     )
     .await
@@ -1124,12 +1138,16 @@ async fn abandoning_active_call_poisoned_connection_without_forcing_http() {
         vec![Ok(vec![text()]), Ok(vec![completed("fresh", json!([]))])],
         false,
     );
-    let mut call = session.call(request(&["one"], None, ""), &http).unwrap();
+    let mut call = session
+        .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+        .unwrap();
     call.next(&cancel).await.unwrap();
     drop(call);
     assert_eq!(wire.aborts.load(Ordering::SeqCst), 1);
     drain(
-        &mut session.call(request(&["two"], None, ""), &http).unwrap(),
+        &mut session
+            .call_lazy(|| Ok(request(&["two"], None, "")), &http)
+            .unwrap(),
         &cancel,
     )
     .await
@@ -1148,7 +1166,9 @@ async fn begin_turn_and_sixty_second_staleness_reset_without_retry() {
             false,
         );
         drain(
-            &mut session.call(request(&["one"], None, ""), &http).unwrap(),
+            &mut session
+                .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+                .unwrap(),
             &cancel,
         )
         .await
@@ -1160,7 +1180,7 @@ async fn begin_turn_and_sixty_second_staleness_reset_without_retry() {
         }
         let events = drain(
             &mut session
-                .call(request(&["one", "two"], None, ""), &http)
+                .call_lazy(|| Ok(request(&["one", "two"], None, "")), &http)
                 .unwrap(),
             &cancel,
         )
@@ -1178,21 +1198,18 @@ async fn begin_turn_and_sixty_second_staleness_reset_without_retry() {
 }
 
 #[tokio::test]
-async fn local_message_limit_selects_http_before_sending_and_preserves_body() {
+async fn local_message_limit_selects_http_before_sending() {
     let (mut session, wire, http, cancel) = setup(vec![Ok(vec![])], false);
     let large = "x".repeat(MAXIMUM_MESSAGE_BYTES);
-    let request = request(&[&large], None, "");
-    let expected = request.http_body().to_vec();
-    let mut call = session.call(request, &http).unwrap();
+    let mut call = session
+        .call_lazy(|| Ok(request(&[&large], None, "")), &http)
+        .unwrap();
     assert!(
         matches!(call.next(&cancel).await.unwrap(), Some(SessionEvent::Retry { attempt: 1, reason }) if reason.contains("exceeds"))
     );
     drain(&mut call, &cancel).await.unwrap();
     assert!(wire.sent.lock().unwrap().is_empty());
-    let calls = http.calls.lock().unwrap();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].0, expected);
-    assert_eq!(calls[0].1, "socket-state");
+    assert_eq!(*http.calls.lock().unwrap(), ["socket-state"]);
 }
 
 #[tokio::test]
@@ -1200,7 +1217,9 @@ async fn explicit_http_selection_and_disposal_are_sticky_and_idempotent() {
     let (mut session, wire, http, cancel) = setup(vec![], false);
     assert!(session.try_fall_back_to_http().unwrap());
     drain(
-        &mut session.call(request(&["one"], None, ""), &http).unwrap(),
+        &mut session
+            .call_lazy(|| Ok(request(&["one"], None, "")), &http)
+            .unwrap(),
         &cancel,
     )
     .await
@@ -1208,7 +1227,7 @@ async fn explicit_http_selection_and_disposal_are_sticky_and_idempotent() {
     session.dispose();
     session.dispose();
     assert!(matches!(
-        session.call(request(&["two"], None, ""), &http),
+        session.call_lazy(|| Ok(request(&["two"], None, "")), &http),
         Err(WebSocketError::Disposed)
     ));
     assert_eq!(

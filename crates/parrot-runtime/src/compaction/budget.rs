@@ -9,8 +9,6 @@ pub struct ProviderTokenBudget {
 }
 
 impl ProviderTokenBudget {
-    pub const DEFAULT_MAXIMUM_OUTPUT_TOKENS: i32 = ContextModel::DEFAULT_REQUESTED_OUTPUT_TOKENS;
-
     pub fn estimate_input_tokens(&self, selector: &str, estimated_input_tokens: i64) -> i64 {
         self.calibration
             .estimate_input_tokens(selector, estimated_input_tokens)

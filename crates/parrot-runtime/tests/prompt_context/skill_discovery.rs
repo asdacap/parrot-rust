@@ -8,7 +8,7 @@ use parrot_domain::{
             AuthorizedReadService, BoundRead, EntryKind, FileMetadata, FileReadError,
             FileReadErrorKind, LinkPolicy, ReadRequest,
         },
-        paths::{ReadOrigin, ResolvedRead},
+        paths::ResolvedRead,
         security::AccessSnapshot,
     },
     values::{
@@ -202,11 +202,7 @@ impl Fake {
         policy: &Policy,
     ) -> Result<FileMetadata, FileReadError> {
         let (physical, node) = self.resolve(path, links == LinkPolicy::Follow)?;
-        policy.check_read(&ResolvedRead::new(
-            path.into(),
-            physical.clone(),
-            ReadOrigin::Explicit,
-        ))?;
+        policy.check_read(&ResolvedRead::new(path.into(), physical.clone()))?;
         Ok(FileMetadata {
             lexical_path: path.into(),
             physical_path: physical,

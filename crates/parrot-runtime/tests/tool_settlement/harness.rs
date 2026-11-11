@@ -63,6 +63,7 @@ pub struct Harness {
     pub selection: TurnSelection<Security>,
     pub capture: Arc<Selection>,
     pub state: parrot_runtime::agent_turn::tool_conversation::ToolConversation,
+    pub settlement: parrot_core::ToolSettlement,
     pub publisher: Arc<Publisher>,
     pub activity: Arc<AgentSessionActivity>,
     pub diagnostics: Arc<Diagnostics>,
@@ -166,6 +167,7 @@ impl Harness {
             selection,
             capture,
             state,
+            settlement: parrot_core::ToolSettlement::default(),
             publisher,
             activity,
             diagnostics,
@@ -220,8 +222,48 @@ impl Harness {
         .map_err(TurnError::Core)
     }
 
+    pub fn begin_execution(
+        &mut self,
+        sequence: i64,
+        calls: Vec<parrot_core::ToolCall>,
+    ) -> Result<(), TurnError> {
+        self.settlement
+            .begin_execution(sequence, calls)
+            .map_err(TurnError::Core)
+    }
+    pub async fn record_results(
+        &mut self,
+        results: &[parrot_core::ToolResult],
+    ) -> Result<(), TurnError> {
+        self.settlement
+            .record_results(
+                &mut SettlementStates {
+                    tools: &mut self.state,
+                    conversation: &mut self.runtime_state.get_mut().conversation,
+                },
+                results,
+            )
+            .await
+            .map_err(TurnError::Core)
+    }
+    pub async fn complete_execution(
+        &mut self,
+        results: &[parrot_core::ToolResult],
+    ) -> Result<(), TurnError> {
+        self.settlement
+            .complete_execution(
+                &mut SettlementStates {
+                    tools: &mut self.state,
+                    conversation: &mut self.runtime_state.get_mut().conversation,
+                },
+                results,
+            )
+            .await
+            .map_err(TurnError::Core)
+    }
     pub async fn restore(&mut self, fixture: &Fixture) -> Result<(), TurnError> {
         fixture.fresh_batches.lock().unwrap().clear();
+        self.settlement.reset_pending();
         self.state.reset_pending();
         self.state
             .restore_results(&mut self.runtime_state.get_mut().conversation)
@@ -248,7 +290,7 @@ impl Harness {
                 else {
                     break;
                 };
-                self.state.begin_execution(sequence, calls.clone())?;
+                self.begin_execution(sequence, calls.clone())?;
                 let mut completed = Vec::new();
                 let mut cancelled = false;
                 while completed.len() < calls.len() {
@@ -259,17 +301,13 @@ impl Harness {
                         cancel_remaining: cancelled,
                     };
                     let results = self.execute(request, capture, cancellation).await?;
-                    self.state
-                        .record_results(&mut self.runtime_state.get_mut().conversation, &results)
-                        .await?;
+                    self.record_results(&results).await?;
                     cancelled |= results
                         .iter()
                         .any(|result| result.status == parrot_core::ToolStatus::Cancelled);
                     completed.extend(results);
                 }
-                self.state
-                    .complete_execution(&mut self.runtime_state.get_mut().conversation, &completed)
-                    .await?;
+                self.complete_execution(&completed).await?;
             }
             self.state
                 .restore_results(&mut self.runtime_state.get_mut().conversation)
@@ -277,9 +315,38 @@ impl Harness {
         }
         .await;
         if result.is_err() {
+            self.settlement.reset_pending();
             self.state.reset_pending();
         }
         result
+    }
+}
+
+struct SettlementStates<'a> {
+    tools: &'a mut parrot_runtime::agent_turn::tool_conversation::ToolConversation,
+    conversation: &'a mut AgentConversation,
+}
+impl parrot_core::States for SettlementStates<'_> {
+    fn get_config(
+        &self,
+        _: parrot_core::ConfigKey,
+    ) -> BoxFuture<'_, Result<parrot_core::ConfigValue, parrot_core::Error>> {
+        Box::pin(async {
+            Err(parrot_core::Error::unsupported(
+                "SettlementStates.get_config",
+            ))
+        })
+    }
+    fn add_conversation_messages(
+        &mut self,
+        addition: parrot_core::ConversationAddition,
+    ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, parrot_core::Error>> {
+        Box::pin(async move {
+            self.tools
+                .add_conversation_messages(self.conversation, addition)
+                .await
+                .map_err(Into::into)
+        })
     }
 }
 

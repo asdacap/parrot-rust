@@ -68,13 +68,3 @@
 {"name":"spinner-text","frame":9,"activity":"thinking","text":"\u280F thinking"}
 {"name":"spinner-text","frame":10,"activity":"thinking","text":"\u280B thinking"}
 {"name":"spinner-text","frame":11,"activity":"safe\u001B[2J\twork","text":"\u2819 safe[2J    work"}
-{"name":"scheduler-coalesce","events":["invalidate:true","invalidate:false","delay:333333","draw:first"],"error":false}
-{"name":"scheduler-drain","events":["invalidate:true","invalidate:false","delay:333333","invalidate-delay:true","invalidate-delay:false","draw:first"],"error":false}
-{"name":"scheduler-latest","events":["invalidate:true","invalidate:false","delay:333333","invalidate-delay:true","invalidate-delay:false","draw:latest"],"error":false}
-{"name":"scheduler-during-draw","events":["invalidate:true","invalidate:false","delay:333333","draw:first","invalidate-draw:true","delay:333333","draw:first"],"error":false}
-{"name":"scheduler-cancel","events":[],"error":false}
-{"name":"scheduler-error","events":["invalidate:true","invalidate:false","delay:333333","draw:first"],"error":true}
-{"name":"spinner-preserve","events":["draw:1","delay","lifetime","joined","preserved"],"error":false}
-{"name":"spinner-end","events":["draw:1","delay","lifetime","joined","draw:0"],"error":false}
-{"name":"spinner-cancel","events":["draw:1","delay","lifetime","joined","draw:0"],"error":false}
-{"name":"spinner-error","events":["draw:1","delay","lifetime","joined","draw:0"],"error":true}

@@ -4,7 +4,7 @@
 //! response/retry values, request bytes, turn-state arguments, connector calls and
 //! socket lifecycle counters are compared exactly.
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
-use parrot_provider::http_stream::{ByteStream, HttpError};
+use parrot_provider::http_stream::SseDecoder;
 use parrot_provider::responses::*;
 use parrot_provider::responses_websocket::{
     ConnectedSocket, Connector as ConnectorTrait, FrameKind, HeaderSource, Headers,
@@ -18,7 +18,6 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::VecDeque,
     io,
-    path::Path,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -141,9 +140,6 @@ impl ResponsesContentView for Content {
     }
     fn text(&self) -> &str {
         &self.0
-    }
-    fn image_path(&self) -> &Path {
-        Path::new("")
     }
     fn image_url(&self) -> &str {
         ""
@@ -301,9 +297,6 @@ impl ResponsesRequestView for Request {
     }
     fn provider_preferences(&self) -> &str {
         ""
-    }
-    fn include_router_metadata(&self) -> bool {
-        false
     }
 }
 pub fn request(
@@ -589,43 +582,26 @@ impl HeaderSource for Auth {
 }
 struct Http {
     requests: Mutex<Vec<Value>>,
+    body: Mutex<Vec<u8>>,
     states: Vec<String>,
     auth: Arc<Auth>,
     provider_id: String,
     response_body: String,
-}
-struct HttpBytes {
-    bytes: Vec<u8>,
-    offset: usize,
-}
-impl ByteStream for HttpBytes {
-    fn read<'a>(
-        &'a mut self,
-        buffer: &'a mut [u8],
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<usize, HttpError>> {
-        Box::pin(async move {
-            let count = buffer.len().min(self.bytes.len() - self.offset);
-            buffer[..count].copy_from_slice(&self.bytes[self.offset..self.offset + count]);
-            self.offset += count;
-            Ok(count)
-        })
-    }
 }
 struct HttpEvents {
     events: VecDeque<ResponsesEvent>,
     state: Option<String>,
 }
 impl HttpEventsTrait for HttpEvents {
-    fn next<'a>(
+    fn next_event<'a>(
         &'a mut self,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, ProviderError>> {
+    ) -> BoxFuture<'a, Result<Option<SessionEvent>, ProviderError>> {
         Box::pin(async move {
             if cancellation.is_cancelled() {
                 Err(ProviderError::Socket(WebSocketError::Cancelled))
             } else {
-                Ok(self.events.pop_front())
+                Ok(self.events.pop_front().map(SessionEvent::Response))
             }
         })
     }
@@ -634,37 +610,36 @@ impl HttpEventsTrait for HttpEvents {
     }
 }
 impl HttpFallback for Http {
-    fn open<'a>(
+    fn open_unprepared<'a>(
         &'a self,
-        bytes: Vec<u8>,
         turn_state: String,
-        cancellation: &'a dyn Cancellation,
+        _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Box<dyn HttpEventsTrait>, ProviderError>> {
         self.auth.calls.fetch_add(1, Ordering::SeqCst);
         let mut requests = self.requests.lock().unwrap();
         let state = self.states.get(requests.len()).cloned();
-        requests.push(json!({"body":body(&bytes), "turn_state":turn_state}));
+        requests.push(json!({"body":body(&self.body.lock().unwrap()), "turn_state":turn_state}));
         Box::pin(async move {
-            let mut bytes = HttpBytes {
-                bytes: self.response_body.as_bytes().to_vec(),
-                offset: 0,
-            };
-            let mut stream = ResponsesEventStream::new(&mut bytes, 4 << 20, &self.provider_id);
+            let protocol = |error: ResponsesError| ProviderError::Socket(error.into());
+            let mut sse = SseDecoder::new(4 << 20);
+            let mut parser = ResponsesParser::new(&self.provider_id);
+            let mut records = sse.feed(self.response_body.as_bytes());
+            records.extend(sse.finish());
             let mut events = VecDeque::new();
-            loop {
-                match stream.next(cancellation).await {
-                    Ok(Some(event)) => events.push_back(event),
-                    Ok(None) => break,
-                    Err(ResponsesStreamError::Protocol(error)) => {
-                        return Err(ProviderError::Socket(error.into()));
-                    }
-                    Err(ResponsesStreamError::Transport(error)) => {
-                        return Err(ProviderError::Socket(WebSocketError::Transport(
-                            error.to_string(),
-                        )));
-                    }
+            for record in records {
+                let record = record.map_err(|error| {
+                    ProviderError::Socket(WebSocketError::Transport(error.to_string()))
+                })?;
+                let parsed = parser.push_data(&record.data).map_err(protocol)?;
+                let terminal = parsed
+                    .iter()
+                    .any(|event| matches!(event, ResponsesEvent::Completed(_)));
+                events.extend(parsed);
+                if terminal {
+                    break;
                 }
             }
+            parser.finish().map_err(protocol)?;
             Ok(Box::new(HttpEvents { events, state }) as Box<dyn HttpEventsTrait>)
         })
     }
@@ -784,6 +759,7 @@ pub async fn observe_completions(
     });
     let http = Http {
         requests: Mutex::new(vec![]),
+        body: Mutex::new(vec![]),
         states: input["http_turn_states"]
             .as_array()
             .map(|values| {
@@ -839,12 +815,10 @@ pub async fn observe_completions(
                 let mut events = vec![];
                 let mut exception = Value::Null;
                 {
-                    let mut call = session
-                        .call(
-                            request(action, previous_completion.as_ref(), provider_id, chatgpt),
-                            &http,
-                        )
-                        .unwrap();
+                    let request =
+                        request(action, previous_completion.as_ref(), provider_id, chatgpt);
+                    *http.body.lock().unwrap() = request.http_body().to_vec();
+                    let mut call = session.call_lazy(move || Ok(request), &http).unwrap();
                     loop {
                         match call.next(&cancellation).await {
                             Ok(Some(published)) => {

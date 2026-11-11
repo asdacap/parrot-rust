@@ -14,17 +14,3 @@ pub struct ImageArtifactMetadata {
     pub display_name: String,
     pub origin: String,
 }
-
-impl ImageArtifactMetadata {
-    /// Equality of the content-addressed fields, excluding the first-reference labels.
-    pub fn matches_content(&self, other: &Self) -> bool {
-        self.artifact_id == other.artifact_id
-            && self.sha256 == other.sha256
-            && self.media_type == other.media_type
-            && self.byte_length == other.byte_length
-            && self.width == other.width
-            && self.height == other.height
-            && self.frame_count == other.frame_count
-            && self.aggregate_pixels == other.aggregate_pixels
-    }
-}

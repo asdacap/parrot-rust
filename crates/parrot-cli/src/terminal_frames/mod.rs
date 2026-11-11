@@ -1,4 +1,4 @@
-//! Inline terminal frame rendering and joined live-update lifecycles.
+//! Inline terminal frame rendering.
 
 mod renderer;
 mod scheduling;
@@ -6,10 +6,7 @@ mod surface;
 
 pub use crate::terminal_layout::{TerminalCellStyleSpan, TerminalLine, TerminalStyle};
 pub use renderer::TerminalFrameRenderer;
-pub use scheduling::{
-    CancellationToken, LiveUpdateScheduler, PreserveFrame, SPINNER_INTERVAL, TerminalSpinner,
-    spinner_text,
-};
+pub use scheduling::{SPINNER_INTERVAL, spinner_text};
 
 use std::any::Any;
 use std::io;

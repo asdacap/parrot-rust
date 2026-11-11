@@ -61,52 +61,6 @@ impl Drop for Fixture {
 }
 
 #[tokio::test]
-async fn raw_cost_messages_preserve_nan_bits_without_partial_eq_rejection() {
-    use parrot_domain::protocol::messages::parrot::{
-        AgentStatisticsUpdatedEvent, RequestUsageRecorded, SessionUsageSnapshot,
-    };
-    use protobuf::Message;
-    let fixture = Fixture::new();
-    let repository = fixture.repository();
-    let nan = f64::from_bits(0x7ff8_0000_0000_0001);
-    for kind in 0..3 {
-        let mut event = Event::new();
-        event.id = format!("nan-{kind}");
-        event.agent_session_id = "agent".into();
-        match kind {
-            0 => event.set_request_usage_recorded(RequestUsageRecorded {
-                input_cost: nan,
-                ..Default::default()
-            }),
-            1 => event.set_agent_statistics_updated(AgentStatisticsUpdatedEvent {
-                input_cost: nan,
-                ..Default::default()
-            }),
-            _ => event.set_session_usage_snapshot(SessionUsageSnapshot {
-                input_cost: nan,
-                ..Default::default()
-            }),
-        }
-        let bytes = event.write_to_bytes().unwrap();
-        let expected = bytes.clone();
-        let stored = repository
-            .transaction(move |tx| {
-                parrot_storage::events::record(
-                    tx,
-                    &event,
-                    Some(&bytes),
-                    "2026-01-02T03:04:05.0000000+00:00",
-                )
-            })
-            .await
-            .unwrap();
-        assert_eq!(stored.raw, expected);
-    }
-    assert_eq!(repository.replay_raw().await.unwrap().len(), 3);
-    repository.database().close().await.unwrap();
-}
-
-#[tokio::test]
 async fn replay_after_cursor_returns_the_suffix_and_unknown_cursor_returns_everything() {
     let fixture = Fixture::new();
     let repository = fixture.repository();
@@ -116,7 +70,7 @@ async fn replay_after_cursor_returns_the_suffix_and_unknown_cursor_returns_every
         event.agent_session_id = "agent".into();
         repository
             .transaction(move |tx| {
-                parrot_storage::events::record(tx, &event, None, "2026-01-02T03:04:05Z")
+                parrot_storage::events::record(tx, &event, "2026-01-02T03:04:05Z")
             })
             .await
             .unwrap();
@@ -152,15 +106,10 @@ async fn actor_repository_errors_roll_back_and_replay_retains_exact_raw_bytes() 
     let mut raw = event.write_to_bytes().unwrap();
     raw.extend_from_slice(&[0xa0, 0x06, 0x07]);
     let event = Event::parse_from_bytes(&raw).unwrap();
-    let expected = raw.clone();
+    let expected = raw;
     repository
         .transaction(move |tx| {
-            parrot_storage::events::record(
-                tx,
-                &event,
-                Some(&raw),
-                "2026-01-02T03:04:05.0000000+00:00",
-            )
+            parrot_storage::events::record(tx, &event, "2026-01-02T03:04:05.0000000+00:00")
         })
         .await
         .unwrap();

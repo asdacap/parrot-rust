@@ -13,7 +13,7 @@ use protobuf::Message;
 const SESSION: &str = "agent";
 
 fn repository(fixture: &super::Fixture) -> EventRepository {
-    EventRepository::new(SessionDatabase::open_memory(fixture.root()).unwrap())
+    EventRepository::new(SessionDatabase::open(fixture.root()).unwrap())
 }
 fn event(agent: &str) -> Event {
     Event {
@@ -64,19 +64,6 @@ async fn admit(
     )
     .await
     .unwrap()
-}
-async fn idle(repo: &EventRepository, content: &str) -> Result<Option<Admission>, EventError> {
-    repo.admit_steer_if_idle(
-        SESSION.into(),
-        "delivery".into(),
-        content.into(),
-        |_| Ok(event(SESSION)),
-        &NeverCancelled,
-    )
-    .unwrap()
-    .into_completion()
-    .await
-    .map(|result| result.into_value().into_output())
 }
 fn other(delivery: Delivery) -> Delivery {
     if delivery == Delivery::DELIVERY_STEER {
@@ -262,49 +249,6 @@ async fn structured_parts_and_idempotent_retry() {
 }
 
 #[tokio::test]
-async fn conditional_steer_yields_and_retries() {
-    let fixture = super::Fixture::new();
-    let repo = repository(&fixture);
-    admit(
-        &repo,
-        SESSION,
-        "normal",
-        "normal prompt",
-        Delivery::DELIVERY_QUEUE,
-    )
-    .await;
-    let blocked = idle(&repo, "notification").await.unwrap();
-    // source-assertion-line: 115
-    assert!(blocked.is_none());
-    promote(&repo, Delivery::DELIVERY_QUEUE).await;
-    let admitted = idle(&repo, "notification")
-        .await
-        .unwrap()
-        .expect("conditional admission unexpectedly failed");
-    let retried = idle(&repo, "notification")
-        .await
-        .unwrap()
-        .expect("conditional admission unexpectedly failed");
-    // source-assertion-line: 134
-    assert!(admitted.created());
-    // source-assertion-line: 135
-    assert!(!retried.created());
-    // source-assertion-line: 136
-    assert_eq!(retried.input.id, admitted.input.id);
-    repo.database().close().await.unwrap();
-}
-#[tokio::test]
-async fn conditional_steer_conflict() {
-    let fixture = super::Fixture::new();
-    let repo = repository(&fixture);
-    idle(&repo, "notification").await.unwrap();
-    // source-assertion-line: 148
-    assert!(
-        matches!(idle(&repo, "different").await, Err(EventError::Conflict(message)) if message == "message delivery was already admitted with different content")
-    );
-    repo.database().close().await.unwrap();
-}
-#[tokio::test]
 async fn steers_together_queues_one_at_a_time() {
     let fixture = super::Fixture::new();
     let repo = repository(&fixture);
@@ -455,22 +399,20 @@ async fn owned_cancel(delivery: Delivery) {
     // source-assertion-line: 197
     assert_eq!(
         single(
-            repo.inputs_for_next_promotion(SESSION.into())
+            repo.capture_pending_input_ids(SESSION.into())
                 .await
                 .unwrap()
-        )
-        .id,
-        unrelated.input.id
+        ),
+        unrelated.input.message_id
     );
     // source-assertion-line: 198
     assert_eq!(
         single(
-            repo.inputs_for_next_promotion("other-agent".into())
+            repo.capture_pending_input_ids("other-agent".into())
                 .await
                 .unwrap()
-        )
-        .id,
-        other_session.input.id
+        ),
+        other_session.input.message_id
     );
     // source-assertion-line: 199
     assert_eq!(promote(&repo, delivery).await, 1);
@@ -567,12 +509,11 @@ async fn cancellation_failure(fail_composition: bool) {
     // source-assertion-line: 231
     assert_eq!(
         single(
-            repo.inputs_for_next_promotion(SESSION.into())
+            repo.capture_pending_input_ids(SESSION.into())
                 .await
                 .unwrap()
-        )
-        .id,
-        admitted.input.id
+        ),
+        admitted.input.message_id
     );
     // source-assertion-line: 232
     assert_eq!(single(repo.replay().await.unwrap()), admitted_event);
@@ -734,12 +675,11 @@ async fn supplemental_sql_trigger_failure_preserves_pending_input_and_event() {
     );
     assert_eq!(
         single(
-            repo.inputs_for_next_promotion(SESSION.into())
+            repo.capture_pending_input_ids(SESSION.into())
                 .await
                 .unwrap()
-        )
-        .id,
-        admitted.input.id
+        ),
+        admitted.input.message_id
     );
     assert_eq!(single(repo.replay().await.unwrap()), admitted_event);
     assert!(messages(&repo).await.is_empty());

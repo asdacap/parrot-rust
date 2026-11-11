@@ -193,16 +193,6 @@ impl EventBroker {
         }
     }
 
-    pub fn with_limits(limits: SubscriptionLimits) -> Result<Self, BrokerError> {
-        if limits.retained == 0 || limits.transient == 0 {
-            return Err(BrokerError::InvalidCapacity);
-        }
-        Ok(Self {
-            state: Mutex::new(BrokerState::default()),
-            limits,
-        })
-    }
-
     /// Eagerly admits the listener before returning, including before its first
     /// read. Subscribing after broker completion returns a completed listener.
     pub fn subscribe(&self) -> Subscription {

@@ -27,7 +27,7 @@ pub fn append_tool_settlement(
         }
         return Ok(None);
     }
-    super::record(tx, event, None, &clock())?;
+    super::record(tx, event, &clock())?;
     let item = project(
         tx,
         &event.agent_session_id,
@@ -52,28 +52,6 @@ pub fn append_tool_settlement(
         ],
     )?;
     Ok(Some(item))
-}
-
-pub fn tool_terminals(
-    tx: &Transaction<'_>,
-    agent: &str,
-) -> Result<Vec<ToolExecutionTerminal>, EventError> {
-    let mut statement = tx.prepare(
-        "SELECT sequence, tool_call_id, tool_result_name, tool_result_status FROM conversation_item \
-         WHERE agent_session = ?1 AND tool_result_status IS NOT NULL ORDER BY sequence;",
-    )?;
-    let mut rows = statement.query([agent])?;
-    let mut terminals = Vec::new();
-    while let Some(row) = rows.next()? {
-        let sequence = row.get::<_, i64>(0)?;
-        terminals.push(ToolExecutionTerminal {
-            tool_call_id: row.get(1)?,
-            tool_name: row.get(2)?,
-            status: parse_status(&row.get::<_, String>(3)?)?,
-            result_parts: read_parts(tx, "conversation_part", "item_sequence", &sequence)?,
-        });
-    }
-    Ok(terminals)
 }
 
 pub fn tool_terminals_of_calls(
@@ -122,7 +100,7 @@ pub fn append_tool_synthetic(
     if has_tool_synthetic(tx, &event.agent_session_id, assistant_sequence)? {
         return Ok(None);
     }
-    super::record(tx, event, None, &clock())?;
+    super::record(tx, event, &clock())?;
     let item = project(
         tx,
         &event.agent_session_id,

@@ -16,16 +16,13 @@ pub use rendering::{
 pub use session::SessionPrompt;
 mod environment;
 
-pub use environment::{
-    AgentPathEnvironment, CliUtilityAvailability, git_repository_prompt, native_platform_identifier,
-};
+pub use environment::{AgentPathEnvironment, CliUtilityAvailability, native_platform_identifier};
 mod identity_scope;
 pub use identity_scope::{PromptScope, StandingInstruction};
 mod model;
 mod packaged;
 pub use packaged::{
-    PACKAGED_SKILL_ASSETS, PackagedSkillAsset, PackagedSkillsError, extract_packaged_skills,
-    extract_packaged_skills_sync, hash_packaged_skills,
+    PACKAGED_SKILL_ASSETS, PackagedSkillAsset, PackagedSkillsError, hash_packaged_skills,
 };
 mod sections;
 mod skills_discovery;
@@ -54,9 +51,8 @@ pub use composition::{
 };
 pub use model::ModelPromptProvider;
 pub use sections::{
-    AgentIdentityDescription, MaterializedContext, RuleActionDescription, SecurityDescription,
-    SecurityProfilePromptProvider, SecurityRuleDescription, SessionIdentityPromptProvider,
-    SubagentDescription, TemplateSystemPromptProvider, materialized_context_providers,
+    AgentIdentityDescription, RuleActionDescription, SecurityProfilePromptProvider,
+    SecurityRuleDescription, SessionIdentityPromptProvider, TemplateSystemPromptProvider,
 };
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};

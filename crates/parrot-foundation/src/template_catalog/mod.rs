@@ -3,8 +3,7 @@
 //! Descriptor and argument order are retained. Inputs are owned JSON values, not
 //! host objects or engine values; scalar insertion accepts actual strings only.
 use crate::config::{ConfigError, Configuration, Result, templates::TemplateSpec};
-use crate::template_scalar::translate_error;
-use parrot_core::{CancellationToken, PromptTemplate};
+use parrot_core::{CancellationToken, Error, ErrorKind, PromptTemplate};
 use parrot_domain::contracts::async_ops::{Cancellation, OperationError, OperationResult};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,7 +15,6 @@ mod tests;
 
 struct Template {
     id: String,
-    spec: TemplateSpec,
     compiled: Arc<PromptTemplate>,
 }
 
@@ -35,7 +33,6 @@ impl Template {
         .map_err(|error| ConfigError::invalid_data(error.message))?;
         Ok(Self {
             id: id.to_owned(),
-            spec: spec.clone(),
             compiled: Arc::new(compiled),
         })
     }
@@ -107,13 +104,6 @@ impl PromptTemplateCatalog {
         Self { templates, indices }
     }
 
-    /// Enumerates the exact configured descriptors and their ordered argument inventories.
-    pub fn descriptors(&self) -> impl ExactSizeIterator<Item = (&str, &TemplateSpec)> {
-        self.templates
-            .iter()
-            .map(|entry| (entry.id.as_str(), &entry.spec))
-    }
-
     /// Renders ordered argument pairs, rejecting duplicate names before map conversion.
     ///
     /// Cancellation is checked before validation and immediately before conversion.
@@ -154,50 +144,12 @@ impl PromptTemplateCatalog {
         })?;
         Ok(self.templates[*index].compiled.clone())
     }
+}
 
-    pub fn render_skills(
-        &self,
-        skills: &str,
-        cancellation: &dyn Cancellation,
-    ) -> OperationResult<String, ConfigError> {
-        self.render(
-            "context.skills",
-            &[("skills".into(), Value::String(skills.into()))],
-            cancellation,
-        )
-    }
-
-    pub fn render_selected_skill(
-        &self,
-        name: &str,
-        path: &str,
-        content: &str,
-        cancellation: &dyn Cancellation,
-    ) -> OperationResult<String, ConfigError> {
-        self.render(
-            "context.skill-selected",
-            &[
-                ("name".into(), Value::String(name.into())),
-                ("path".into(), Value::String(path.into())),
-                ("content".into(), Value::String(content.into())),
-            ],
-            cancellation,
-        )
-    }
-
-    pub fn render_unavailable_skill(
-        &self,
-        name: &str,
-        message: &str,
-        cancellation: &dyn Cancellation,
-    ) -> OperationResult<String, ConfigError> {
-        self.render(
-            "context.skill-unavailable",
-            &[
-                ("name".into(), Value::String(name.into())),
-                ("message".into(), Value::String(message.into())),
-            ],
-            cancellation,
-        )
+fn translate_error(error: Error) -> OperationError<ConfigError> {
+    if error.kind == ErrorKind::Cancelled {
+        OperationError::Cancelled
+    } else {
+        OperationError::Failed(ConfigError::invalid_data(error.message))
     }
 }

@@ -162,10 +162,8 @@ impl ActivationStatus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClaimDisposition {
     Fresh,
-    Reclaimed,
     Live,
     Contended,
-    SelectionRequired,
     Corrupt,
     Resumed,
 }
@@ -236,11 +234,6 @@ pub struct AdmissionResult {
     pub session_id: Option<UserSessionId>,
     pub activation_lease: Option<SessionActivationLease>,
     pub intent: Option<OpenIntent>,
-}
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ClaimResult {
-    pub session_id: String,
-    pub disposition: ClaimDisposition,
 }
 pub struct SessionActivationLease {
     claim: WorkingDirectoryClaim,

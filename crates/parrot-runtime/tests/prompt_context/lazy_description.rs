@@ -235,11 +235,7 @@ async fn system_prompt_reads_support_custom_template_ids() {
 fn security_description_template_is_lazy_and_retains_its_first_error_across_epochs() {
     let catalog =
         templates("prompt_templates:\n  context.security-profile:\n    template: '{{ 1 / 0 }}'\n");
-    let providers = materialized_context_providers(&context(), catalog);
-    let description = providers
-        .iter()
-        .find(|provider| provider.key().ends_with(":16-security-profile"))
-        .unwrap();
+    let description = SecurityProfilePromptProvider::new(Vec::new(), Arc::new(|| true), catalog);
     // This is rendering of an inert supplied description, not a SecurityProfile service.
     let mut prompt = description.materialize(&identity()).unwrap();
     let first = prompt.build(&selection()).unwrap_err();
@@ -254,7 +250,7 @@ fn security_description_samples_sandbox_switch_at_agent_materialization() {
     let enabled = Arc::new(AtomicBool::new(false));
     let current = enabled.clone();
     let provider = SecurityProfilePromptProvider::new(
-        context().security.rules,
+        Vec::new(),
         Arc::new(move || current.load(Ordering::Acquire)),
         templates(""),
     );

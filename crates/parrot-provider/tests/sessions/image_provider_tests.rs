@@ -27,9 +27,11 @@ fn response_body() -> Vec<u8> {
     format!("{{\"data\":[{{\"b64_json\":\"{PNG}\"}}]}}").into_bytes()
 }
 fn png() -> Vec<u8> {
-    parrot_provider::image_generation::client::decode_response(&response_body())
-        .unwrap()
-        .data
+    "89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C4890000000D49444154789C63F8CFC0F01F00050001FF89993D1D0000000049454E44AE426082"
+        .as_bytes()
+        .chunks(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect()
 }
 struct Token(bool);
 impl Cancellation for Token {

@@ -4,7 +4,7 @@ mod lifecycle;
 mod tool_execution_support;
 mod usage;
 
-use parrot_runtime::agent_turn::budget::AgentState;
+use parrot_core::budget::AgentState;
 
 #[test]
 fn disabled_max_turns_preserves_normal_phase_settlement_cap_and_restart_policy() {

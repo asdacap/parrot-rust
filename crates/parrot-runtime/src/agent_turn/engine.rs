@@ -158,10 +158,6 @@ impl<S> RuntimeBackend<S>
 where
     S: AccessSnapshot + 'static,
 {
-    pub async fn new(config: RuntimeConfig<S>) -> Result<Arc<Self>, TurnError> {
-        Self::with_sessions(config, ProviderSessions::new()).await
-    }
-
     pub async fn with_sessions(
         config: RuntimeConfig<S>,
         sessions: ProviderSessions,
@@ -284,41 +280,6 @@ where
     }
     pub fn broker(&self) -> &Arc<EventBroker> {
         &self.broker
-    }
-    pub async fn listen<'a, I, IF>(
-        &'a self,
-        cursor: Option<String>,
-        capture_scopes: I,
-    ) -> Result<
-        impl parrot_domain::contracts::events::EventSubscription<
-            Event = Event,
-            Error = crate::event_broker::ListenError<EventError>,
-        > + 'a,
-        EventError,
-    >
-    where
-        I: FnOnce() -> IF + Send + 'a,
-        IF: std::future::Future<Output = Result<Vec<Event>, EventError>> + Send + 'a,
-    {
-        self.broker
-            .listen(
-                cursor.as_deref(),
-                |cursor| async move {
-                    self.history
-                        .repository()
-                        .events()
-                        .replay_after(&cursor)
-                        .await
-                },
-                move || async move {
-                    let mut snapshots = capture_scopes().await?;
-                    let mut usage = Event::new();
-                    usage.set_session_usage_snapshot(self.usage.usage_snapshot());
-                    snapshots.push(usage);
-                    Ok(snapshots)
-                },
-            )
-            .await
     }
     async fn compact_now(
         &self,

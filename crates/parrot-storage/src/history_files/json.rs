@@ -5,10 +5,6 @@ use serde_json::ser::{CharEscape, CompactFormatter, Formatter, PrettyFormatter};
 use serde_json::{Map, Number, Value};
 use std::io;
 
-#[path = "json_decode.rs"]
-mod decode;
-pub use decode::deserialize_entry;
-
 pub fn serialize_entry(entry: &AgentHistoryEntry) -> Result<Vec<u8>> {
     let mut object = Map::new();
     match entry {
@@ -437,5 +433,52 @@ mod tests {
         }
 
         assert_eq!(actual, expected.as_bytes());
+    }
+
+    #[test]
+    fn image_parts_and_request_effort_serialize_every_field() {
+        let message = AgentHistoryEntry::Message {
+            sequence: 2,
+            conversation_sequence: 9,
+            origin: "model".into(),
+            role: "assistant".into(),
+            parts: vec![ConversationPart::image(
+                crate::artifacts::ImageArtifactMetadata {
+                    artifact_id: "image-one".into(),
+                    sha256: "image-one".into(),
+                    media_type: "image/png".into(),
+                    display_name: "saved image".into(),
+                    byte_length: 70,
+                    width: 24,
+                    height: 12,
+                    frame_count: 3,
+                    aggregate_pixels: 864,
+                    origin: "upload".into(),
+                },
+            )],
+            tool_calls: Vec::new(),
+            tool_call_id: String::new(),
+        };
+        let encoded: Value = serde_json::from_slice(&serialize_entry(&message).unwrap()).unwrap();
+        assert_eq!(
+            encoded["parts"],
+            serde_json::json!([{"kind":"image_artifact","text":"","artifact_id":"image-one","media_type":"image/png","display_name":"saved image","byte_length":70,"width":24,"height":12,"frame_count":3,"aggregate_pixels":864,"origin":"upload"}])
+        );
+        let request = AgentHistoryEntry::Request {
+            sequence: 3,
+            event_sequence: 15,
+            request_id: "request".into(),
+            provider: "provider".into(),
+            model: "model".into(),
+            effort: Some("high".into()),
+            input_tokens: 0,
+            cached_input_tokens: 0,
+            output_tokens: 0,
+            input_cost: 0.0,
+            output_cost: 0.0,
+            tool_calls: 0,
+        };
+        let encoded: Value = serde_json::from_slice(&serialize_entry(&request).unwrap()).unwrap();
+        assert_eq!(encoded["effort"], "high");
     }
 }

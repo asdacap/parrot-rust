@@ -544,7 +544,10 @@ impl Harness {
                 .await
                 .unwrap();
         });
-        let token = TransportToken::generate().unwrap();
+        let token = TransportToken::from_hex(
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .unwrap();
         let mut owner =
             GrpcTransportClient::connect(&address, Some(&token), None, diagnostics.clone())
                 .unwrap();

@@ -296,17 +296,10 @@ fn visible_output_and_cancellation_suppress_all_retries_without_mutation() {
         let mut visible = RetryPolicy::new(32768, 5);
         visible.mark_visible();
         assert_eq!(visible.classify(&failure, false), Err(failure.clone()));
-        assert_eq!(visible.max_output_tokens(), 32768);
         let mut cancelled = RetryPolicy::new(32768, 5);
         assert_eq!(cancelled.classify(&failure, true), Err(failure.clone()));
-        assert_eq!(cancelled.max_output_tokens(), 32768);
-        assert_eq!(
-            cancelled
-                .classify(&Failure::Network, false)
-                .unwrap()
-                .attempt,
-            1
-        );
+        let action = cancelled.classify(&Failure::Network, false).unwrap();
+        assert_eq!((action.attempt, action.max_output_tokens), (1, 32768));
     }
     let mut policy = RetryPolicy::new(0, 5);
     assert_eq!(
@@ -351,10 +344,8 @@ fn reset_after_fallback_only_resets_stream_budget() {
             .fallback_http
     );
     policy.reset_stream();
-    assert_eq!(
-        policy.classify(&Failure::Network, false).unwrap().attempt,
-        1
-    );
+    let action = policy.classify(&Failure::Network, false).unwrap();
+    assert_eq!((action.attempt, action.max_output_tokens), (1, 24866));
     assert_eq!(
         policy
             .classify(&http(503, "", "", ""), false)
@@ -370,7 +361,6 @@ fn reset_after_fallback_only_resets_stream_budget() {
         policy.classify(&context_failure, false),
         Err(context_failure)
     );
-    assert_eq!(policy.max_output_tokens(), 24866);
     policy.mark_visible();
     policy.reset_stream();
     assert_eq!(

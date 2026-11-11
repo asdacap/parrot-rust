@@ -42,27 +42,6 @@ async fn composite_nested_visibility_changes_remain_local_without_restarting_exe
     .await;
     assert!(inner(&snapshot(&root).await[0])[0].hidden);
     assert!(!child.snapshot().await[0].hidden);
-    for payload in [original.payload.clone(), hidden_payload] {
-        let before = snapshot(&root).await;
-        let mut update = before[0].clone();
-        update.payload = payload.clone();
-        bounded(
-            scheduler
-                .apply_visibility_changes(before, vec![update])
-                .join(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            inner(&snapshot(&root).await[0])[0].hidden,
-            inner(&Task {
-                payload,
-                ..original.clone()
-            })[0]
-                .hidden
-        );
-        assert!(!child.snapshot().await[0].hidden);
-    }
     assert_eq!(snapshot(&root).await[0].state, Running);
     assert_eq!(
         scheduler

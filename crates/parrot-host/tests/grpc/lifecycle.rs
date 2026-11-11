@@ -13,9 +13,10 @@ use std::{sync::atomic::Ordering, time::Duration};
 
 async fn transport_borrows_service(address: TransportAddress) {
     let fixture = Fixture::new().await;
-    let token = address
-        .is_tcp()
-        .then(|| TransportToken::generate().unwrap());
+    let token = address.is_tcp().then(|| {
+        TransportToken::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+            .unwrap()
+    });
     let mut server = bounded(GrpcServer::start(
         GrpcService::new(fixture.service.clone()),
         address,
@@ -69,7 +70,7 @@ async fn transport_borrows_service(address: TransportAddress) {
     // Drain already buffered events, then observe actual network termination.
     bounded(async { while let Ok(Some(_)) = stream.message().await {} }).await;
     bounded(server.close()).await.unwrap();
-    if let Some(path) = address.unix_path() {
+    if let TransportAddress::Unix(path) = &address {
         assert!(!path.exists(), "transport close removes its owned socket");
     } else {
         assert!(
@@ -126,7 +127,7 @@ fn client_runtime_loss_does_not_settle_actual_refresh_cleanup_or_service_close()
         .unwrap();
     owner.block_on(async {
         let fixture = Fixture::new().await;
-        let token = TransportToken::generate().unwrap();
+        let token = TransportToken::from_hex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").unwrap();
         let mut server = bounded(GrpcServer::start(GrpcService::new(fixture.service.clone()),
             TransportAddress::parse("http://127.0.0.1:0").unwrap(), Some(token.clone()), None,
             fixture.diagnostics.clone())).await.unwrap();

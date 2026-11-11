@@ -220,47 +220,6 @@ impl NativeProcess {
         self.reader.take()
     }
 
-    /// Matches the source: interactive stdin is available only for PTY processes.
-    pub async fn write_stdin(&mut self, bytes: &[u8]) -> io::Result<()> {
-        let master = self.master.as_ref().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Unsupported,
-                "standard input is available only for pseudo-terminal processes",
-            )
-        })?;
-        if self.status.is_some() {
-            return Err(io::Error::new(
-                io::ErrorKind::BrokenPipe,
-                "the pseudo-terminal process has completed",
-            ));
-        }
-        let mut remaining = bytes;
-        while !remaining.is_empty() {
-            let count = unsafe {
-                libc::write(
-                    master.as_raw_fd(),
-                    remaining.as_ptr().cast(),
-                    remaining.len(),
-                )
-            };
-            match count.cmp(&0) {
-                std::cmp::Ordering::Greater => remaining = &remaining[count as usize..],
-                std::cmp::Ordering::Equal => tokio::time::sleep(Duration::from_millis(5)).await,
-                std::cmp::Ordering::Less => {
-                    let error = io::Error::last_os_error();
-                    if error.kind() == io::ErrorKind::Interrupted {
-                        continue;
-                    }
-                    if error.kind() != io::ErrorKind::WouldBlock {
-                        return Err(error);
-                    }
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                }
-            }
-        }
-        Ok(())
-    }
-
     /// Makes one nonblocking terminal write for a composing execution owner.
     pub fn try_write_stdin(&mut self, bytes: &[u8]) -> io::Result<usize> {
         let master = self.master.as_ref().ok_or_else(|| {
@@ -283,37 +242,11 @@ impl NativeProcess {
         }
     }
 
-    /// Sends the terminal's EOF character; the reader stays open to drain output.
-    pub async fn close_stdin(&mut self) -> io::Result<()> {
-        self.write_stdin(&[4]).await
-    }
-
-    pub fn resize(&self, rows: u16, columns: u16) -> io::Result<()> {
-        let master = self.master.as_ref().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Unsupported,
-                "pipe processes have no terminal window",
-            )
-        })?;
-        resize(master.as_raw_fd(), rows, columns)
-    }
-
     pub fn send_signal(&self, signal: i32) -> io::Result<()> {
         if self.status.is_some() {
             return Err(io::Error::from_raw_os_error(libc::ESRCH));
         }
         self.signals.send(signal)
-    }
-
-    /// Polling does not own a detached task; dropping this future leaves the
-    /// process owned by this object. Drop/cancel still synchronously reap it.
-    pub async fn wait(&mut self) -> io::Result<ExitStatus> {
-        loop {
-            if let Some(status) = self.try_wait()? {
-                return Ok(status);
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
     }
 
     /// Polls exit without holding a composing owner's lock across an await.
@@ -332,13 +265,6 @@ impl NativeProcess {
     /// Terminates the captured descendants, retaining the direct child until reap/drop.
     pub fn request_cancel(&mut self) -> io::Result<()> {
         self.kill_owned()
-    }
-
-    pub async fn cancel_and_wait(&mut self) -> io::Result<ExitStatus> {
-        let cleanup = self.kill_owned();
-        let status = self.wait().await;
-        cleanup?;
-        status
     }
 
     fn kill_owned(&mut self) -> io::Result<()> {

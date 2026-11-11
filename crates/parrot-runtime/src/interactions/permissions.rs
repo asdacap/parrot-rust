@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, Clock, OperationError};
-use parrot_domain::contracts::interactions::PermissionBroker as PermissionBrokerContract;
 use parrot_domain::contracts::storage::Committed;
 use parrot_domain::protocol::messages::parrot::Event;
 use parrot_domain::values::identifiers::Identifier;
@@ -337,49 +336,5 @@ impl<T: Clone + Send + Sync + 'static> PermissionBroker<T> {
         let _gate = self.gate.lock().await;
         self.pending
             .close(InteractionError::permission("permission session closed"));
-    }
-}
-
-impl<T: Clone + Send + Sync + 'static> PermissionBrokerContract for PermissionBroker<T> {
-    type Request = PermissionRequest<T>;
-    type Reply = PermissionReply;
-    type Pending = Vec<PendingPermission<T>>;
-    type RequestId = String;
-    type Error = InteractionError;
-
-    fn request<'a>(
-        &'a self,
-        request: Self::Request,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Self::Reply, OperationError<Self::Error>>> {
-        Box::pin(self.request(request, cancellation))
-    }
-    fn pending(&self) -> BoxFuture<'_, Result<Self::Pending, Self::Error>> {
-        Box::pin(async move { Ok(self.pending().await) })
-    }
-    fn reply<'a>(
-        &'a self,
-        id: &'a String,
-        reply: Self::Reply,
-    ) -> BoxFuture<'a, Result<(), Self::Error>> {
-        Box::pin(async move {
-            if reply.kind != PermissionReplyKind::Decided {
-                return Err(InteractionError::permission(
-                    "permission replies require a decision",
-                ));
-            }
-            let choice = match reply.decision {
-                PermissionDecision::Grant => "grant",
-                PermissionDecision::Reject if reply.reason.trim().is_empty() => "reject",
-                PermissionDecision::Reject => "reject with reason",
-            };
-            self.reply(id, choice, &reply.reason).await
-        })
-    }
-    fn reject<'a>(&'a self, id: &'a String) -> BoxFuture<'a, Result<(), Self::Error>> {
-        Box::pin(self.reject(id))
-    }
-    fn withdraw<'a>(&'a self, id: &'a String) -> BoxFuture<'a, Result<(), Self::Error>> {
-        Box::pin(self.withdraw(id))
     }
 }

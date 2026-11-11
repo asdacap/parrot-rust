@@ -39,12 +39,6 @@ impl Provider for NoCallProvider {
     fn id(&self) -> &str {
         "local"
     }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.0.fetch_add(1, Ordering::SeqCst);
-        Err(Error::InvalidOperation(
-            "constructor test must not call provider".into(),
-        ))
-    }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(true) })
     }
@@ -358,9 +352,6 @@ impl ScriptedProvider {
 impl Provider for ScriptedProvider {
     fn id(&self) -> &str {
         "local"
-    }
-    fn call(&self, _: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.stream()
     }
     fn has_credential<'a>(&'a self, _: &'a dyn Cancellation) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async { Ok(true) })

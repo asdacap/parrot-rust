@@ -64,7 +64,8 @@ async fn retained_resume_preserves_actual_runtime_history_resources_and_updates_
                 .current()
                 .unwrap()
                 .model
-                .canonical_base(),
+                .canonical_model
+                .selector(),
             "scripted/second"
         );
         let second = send(resumed.session().as_ref(), "second question").await;

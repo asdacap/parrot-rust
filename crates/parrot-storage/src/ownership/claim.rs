@@ -1,6 +1,5 @@
 use super::runtime::{fingerprint_host, random_id};
 use super::types::*;
-use crate::history_files::{SessionCatalog, SessionCatalogState};
 use parrot_domain::values::identifiers::UserSessionId;
 use sha2::{Digest, Sha256};
 use std::{
@@ -126,73 +125,6 @@ impl WorkingDirectoryClaim {
         }
         Ok(newest)
     }
-    pub fn discover_latest(&self, working_directory: &Path) -> io::Result<AdmissionResult> {
-        self.discover(working_directory, true)
-    }
-    fn discover(
-        &self,
-        working_directory: &Path,
-        recheck_inactive: bool,
-    ) -> io::Result<AdmissionResult> {
-        let canonical = Self::canonicalize(working_directory)?;
-        let Some(associations) = self.read_associations(&canonical)? else {
-            return Ok(result(ClaimDisposition::Corrupt, None, None));
-        };
-        let catalog = SessionCatalog::new(&self.state_directory);
-        let mut candidates = Vec::new();
-        for id in associations {
-            let Some(status) = self.read_activation(&id, &canonical)? else {
-                return Ok(result(ClaimDisposition::Corrupt, None, None));
-            };
-            let mut metadata = catalog.find(&id);
-            let session_directory = self.state_directory.join("sessions").join(id.value());
-            if metadata
-                .as_ref()
-                .is_some_and(|meta| meta.state == SessionCatalogState::Corrupt)
-                && !fs::symlink_metadata(&session_directory)?
-                    .file_type()
-                    .is_symlink()
-                && !session_directory.join("meta.json").is_file()
-            {
-                metadata = None;
-            }
-            if let Some(meta) = &metadata
-                && (meta.state == SessionCatalogState::Corrupt
-                    || Self::canonicalize(Path::new(&meta.working_directory))? != canonical)
-            {
-                return Ok(result(ClaimDisposition::Corrupt, None, None));
-            }
-            let recency = metadata
-                .map(|meta| {
-                    meta.last_opened_at
-                        .filter(|date| !date.is_empty())
-                        .or(meta.created_at)
-                        .unwrap_or_default()
-                })
-                .unwrap_or_default();
-            candidates.push((id, recency, status));
-        }
-        candidates.sort_by(|(a_id, a_date, _), (b_id, b_date, _)| {
-            ordinal_cmp(b_date, a_date).then_with(|| ordinal_cmp(a_id.value(), b_id.value()))
-        });
-        let Some((id, _, status)) = candidates.into_iter().next() else {
-            return Ok(result(ClaimDisposition::Fresh, None, None));
-        };
-        // OpenDefault's inactive candidate is rechecked by activation before
-        // any write. Standalone discovery still rechecks before returning.
-        let status = if !recheck_inactive && status == ActivationStatus::Inactive {
-            Some(status)
-        } else {
-            self.read_activation(&id, &canonical)?
-        };
-        let disposition = match status {
-            None => ClaimDisposition::Corrupt,
-            Some(ActivationStatus::Inactive) => ClaimDisposition::Resumed,
-            _ => ClaimDisposition::Live,
-        };
-        let intent = intent(OpenOperation::Resume, working_directory, &id, canonical);
-        Ok(result(disposition, Some(id), Some(intent)))
-    }
     pub fn activation_status(
         &self,
         id: &UserSessionId,
@@ -208,16 +140,6 @@ impl WorkingDirectoryClaim {
             self.read_activation(id, &Self::canonicalize(working_directory)?)?,
             Some(ActivationStatus::Active | ActivationStatus::LiveOwnerNotDisproved)
         ))
-    }
-    pub fn open_default(&self, working_directory: &Path) -> io::Result<AdmissionResult> {
-        let candidate = self.discover(working_directory, false)?;
-        match (&candidate.disposition, &candidate.session_id) {
-            (ClaimDisposition::Fresh, _) => {
-                self.create_fresh(working_directory, &UserSessionId::generate()?)
-            }
-            (ClaimDisposition::Resumed, Some(id)) => self.resume(working_directory, id, false),
-            _ => Ok(candidate),
-        }
     }
     pub fn create_fresh(
         &self,
@@ -296,65 +218,6 @@ impl WorkingDirectoryClaim {
             ));
         }
         self.activate(intent, ClaimDisposition::Resumed, take_over)
-    }
-    pub fn claim(
-        &self,
-        working_directory: &Path,
-        proposed: &UserSessionId,
-        alive: impl Fn(i32) -> bool,
-    ) -> io::Result<ClaimResult> {
-        let canonical = Self::canonicalize(working_directory)?;
-        let directory = self.owners_directory().join(Self::fingerprint(&canonical));
-        fs::create_dir_all(&directory)?;
-        let existing = Self::current(&directory)?;
-        let resumed = existing
-            .as_ref()
-            .and_then(|record| record.session_id.clone())
-            .unwrap_or_else(|| proposed.value().to_owned());
-        if existing
-            .as_ref()
-            .and_then(|record| record.process_id)
-            .is_some_and(alive)
-        {
-            return Ok(ClaimResult {
-                session_id: resumed,
-                disposition: ClaimDisposition::Live,
-            });
-        }
-        let version = existing
-            .as_ref()
-            .and_then(|record| record.version)
-            .unwrap_or(0)
-            .wrapping_add(1);
-        let mut record = self.active_record(
-            &intent(
-                OpenOperation::CreateFresh,
-                working_directory,
-                proposed,
-                canonical,
-            ),
-            version,
-            i64::from(version),
-            random_id()?,
-        );
-        record.schema_version = None;
-        record.user_session_id = None;
-        record.session_id = Some(resumed.clone());
-        let written = write_version(&directory, &record)?;
-        Ok(ClaimResult {
-            session_id: if written {
-                resumed
-            } else {
-                proposed.value().into()
-            },
-            disposition: if !written {
-                ClaimDisposition::Contended
-            } else if existing.is_none() {
-                ClaimDisposition::Fresh
-            } else {
-                ClaimDisposition::Reclaimed
-            },
-        })
     }
     pub(crate) fn release(&self, lease: &SessionActivationLease) -> io::Result<()> {
         let directory = self.activation_directory(&lease.intent.session_id);
@@ -810,8 +673,4 @@ impl serde_json::ser::Formatter for OwnerJsonFormatter {
             _ => CompactFormatter.write_char_escape(writer, escape),
         }
     }
-}
-
-fn ordinal_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    a.encode_utf16().cmp(b.encode_utf16())
 }

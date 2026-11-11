@@ -50,14 +50,11 @@ fn unavailable(error: &Error) -> bool {
             | Error::Encode(_)
             | Error::Io(_)
             | Error::Cancelled
-            | Error::Cancellation(_)
             | Error::Http(
                 HttpError::Response(_)
-                    | HttpError::Http(_)
                     | HttpError::ProviderHttp(_)
                     | HttpError::Transport(_)
                     | HttpError::Cancelled
-                    | HttpError::RequestCancelled(_)
                     | HttpError::Provider(_)
             )
     )

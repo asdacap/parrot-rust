@@ -252,43 +252,11 @@ fn registry_rejects_duplicate_and_empty_names_without_changing_ordinal_rules() {
     );
 }
 #[test]
-fn actual_factory_registers_every_source_presenter_once() {
-    let registry = ToolPresenterRegistry::standard(vec!["git status".into()]);
-    let names = registry
-        .registered_names()
-        .collect::<std::collections::BTreeSet<_>>();
-    let expected = [
-        "answer",
-        "ask",
-        "reply",
-        "agent_send",
-        "agent_spawn",
-        "agent_status",
-        "clear_exit_reminder",
-        "edit",
-        "exec_command",
-        "glob",
-        "imagegen",
-        "interrupt_process",
-        "read_image",
-        "read",
-        "set_agent_tasks",
-        "get_agent_tasks",
-        "progress",
-        "question",
-        "set_checkpoint",
-        "set_exit_reminder",
-        "status",
-        "queue_push",
-        "queue_take",
-        "wait",
-        "web_fetch",
-        "write_stdin",
-        "write",
-    ]
-    .into_iter()
-    .collect();
-    assert_eq!(names, expected);
+fn actual_factory_wires_source_presenters() {
+    let registry = ToolPresenterRegistry::standard_with_skill_read_paths(
+        vec!["git status".into()],
+        Arc::new(tools::read::SkillReadPathFormatter::default()),
+    );
     assert!(registry.describe("agent_spawn").terminal_only);
     assert!(registry.describe("question").modeline);
     assert_eq!(

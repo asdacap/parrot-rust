@@ -137,6 +137,16 @@ impl Wake for ThreadWake {
         self.0.unpark();
     }
 }
+fn request_too_large(message: &str) -> Error {
+    Error {
+        kind: ErrorKind::RequestTooLarge,
+        code: ErrorCode::RequestTooLarge,
+        message: message.into(),
+        response_body: String::new(),
+        detail: None,
+    }
+}
+
 fn finish<F: Future>(future: F) -> F::Output {
     let waker = Waker::from(Arc::new(ThreadWake(thread::current())));
     let mut context = Context::from_waker(&waker);
@@ -355,7 +365,7 @@ impl Provider for MemoryProvider {
                 .expect("unexpected provider request")
             {
                 Reply::Response(response) => Ok(response),
-                Reply::TooLarge(message) => Err(Error::request_too_large(message)),
+                Reply::TooLarge(message) => Err(request_too_large(message)),
                 Reply::Failed(message) => Err(Error::failed(message)),
                 Reply::Error(error) => Err(error),
             }
@@ -743,16 +753,6 @@ impl States for MemoryState {
     }
     fn read_standing_statuses(&self) -> BoxFuture<'_, Result<StatusStanding, Error>> {
         Box::pin(async { Ok(self.status_standing.clone()) })
-    }
-    fn read_next_input_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
-        Box::pin(async move {
-            Ok(self
-                .pending_messages
-                .front()
-                .map(|(_, message)| message.clone())
-                .into_iter()
-                .collect())
-        })
     }
     fn add_conversation_messages(
         &mut self,
@@ -1508,7 +1508,7 @@ fn oversized_requests_compact_once_until_a_successful_response_resets_the_guard(
 #[test]
 fn a_second_oversized_failure_propagates_without_repeating_compaction() {
     let mut state = MemoryState::new([Reply::TooLarge("first"), Reply::TooLarge("second")]);
-    assert_eq!(state.run(), Err(Error::request_too_large("second")));
+    assert_eq!(state.run(), Err(request_too_large("second")));
     assert_eq!(
         state
             .trace
@@ -1525,7 +1525,7 @@ fn a_second_oversized_failure_propagates_without_repeating_compaction() {
 fn compaction_that_does_not_reduce_context_returns_the_original_provider_error() {
     let mut state = MemoryState::new([Reply::TooLarge("original")]);
     state.reduced = false;
-    assert_eq!(state.run(), Err(Error::request_too_large("original")));
+    assert_eq!(state.run(), Err(request_too_large("original")));
     assert_eq!(state.request().rendered_instructions.len(), 1);
     assert_eq!(state.trace.values().last().unwrap(), "compact");
 }

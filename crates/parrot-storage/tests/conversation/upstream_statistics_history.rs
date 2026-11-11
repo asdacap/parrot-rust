@@ -26,12 +26,8 @@ impl Fixture {
     fn root(&self) -> SelectedSessionRoot {
         SelectedSessionRoot::new(self.0.clone(), RootOrigin::Current).unwrap()
     }
-    fn repository(&self, memory: bool) -> ConversationRepository {
-        let database = if memory {
-            SessionDatabase::open_memory(self.root()).unwrap()
-        } else {
-            SessionDatabase::open(self.root()).unwrap()
-        };
+    fn repository(&self) -> ConversationRepository {
+        let database = SessionDatabase::open(self.root()).unwrap();
         {
             let events = EventRepository::new(database);
             let root = events.database().selected_root().clone();
@@ -77,7 +73,7 @@ fn single_request(entries: &[AgentHistoryEntry]) -> &AgentHistoryEntry {
 #[tokio::test]
 async fn durable_facts_reopen_without_aggregate_projection_or_current_pricing_history_literals() {
     let fixture = Fixture::new();
-    let repository = fixture.repository(false);
+    let repository = fixture.repository();
     let mut request = event("request", "main");
     request.set_request_usage_recorded(RequestUsageRecorded {
         request_id: "request".into(),
@@ -96,7 +92,7 @@ async fn durable_facts_reopen_without_aggregate_projection_or_current_pricing_hi
         .unwrap();
     repository.events().database().close().await.unwrap();
 
-    let reopened = fixture.repository(false);
+    let reopened = fixture.repository();
     let _replay = reopened.events().replay_statistics().await.unwrap();
     let sessions = reopened.agent_history_session_ids().await.unwrap();
     assert_eq!(sessions.len(), 1, "source session IDs Single()");
@@ -126,7 +122,7 @@ async fn facts_replay_tree_request_history_high_effort_original_literals() {
 
 async fn facts_replay_tree_request_history_original_literals(effort: Option<&str>) {
     let fixture = Fixture::new();
-    let repository = fixture.repository(true);
+    let repository = fixture.repository();
     let mut main = event("main-request", "main");
     main.set_request_usage_recorded(RequestUsageRecorded {
         request_id: "main-request".into(),
@@ -205,7 +201,7 @@ async fn facts_replay_tree_request_history_original_literals(effort: Option<&str
 
     assert!(
         repository
-            .model_history("grandchild".into())
+            .conversation("grandchild".into())
             .await
             .unwrap()
             .is_empty()

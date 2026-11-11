@@ -23,10 +23,16 @@ async fn retained_tree_reopens_same_identities_and_histories_without_execution()
             .get("completed")
             .adapter
             .session()
-            .send_text_message(
-                "finish work".into(),
+            .send_and_select_execution(
+                vec![parrot_storage::events::ConversationPart::text(
+                    "finish work",
+                )],
+                parrot_domain::values::identifiers::Identifier::message_id().unwrap(),
+                parrot_domain::protocol::messages::parrot::InputSource::INPUT_SOURCE_UNSPECIFIED,
                 Arc::new(parrot_storage::events::NeverCancelled),
             )
+            .unwrap()
+            .wait(&parrot_storage::events::NeverCancelled)
             .await
             .unwrap();
         sent.execution.join().await.unwrap();

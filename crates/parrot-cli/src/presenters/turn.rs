@@ -13,7 +13,6 @@ use super::{MarqueeValue, Presentation, PresenterError, PresenterResult};
 #[derive(Default)]
 pub struct TurnPresentation {
     pub commits: Vec<Arc<dyn ScrollbackItem>>,
-    pub live: Vec<Arc<dyn LiveBufferItem>>,
     pub completion: Option<bool>,
     pub errors: Vec<String>,
 }
@@ -43,17 +42,7 @@ impl EnhancedTurnRenderer {
         }
     }
 
-    pub fn observe(
-        &mut self,
-        published: &Event,
-        replaying: bool,
-    ) -> PresenterResult<TurnPresentation> {
-        let mut update = self.apply_event(published, replaying)?;
-        update.live = self.snapshot();
-        Ok(update)
-    }
-
-    pub(crate) fn apply_event(
+    pub fn apply_event(
         &mut self,
         published: &Event,
         replaying: bool,
@@ -138,10 +127,7 @@ impl EnhancedTurnRenderer {
 
     pub fn flush_response(&mut self, owner: &str) -> PresenterResult<TurnPresentation> {
         if self.owner.as_deref() != Some(owner) {
-            return Ok(TurnPresentation {
-                live: self.snapshot(),
-                ..Default::default()
-            });
+            return Ok(TurnPresentation::default());
         }
         self.finish()
     }
@@ -156,12 +142,7 @@ impl EnhancedTurnRenderer {
             self.owner = None;
             self.segment += 1;
         }
-        update.live = self.snapshot();
         Ok(update)
-    }
-
-    pub fn cancel(&mut self) -> PresenterResult<TurnPresentation> {
-        self.finish()
     }
 
     pub fn snapshot(&self) -> Vec<Arc<dyn LiveBufferItem>> {
@@ -173,139 +154,6 @@ impl EnhancedTurnRenderer {
                 text: self.preview.join(" "),
                 frame: self.frame,
             })]
-        }
-    }
-
-    /// Actual source stream boundary: before/after hooks surround each visible
-    /// event, and EOF, cancellation and failures flush the same live renderer.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn render_session_turn<S, B, A, D, C, E, R>(
-        &mut self,
-        stream: &mut S,
-        mut before_render: B,
-        mut after_render: A,
-        mut draw: D,
-        mut commit: C,
-        mut error: E,
-        is_replaying: R,
-        cancellation: &dyn parrot_domain::contracts::async_ops::Cancellation,
-    ) -> Result<bool, tonic::Status>
-    where
-        S: futures_util::Stream<Item = Result<Event, tonic::Status>> + Unpin,
-        B: for<'a> FnMut(
-            &'a Event,
-            &'a dyn parrot_domain::contracts::async_ops::Cancellation,
-        ) -> parrot_domain::contracts::async_ops::BoxFuture<
-            'a,
-            Result<(), tonic::Status>,
-        >,
-        A: for<'a> FnMut(
-            &'a Event,
-            &'a dyn parrot_domain::contracts::async_ops::Cancellation,
-        ) -> parrot_domain::contracts::async_ops::BoxFuture<
-            'a,
-            Result<(), tonic::Status>,
-        >,
-        D: for<'a> FnMut(
-            Vec<Arc<dyn LiveBufferItem>>,
-            &'a dyn parrot_domain::contracts::async_ops::Cancellation,
-        ) -> parrot_domain::contracts::async_ops::BoxFuture<
-            'a,
-            Result<(), tonic::Status>,
-        >,
-        C: for<'a> FnMut(
-            Arc<dyn ScrollbackItem>,
-            Vec<Arc<dyn LiveBufferItem>>,
-            &'a dyn parrot_domain::contracts::async_ops::Cancellation,
-        ) -> parrot_domain::contracts::async_ops::BoxFuture<
-            'a,
-            Result<(), tonic::Status>,
-        >,
-        E: for<'a> FnMut(
-            Vec<String>,
-            &'a dyn parrot_domain::contracts::async_ops::Cancellation,
-        ) -> parrot_domain::contracts::async_ops::BoxFuture<
-            'a,
-            Result<(), tonic::Status>,
-        >,
-        R: Fn() -> bool,
-    {
-        use futures_util::{
-            StreamExt,
-            future::{Either, select},
-        };
-        let mut pending = TurnPresentation::default();
-        let running = async {
-            loop {
-                cancellation
-                    .check()
-                    .map_err(|_| tonic::Status::cancelled("operation cancelled"))?;
-                let next = match select(cancellation.cancelled(), Box::pin(stream.next())).await {
-                    Either::Left(_) => return Err(tonic::Status::cancelled("operation cancelled")),
-                    Either::Right((next, _)) => next,
-                };
-                let Some(published) = next else {
-                    pending = self
-                        .finish()
-                        .map_err(|e| tonic::Status::internal(e.to_string()))?;
-                    apply_turn(
-                        &mut pending,
-                        &mut draw,
-                        &mut commit,
-                        &mut error,
-                        cancellation,
-                    )
-                    .await?;
-                    return Ok(false);
-                };
-                let published = published?;
-                before_render(&published, cancellation).await?;
-                pending = self
-                    .observe(&published, is_replaying())
-                    .map_err(|e| tonic::Status::internal(e.to_string()))?;
-                let completed = pending.completion;
-                apply_turn(
-                    &mut pending,
-                    &mut draw,
-                    &mut commit,
-                    &mut error,
-                    cancellation,
-                )
-                .await?;
-                after_render(&published, cancellation).await?;
-                if let Some(completed) = completed {
-                    return Ok(completed);
-                }
-            }
-        }
-        .await;
-        if running.is_err() {
-            let uncancelled = parrot_storage::events::NeverCancelled;
-            if !pending.commits.is_empty() {
-                apply_turn(
-                    &mut pending,
-                    &mut draw,
-                    &mut commit,
-                    &mut error,
-                    &uncancelled,
-                )
-                .await?;
-            }
-            pending = self
-                .cancel()
-                .map_err(|e| tonic::Status::internal(e.to_string()))?;
-            apply_turn(
-                &mut pending,
-                &mut draw,
-                &mut commit,
-                &mut error,
-                &uncancelled,
-            )
-            .await?;
-        }
-        match running {
-            Err(error) if error.code() == tonic::Code::Cancelled => Ok(false),
-            result => result,
         }
     }
 
@@ -367,49 +215,4 @@ pub(crate) fn response_boundary(published: &Event) -> bool {
                 | Payload::PlanCompleted(_)
         )
     )
-}
-
-async fn apply_turn<D, C, E>(
-    update: &mut TurnPresentation,
-    draw: &mut D,
-    commit: &mut C,
-    error: &mut E,
-    cancellation: &dyn parrot_domain::contracts::async_ops::Cancellation,
-) -> Result<(), tonic::Status>
-where
-    D: for<'a> FnMut(
-        Vec<Arc<dyn LiveBufferItem>>,
-        &'a dyn parrot_domain::contracts::async_ops::Cancellation,
-    ) -> parrot_domain::contracts::async_ops::BoxFuture<
-        'a,
-        Result<(), tonic::Status>,
-    >,
-    C: for<'a> FnMut(
-        Arc<dyn ScrollbackItem>,
-        Vec<Arc<dyn LiveBufferItem>>,
-        &'a dyn parrot_domain::contracts::async_ops::Cancellation,
-    ) -> parrot_domain::contracts::async_ops::BoxFuture<
-        'a,
-        Result<(), tonic::Status>,
-    >,
-    E: for<'a> FnMut(
-        Vec<String>,
-        &'a dyn parrot_domain::contracts::async_ops::Cancellation,
-    ) -> parrot_domain::contracts::async_ops::BoxFuture<
-        'a,
-        Result<(), tonic::Status>,
-    >,
-{
-    if update.commits.is_empty() {
-        draw(update.live.clone(), cancellation).await?;
-    } else {
-        while let Some(item) = update.commits.first() {
-            commit(item.clone(), update.live.clone(), cancellation).await?;
-            update.commits.remove(0);
-        }
-    }
-    if !update.errors.is_empty() {
-        error(std::mem::take(&mut update.errors), cancellation).await?;
-    }
-    Ok(())
 }

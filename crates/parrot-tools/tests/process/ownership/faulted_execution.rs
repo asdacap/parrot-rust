@@ -10,9 +10,14 @@ use parrot_domain::values::identifiers::Identifier;
 use crate::process::execution::{LaunchSpec, ShellProcessExecution};
 use crate::process::ownership::execution::{Execution, NeverCancelled};
 use crate::process::ownership::managed::{
-    CompletionMessage, CompletionReport, CompletionSink, NoProcessDiagnostics,
+    CompletionMessage, CompletionReport, CompletionSink, ProcessDiagnostic, ProcessDiagnostics,
 };
 use crate::process::ownership::owner::{ProcessAgent, ProcessStart, ShellProcessOwner};
+
+struct NoProcessDiagnostics;
+impl ProcessDiagnostics for NoProcessDiagnostics {
+    fn write(&self, _: ProcessDiagnostic) {}
+}
 
 struct Sink;
 impl CompletionSink for Sink {

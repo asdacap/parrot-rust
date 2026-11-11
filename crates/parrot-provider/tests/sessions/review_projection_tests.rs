@@ -56,7 +56,7 @@ async fn review_projector_preserves_original_websocket_credential_errors() {
             if credential == "cancelled" {
                 assert_eq!(
                     result["error"],
-                    serde_json::json!({"type":"OperationCanceledException","message":"synthetic credential cancellation"})
+                    serde_json::json!({"type":"OperationCanceledException","message":"The operation was canceled."})
                 );
             }
         }

@@ -15,7 +15,6 @@ pub enum Error {
         message: String,
         cause: Box<Error>,
     },
-    HeaderTimeout(String),
     HeaderRetryLimit {
         maximum_retries: u32,
         attempts: u64,
@@ -26,7 +25,6 @@ pub enum Error {
     Wire(String),
     Encode(String),
     Cancelled,
-    Cancellation(String),
     Io(String),
     InvalidOperation(String),
     Disposed,
@@ -85,10 +83,8 @@ impl fmt::Display for Error {
                 Ok(())
             }
             Self::Provider(message)
-            | Self::HeaderTimeout(message)
             | Self::Wire(message)
             | Self::Encode(message)
-            | Self::Cancellation(message)
             | Self::Io(message)
             | Self::InvalidOperation(message) => f.write_str(message),
             Self::Cancelled => f.write_str("The operation was canceled."),
@@ -151,7 +147,6 @@ impl Error {
         let preserved = matches!(
             &self,
             Error::Cancelled
-                | Error::Cancellation(_)
                 | Error::Provider(_)
                 | Error::ProviderWithCause { .. }
                 | Error::WebSocketTransport { .. }
@@ -159,7 +154,6 @@ impl Error {
                 | Error::Response(crate::responses::ResponsesError::ProviderResponse { .. })
                 | Error::Http(
                     crate::http_stream::HttpError::Cancelled
-                        | crate::http_stream::HttpError::RequestCancelled(_)
                         | crate::http_stream::HttpError::Provider(_)
                         | crate::http_stream::HttpError::RequestTooLarge(_)
                 )

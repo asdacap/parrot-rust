@@ -232,23 +232,11 @@ async fn running_visibility_updates_preserve_execution_detail_and_terminal_resul
             Some("a")
         );
         assert!(scheduler.capture_detail("missing").await.is_none());
-        let before = snapshot(&root).await;
         gate.open();
         let done = wait_tasks(&root, |tasks| tasks[0].state == Succeeded).await;
         assert_eq!(done[0].hidden, hidden);
         assert_eq!(done[0].result.as_deref(), Some("answer"));
         assert!(!done[1].hidden);
-        let mut changed = before[0].clone();
-        changed.hidden = !hidden;
-        bounded(
-            scheduler
-                .apply_visibility_changes(before, vec![changed])
-                .join(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(snapshot(&root).await[0].hidden, !hidden);
-        assert_eq!(snapshot(&root).await[0].state, Succeeded);
         assert_eq!(requests(&h.provider, "a").len(), 1);
         assert!(Arc::ptr_eq(&scope, &h.factory.get("a")));
         h.close().await;
@@ -289,7 +277,7 @@ async fn autohide_requires_nonempty_all_resolved_and_hides_once_per_transition()
 }
 
 #[tokio::test]
-async fn unspawned_detail_and_recursive_visibility_never_create_workers() {
+async fn unspawned_detail_never_creates_workers() {
     let h = Harness::new();
     let root = h.root("owner").await;
     let mut blocked = composite("blocked", vec![task("child")]);
@@ -299,20 +287,6 @@ async fn unspawned_detail_and_recursive_visibility_never_create_workers() {
     let detail = scheduler.capture_detail("blocked").await.unwrap();
     assert!(detail.agent_name.is_none());
     assert_eq!(detail.task.state, Pending);
-    let before = snapshot(&root).await;
-    let mut changed = before[1].clone();
-    changed.payload = parrot_domain::values::agent_tasks::TaskPayload::Tasks(vec![Task {
-        hidden: true,
-        ..task("child")
-    }]);
-    bounded(
-        scheduler
-            .apply_visibility_changes(before, vec![changed])
-            .join(),
-    )
-    .await
-    .unwrap();
-    assert!(inner(&snapshot(&root).await[1])[0].hidden);
     assert!(
         scheduler
             .capture_detail("blocked")

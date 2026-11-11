@@ -154,12 +154,19 @@ async fn metadata_lookup_does_not_read_body_and_content_reads_keep_full_bytes_an
 
 #[tokio::test]
 async fn unknown_lookup_refreshes_catalog_and_keeps_the_active_snapshot_until_end_turn() {
-    let (reader, catalog, mut skills) = skills_fixture();
-    let before = skills.build_catalog(&Cancel::no()).await.unwrap();
-    skills.begin_turn(&Cancel::no()).await.unwrap();
+    let (reader, catalog, skills) = skills_fixture();
+    let skills = Arc::new(tokio::sync::Mutex::new(skills));
+    let mut prompt = AgentSkillPromptProvider::new(skills.clone())
+        .await
+        .materialize(&identity())
+        .unwrap();
+    let before = render_catalog(prompt.as_mut()).await;
+    skills.lock().await.begin_turn(&Cancel::no()).await.unwrap();
     reader.skill("/skills/three/SKILL.md", "three");
-    assert_eq!(skills.build_catalog(&Cancel::no()).await.unwrap(), before);
+    assert_eq!(render_catalog(prompt.as_mut()).await, before);
     let three = skills
+        .lock()
+        .await
         .get_skills(
             std::slice::from_ref(&SkillReference {
                 name: "three".into(),
@@ -172,30 +179,21 @@ async fn unknown_lookup_refreshes_catalog_and_keeps_the_active_snapshot_until_en
         .unwrap()
         .unwrap();
     assert_eq!(three.id, "/skills/three/SKILL.md");
-    assert!(
-        skills
-            .build_catalog(&Cancel::no())
-            .await
-            .unwrap()
-            .contains("$three:")
-    );
+    assert!(render_catalog(prompt.as_mut()).await.contains("$three:"));
     reader.skill("/skills/four/SKILL.md", "four");
     catalog.invalidate().await;
-    assert!(
-        !skills
-            .build_catalog(&Cancel::no())
-            .await
-            .unwrap()
-            .contains("$four:")
-    );
-    skills.end_turn();
-    assert!(
-        skills
-            .build_catalog(&Cancel::no())
-            .await
-            .unwrap()
-            .contains("$four:")
-    );
+    assert!(!render_catalog(prompt.as_mut()).await.contains("$four:"));
+    skills.lock().await.end_turn();
+    assert!(render_catalog(prompt.as_mut()).await.contains("$four:"));
+}
+
+async fn render_catalog(prompt: &mut dyn SystemPrompt) -> String {
+    prompt
+        .read_system_prompts_live(&selection(), &Cancel::no())
+        .await
+        .unwrap()
+        .remove(0)
+        .1
 }
 
 #[tokio::test]
@@ -403,23 +401,34 @@ async fn full_runtime_prompt_joins_real_agents_skills_model_scope_and_configured
     skills.begin_turn(&Cancel::no()).await.unwrap();
     let templates = crate::templates("");
     let security = Arc::new(Captures(AtomicUsize::new(0)));
-    let context = MaterializedContext {
-        platform: "osx-arm64".into(),
-        working_directory: "/work".into(),
-        scratch_path: "/session/scratch".into(),
-        history_path: "/session/history.jsonl".into(),
-        expected_cli_utilities: vec!["git".into()],
-        optional_cli_utilities: vec!["jq".into()],
-        subagents: vec![SubagentDescription {
-            id: "worker".into(),
-            usage: "inspect".into(),
-        }],
-        security: SecurityDescription {
-            rules: Vec::new(),
-            sandbox_enabled: true,
-        },
-    };
-    let mut providers = materialized_context_providers(&context, templates.clone());
+    let mut providers: Vec<Arc<dyn SystemPromptProvider>> = [
+        ("07-platform", "context.platform", "platform", "osx-arm64"),
+        (
+            "92-agent-scratch",
+            "context.agent-scratch",
+            "path",
+            "/session/scratch",
+        ),
+        (
+            "93-agent-history",
+            "context.agent-history",
+            "path",
+            "/session/history.jsonl",
+        ),
+    ]
+    .into_iter()
+    .map(|(key, template, argument, value)| {
+        Arc::new(TemplateSystemPromptProvider::new(
+            format!("runtime:system-context:{key}"),
+            template,
+            vec![(argument.into(), value.into())],
+            templates.clone(),
+        )) as Arc<dyn SystemPromptProvider>
+    })
+    .collect();
+    providers.push(Arc::new(SessionIdentityPromptProvider::new(
+        templates.clone(),
+    )));
     providers.push(Arc::new(
         AgentsPromptProvider::new("/work", "/config", reader, security, templates.clone()).unwrap(),
     ));

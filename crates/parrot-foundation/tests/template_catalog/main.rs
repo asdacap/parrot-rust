@@ -2,7 +2,8 @@
 mod support;
 use parrot_domain::contracts::async_ops::OperationError;
 use parrot_foundation::{
-    config::configuration::source_predefined_content, template_catalog::PromptTemplateCatalog,
+    config::{Configuration, configuration::source_predefined_content},
+    template_catalog::PromptTemplateCatalog,
 };
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -137,7 +138,7 @@ fn m1_scalar_both_original_assertions_share_the_overridden_configuration() {
 fn m1_three_mixed_category_assertions_remain_scalar_and_exact() {
     let baseline = defaults();
     let content = "prompt_templates:\n  agent-task.stop-canceled:\n    template: Task canceled by owner.\n  agent-session.child-completion:\n    template: '{agent_name}: {result}'\nprofiles:\n  build:\n    usage: Custom foreground usage\nlive_buffer_rows: 37\nagent_tasks:\n  maximum_attempts: 7\n";
-    let (config, catalog) = PromptTemplateCatalog::from_content(content, &environment()).unwrap();
+    let (_, catalog) = PromptTemplateCatalog::from_content(content, &environment()).unwrap();
     assert_eq!(
         catalog
             .render("agent-task.stop-canceled", &[], &CancellationState::Active)
@@ -162,7 +163,7 @@ fn m1_three_mixed_category_assertions_remain_scalar_and_exact() {
             .render("agent-task.stop-succeeded", &[], &CancellationState::Active)
             .unwrap()
     );
-    assert_eq!(config.prompt_templates.len(), 110);
+    assert_eq!(template_specs(content).len(), 110);
 }
 
 #[test]
@@ -231,11 +232,10 @@ fn m1_m3_m6_repeat_calls_large_loop_and_inputs_are_isolated() {
 fn m5_ordering_duplicate_extra_required_and_string_only_scalar() {
     let content = "prompt_templates:\n  custom.order:\n    template: '{z}:{a}'\n    allowed_arguments: [z, a, optional]\n    required_arguments: [z, a]\n";
     let (_, catalog) = PromptTemplateCatalog::from_content(content, &environment()).unwrap();
-    let spec = catalog
-        .descriptors()
-        .find(|(id, _)| *id == "custom.order")
-        .unwrap()
-        .1;
+    let spec = template_specs(content)
+        .into_iter()
+        .find(|spec| spec.path == "prompt_templates.custom.order")
+        .unwrap();
     assert_eq!(spec.allowed, ["z", "a", "optional"]);
     assert_eq!(spec.required, ["z", "a"]);
     assert_eq!(
@@ -501,8 +501,14 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
     assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
     let new = "prompt_templates:\n  custom.structured:\n    engine: minijinja\n    template: '{{ value }}'\n    allowed_arguments: [value]\n    required_arguments: [value]\n";
     std::fs::write(&path, new).unwrap();
-    let (config, catalog) = PromptTemplateCatalog::load(&path, &predefined, &env).unwrap();
-    assert_eq!(config.prompt_templates.len(), 111);
+    let (_, catalog) = PromptTemplateCatalog::load(&path, &predefined, &env).unwrap();
+    let mut loaded = 0;
+    Configuration::load(&path, &predefined, &env, |_| {
+        loaded += 1;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(loaded, 111);
     assert_eq!(
         catalog
             .render(
@@ -522,45 +528,4 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
     assert!(active.contains("engine: minijinja"));
     assert!(!active.contains("engine: scriban"));
     std::fs::remove_dir_all(directory).unwrap();
-}
-
-#[test]
-fn source_skill_catalog_conveniences_preserve_opaque_literal_arguments() {
-    let catalog = defaults();
-    let token = CancellationState::Active;
-    let hostile = "{{ value }}\n${NAME}";
-    assert_eq!(
-        catalog.render_skills(hostile, &token).unwrap(),
-        catalog
-            .render(
-                "context.skills",
-                &arguments(&json!({"skills":hostile})),
-                &token
-            )
-            .unwrap()
-    );
-    assert_eq!(
-        catalog
-            .render_selected_skill("n", "/tmp/{x}", hostile, &token)
-            .unwrap(),
-        catalog
-            .render(
-                "context.skill-selected",
-                &arguments(&json!({"name":"n","path":"/tmp/{x}","content":hostile})),
-                &token
-            )
-            .unwrap()
-    );
-    assert_eq!(
-        catalog
-            .render_unavailable_skill("n", hostile, &token)
-            .unwrap(),
-        catalog
-            .render(
-                "context.skill-unavailable",
-                &arguments(&json!({"name":"n","message":hostile})),
-                &token
-            )
-            .unwrap()
-    );
 }

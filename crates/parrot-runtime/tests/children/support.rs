@@ -533,7 +533,7 @@ impl Factory {
                 (id, handle)
             })
             .collect();
-        let backend = RuntimeBackend::new(RuntimeConfig {
+        let runtime_config = RuntimeConfig {
             tool_execution: tool_execution_config(&history, templates.clone(), publisher.clone()),
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_max_turns: false,
@@ -557,7 +557,11 @@ impl Factory {
             parent_completion: prepared.parent_completion,
             ancestors,
             event_id: Arc::new(id),
-        })
+        };
+        let backend = RuntimeBackend::with_sessions(
+            runtime_config,
+            parrot_provider::sessions::ProviderSessions::new(),
+        )
         .await
         .unwrap();
         let adapter = Arc::new(SessionAdapter::new(
@@ -647,9 +651,6 @@ impl Scripted {
 impl Provider for Scripted {
     fn id(&self) -> &str {
         "scripted"
-    }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.call_impl(request)
     }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         Ok(Arc::new(self.clone()))

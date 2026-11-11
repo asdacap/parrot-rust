@@ -36,10 +36,6 @@ pub trait States: Send + Sync {
     fn read_standing_statuses(&self) -> BoxFuture<'_, Result<crate::StatusStanding, Error>> {
         Box::pin(async { Ok(crate::StatusStanding::default()) })
     }
-    /// Reads materialized pending input without admitting it to the conversation.
-    fn read_next_input_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_next_input_messages")) })
-    }
     /// Reads typed configuration without rendering prompts or deciding request policy.
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>>;
     /// Reads the consolidated agent state that survives across turns, including

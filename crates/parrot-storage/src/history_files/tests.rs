@@ -1,7 +1,5 @@
 use super::*;
-use crate::conversation::{
-    AgentHistoryEntry, ConversationMessage, ConversationRepository, MessageRole,
-};
+use crate::conversation::{ConversationMessage, ConversationRepository, MessageRole};
 use crate::database::SessionDatabase;
 use crate::events::EventRepository;
 use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
@@ -554,67 +552,6 @@ async fn recovery_reprovisions_agent_directories_before_later_append() {
 }
 
 #[tokio::test]
-async fn explicit_replace_entries_matches_source_atomic_failure_behavior() {
-    let temp = TempDirectory::new();
-    let root = SelectedSessionRoot::new(temp.0.clone(), RootOrigin::Current).unwrap();
-    let projection = AgentHistoryFile::new(
-        root.clone(),
-        root.path().join("agent/history.jsonl"),
-        vec!["agent".into()],
-    )
-    .unwrap();
-    let initial = AgentHistoryEntry::Compaction {
-        sequence: 7,
-        summary: "summary".into(),
-        watermark: 4,
-    };
-    projection.replace_entries(vec![initial]).await.unwrap();
-    let original = std::fs::read(projection.path()).unwrap();
-    assert!(
-        std::fs::read_dir(projection.path().parent().unwrap())
-            .unwrap()
-            .all(|entry| !entry
-                .unwrap()
-                .file_name()
-                .to_string_lossy()
-                .ends_with(".tmp"))
-    );
-
-    let invalid = AgentHistoryEntry::Request {
-        sequence: 8,
-        event_sequence: 9,
-        request_id: "invalid-cost".into(),
-        provider: "provider".into(),
-        model: "model".into(),
-        effort: None,
-        input_tokens: 0,
-        cached_input_tokens: 0,
-        output_tokens: 0,
-        input_cost: f64::NAN,
-        output_cost: 0.0,
-        tool_calls: 0,
-    };
-    assert_eq!(
-        projection
-            .replace_entries(vec![invalid])
-            .await
-            .unwrap_err()
-            .kind,
-        ErrorKind::InvalidData
-    );
-    assert_eq!(std::fs::read(projection.path()).unwrap(), original);
-    assert!(
-        std::fs::read_dir(projection.path().parent().unwrap())
-            .unwrap()
-            .all(|entry| !entry
-                .unwrap()
-                .file_name()
-                .to_string_lossy()
-                .ends_with(".tmp"))
-    );
-}
-
-#[tokio::test]
 async fn refresh_rebuilds_truncated_deleted_changed_and_directory_targets() {
     let temp = TempDirectory::new();
     let root = SelectedSessionRoot::new(temp.0.clone(), RootOrigin::Current).unwrap();
@@ -784,7 +721,11 @@ async fn known_good_refresh_appends_without_replacing_the_file() {
     assert_eq!(observed, appended);
     history.refresh().await.unwrap();
     assert_eq!(std::fs::read(projection.path()).unwrap(), appended);
-    history.cleanup_fork().await.unwrap();
+    history
+        .repository()
+        .cleanup_forked_agent_history(history.agent_session_id().into())
+        .await
+        .unwrap();
     assert!(std::fs::read(projection.path()).unwrap().is_empty());
     repository.events().database().close().await.unwrap();
 }
@@ -900,9 +841,12 @@ async fn history_file_failure_does_not_undo_committed_conversation() {
         )
         .await
         .unwrap();
+    let conversation = repository.conversation("agent".into()).await.unwrap();
+    assert_eq!(conversation.len(), 1);
+    assert_eq!(conversation[0].message.role, MessageRole::User);
     assert_eq!(
-        repository.messages("agent".into()).await.unwrap(),
-        ["user: committed despite file failure"]
+        crate::events::content(&conversation[0].message.parts),
+        "committed despite file failure"
     );
     assert_eq!(repository.events().replay().await.unwrap().len(), 1);
     assert!(!blocked_parent.join("history.jsonl").exists());

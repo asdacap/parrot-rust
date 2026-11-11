@@ -6,7 +6,8 @@ use parrot_domain::contracts::async_ops::{
     BoxFuture, Cancellation, Cancelled, Clock, OperationError,
 };
 use parrot_domain::contracts::interactions::{
-    AgentAskReply, AgentCommunication, QuestionDefinition, QuestionReply, QuestionRequester,
+    AgentAskReply, AgentCommunication, QuestionDefinition, QuestionReply, QuestionReplyKind,
+    QuestionRequester,
 };
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
@@ -95,7 +96,13 @@ async fn question_maps_schema_input_into_actual_broker_and_formats_label_reply()
     assert_eq!(questions[0].options[1].description, "warm");
     assert!(questions[0].multiple && questions[0].custom);
     broker
-        .reply(&pending[0].id, QuestionReply::answered(vec!["Blue".into()]))
+        .reply(
+            &pending[0].id,
+            QuestionReply {
+                kind: QuestionReplyKind::Answered,
+                answers: vec!["Blue".into()],
+            },
+        )
         .unwrap();
     assert_eq!(
         task.await.unwrap().unwrap(),
@@ -116,7 +123,10 @@ async fn ordered_answers_preserve_question_and_supplied_selection_order() {
     broker
         .reply(
             &pending[0].id,
-            QuestionReply::answered(vec!["Blue, Red, Green".into(), "done".into()]),
+            QuestionReply {
+                kind: QuestionReplyKind::Answered,
+                answers: vec!["Blue, Red, Green".into(), "done".into()],
+            },
         )
         .unwrap();
     assert_eq!(
@@ -351,7 +361,6 @@ async fn ask_blocks_until_reply_settles_immediately_and_preserves_plain_text() {
     for name in ["parent", "/root"] {
         let ask: AskTool<_, Security> = AskTool::new(definition(), service.clone(), None);
         assert!(ask.enabled_after_interruption());
-        assert_eq!(ask.name(), "ask");
         assert_eq!(ask.definition(), &definition());
         assert_eq!(
             ask.parallel_safety(&invocation("{}")),
@@ -382,7 +391,6 @@ async fn ask_blocks_until_reply_settles_immediately_and_preserves_plain_text() {
         let reply: ReplyTool<_, Security> =
             ReplyTool::new(definition(), communication(recipient.clone()), None);
         assert!(reply.enabled_after_interruption());
-        assert_eq!(reply.name(), "reply");
         assert_eq!(
             reply.parallel_safety(&invocation("{}")),
             ParallelSafety::Sequential
@@ -546,7 +554,10 @@ async fn question_uses_selected_result_templates() {
     broker
         .reply(
             &broker.pending()[0].id,
-            QuestionReply::answered(vec!["yes".into()]),
+            QuestionReply {
+                kind: QuestionReplyKind::Answered,
+                answers: vec!["yes".into()],
+            },
         )
         .unwrap();
     assert_eq!(

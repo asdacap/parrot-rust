@@ -8,6 +8,7 @@ mod session;
 mod state;
 mod status;
 mod streams;
+mod support;
 mod tasks;
 mod turn;
 mod usage;

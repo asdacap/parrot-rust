@@ -52,9 +52,6 @@ impl Provider for UsageReportingProvider {
     fn usage_reporter(&self) -> Option<Arc<dyn UsageReporter>> {
         Some(self.reporter.clone())
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        self.inner.call(request)
-    }
     fn generate_image<'a>(
         &'a self,
         request: crate::image_generation::ImageGenerationRequest,
@@ -150,14 +147,6 @@ impl Provider for RetryingProvider {
     fn usage_reporter(&self) -> Option<Arc<dyn UsageReporter>> {
         self.inner.usage_reporter()
     }
-    fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
-        Ok(Box::new(RetryStream::new(
-            RetryTarget::Provider(self.inner.clone()),
-            request,
-            self.header_max_retries,
-            self.sleeper.clone(),
-        )))
-    }
     fn generate_image<'a>(
         &'a self,
         request: crate::image_generation::ImageGenerationRequest,
@@ -212,7 +201,7 @@ impl Session for RetryingSession {
     }
     fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
         Ok(Box::new(RetryStream::new(
-            RetryTarget::Session(self.inner.clone()),
+            self.inner.clone(),
             request,
             self.header_max_retries,
             self.sleeper.clone(),
@@ -224,7 +213,7 @@ impl Session for RetryingSession {
         trace: Arc<super::diagnostics::CallTrace>,
     ) -> Result<Box<dyn EventStream>, Error> {
         let mut stream = RetryStream::new(
-            RetryTarget::Session(self.inner.clone()),
+            self.inner.clone(),
             request,
             self.header_max_retries,
             self.sleeper.clone(),
@@ -233,12 +222,8 @@ impl Session for RetryingSession {
         Ok(Box::new(stream))
     }
 }
-enum RetryTarget {
-    Provider(Arc<dyn Provider>),
-    Session(Arc<dyn Session>),
-}
 struct RetryStream {
-    target: RetryTarget,
+    session: Arc<dyn Session>,
     trace: Option<Arc<super::diagnostics::CallTrace>>,
     request: Request,
     policy: RetryPolicy,
@@ -249,13 +234,13 @@ struct RetryStream {
 }
 impl RetryStream {
     fn new(
-        target: RetryTarget,
+        session: Arc<dyn Session>,
         request: Request,
         header_max_retries: u32,
         sleeper: Arc<dyn RetrySleeper>,
     ) -> Self {
         Self {
-            target,
+            session,
             sleeper,
             trace: None,
             policy: RetryPolicy::new(request.max_output_tokens, header_max_retries),
@@ -266,12 +251,11 @@ impl RetryStream {
         }
     }
     fn call_attempt(&self) -> Result<Box<dyn EventStream>, Error> {
-        match &self.target {
-            RetryTarget::Provider(provider) => provider.call(self.request.clone()),
-            RetryTarget::Session(session) => match &self.trace {
-                Some(trace) => session.call_with_trace(self.request.clone(), trace.clone()),
-                None => session.call(self.request.clone()),
-            },
+        match &self.trace {
+            Some(trace) => self
+                .session
+                .call_with_trace(self.request.clone(), trace.clone()),
+            None => self.session.call(self.request.clone()),
         }
     }
     async fn close_attempt(&mut self) -> Result<(), Error> {
@@ -340,17 +324,10 @@ impl RetryStream {
                     Err(_) => return Err(original),
                 };
                 if action.fallback_http {
-                    match &self.target {
-                        RetryTarget::Provider(_) => {
-                            return Err(Error::InvalidOperation(
-                                "A stateless provider cannot select HTTP fallback.".into(),
-                            ));
-                        }
-                        RetryTarget::Session(session) => {
-                            if !session.try_fall_back_to_http().await? {
-                                return Err(Error::InvalidOperation("A provider call requested HTTP fallback without supporting it.".into()));
-                            }
-                        }
+                    if !self.session.try_fall_back_to_http().await? {
+                        return Err(Error::InvalidOperation(
+                            "A provider call requested HTTP fallback without supporting it.".into(),
+                        ));
                     }
                     self.policy.reset_stream();
                 }
@@ -398,9 +375,9 @@ pub fn classify_failure(error: &Error) -> Failure {
             | parrot_foundation::oauth::AuthError::IoWithMessage(_),
         ) => Failure::Network,
         Error::Authentication(_) => Failure::Protocol,
-        Error::HeaderRetryLimit { .. } | Error::HeaderTimeout(_) => Failure::HeaderTimeout,
+        Error::HeaderRetryLimit { .. } => Failure::HeaderTimeout,
         Error::Http(error) => match error {
-            HttpError::Cancelled | HttpError::RequestCancelled(_) => Failure::Cancelled,
+            HttpError::Cancelled => Failure::Cancelled,
             HttpError::ProviderHttp(_) => Failure::Http {
                 status: 0,
                 error_type: String::new(),
@@ -437,7 +414,7 @@ pub fn classify_failure(error: &Error) -> Failure {
             WebSocketError::RequestTooLarge { .. } => Failure::RequestTooLarge,
             _ => Failure::Protocol,
         },
-        Error::Cancelled | Error::Cancellation(_) => Failure::Cancelled,
+        Error::Cancelled => Failure::Cancelled,
         Error::Io(_) => Failure::Network,
         Error::Provider(_) | Error::ProviderWithCause { .. } => Failure::Configuration,
         Error::Wire(_) | Error::Encode(_) | Error::InvalidOperation(_) | Error::Disposed => {

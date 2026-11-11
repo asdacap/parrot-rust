@@ -163,10 +163,10 @@ impl Socket for TestSocket {
 struct Http(Arc<Trace>);
 struct Empty;
 impl HttpEvents for Empty {
-    fn next<'a>(
+    fn next_event<'a>(
         &'a mut self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Option<ResponsesEvent>, ProviderError>> {
+    ) -> BoxFuture<'a, Result<Option<SessionEvent>, ProviderError>> {
         Box::pin(async { Ok(None) })
     }
     fn take_turn_state(&mut self) -> Option<String> {
@@ -180,15 +180,6 @@ impl HttpFallback for Http {
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, ProviderError>> {
         self.0.push("http-original");
-        Box::pin(async { Ok(Box::new(Empty) as Box<dyn HttpEvents>) })
-    }
-    fn open<'a>(
-        &'a self,
-        _: Vec<u8>,
-        _: String,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<Box<dyn HttpEvents>, ProviderError>> {
-        self.0.push("http-prepared");
         Box::pin(async { Ok(Box::new(Empty) as Box<dyn HttpEvents>) })
     }
 }
@@ -663,20 +654,6 @@ async fn unsupported_upgrade_falls_back_to_original_http_callback_once() {
             "http-original"
         ]
     );
-}
-
-#[tokio::test]
-async fn eager_precancel_preserves_existing_connection_path() {
-    let trace = Arc::new(Trace::default());
-    let http = Http(trace.clone());
-    let mut session = session(&trace, false, Err(WebSocketError::Cancelled));
-    let mut call = session.call(request(), &http).unwrap();
-    assert_eq!(
-        call.next(&Cancel(true)).await,
-        Err(ProviderError::Cancelled)
-    );
-    drop(call);
-    assert_eq!(trace.values(), ["auth", "connect"]);
 }
 
 #[tokio::test]

@@ -1,15 +1,13 @@
 use std::fmt::Write as _;
 
-use parrot_domain::contracts::paths::{
-    PrimaryReadFailure, ReadPurpose, RootOrigin, SelectedSessionRoot, allows_legacy_fallback,
-};
+use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
 use parrot_domain::values::config::{PathPlatform, PlatformPath};
 use serde_json::Value;
 
 use crate::support::for_cases;
 
 #[test]
-fn seeded_lexical_paths_keep_selected_root_and_approved_fallback_is_exact() {
+fn seeded_lexical_paths_keep_selected_root() {
     let corpus: Value = serde_json::from_str(include_str!(
         "../fixtures/regressions/T77/path-regressions.json"
     ))
@@ -39,45 +37,6 @@ fn seeded_lexical_paths_keep_selected_root_and_approved_fallback_is_exact() {
             );
         }
     }
-    let purposes = [
-        ReadPurpose::ApplicationState,
-        ReadPurpose::ApplicationData,
-        ReadPurpose::SessionInternal,
-        ReadPurpose::Configuration,
-        ReadPurpose::Credentials,
-        ReadPurpose::UserFile,
-    ];
-    let failures = [
-        PrimaryReadFailure::Absent,
-        PrimaryReadFailure::PermissionDenied,
-        PrimaryReadFailure::Corrupt,
-        PrimaryReadFailure::Other,
-    ];
-    let table = &corpus["fallback_table"];
-    let mut rows = 0;
-    for (enabled_index, enabled) in [false, true].into_iter().enumerate() {
-        for (purpose_index, purpose) in purposes.into_iter().enumerate() {
-            assert_eq!(
-                format!("{purpose:?}"),
-                table["purposes"][purpose_index].as_str().unwrap()
-            );
-            for (failure_index, failure) in failures.into_iter().enumerate() {
-                assert_eq!(
-                    format!("{failure:?}"),
-                    table["failures"][failure_index].as_str().unwrap()
-                );
-                assert_eq!(
-                    allows_legacy_fallback(enabled, purpose, failure),
-                    table["expected"][enabled_index][purpose_index][failure_index]
-                        .as_bool()
-                        .unwrap(),
-                    "approved fallback enabled={enabled} purpose={purpose:?} failure={failure:?}"
-                );
-                rows += 1;
-            }
-        }
-    }
-    assert_eq!(rows, 48);
     for origin in [RootOrigin::Current, RootOrigin::Legacy] {
         let selected = SelectedSessionRoot::new("/synthetic/session".into(), origin).unwrap();
         for invalid in ["", "../escape", "queues/../escape", "/absolute", "./queues"] {

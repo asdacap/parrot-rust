@@ -37,22 +37,6 @@ fn bearer_requires_exact_lowercase_token_and_ordinal_prefix() {
 }
 
 #[test]
-fn token_generation_is_32_random_bytes_rendered_as_64_lower_hex() {
-    let first = TransportToken::generate().unwrap();
-    let second = TransportToken::generate().unwrap();
-    for value in [first.bearer(), second.bearer()] {
-        assert_eq!(value.len(), 64);
-        assert!(
-            value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        );
-        assert!(TransportToken::from_hex(&value).unwrap().matches(&value));
-    }
-    assert_ne!(first.bearer(), second.bearer());
-}
-
-#[test]
 fn invalid_token_encodings_are_rejected() {
     for value in [
         "".to_owned(),

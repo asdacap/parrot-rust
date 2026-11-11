@@ -38,7 +38,7 @@ impl Fixture {
         let receipt = self
             .repository
             .admit(event.id.clone(), &NeverCancelled, move |tx| {
-                parrot_storage::events::record(tx, &event, None, "2026-01-02T03:04:05Z")?;
+                parrot_storage::events::record(tx, &event, "2026-01-02T03:04:05Z")?;
                 Ok(event)
             })
             .unwrap()

@@ -56,7 +56,7 @@ pub fn append_usage_fact(
                 .into(),
         ));
     }
-    let revision = super::record(tx, event, None, &clock())?.sequence;
+    let revision = super::record(tx, event, &clock())?.sequence;
     if event.has_request_usage_recorded() {
         tx.execute(
             "UPDATE event SET history_anchor = (SELECT COALESCE(MAX(sequence), 0) FROM conversation_item WHERE agent_session = ?2) WHERE sequence = ?1;",
@@ -84,36 +84,6 @@ pub(super) fn events_semantically_equal(left: &Event, right: &Event) -> bool {
         left.mut_request_usage_recorded().output_cost = 0.0;
         right.mut_request_usage_recorded().input_cost = 0.0;
         right.mut_request_usage_recorded().output_cost = 0.0;
-        left == right
-    } else if left.has_agent_statistics_updated() && right.has_agent_statistics_updated() {
-        let a = left.agent_statistics_updated();
-        let b = right.agent_statistics_updated();
-        if a.input_cost.to_bits() != b.input_cost.to_bits()
-            || a.output_cost.to_bits() != b.output_cost.to_bits()
-        {
-            return false;
-        }
-        let mut left = left.clone();
-        let mut right = right.clone();
-        left.mut_agent_statistics_updated().input_cost = 0.0;
-        left.mut_agent_statistics_updated().output_cost = 0.0;
-        right.mut_agent_statistics_updated().input_cost = 0.0;
-        right.mut_agent_statistics_updated().output_cost = 0.0;
-        left == right
-    } else if left.has_session_usage_snapshot() && right.has_session_usage_snapshot() {
-        let a = left.session_usage_snapshot();
-        let b = right.session_usage_snapshot();
-        if a.input_cost.to_bits() != b.input_cost.to_bits()
-            || a.output_cost.to_bits() != b.output_cost.to_bits()
-        {
-            return false;
-        }
-        let mut left = left.clone();
-        let mut right = right.clone();
-        left.mut_session_usage_snapshot().input_cost = 0.0;
-        left.mut_session_usage_snapshot().output_cost = 0.0;
-        right.mut_session_usage_snapshot().input_cost = 0.0;
-        right.mut_session_usage_snapshot().output_cost = 0.0;
         left == right
     } else {
         left == right

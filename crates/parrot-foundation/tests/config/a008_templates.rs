@@ -48,9 +48,9 @@ fn a008_scriban_is_rejected_with_manual_guide_and_user_yaml_is_not_rewritten() {
 
 #[test]
 fn a008_active_catalog_compiles_and_admits_only_live_bundled_descriptors() {
-    let configuration = fixtures::fixture_configuration("").unwrap();
-    assert_eq!(configuration.prompt_templates.len(), 110);
+    let templates = fixtures::fixture_templates("").unwrap();
+    assert_eq!(templates.len(), 110);
     for id in fixtures::CONSOLIDATED_IDS {
-        assert_eq!(configuration.prompt_templates[id].engine, "minijinja");
+        assert_eq!(templates[id].engine, "minijinja");
     }
 }

@@ -91,16 +91,6 @@ impl Error {
         }
     }
 
-    pub fn request_too_large(message: impl Into<String>) -> Self {
-        Self {
-            kind: ErrorKind::RequestTooLarge,
-            code: ErrorCode::RequestTooLarge,
-            message: message.into(),
-            response_body: String::new(),
-            detail: None,
-        }
-    }
-
     pub fn cancelled() -> Self {
         Self {
             kind: ErrorKind::Cancelled,

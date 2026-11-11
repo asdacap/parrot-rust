@@ -356,11 +356,7 @@ fn provider_cancelled(error: &sessions::Error) -> bool {
     matches!(
         error,
         sessions::Error::Cancelled
-            | sessions::Error::Cancellation(_)
-            | sessions::Error::Http(
-                parrot_provider::http_stream::HttpError::Cancelled
-                    | parrot_provider::http_stream::HttpError::RequestCancelled(_)
-            )
+            | sessions::Error::Http(parrot_provider::http_stream::HttpError::Cancelled)
             | sessions::Error::Socket(
                 parrot_provider::responses_websocket::WebSocketError::Cancelled
             )

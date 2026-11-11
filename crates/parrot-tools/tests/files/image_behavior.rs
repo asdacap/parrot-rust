@@ -16,7 +16,7 @@ use parrot_domain::{
         security::InvocationContext,
         tools::{ParallelSafety, Tool},
     },
-    values::tools::ToolCycleImageBudget,
+    values::{image_artifact::ImageArtifactMetadata, tools::ToolCycleImageBudget},
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_storage::{
@@ -149,7 +149,14 @@ async fn image_references_preserve_each_bound_actual_filename_and_share_original
         .unwrap();
     assert_eq!(renamed.image_artifacts.len(), 1);
     let renamed_artifact = &renamed.image_artifacts[0];
-    assert!(renamed_artifact.matches_content(artifact));
+    assert_eq!(
+        ImageArtifactMetadata {
+            display_name: artifact.display_name.clone(),
+            origin: artifact.origin.clone(),
+            ..renamed_artifact.clone()
+        },
+        *artifact
+    );
     assert_eq!(renamed_artifact.display_name, "renamed.png");
     assert_eq!(renamed_artifact.origin, "read_image");
     assert_eq!(
@@ -510,7 +517,7 @@ async fn image_preexceeded_budget_short_circuits_invalid_json_and_all_service_ca
     let service = RecordingService::default();
     let tool = fixture.tool(service.clone(), 1024);
     let budget = Arc::new(ToolCycleImageBudget::new(0));
-    budget.restore_exceeded();
+    assert_eq!(budget.try_accept(1), Ok(false));
     let templates = templates();
     let result = tool
         .execute(

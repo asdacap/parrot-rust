@@ -194,7 +194,6 @@ impl AnthropicProvider {
         cancellation: &dyn Cancellation,
     ) -> Result<AnthropicStream, ProviderError> {
         let headers = self.headers(cancellation).await?;
-        let counter = ResponseByteCounter::default();
         let options = StreamOptions::from_millis(
             self.options.header_timeout_ms,
             self.options.stream_idle_timeout_ms.max(0),
@@ -206,7 +205,7 @@ impl AnthropicProvider {
             prepared.body,
             headers,
             options,
-            counter.clone(),
+            ResponseByteCounter::default(),
         )?;
         Ok(AnthropicStream {
             http: Some(http),
@@ -215,7 +214,6 @@ impl AnthropicProvider {
             finished: false,
             request_started: false,
             invalid_idle_timeout: self.options.stream_idle_timeout_ms < 0,
-            counter,
         })
     }
     pub async fn list_models(
@@ -297,7 +295,7 @@ pub enum AnthropicStreamEvent {
     Message(AnthropicEvent),
 }
 /// Owns the HTTP body until exhaustion, terminal error, or caller drop. It
-/// exposes real lifecycle/counter observations for T30's single trace layer.
+/// exposes real lifecycle observations for T30's single trace layer.
 pub struct AnthropicStream {
     http: Option<HttpEventStream>,
     parser: AnthropicParser,
@@ -305,15 +303,8 @@ pub struct AnthropicStream {
     finished: bool,
     request_started: bool,
     invalid_idle_timeout: bool,
-    counter: ResponseByteCounter,
 }
 impl AnthropicStream {
-    pub fn response_bytes(&self) -> u64 {
-        self.counter.get()
-    }
-    pub fn byte_counter(&self) -> ResponseByteCounter {
-        self.counter.clone()
-    }
     pub async fn next(
         &mut self,
         cancellation: &dyn Cancellation,

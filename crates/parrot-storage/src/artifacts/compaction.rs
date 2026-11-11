@@ -1,8 +1,6 @@
 //! Descriptor-relative port of CompactionGroupBlobStore.cs at 5f27a8a9.
 //!
-//! Source-shaped compaction messages are converted to the persisted artifact
-//! envelope here, including file-backed image reads and base64 encoding.
-//! No text, tool argument, image, or serialized artifact size limit is imposed.
+//! Scratch contents are published as supplied; no size limit is imposed.
 
 use std::fmt;
 use std::io;
@@ -14,11 +12,6 @@ use std::sync::Arc;
 use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_domain::contracts::filenames::FilenameGenerator;
 use parrot_domain::contracts::paths::SelectedSessionRoot;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use serde::Serialize;
-use serde_json::Value;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use serde_json::ser::{CharEscape, Formatter, PrettyFormatter};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 const MAXIMUM_NAME_ATTEMPTS: usize = 16;
@@ -107,114 +100,6 @@ pub(crate) struct Hooks {
     pub after_cleanup_selection: Option<CleanupSelectionHook>,
     #[cfg(target_os = "linux")]
     pub returned_status_mask: Option<Box<dyn Fn(u32) -> u32>>,
-}
-
-/// The ordered messages to persist for a source compaction group.
-pub struct CompactionGroup {
-    pub messages: Vec<CompactionMessage>,
-}
-
-/// Source message fields retained by the compaction artifact.
-pub struct CompactionMessage {
-    pub role: String,
-    pub contents: Vec<CompactionContent>,
-    pub tool_calls: Vec<CompactionToolCall>,
-    pub tool_call_id: String,
-}
-
-/// A text or file-backed image content item.
-pub struct CompactionContent {
-    pub kind: String,
-    pub text: String,
-    pub image_path: Option<PathBuf>,
-    pub media_type: String,
-}
-
-/// A tool call with its original arguments JSON text.
-pub struct CompactionToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments_json: String,
-}
-
-impl CompactionGroup {
-    fn to_artifact(&self) -> Result<Value, CompactionError> {
-        let mut messages = Vec::with_capacity(self.messages.len());
-        for message in &self.messages {
-            let mut contents = Vec::with_capacity(message.contents.len());
-            for content in &message.contents {
-                let image = if content.kind == "Image" {
-                    let path = content.image_path.as_ref().ok_or_else(|| {
-                        CompactionError::invalid(
-                            "An image compaction content item has no file path.",
-                        )
-                    })?;
-                    let bytes = std::fs::read(path).map_err(|error| {
-                        CompactionError::io("read compaction group image", error)
-                    })?;
-                    encode_base64(&bytes)
-                } else {
-                    String::new()
-                };
-                contents.push(serde_json::json!({
-                    "kind": content.kind,
-                    "text": content.text,
-                    "image": image,
-                    "media_type": content.media_type,
-                }));
-            }
-            let tool_calls = message
-                .tool_calls
-                .iter()
-                .map(|call| {
-                    serde_json::json!({
-                        "id": call.id,
-                        "name": call.name,
-                        "arguments_json": call.arguments_json,
-                    })
-                })
-                .collect::<Vec<_>>();
-            messages.push(serde_json::json!({
-                "role": message.role,
-                "contents": contents,
-                "tool_calls": tool_calls,
-                "tool_call_id": message.tool_call_id,
-            }));
-        }
-        Ok(serde_json::json!({ "messages": messages }))
-    }
-}
-
-fn encode_base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let first = chunk[0];
-        let second = chunk.get(1).copied().unwrap_or(0);
-        let third = chunk.get(2).copied().unwrap_or(0);
-        encoded.push(char::from(ALPHABET[usize::from(first >> 2)]));
-        encoded.push(char::from(
-            ALPHABET[usize::from(((first & 0x03) << 4) | (second >> 4))],
-        ));
-        if chunk.len() > 1 {
-            encoded.push(char::from(
-                ALPHABET[usize::from(((second & 0x0f) << 2) | (third >> 6))],
-            ));
-        } else {
-            encoded.push('=');
-        }
-        if chunk.len() > 2 {
-            encoded.push(char::from(ALPHABET[usize::from(third & 0x3f)]));
-        } else {
-            encoded.push('=');
-        }
-    }
-    encoded
-}
-
-enum ScratchContents<'a> {
-    Artifact(Value),
-    Bytes(&'a [u8]),
 }
 
 pub struct CompactionGroupBlobStore {
@@ -317,29 +202,10 @@ impl CompactionGroupBlobStore {
         Ok(path)
     }
 
-    pub fn persist(
-        &mut self,
-        group: &CompactionGroup,
-        cancellation: &dyn Cancellation,
-    ) -> Result<PathBuf, CompactionError> {
-        self.persist_contents(
-            || group.to_artifact().map(ScratchContents::Artifact),
-            cancellation,
-        )
-    }
-
     /// Writes the exact supplied bytes and returns their published scratch path.
     pub fn write_to_scratch(
         &mut self,
         contents: &[u8],
-        cancellation: &dyn Cancellation,
-    ) -> Result<PathBuf, CompactionError> {
-        self.persist_contents(|| Ok(ScratchContents::Bytes(contents)), cancellation)
-    }
-
-    fn persist_contents<'a>(
-        &mut self,
-        prepare: impl FnOnce() -> Result<ScratchContents<'a>, CompactionError>,
         cancellation: &dyn Cancellation,
     ) -> Result<PathBuf, CompactionError> {
         self.validate_blob_directory()?;
@@ -355,7 +221,6 @@ impl CompactionGroupBlobStore {
         }
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
-            let contents = prepare()?;
             let directory = native::open_directory(&self.blob_directory)?;
             #[cfg(test)]
             if let Some(hook) = &self.hooks.after_blob_directory_opened {
@@ -369,7 +234,7 @@ impl CompactionGroupBlobStore {
                 #[cfg(not(test))]
                 let force_named = false;
                 if !force_named && let Some(file) = native::try_open_temporary_file(&directory)? {
-                    return self.persist_file(&directory, file, None, &contents, cancellation);
+                    return self.persist_file(&directory, file, None, contents, cancellation);
                 }
             }
             let (staging_name, file) = loop {
@@ -378,23 +243,11 @@ impl CompactionGroupBlobStore {
                     break (name, file);
                 }
             };
-            self.persist_file(
-                &directory,
-                file,
-                Some(staging_name),
-                &contents,
-                cancellation,
-            )
+            self.persist_file(&directory, file, Some(staging_name), contents, cancellation)
         }
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
-            let contents = prepare()?;
-            match contents {
-                ScratchContents::Artifact(artifact) => drop(artifact),
-                ScratchContents::Bytes(contents) => {
-                    let _ = contents;
-                }
-            }
+            let _ = contents;
             Err(CompactionError::new(
                 CompactionErrorKind::UnsupportedPlatform,
                 "Race-safe compaction group persistence is unavailable on this platform.",
@@ -429,7 +282,7 @@ impl CompactionGroupBlobStore {
         directory: &std::fs::File,
         mut file: std::fs::File,
         staging_name: Option<String>,
-        contents: &ScratchContents<'_>,
+        contents: &[u8],
         cancellation: &dyn Cancellation,
     ) -> Result<PathBuf, CompactionError> {
         let mut identity = None;
@@ -442,29 +295,24 @@ impl CompactionGroupBlobStore {
             if let Some(hook) = &self.hooks.after_file_created {
                 hook();
             }
-            match contents {
-                ScratchContents::Artifact(artifact) => {
-                    serialize(&mut file, artifact, cancellation)?
-                }
-                ScratchContents::Bytes(contents) => {
-                    let mut writer = CancellableWriter {
-                        file: io::BufWriter::new(&mut file),
-                        cancellation,
-                    };
-                    writer
-                        .write_all(contents)
-                        .and_then(|()| writer.flush())
-                        .map_err(|error| {
-                            if cancellation.is_cancelled() {
-                                CompactionError::new(
-                                    CompactionErrorKind::Cancelled,
-                                    "A task was canceled.",
-                                )
-                            } else {
-                                CompactionError::io("write scratch contents", error)
-                            }
-                        })?;
-                }
+            {
+                let mut writer = CancellableWriter {
+                    file: io::BufWriter::new(&mut file),
+                    cancellation,
+                };
+                writer
+                    .write_all(contents)
+                    .and_then(|()| writer.flush())
+                    .map_err(|error| {
+                        if cancellation.is_cancelled() {
+                            CompactionError::new(
+                                CompactionErrorKind::Cancelled,
+                                "A task was canceled.",
+                            )
+                        } else {
+                            CompactionError::io("write scratch contents", error)
+                        }
+                    })?;
             }
             self.require_current(directory)?;
             if identity.is_none() {
@@ -540,128 +388,6 @@ impl Write for CancellableWriter<'_> {
         }
         self.file.flush()
     }
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-struct SourceJsonFormatter(PrettyFormatter<'static>);
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-impl Formatter for SourceJsonFormatter {
-    fn write_char_escape<W>(&mut self, writer: &mut W, escape: CharEscape) -> io::Result<()>
-    where
-        W: ?Sized + io::Write,
-    {
-        match escape {
-            CharEscape::Quote => writer.write_all(b"\\u0022"),
-            escape => self.0.write_char_escape(writer, escape),
-        }
-    }
-
-    fn begin_array<W>(&mut self, writer: &mut W) -> io::Result<()>
-    where
-        W: ?Sized + io::Write,
-    {
-        self.0.begin_array(writer)
-    }
-
-    fn end_array<W>(&mut self, writer: &mut W) -> io::Result<()>
-    where
-        W: ?Sized + io::Write,
-    {
-        self.0.end_array(writer)
-    }
-
-    fn begin_array_value<W>(&mut self, writer: &mut W, first: bool) -> io::Result<()>
-    where
-        W: ?Sized + io::Write,
-    {
-        self.0.begin_array_value(writer, first)
-    }
-
-    fn end_array_value<W>(&mut self, writer: &mut W) -> io::Result<()>
-    where
-        W: ?Sized + io::Write,
-    {
-        self.0.end_array_value(writer)
-    }
-
-    fn begin_object<W>(&mut self, writer: &mut W) -> io::Result<()>
-    where
-        W: ?Sized + io::Write,
-    {
-        self.0.begin_object(writer)
-    }
-
-    fn end_object<W>(&mut self, writer: &mut W) -> io::Result<()>
-    where
-        W: ?Sized + io::Write,
-    {
-        self.0.end_object(writer)
-    }
-
-    fn begin_object_key<W>(&mut self, writer: &mut W, first: bool) -> io::Result<()>
-    where
-        W: ?Sized + io::Write,
-    {
-        self.0.begin_object_key(writer, first)
-    }
-
-    fn end_object_key<W>(&mut self, writer: &mut W) -> io::Result<()>
-    where
-        W: ?Sized + io::Write,
-    {
-        self.0.end_object_key(writer)
-    }
-
-    fn begin_object_value<W>(&mut self, writer: &mut W) -> io::Result<()>
-    where
-        W: ?Sized + io::Write,
-    {
-        self.0.begin_object_value(writer)
-    }
-
-    fn end_object_value<W>(&mut self, writer: &mut W) -> io::Result<()>
-    where
-        W: ?Sized + io::Write,
-    {
-        self.0.end_object_value(writer)
-    }
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn serialize(
-    file: &mut std::fs::File,
-    artifact: &Value,
-    cancellation: &dyn Cancellation,
-) -> Result<(), CompactionError> {
-    let mut writer = CancellableWriter {
-        file: io::BufWriter::new(file),
-        cancellation,
-    };
-    let serialized = {
-        let formatter = SourceJsonFormatter(PrettyFormatter::new());
-        let mut serializer = serde_json::Serializer::with_formatter(&mut writer, formatter);
-        artifact.serialize(&mut serializer)
-    };
-    if let Err(error) = serialized {
-        if cancellation.is_cancelled() {
-            return Err(CompactionError::new(
-                CompactionErrorKind::Cancelled,
-                "A task was canceled.",
-            ));
-        }
-        return Err(CompactionError::io(
-            "serialize a compaction group artifact",
-            io::Error::other(error),
-        ));
-    }
-    writer.flush().map_err(|error| {
-        if cancellation.is_cancelled() {
-            CompactionError::new(CompactionErrorKind::Cancelled, "A task was canceled.")
-        } else {
-            CompactionError::io("flush a compaction group artifact", error)
-        }
-    })
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]

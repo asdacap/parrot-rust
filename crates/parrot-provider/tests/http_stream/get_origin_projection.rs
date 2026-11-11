@@ -19,15 +19,6 @@ impl Token {
     fn cancel(&self) {
         self.0.send_replace(true);
     }
-    fn request_check(&self) -> Result<(), HttpError> {
-        if self.is_cancelled() {
-            Err(HttpError::RequestCancelled(
-                "The operation was canceled.".into(),
-            ))
-        } else {
-            Ok(())
-        }
-    }
 }
 impl Cancellation for Token {
     fn is_cancelled(&self) -> bool {
@@ -99,16 +90,6 @@ impl HttpTransport for Transport {
     ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async move {
             self.state.calls.fetch_add(1, Ordering::SeqCst);
-            if self.mode == "in-send-cancel" || self.mode == "cancelled-task" {
-                self.caller.cancel();
-            }
-            if self.mode == "pre-cancel-check" || self.mode == "in-send-cancel" {
-                self.caller.request_check()?;
-            }
-            if self.mode == "cancelled-task" {
-                assert!(self.caller.is_cancelled());
-                return Err(HttpError::RequestCancelled("A task was canceled.".into()));
-            }
             if self.mode == "fault" {
                 return Err(HttpError::Transport("synthetic unavailable".into()));
             }
@@ -139,9 +120,6 @@ fn error(error: &HttpError) -> Value {
             for key in ["type", "code", "detail", "response_body"] {
                 output[key] = json!("");
             }
-        }
-        HttpError::RequestCancelled(_) => {
-            output["category"] = json!("System.Threading.Tasks.TaskCanceledException")
         }
         HttpError::Transport(_) => {
             output["category"] = json!("System.Net.Http.HttpRequestException")
@@ -226,7 +204,7 @@ async fn pending_get_keeps_generic_wrapper_cancellation_unpromoted() {
 async fn native_get_origins_keep_request_and_body_cancellation_distinct() {
     let source: Value =
         serde_json::from_str(include_str!("fixtures/get-origin-owned-v1/expected.json")).unwrap();
-    assert_eq!(source["cases"].as_array().unwrap().len(), 15);
+    assert_eq!(source["cases"].as_array().unwrap().len(), 11);
     for case in source["cases"].as_array().unwrap() {
         assert_eq!(
             observe(&case["input"]).await,

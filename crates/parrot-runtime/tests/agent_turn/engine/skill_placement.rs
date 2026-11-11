@@ -115,7 +115,7 @@ async fn skill_session(
     // read skill files or infer permissions from these inert path descriptions.
     let instructions =
         format!("Available Markdown skills:\n- $first ({first_path})\n- $second ({second_path})");
-    let backend = RuntimeBackend::new(RuntimeConfig {
+    let runtime_config = RuntimeConfig {
         tool_execution: tool_execution_config(
             &fixture.history,
             templates.clone(),
@@ -157,7 +157,11 @@ async fn skill_session(
         parent_completion: Arc::new(Parent(trace)),
         ancestors: vec![],
         event_id: Arc::new(id),
-    })
+    };
+    let backend = RuntimeBackend::with_sessions(
+        runtime_config,
+        parrot_provider::sessions::ProviderSessions::new(),
+    )
     .await
     .unwrap();
     AgentSession::new(backend, Arc::new(Signal::new()))
@@ -319,27 +323,40 @@ async fn selected_skill_context_follows_original_steer_and_new_turn_history_and_
         history,
         "user: use $second then $second | skill: SECOND | assistant:  | tool: settled | user: also $first | skill: FIRST | assistant: first answer | user: next turn $first $third | skill: FIRST THIRD | assistant: second answer"
     );
-    // The source-format JSONL intentionally escapes '<'. Compare decoded
+    // The source-format JSONL intentionally escapes '<'. Compare parsed
     // message parts, not an invalid assumption about their wire spelling.
     let projected: Vec<_> = fixture
         .jsonl()
         .lines()
-        .filter_map(|line| {
-            match parrot_storage::history_files::json::deserialize_entry(line.as_bytes()).unwrap() {
-                parrot_storage::conversation::AgentHistoryEntry::Message {
-                    role, parts, ..
-                } => Some((role, parts)),
-                _ => None,
-            }
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|entry| entry["type"] == "message")
+        .map(|entry| {
+            let parts = entry["parts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|part| (part["kind"].clone(), part["text"].clone()))
+                .collect::<Vec<_>>();
+            (entry["role"].clone(), parts)
         })
         .collect();
     let authoritative: Vec<_> = conversation
         .iter()
         .map(|item| {
-            (
-                item.message.role.as_str().to_owned(),
-                item.message.parts.clone(),
-            )
+            let parts = item
+                .message
+                .parts
+                .iter()
+                .map(|part| match part {
+                    parrot_storage::events::ConversationPart::Text(text) => {
+                        (serde_json::json!("text"), serde_json::json!(text))
+                    }
+                    parrot_storage::events::ConversationPart::ImageArtifact { .. } => {
+                        (serde_json::json!("image_artifact"), serde_json::json!(""))
+                    }
+                })
+                .collect::<Vec<_>>();
+            (serde_json::json!(item.message.role.as_str()), parts)
         })
         .collect();
     assert_eq!(projected, authoritative);

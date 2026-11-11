@@ -41,7 +41,7 @@ async fn dropped_listener_held_provider_interrupt_queued_restart_and_transaction
         .lease
         .events
         .transaction(move |tx| {
-            parrot_storage::events::record(tx, &attempted, None, "2026-10-21T00:00:00Z")?;
+            parrot_storage::events::record(tx, &attempted, "2026-10-21T00:00:00Z")?;
             Err(parrot_storage::events::EventError::Invalid(
                 "t76 deliberate rollback after insert".into(),
             ))

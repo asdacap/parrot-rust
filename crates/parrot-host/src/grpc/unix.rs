@@ -76,14 +76,6 @@ pub struct OwnedUnixSocket {
 }
 
 impl OwnedUnixSocket {
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub fn identity(&self) -> UnixSocketIdentity {
-        self.identity
-    }
-
     pub fn cleanup(&self) -> io::Result<bool> {
         self.identity.remove_owned(&self.path)
     }

@@ -275,9 +275,7 @@ impl ModelOperations {
             Ok(usage) => {
                 Ok(format_usage(usage).unwrap_or_else(|| vec!["Usage unavailable".into()]))
             }
-            Err(ProviderError::Cancelled | ProviderError::Cancellation(_))
-                if cancellation.is_cancelled() =>
-            {
+            Err(ProviderError::Cancelled) if cancellation.is_cancelled() => {
                 Err(RpcError::new(RpcCode::Cancelled, "operation cancelled"))
             }
             Err(_) => Ok(vec!["Usage unavailable".into()]),
@@ -337,9 +335,7 @@ fn configuration_error(error: CoordinatorError, persistence: &str) -> RpcError {
 
 fn provider_error(error: ProviderError, persistence: &str) -> RpcError {
     match error {
-        ProviderError::Cancelled | ProviderError::Cancellation(_) => {
-            RpcError::new(RpcCode::Cancelled, error.to_string())
-        }
+        ProviderError::Cancelled => RpcError::new(RpcCode::Cancelled, error.to_string()),
         ProviderError::Provider(_) | ProviderError::ProviderWithCause { .. } => {
             RpcError::new(RpcCode::InvalidArgument, error.to_string())
         }

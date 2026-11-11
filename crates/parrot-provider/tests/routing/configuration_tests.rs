@@ -425,7 +425,11 @@ fn separate_coordinators_and_direct_setter_share_the_same_path_transaction() {
     });
     let setter = std::thread::spawn(move || {
         started_tx.send(()).unwrap();
-        let result = direct.set_model_alias("preferred", "p/later");
+        let result = direct
+            .model_configuration_transaction(|transaction| {
+                transaction.set_model_alias("preferred", "p/later")
+            })
+            .and_then(|result| result);
         finished_tx.send(()).unwrap();
         result
     });
@@ -506,7 +510,9 @@ fn selection_callback_reenters_same_path_separate_handle_direct_setter() {
     let (sent, received) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
         let result = coordinator.select_preset("Work", "preferred", move |_| {
-            separate.set_model_alias("preferred", "p/new")?;
+            separate.model_configuration_transaction(|transaction| {
+                transaction.set_model_alias("preferred", "p/new")
+            })??;
             Ok(())
         });
         sent.send(result.map(|selection| selection.resolved_selection.canonical_model.selector()))
