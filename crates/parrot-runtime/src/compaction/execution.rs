@@ -422,22 +422,6 @@ impl parrot_core::States for CompactionStates<'_> {
                 })
         })
     }
-
-    fn read_file<'a, 'c>(
-        &'a self,
-        path: &'a str,
-        cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<u8>, parrot_core::Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            read_file(path, &cancellation).map_err(|error| {
-                let diagnostic = describe_error(&error);
-                self.errors.capture(error, diagnostic)
-            })
-        })
-    }
 }
 
 pub(crate) fn progress_event(progress: CompactionProgress) -> CompactionProgressEvent {
@@ -665,27 +649,4 @@ impl parrot_core::EventPublisher for ObserverPublisher<'_> {
                 })
         })
     }
-}
-
-pub(crate) fn read_file(
-    path: &str,
-    cancellation: &dyn Cancellation,
-) -> Result<Vec<u8>, CompactionError> {
-    cancellation
-        .check()
-        .map_err(|_| artifact::CompactionError {
-            kind: artifact::CompactionErrorKind::Cancelled,
-            message: "The operation was canceled.".into(),
-            native_error: None,
-            cleanup_failures: Vec::new(),
-        })?;
-    std::fs::read(path).map_err(|error| {
-        artifact::CompactionError {
-            kind: artifact::CompactionErrorKind::Io,
-            message: format!("Failed to read file: {error}"),
-            native_error: Some(error),
-            cleanup_failures: Vec::new(),
-        }
-        .into()
-    })
 }

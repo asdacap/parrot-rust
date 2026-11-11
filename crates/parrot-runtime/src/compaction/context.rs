@@ -1070,19 +1070,6 @@ impl parrot_core::States for EpochStates<'_> {
                 .map_err(|error| self.capture_error(error))
         })
     }
-    fn read_file<'a, 'c>(
-        &'a self,
-        path: &'a str,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<u8>, parrot_core::Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            crate::compaction::read_file(path, &cancellation)
-                .map_err(|error| self.capture_error(error))
-        })
-    }
     fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, parrot_core::Error>> {
         Box::pin(async move {
             self.prompt

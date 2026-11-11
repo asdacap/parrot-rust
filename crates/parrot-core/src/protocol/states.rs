@@ -89,17 +89,6 @@ pub trait States: Send + Sync {
     {
         Box::pin(async { Err(Error::unsupported("States.write_to_scratch")) })
     }
-    /// Reads the supplied file without interpreting its contents.
-    fn read_file<'a, 'c>(
-        &'a self,
-        _path: &'a str,
-        _cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<u8>, Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async { Err(Error::unsupported("States.read_file")) })
-    }
     /// Captures the complete provider-rendered system prompt and native request bindings.
     fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, Error>> {
         Box::pin(async { Err(Error::unsupported("States.capture_system_prompt")) })

@@ -239,7 +239,7 @@ fn initial_spills_commit_in_source_order_before_a_later_ineligible_group_fails()
         artifact,
         serde_json::json!({ "messages": [{
             "role": "Assistant",
-            "contents": [{ "kind": "Text", "text": "too large first tool group", "image": "", "media_type": "" }],
+            "contents": [{ "kind": "Text", "text": "too large first tool group", "path": "", "media_type": "" }],
             "tool_calls": [{ "id": "call", "name": "tool", "arguments_json": "{}" }],
             "tool_call_id": ""
         }] })
@@ -271,7 +271,7 @@ fn a_previous_summary_can_force_one_late_spill_of_the_original_atomic_group() {
         artifact,
         serde_json::json!({ "messages": [{
             "role": "Assistant",
-            "contents": [{ "kind": "Text", "text": "other-14-bytes!", "image": "", "media_type": "" }],
+            "contents": [{ "kind": "Text", "text": "other-14-bytes!", "path": "", "media_type": "" }],
             "tool_calls": [{ "id": "call", "name": "tool", "arguments_json": " { \"x\" : 1.00 } " }],
             "tool_call_id": ""
         }] })
@@ -284,53 +284,48 @@ fn a_previous_summary_can_force_one_late_spill_of_the_original_atomic_group() {
 }
 
 #[test]
-fn oversized_groups_write_json_with_inline_or_file_image_bytes_before_rendering_the_path() {
-    for inline in [false, true] {
-        let mut plan = plan(&["oversized tool call", "tail"]);
-        plan.input_budget = 5;
-        plan.groups[0].messages[0].role = Role::Assistant;
-        plan.groups[0].messages[0].tool_calls.push(ToolCall {
-            id: "call".into(),
-            name: "tool".into(),
-            arguments_json: " { \"x\" : 1.00 } ".into(),
-        });
-        plan.groups[0].messages.push(parrot_core::Message {
-            role: Role::Tool,
-            tool_call_id: "call".into(),
-            contents: vec![Content::Image {
-                path: "image.bin".into(),
-                url: String::new(),
-                media_type: "image/test".into(),
-                width: 1,
-                height: 1,
-                bytes: inline.then(|| vec![0, 1, 255]),
-            }],
-            ..parrot_core::Message::default()
-        });
-        let mut effects = Effects::default();
-        if !inline {
-            effects.files.insert("image.bin".into(), vec![0, 1, 255]);
-        }
-        let provider = Provider::new([SummaryResponse::Summary("done".into())]);
-        run(Some(plan), &mut effects, &provider).unwrap().unwrap();
-        let writes = effects.scratch_writes.lock().unwrap();
-        assert_eq!(writes.len(), 1);
-        let artifact: serde_json::Value = serde_json::from_slice(&writes[0]).unwrap();
-        assert_eq!(
-            artifact["messages"][0]["tool_calls"][0]["arguments_json"],
-            " { \"x\" : 1.00 } "
-        );
-        assert_eq!(artifact["messages"][1]["role"], "Tool");
-        assert_eq!(artifact["messages"][1]["tool_call_id"], "call");
-        assert_eq!(artifact["messages"][1]["contents"][0]["image"], "AAH/");
-        assert_eq!(
-            artifact["messages"][1]["contents"][0]["media_type"],
-            "image/test"
-        );
-        let requests = provider.requests.lock().unwrap();
-        assert_eq!(texts(&requests[0]), ["instructions", "blob"]);
-        assert_eq!(requests[0].messages[1].role, Role::System);
-    }
+fn oversized_groups_write_json_with_image_path_before_rendering_the_notice() {
+    let mut plan = plan(&["oversized tool call", "tail"]);
+    plan.input_budget = 5;
+    plan.groups[0].messages[0].role = Role::Assistant;
+    plan.groups[0].messages[0].tool_calls.push(ToolCall {
+        id: "call".into(),
+        name: "tool".into(),
+        arguments_json: " { \"x\" : 1.00 } ".into(),
+    });
+    plan.groups[0].messages.push(parrot_core::Message {
+        role: Role::Tool,
+        tool_call_id: "call".into(),
+        contents: vec![Content::Image {
+            path: "image.bin".into(),
+            url: String::new(),
+            media_type: "image/test".into(),
+            width: 1,
+            height: 1,
+            bytes: None,
+        }],
+        ..parrot_core::Message::default()
+    });
+    let mut effects = Effects::default();
+    let provider = Provider::new([SummaryResponse::Summary("done".into())]);
+    run(Some(plan), &mut effects, &provider).unwrap().unwrap();
+    let writes = effects.scratch_writes.lock().unwrap();
+    assert_eq!(writes.len(), 1);
+    let artifact: serde_json::Value = serde_json::from_slice(&writes[0]).unwrap();
+    assert_eq!(
+        artifact["messages"][0]["tool_calls"][0]["arguments_json"],
+        " { \"x\" : 1.00 } "
+    );
+    assert_eq!(artifact["messages"][1]["role"], "Tool");
+    assert_eq!(artifact["messages"][1]["tool_call_id"], "call");
+    assert_eq!(artifact["messages"][1]["contents"][0]["path"], "image.bin");
+    assert_eq!(
+        artifact["messages"][1]["contents"][0]["media_type"],
+        "image/test"
+    );
+    let requests = provider.requests.lock().unwrap();
+    assert_eq!(texts(&requests[0]), ["instructions", "blob"]);
+    assert_eq!(requests[0].messages[1].role, Role::System);
 }
 
 #[test]

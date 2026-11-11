@@ -421,18 +421,6 @@ where
                 .map_err(Into::into)
         })
     }
-    fn read_file<'a, 'c>(
-        &'a self,
-        path: &'a str,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<u8>, CoreError>>
-    where
-        'c: 'a,
-    {
-        Box::pin(
-            async move { crate::compaction::read_file(path, &cancellation).map_err(Into::into) },
-        )
-    }
 
     fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, CoreError>> {
         adapt_operation(async move {

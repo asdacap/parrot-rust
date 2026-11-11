@@ -1081,11 +1081,10 @@ async fn stream_failure_is_preserved_and_disposal_failure_is_not_silenced() {
 }
 
 #[tokio::test]
-async fn actual_oversized_tool_group_persists_original_bytes_and_real_notice_path() {
+async fn actual_oversized_tool_group_persists_image_path_and_real_notice_path() {
     let mut fixture = Fixture::new(1000, vec![vec![done("spilled summary")]]);
     let mut history = tool_group(&"result-🦜".repeat(1000));
     let image = fixture.path.join("image.bin");
-    fs::write(&image, [0_u8, 1, 255]).unwrap();
     let text = history[1].content().to_owned();
     history[1].set_contents(vec![
         Content::text(text),
@@ -1114,7 +1113,10 @@ async fn actual_oversized_tool_group_persists_original_bytes_and_real_notice_pat
         artifact["messages"][1]["contents"][0]["text"],
         history[1].content()
     );
-    assert_eq!(artifact["messages"][1]["contents"][1]["image"], "AAH/");
+    assert_eq!(
+        artifact["messages"][1]["contents"][1]["path"],
+        image.to_str().unwrap()
+    );
     assert_eq!(
         artifact["messages"][1]["contents"][1]["media_type"],
         "image/test"
@@ -1287,8 +1289,7 @@ async fn provider_response_body_stays_concrete_and_does_not_traverse_wrapped_cau
 }
 
 #[tokio::test]
-async fn cancelled_compaction_and_missing_file_image_stop_before_provider_call() {
-    use parrot_storage::artifacts::compaction::CompactionErrorKind;
+async fn cancelled_compaction_stops_before_provider_call_and_spill_persists_the_image_path() {
     let mut fixture = Fixture::new(1000, vec![]);
     let mut history = tool_group(&"oversized".repeat(1000));
     history.push(Message::user("tail"));
@@ -1301,19 +1302,28 @@ async fn cancelled_compaction_and_missing_file_image_stop_before_provider_call()
     assert!(fixture.blob_files().is_empty() && fixture.requests().is_empty());
     fixture.close().await;
 
-    let mut fixture = Fixture::new(1000, vec![]);
+    let mut fixture = Fixture::new(1000, vec![vec![done("spilled summary")]]);
+    let image = fixture.path.join("missing.png");
     history[1].set_contents(vec![Content::image_file(
-        fixture.path.join("missing.png").to_str().unwrap(),
+        image.to_str().unwrap(),
         "image/png",
         2,
         2,
     )]);
-    let error = fixture
+    fixture
         .compact(&compactor(500), &history)
         .await
-        .unwrap_err();
-    assert!(matches!(error, CompactionError::Blob(error) if error.kind == CompactionErrorKind::Io));
-    assert!(fixture.blob_files().is_empty() && fixture.requests().is_empty());
+        .unwrap()
+        .unwrap();
+    let files = fixture.blob_files();
+    assert_eq!(files.len(), 1);
+    let artifact: serde_json::Value =
+        serde_json::from_slice(&fs::read(&files[0]).unwrap()).unwrap();
+    assert_eq!(
+        artifact["messages"][1]["contents"][0]["path"],
+        image.to_str().unwrap()
+    );
+    assert_eq!(fixture.requests().len(), 1);
     fixture.close().await;
 }
 

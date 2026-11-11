@@ -47,7 +47,6 @@ pub fn plan(groups: &[&str]) -> CompactionPlan {
 pub struct Effects {
     pub progress: Arc<Mutex<Vec<CompactionProgress>>>,
     pub scratch_writes: Mutex<Vec<Vec<u8>>>,
-    pub files: std::collections::BTreeMap<String, Vec<u8>>,
     pub contexts: Arc<Mutex<Vec<ProviderRequest>>>,
     pub context_failure: Option<(usize, Error)>,
 }
@@ -218,21 +217,6 @@ impl parrot_core::States for Effects {
         'c: 'a,
     {
         self.write_to_scratch(contents, cancellation)
-    }
-    fn read_file<'a, 'c>(
-        &'a self,
-        path: &'a str,
-        _: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<Vec<u8>, Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            self.files
-                .get(path)
-                .cloned()
-                .ok_or_else(|| Error::failed("file not found"))
-        })
     }
 }
 
