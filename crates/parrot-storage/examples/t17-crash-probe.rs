@@ -119,12 +119,10 @@ async fn main() {
             wait_at_gate("before-admission open=true");
         }
         "during-transaction" => {
-            let context = repository.context().clone();
             repository
                 .transaction(move |transaction| -> Result<(), EventError> {
                     let outcome = close_turn_if_open(
                         transaction,
-                        &context,
                         &key,
                         &proposed,
                         Some(&raw),

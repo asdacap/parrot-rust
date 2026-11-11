@@ -1,7 +1,8 @@
 //! Source-compatible durable input identity, pending selection and promotion.
-use super::{EventError, RepositoryContext, projection, record, types::*};
+use super::{EventError, projection, record, timestamp, types::*};
 use crate::database::Transaction;
 use parrot_domain::protocol::messages::parrot::{Delivery, Event};
+use parrot_domain::values::identifiers::Identifier;
 use rusqlite::{OptionalExtension, params};
 
 pub fn delivery_text(delivery: Delivery) -> Result<&'static str, EventError> {
@@ -120,7 +121,6 @@ pub fn inputs_for_next_promotion(
 }
 pub fn admit_parts<F>(
     tx: &Transaction<'_>,
-    context: &RepositoryContext,
     agent: &str,
     message: &str,
     parts: Vec<ConversationPart>,
@@ -143,15 +143,15 @@ where
         };
     }
     let admitted = AdmittedInput {
-        id: (context.input_id)()?,
+        id: Identifier::input_id()?,
         message_id: message.into(),
         parts,
         delivery,
     };
     let event = compose(&admitted)?;
-    tx.execute("INSERT INTO input (id, agent_session, message_id, content, delivery, status, created_at) VALUES (?1,?2,?3,?4,?5,'pending',?6)",params![admitted.id,agent,message,admitted.content(),delivery_text(delivery)?,(context.timestamp)()])?;
+    tx.execute("INSERT INTO input (id, agent_session, message_id, content, delivery, status, created_at) VALUES (?1,?2,?3,?4,?5,'pending',?6)",params![admitted.id,agent,message,admitted.content(),delivery_text(delivery)?,timestamp()])?;
     projection::insert_input_parts(tx, &admitted.id, &admitted.parts)?;
-    record(tx, &event, None, &(context.timestamp)())?;
+    record(tx, &event, None, &timestamp())?;
     Ok(Admission {
         input: admitted,
         published: Some(event),
@@ -159,7 +159,6 @@ where
 }
 pub fn admit_steer_if_idle<F>(
     tx: &Transaction<'_>,
-    context: &RepositoryContext,
     agent: &str,
     message: &str,
     content: String,
@@ -184,15 +183,15 @@ where
         return Ok(None);
     }
     let admitted = AdmittedInput {
-        id: (context.input_id)()?,
+        id: Identifier::input_id()?,
         message_id: message.into(),
         parts: vec![ConversationPart::text(content)],
         delivery: Delivery::DELIVERY_STEER,
     };
     let event = compose(&admitted)?;
-    tx.execute("INSERT INTO input (id, agent_session, message_id, content, delivery, status, created_at) VALUES (?1,?2,?3,?4,'steer','pending',?5)",params![admitted.id,agent,message,admitted.content(),(context.timestamp)()])?;
+    tx.execute("INSERT INTO input (id, agent_session, message_id, content, delivery, status, created_at) VALUES (?1,?2,?3,?4,'steer','pending',?5)",params![admitted.id,agent,message,admitted.content(),timestamp()])?;
     // Source idle-steer path intentionally has no input_part insertion.
-    record(tx, &event, None, &(context.timestamp)())?;
+    record(tx, &event, None, &timestamp())?;
     Ok(Some(Admission {
         input: admitted,
         published: Some(event),
@@ -200,7 +199,6 @@ where
 }
 pub fn cancel_pending<F>(
     tx: &Transaction<'_>,
-    context: &RepositoryContext,
     agent: &str,
     input: &str,
     compose: F,
@@ -210,12 +208,11 @@ where
 {
     if tx.execute("UPDATE input SET status = 'canceled' WHERE agent_session = ?1 AND id = ?2 AND status = 'pending'",params![agent,input])?==0{return Ok(None);}
     let event = compose()?;
-    record(tx, &event, None, &(context.timestamp)())?;
+    record(tx, &event, None, &timestamp())?;
     Ok(Some(event))
 }
 pub fn promote<F>(
     tx: &Transaction<'_>,
-    context: &RepositoryContext,
     agent: &str,
     delivery: Delivery,
     limit: i64,
@@ -228,7 +225,7 @@ where
     if waiting.is_empty() {
         return Ok(Vec::new());
     }
-    let at = (context.timestamp)();
+    let at = timestamp();
     let mut promoted = Vec::with_capacity(waiting.len());
     for input in waiting {
         let event = compose(&input)?;
@@ -241,8 +238,8 @@ where
             tool_call_id: String::new(),
             provider_content: ProviderContent::default(),
         };
-        projection::project(tx, agent, &message, &(context.timestamp)())?;
-        record(tx, &event, None, &(context.timestamp)())?;
+        projection::project(tx, agent, &message, &timestamp())?;
+        record(tx, &event, None, &timestamp())?;
         promoted.push(Promotion {
             input,
             published: event,

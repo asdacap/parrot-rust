@@ -3,7 +3,7 @@ use super::{
     CompactionContext, CompactionSnapshot, ConversationMessage, ConversationPart,
     ConversationRepository, EventError, MessageRole,
 };
-use crate::events::{projection, record};
+use crate::events::{projection, record, timestamp};
 use parrot_domain::protocol::messages::parrot::Event;
 use rusqlite::{OptionalExtension, Transaction, params};
 
@@ -52,14 +52,13 @@ impl ConversationRepository {
     ) -> Result<bool, EventError> {
         self.validate(&agent)?;
         let saved_agent = agent.clone();
-        let context = self.events.context().clone();
         let saved = self
             .events
             .transaction(move |tx| {
                 if already_saved(tx, &agent, snapshot.watermark)? {
                     return Ok(false);
                 }
-                save_snapshot(tx, &agent, &snapshot, &(context.timestamp)())?;
+                save_snapshot(tx, &agent, &snapshot, &timestamp())?;
                 Ok(true)
             })
             .await?;
@@ -76,12 +75,11 @@ impl ConversationRepository {
     ) -> Result<bool, EventError> {
         self.validate(&published.agent_session_id)?;
         let agent = published.agent_session_id.clone();
-        let context = self.events.context().clone();
         let appended = self.events.transaction(move |tx| {
             if already_saved(tx, &published.agent_session_id, snapshot.watermark)? { return Ok(false); }
-            let summary_sequence = save_snapshot(tx, &published.agent_session_id, &snapshot, &(context.timestamp)())?;
-            record(tx, &published, None, &(context.timestamp)())?;
-            let status = projection::project(tx, &published.agent_session_id, &ConversationMessage::text(MessageRole::System, content), &(context.timestamp)())?;
+            let summary_sequence = save_snapshot(tx, &published.agent_session_id, &snapshot, &timestamp())?;
+            record(tx, &published, None, &timestamp())?;
+            let status = projection::project(tx, &published.agent_session_id, &ConversationMessage::text(MessageRole::System, content), &timestamp())?;
             tx.execute("UPDATE conversation_item SET compaction_status_sequence = ?1 WHERE sequence = ?2;", params![status.sequence, summary_sequence])?;
             // Drop the context reminder standing hash, so a qualifying reminder
             // re-fires after compaction like the retired checkpoint reset did.

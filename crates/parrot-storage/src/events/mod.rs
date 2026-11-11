@@ -18,7 +18,6 @@ use crate::database::{DatabaseError, SessionDatabase, Transaction, extract_usage
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_domain::contracts::storage::{AdmissionError, CommitTicket, Committed};
 use parrot_domain::protocol::messages::parrot::Event;
-use parrot_domain::values::identifiers::Identifier;
 use protobuf::Message;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,23 +26,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Counts do not indicate that statistics replay or restoration has completed.
 pub type EventLoadProgress = Arc<dyn Fn(usize) + Send + Sync>;
 
-/// Injected only for source-equivalent ID/time generation and deterministic captures.
-#[derive(Clone)]
-pub struct RepositoryContext {
-    pub timestamp: Arc<dyn Fn() -> String + Send + Sync>,
-    pub input_id: Arc<dyn Fn() -> Result<String, std::io::Error> + Send + Sync>,
-}
-impl Default for RepositoryContext {
-    fn default() -> Self {
-        Self {
-            timestamp: Arc::new(timestamp),
-            input_id: Arc::new(Identifier::input_id),
-        }
-    }
-}
 struct RepositoryInner {
     database: SessionDatabase,
-    context: RepositoryContext,
     runtime_statistics:
         tokio::sync::OnceCell<Arc<crate::diagnostics::statistics::UserSessionStatistics>>,
 }
@@ -53,22 +37,15 @@ pub struct EventRepository {
 }
 impl EventRepository {
     pub fn new(database: SessionDatabase) -> Self {
-        Self::with_context(database, RepositoryContext::default())
-    }
-    pub fn with_context(database: SessionDatabase, context: RepositoryContext) -> Self {
         Self {
             inner: Arc::new(RepositoryInner {
                 database,
-                context,
                 runtime_statistics: tokio::sync::OnceCell::new(),
             }),
         }
     }
     pub fn database(&self) -> &SessionDatabase {
         &self.inner.database
-    }
-    pub fn context(&self) -> &RepositoryContext {
-        &self.inner.context
     }
 
     /// Transfers one complete repository transaction, preserving validation errors.
@@ -206,7 +183,7 @@ pub fn read_events(
     .collect()
 }
 
-fn timestamp() -> String {
+pub(crate) fn timestamp() -> String {
     let time = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("UTC clock before Unix epoch");

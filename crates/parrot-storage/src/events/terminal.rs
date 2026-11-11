@@ -27,7 +27,6 @@ pub struct TurnCommit {
 /// terminals win unchanged; a losing proposal writes no event or projection.
 pub fn close_turn_if_open(
     tx: &Transaction<'_>,
-    context: &RepositoryContext,
     key: &TurnKey,
     proposed: &Event,
     raw: Option<&[u8]>,
@@ -82,7 +81,7 @@ pub fn close_turn_if_open(
         }
     }
     drop(read);
-    let outcome = repository::append(tx, context, proposed, raw, message)?;
+    let outcome = repository::append(tx, proposed, raw, message)?;
     Ok(TurnCommit {
         key: key.clone(),
         closure: TurnClosure::NewlyClosed,
@@ -109,12 +108,10 @@ impl EventRepository {
         message: Option<ConversationMessage>,
         cancellation: &dyn Cancellation,
     ) -> Result<CommitTicket<TurnKey, TurnCommit, EventError>, AdmissionError<EventError>> {
-        let context = self.context().clone();
         let command_key = key.clone();
         self.admit(key, cancellation, move |tx| {
             close_turn_if_open(
                 tx,
-                &context,
                 &command_key,
                 &proposed,
                 raw.as_deref(),
