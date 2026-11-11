@@ -2,6 +2,8 @@
 mod agent_state_support;
 mod engine;
 mod lifecycle;
+#[path = "../memory_agent_state_support.rs"]
+mod memory_agent_state_support;
 #[path = "../tool_execution_support.rs"]
 mod tool_execution_support;
 mod usage;

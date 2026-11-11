@@ -5,5 +5,7 @@ mod streams;
 mod structured;
 mod support;
 
+#[path = "../../crates/parrot-runtime/tests/memory_agent_state_support.rs"]
+mod agent_state_support;
 #[path = "../stress/scheduler.rs"]
 mod scheduler;

@@ -238,7 +238,11 @@ async fn seeded_concurrent_passive_wakes_share_one_drain_without_execution_callb
 
 async fn exercise_wakes(participants: usize, context: &str) {
     let backend = Backend::new();
-    let session = AgentSession::new(backend.clone(), Arc::new(NeverCancelled));
+    let session = AgentSession::with_state(
+        backend.clone(),
+        Arc::new(NeverCancelled),
+        Arc::new(crate::agent_state_support::MemoryAgentStateStore::default()),
+    );
     let (started, first) = session.wake(None);
     bounded(backend.entered.acquire()).await.unwrap().forget();
     let mut joins = Vec::new();
@@ -295,7 +299,11 @@ async fn seeded_cancelled_or_dropped_observer_cannot_abandon_admitted_mutation_o
 
 async fn exercise_mutation(cancelled_observer: bool, value: u64, context: &str) {
     let backend = Backend::new();
-    let session = AgentSession::new(backend.clone(), Arc::new(NeverCancelled));
+    let session = AgentSession::with_state(
+        backend.clone(),
+        Arc::new(NeverCancelled),
+        Arc::new(crate::agent_state_support::MemoryAgentStateStore::default()),
+    );
     let entered = Arc::new(Semaphore::new(0));
     let release = Arc::new(Semaphore::new(0));
     let caller = Arc::new(Signal::new());

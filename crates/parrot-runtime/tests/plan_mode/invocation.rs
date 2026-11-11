@@ -68,7 +68,7 @@ impl DrainBackend for Consumer {
         &self,
         _: String,
     ) -> BoxFuture<'_, Result<Option<AdmittedInput>, LifecycleError>> {
-        panic!("fixture does not use durable owned execution")
+        Box::pin(async { Ok(None) })
     }
     fn publish_admission<'a>(
         &'a self,
@@ -161,7 +161,7 @@ impl DrainBackend for Consumer {
         Box::pin(async { Ok(()) })
     }
     fn execution_started_correlated(&self, _: &str) -> BoxFuture<'_, Result<(), LifecycleError>> {
-        panic!("fixture does not use durable owned execution")
+        Box::pin(async { Ok(()) })
     }
     fn execution_finished_correlated<'a>(
         &'a self,
@@ -169,33 +169,45 @@ impl DrainBackend for Consumer {
         _: &'a parrot_domain::values::agent_state::ExecutionTerminal,
         _: &'a str,
     ) -> BoxFuture<'a, Result<(), LifecycleError>> {
-        panic!("fixture does not use durable owned execution")
+        Box::pin(async { Ok(()) })
     }
     fn cancel_execution_input(&self, _: &str) -> BoxFuture<'_, Result<i64, LifecycleError>> {
-        panic!("fixture does not use durable owned execution")
+        Box::pin(async { Ok(0) })
     }
     fn execution_watermark(&self) -> BoxFuture<'_, Result<i64, LifecycleError>> {
-        panic!("fixture does not use durable owned execution")
+        Box::pin(async { Ok(0) })
     }
     fn restore_execution<'a>(
         &'a self,
         _: &'a parrot_domain::values::agent_state::ExecutionTerminal,
     ) -> BoxFuture<'a, Result<Execution, LifecycleError>> {
-        panic!("fixture does not use durable owned execution")
+        Box::pin(async { Ok(Execution::succeeded("")) })
     }
     fn capture_execution<'a>(
         &'a self,
-        _: &'a parrot_domain::values::agent_state::ExecutionCheckpoint,
-        _: &'a mut Execution,
+        checkpoint: &'a parrot_domain::values::agent_state::ExecutionCheckpoint,
+        execution: &'a mut Execution,
         _: ExecutionResultReference,
-        _: i64,
+        recovery_watermark: i64,
     ) -> BoxFuture<'a, Result<parrot_domain::values::agent_state::ExecutionTerminal, LifecycleError>>
     {
-        panic!("fixture does not use durable owned execution")
+        use parrot_domain::values::agent_state::{ExecutionOutcome, ExecutionTerminal};
+        let outcome = match execution.status {
+            ExecutionStatus::Succeeded => ExecutionOutcome::Succeeded,
+            ExecutionStatus::Canceled => ExecutionOutcome::Canceled,
+            ExecutionStatus::Failed => ExecutionOutcome::Failed(execution.error.clone()),
+        };
+        Box::pin(async move {
+            Ok(ExecutionTerminal {
+                event_id: format!("{}.finished", checkpoint.execution_id),
+                elapsed_ms: None,
+                history_sequence: 0,
+                recovery_watermark,
+                outcome,
+            })
+        })
     }
-    fn suspend_execution(&self) {
-        panic!("fixture does not use durable owned execution")
-    }
+    fn suspend_execution(&self) {}
     fn close(&self) -> BoxFuture<'_, Result<(), LifecycleError>> {
         Box::pin(async { Ok(()) })
     }
