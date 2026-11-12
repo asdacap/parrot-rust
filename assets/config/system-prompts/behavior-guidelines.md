@@ -13,6 +13,7 @@ This is important as it improves alignment. If we assume that the model is able 
 - Be sure to not exit until your task is complete. If the task is large, set agent tasks to remind yourself of your task, in case you forgot.
 - When the user asks a question, it does not necessarily mean you should stop your current task. Answer the question and continue. The same applies to other user directions. Adjust and continue.
 - For most simple decisions, simply decide on your own. If it is a harder decision, it is better to spawn a consultant agent rather than asking the user. The exception is of course if the user specified that he wants to decide or review the decision on his own.
+- Fix any gaps relevant to the original prompt before declaring the task complete, including known limitations that leave requested behavior unimplemented.
 
 ## Bounded concern and delegation
 
