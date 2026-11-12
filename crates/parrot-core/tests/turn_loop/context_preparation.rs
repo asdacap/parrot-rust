@@ -395,3 +395,37 @@ fn discarded_tool_responses_still_record_provider_usage() {
         );
     }
 }
+
+#[test]
+fn failed_invocations_calibrate_later_turns_from_returned_usage() {
+    for error in [
+        Error::failed("failure after completion"),
+        Error::cancelled(),
+    ] {
+        let mut state = MemoryState::new([
+            Reply::UsageThenError {
+                error: error.clone(),
+                input_tokens: 350,
+            },
+            Reply::final_response("next answer"),
+        ]);
+        state.request().estimated_input_tokens = 100;
+
+        assert_eq!(state.run(), Err(error));
+        assert_eq!(
+            state
+                .budget
+                .last_request_statistic
+                .estimate_input_tokens("memory/model", 200),
+            450
+        );
+        assert_eq!(state.run(), Ok(Outcome::Completed("next answer".into())));
+        assert_eq!(
+            state
+                .budget
+                .last_request_statistic
+                .estimate_input_tokens("memory/model", 200),
+            450
+        );
+    }
+}

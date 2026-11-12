@@ -4,6 +4,22 @@ use super::{
     ToolDefinition, ToolResultMetadata,
 };
 
+/// An invocation failure with usage observed before the failure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProviderInvokeError {
+    pub error: Error,
+    pub input_tokens: Option<i32>,
+}
+
+impl From<Error> for ProviderInvokeError {
+    fn from(error: Error) -> Self {
+        Self {
+            error,
+            input_tokens: None,
+        }
+    }
+}
+
 /// Invokes models using the core protocol while owning transport and stream cleanup.
 /// Unsupported invocation and estimation capabilities return explicit errors.
 pub trait Provider: Send + Sync {
@@ -29,16 +45,17 @@ pub trait Provider: Send + Sync {
     }
 
     /// Invokes the request and joins stream cleanup before returning, including
-    /// after errors or cancellation.
+    /// after errors or cancellation. Returns the last positive input-token usage
+    /// observed during the invocation on either success or failure.
     fn invoke<'a, 'c>(
         &'a self,
         _request: ProviderRequest,
         _cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<ProviderResponse, Error>>
+    ) -> BoxFuture<'a, Result<ProviderResponse, ProviderInvokeError>>
     where
         'c: 'a,
     {
-        Box::pin(async { Err(Error::unsupported("Provider.invoke")) })
+        Box::pin(async { Err(Error::unsupported("Provider.invoke").into()) })
     }
 }
 

@@ -4,7 +4,7 @@ use super::{
         DrainBackend, DrainPass, DrainWork, Execution, ExecutionResultReference, ExecutionStatus,
         LifecycleError,
     },
-    provider_call::{self, ProviderUsage},
+    provider_call,
     services::*,
     tool_conversation::ToolConversation,
     usage::SessionUsageRecorder,
@@ -36,10 +36,7 @@ use parrot_domain::{
 use parrot_foundation::{
     config::runtime::AgentLimitsConfig, template_catalog::PromptTemplateCatalog,
 };
-use parrot_provider::{
-    routing::registry::ProviderModel,
-    sessions::{self, ProviderSessions},
-};
+use parrot_provider::sessions::{self, ProviderSessions};
 use parrot_storage::{
     conversation::{AgentConversation, AgentHistoryView, ConversationReadView, ModelMessage},
     events::{
@@ -86,36 +83,6 @@ struct State {
     tool_conversation: ToolConversation,
     context: ContextController,
     request_status: Option<Arc<dyn crate::compaction::ContextStatus>>,
-    request_accounting: Option<RequestAccounting>,
-    usage: Arc<SessionUsageRecorder>,
-}
-
-struct RequestAccounting {
-    selected: ProviderModel,
-    estimated_input_tokens: i64,
-}
-
-impl ProviderUsage for State {
-    fn observe_completion<'a>(
-        &'a mut self,
-        request: &'a sessions::Request,
-        completed: &'a sessions::Completion,
-    ) -> BoxFuture<'a, Result<(), EventError>> {
-        Box::pin(async move {
-            let accounting = self
-                .request_accounting
-                .as_ref()
-                .ok_or_else(|| EventError::Invalid("request accounting is unavailable".into()))?;
-            self.agent_state.last_request_statistic.observe_usage(
-                &accounting.selected.selector(),
-                accounting.estimated_input_tokens,
-                completed.input_tokens,
-            );
-            self.usage
-                .record_request(&accounting.selected, request.reasoning.as_ref(), completed)
-                .await
-        })
-    }
 }
 
 /// A real storage/provider backend. No service has a success default, and no
@@ -209,7 +176,7 @@ where
             parent_completion: config.parent_completion,
             event_id: config.event_id,
             sessions,
-            usage: usage.clone(),
+            usage,
             reminders,
             suspending: AtomicBool::new(false),
             prompt: SessionPrompt::new(config.prompt),
@@ -222,8 +189,6 @@ where
                 tool_conversation,
                 context: config.context,
                 request_status: None,
-                request_accounting: None,
-                usage,
             }),
             notices,
             execution_activity: std::sync::Mutex::new(None),

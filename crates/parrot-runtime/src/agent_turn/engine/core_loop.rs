@@ -164,7 +164,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                     event_id: backend.event_id.as_ref(),
                     output: backend.output.as_ref(),
                     activity: backend.activity.as_ref(),
-                    state: &backend.state,
+                    usage: &backend.usage,
                     events: ContextEmitter::new(
                         &backend.history,
                         backend.publisher.as_ref(),
@@ -220,7 +220,6 @@ where
         let state = &mut *guard;
         state.agent_state.restart();
         state.request_status = None;
-        state.request_accounting = None;
         state.tool_conversation.reset_pending();
         state
             .tool_conversation
@@ -245,7 +244,6 @@ where
     {
         let mut state = backend.state.lock().await;
         state.request_status = None;
-        state.request_accounting = None;
         state.tool_conversation.reset_pending();
     }
     let execution = match outcome {

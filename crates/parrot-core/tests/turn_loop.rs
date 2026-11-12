@@ -245,6 +245,7 @@ enum Reply {
     TooLarge(&'static str),
     Failed(&'static str),
     Error(Error),
+    UsageThenError { error: Error, input_tokens: i32 },
 }
 impl Reply {
     fn final_response(text: &str) -> Self {
@@ -432,7 +433,7 @@ impl Provider for MemoryProvider {
         &'a self,
         request: ProviderRequest,
         _cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<ProviderResponse, Error>>
+    ) -> BoxFuture<'a, Result<ProviderResponse, parrot_core::ProviderInvokeError>>
     where
         'c: 'a,
     {
@@ -447,9 +448,16 @@ impl Provider for MemoryProvider {
                 .expect("unexpected provider request")
             {
                 Reply::Response(response) => Ok(response),
-                Reply::TooLarge(message) => Err(request_too_large(message)),
-                Reply::Failed(message) => Err(Error::failed(message)),
-                Reply::Error(error) => Err(error),
+                Reply::TooLarge(message) => Err(request_too_large(message).into()),
+                Reply::Failed(message) => Err(Error::failed(message).into()),
+                Reply::Error(error) => Err(error.into()),
+                Reply::UsageThenError {
+                    error,
+                    input_tokens,
+                } => Err(parrot_core::ProviderInvokeError {
+                    error,
+                    input_tokens: Some(input_tokens),
+                }),
             }
         })
     }
@@ -1997,7 +2005,7 @@ impl Provider for EchoProvider {
         &'a self,
         request: ProviderRequest,
         _cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<ProviderResponse, Error>>
+    ) -> BoxFuture<'a, Result<ProviderResponse, parrot_core::ProviderInvokeError>>
     where
         'c: 'a,
     {

@@ -21,7 +21,7 @@ impl Provider for WaitingProvider {
         &'a self,
         _request: ProviderRequest,
         cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<ProviderResponse, Error>>
+    ) -> BoxFuture<'a, Result<ProviderResponse, parrot_core::ProviderInvokeError>>
     where
         'c: 'a,
     {
@@ -40,7 +40,7 @@ impl Provider for WaitingProvider {
             })
             .await;
             self.cleaned.store(true, Ordering::SeqCst);
-            Err(Error::cancelled())
+            Err(Error::cancelled().into())
         })
     }
 }

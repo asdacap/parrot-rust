@@ -161,8 +161,6 @@ impl Harness {
                 .unwrap(),
             context: fixture.controller(),
             request_status: Some(Arc::new(Status)),
-            request_accounting: None,
-            usage: usage.clone(),
         });
         Self {
             config,
