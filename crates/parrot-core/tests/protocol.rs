@@ -37,7 +37,7 @@ fn unsupported_state_operations_return_errors_instead_of_empty_or_successful_res
     let state = finish(states.get_agent_state()).unwrap_err();
     assert_eq!(state.code, ErrorCode::InvalidOperation);
     assert!(state.message.contains("get_agent_state"));
-    let write = finish(states.set_agent_state(parrot_core::AgentState::new(false))).unwrap_err();
+    let write = finish(states.set_agent_state(parrot_core::AgentState::default())).unwrap_err();
     assert_eq!(write.code, ErrorCode::InvalidOperation);
     assert!(write.message.contains("set_agent_state"));
     let scratch =

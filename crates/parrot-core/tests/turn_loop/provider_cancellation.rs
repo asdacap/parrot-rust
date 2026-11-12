@@ -57,7 +57,7 @@ fn entry_cancellation_reaches_inflight_provider_and_awaits_cleanup() {
     };
     let waker = Waker::from(Arc::new(ThreadWake(thread::current())));
     let mut context = Context::from_waker(&waker);
-    state.budget = AgentState::new(false);
+    state.budget = AgentState::default();
     let mut running = std::pin::pin!(run(
         &mut state,
         &tools,

@@ -657,7 +657,17 @@ mod fixture {
                 })
                 .into_iter()
                 .collect();
+            let store = crate::agent_state_support::test_agent_state_store(
+                &self
+                    .histories
+                    .path
+                    .join("agent-state")
+                    .join(prepared.identity.session.name.clone()),
+                &prepared.identity.session.name,
+            )
+            .await;
             let runtime_config = RuntimeConfig {
+                agent_state: store.clone(),
                 agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                     disable_max_turns: false,
                     ..Default::default()
@@ -692,15 +702,6 @@ mod fixture {
             )
             .await
             .unwrap();
-            let store = crate::agent_state_support::test_agent_state_store(
-                &self
-                    .histories
-                    .path
-                    .join("agent-state")
-                    .join(prepared.identity.session.name.clone()),
-                &prepared.identity.session.name,
-            )
-            .await;
             let session = Arc::new(AgentSession::with_state(backend, prepared.lifetime, store));
             let bound = Arc::new(AgentSessionServices {
                 session: session.clone(),

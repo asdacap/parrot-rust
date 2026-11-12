@@ -4,7 +4,6 @@ mod embedded_metadata;
 mod forks;
 mod reads;
 mod reload_cancellation;
-mod status_assembly;
 mod upstream_remaining;
 mod upstream_statistics_history;
 

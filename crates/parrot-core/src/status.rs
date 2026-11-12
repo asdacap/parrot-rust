@@ -1,7 +1,7 @@
 use crate::{
-    CancellationToken, ConfigKey, ContextSnapshot, ConversationAddition, ConversationEvent,
-    ConversationPersistence, Error, Message, Provider, ProviderRequest, Role, States,
-    ToolDefinition, compaction::fit_status,
+    AgentState, CancellationToken, ConfigKey, ContextSnapshot, ConversationAddition,
+    ConversationEvent, ConversationOrigin, ConversationPersistence, Error, Message, Provider,
+    ProviderRequest, Role, States, ToolDefinition, compaction::fit_status,
 };
 use std::{collections::BTreeMap, fmt};
 
@@ -13,7 +13,7 @@ pub(crate) fn status_notice(content: &str) -> String {
 
 /// Names one status slot of a conversation. Keys are stable across engine restarts
 /// and iterate in string order so status assembly stays deterministic.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct StatusKey(String);
 
 impl StatusKey {
@@ -76,11 +76,12 @@ pub fn join_status_offering(offering: &StatusOffering) -> String {
 
 /// Injects full fitted status without a standing baseline. Later auto-update
 /// changes inject only auto-update slots with changed identities.
-/// Each message atomically records cumulative standing identities so unchanged
-/// slots stay known across updates and restarts.
+/// After each message, the agent state records cumulative standing identities so
+/// unchanged slots stay known across updates and restarts.
 /// Safe points occur between provider requests.
 pub async fn steer_status(
     states: &mut dyn States,
+    state: &mut AgentState,
     provider: &dyn Provider,
     definitions: &[ToolDefinition],
     cancellation: CancellationToken<'_>,
@@ -97,7 +98,7 @@ pub async fn steer_status(
     let tokens = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
     let context = ContextSnapshot::estimate(tokens, &configuration);
     let offering = states.read_status_offering(context).await?;
-    let mut standing = states.get_agent_state().await?.standing_statuses;
+    let mut standing = state.standing_statuses.clone();
     if !status_steering_needed(&offering, &standing) {
         return Ok(());
     }
@@ -134,8 +135,8 @@ pub async fn steer_status(
     states
         .add_conversation_messages(ConversationAddition {
             messages: vec![Message::text(Role::System, content)],
-            persistence: ConversationPersistence::StatusSteering {
-                standing,
+            persistence: ConversationPersistence::Append {
+                origin: ConversationOrigin::System,
                 event: ConversationEvent::Notice {
                     kind: "status".into(),
                     notice,
@@ -143,6 +144,7 @@ pub async fn steer_status(
             },
         })
         .await?;
+    state.standing_statuses = standing;
     Ok(())
 }
 

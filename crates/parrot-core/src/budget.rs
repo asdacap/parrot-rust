@@ -3,36 +3,24 @@
 use crate::{AgentState, TurnFlags};
 
 impl AgentState {
-    pub fn new(disable_max_turns: bool) -> Self {
-        Self {
-            final_phase: false,
-            last_request_statistic: crate::RequestStatistic::default(),
-            standing_statuses: crate::StatusStanding::default(),
-            disable_max_turns,
-            provider_requests: 0,
-            settlement_extensions: 0,
-        }
-    }
-
     pub fn begin_turn(&mut self) {
         self.provider_requests = 0;
     }
 
-    /// Resets invocation state without discarding the last request statistics.
+    /// Resets the invocation budget, keeping the phase, standing statuses and
+    /// last request statistics.
     pub fn restart(&mut self) {
-        let calibration = std::mem::take(&mut self.last_request_statistic);
-        *self = Self::new(self.disable_max_turns);
-        self.last_request_statistic = calibration;
+        self.provider_requests = 0;
+        self.settlement_extensions = 0;
     }
 
-    pub fn admit(&mut self, maximum: i32) -> Option<TurnFlags> {
-        if !self.disable_max_turns
+    pub fn admit(&mut self, maximum: i32, disable_max_turns: bool) -> Option<TurnFlags> {
+        if !disable_max_turns
             && self.provider_requests >= maximum.wrapping_add(self.settlement_extensions)
         {
             return None;
         }
-        let final_phase =
-            !self.disable_max_turns && self.provider_requests.wrapping_add(1) >= maximum;
+        let final_phase = !disable_max_turns && self.provider_requests.wrapping_add(1) >= maximum;
         Some(TurnFlags { final_phase })
     }
 

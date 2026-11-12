@@ -97,6 +97,7 @@ impl AgentStateStore for FileAgentStateStore {
                     AgentStateUpdate::Children(value) => snapshot.children = value,
                     AgentStateUpdate::Tasks(value) => snapshot.tasks = value,
                     AgentStateUpdate::Execution(value) => snapshot.execution = value,
+                    AgentStateUpdate::Core(value) => snapshot.core = Some(value),
                 }
                 snapshot.revision = snapshot.revision.checked_add(1).ok_or_else(|| {
                     AgentStateError::new(

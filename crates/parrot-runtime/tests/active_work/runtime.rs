@@ -427,7 +427,17 @@ impl ScopeFactory<Security> for Factory {
                     (id, statistics)
                 })
                 .collect();
+            let store = crate::agent_state_support::test_agent_state_store(
+                &self
+                    .histories
+                    .path
+                    .join("agent-state")
+                    .join(identity.session.name.clone()),
+                &identity.session.name,
+            )
+            .await;
             let runtime_config = RuntimeConfig {
+                agent_state: store.clone(),
                 tool_execution: crate::tool_execution_support::tool_execution_config(
                     &history,
                     templates(),
@@ -462,15 +472,6 @@ impl ScopeFactory<Security> for Factory {
             )
             .await
             .map_err(|error| ChildError::failure("runtime", error.to_string()))?;
-            let store = crate::agent_state_support::test_agent_state_store(
-                &self
-                    .histories
-                    .path
-                    .join("agent-state")
-                    .join(identity.session.name.clone()),
-                &identity.session.name,
-            )
-            .await;
             let session = AgentSession::with_state(backend, prepared.lifetime, store);
             let provider = self
                 .providers

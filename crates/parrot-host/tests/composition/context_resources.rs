@@ -22,7 +22,7 @@ impl BorrowedContextResources {
             conversation: AgentConversation::new(fixture.history.clone())
                 .await
                 .unwrap(),
-            agent_state: parrot_core::AgentState::new(false),
+            agent_state: parrot_core::AgentState::default(),
             context: fixture.controller(),
             prompt: SessionPrompt::new(Box::new(Prompt)),
             sessions: sessions::ProviderSessions::new(),

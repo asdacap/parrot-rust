@@ -53,19 +53,21 @@ pub struct TurnOptions {
     pub reasoning: Option<Reasoning>,
     pub provider_preferences: String,
     pub include_router_metadata: bool,
+    /// Turns off the provider-request limit entirely.
+    pub disable_max_turns: bool,
 }
-/// Consolidates the agent-local state that survives across turns. Core reads it at
-/// turn start and saves it after the turn returns, even on error.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Consolidates the agent-local state that survives across turns and restarts.
+/// Core owns every field: it reads the state at turn start and saves it after the
+/// turn returns, even on error. The states side persists what core saves.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentState {
-    /// Durable final-phase marker read without changing the conversation.
+    /// Whether the latest phase prompt restricted tools to the final-phase set.
     pub final_phase: bool,
     /// Latest model-specific input-token estimate and provider-reported usage.
     pub last_request_statistic: crate::RequestStatistic,
-    /// Per-slot hashes recorded by the latest persisted status assembly.
+    /// Per-slot hashes of the latest steered status assembly.
     pub standing_statuses: crate::StatusStanding,
-    /// Per-invocation setting that turns off the provider-request limit entirely.
-    pub(crate) disable_max_turns: bool,
     /// Provider requests counted during the current turn. Not a token budget.
     pub(crate) provider_requests: i32,
     /// Settlement extensions retained across turns within the same invocation.

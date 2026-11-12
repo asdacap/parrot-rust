@@ -13,12 +13,10 @@ fn reminder_band_steering_does_not_repeat_on_tool_followups_or_later_turns() {
     state.enqueue_message(Delivery::Queue, "another question");
     assert_eq!(state.run(), Ok(Outcome::Completed("second answer".into())));
 
+    assert_eq!(state.status_steered, ["fitted status"]);
     assert_eq!(
-        state.status_steered,
-        [(
-            "fitted status".into(),
-            status_standing(&[("runtime:context-reminder", "band-50")])
-        )]
+        state.budget.standing_statuses,
+        status_standing(&[("runtime:context-reminder", "band-50")])
     );
     let steered = state
         .trace
@@ -54,7 +52,7 @@ fn core_records_each_final_request_before_rendering_and_retains_final_catalogs()
     let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.final_requests, [1, 2]);
+    assert_eq!(state.final_requests, [1]);
     assert_eq!(state.capture_catalogs(), [vec!["read"], vec!["read"]]);
     assert!(state.tools.flags.lock().unwrap()[0].final_phase);
     let trace = state.trace.values();

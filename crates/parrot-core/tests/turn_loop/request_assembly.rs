@@ -22,7 +22,7 @@ fn state_supplies_fresh_rendered_instructions_on_each_request() {
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = AgentState::new(state.unlimited);
+    state.budget = AgentState::default();
 
     assert_eq!(
         finish(run(

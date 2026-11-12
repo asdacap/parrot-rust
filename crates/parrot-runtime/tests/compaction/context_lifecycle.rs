@@ -1,5 +1,4 @@
 use super::*;
-use parrot_core::ConversationEvent;
 use parrot_storage::{
     artifacts::{ImageArtifactRepository, ImageArtifactStore},
     conversation::ConversationPart,
@@ -36,7 +35,7 @@ async fn provider_template_failure_retains_native_prompt_error_and_terminal_publ
                 selection: &selection,
                 tools: &[],
                 conversation: &mut conversation,
-                agent_state: &mut parrot_core::AgentState::new(false),
+                agent_state: &mut parrot_core::AgentState::default(),
                 prompt: &prompt,
                 sessions: &sessions,
                 status: &status,
@@ -60,84 +59,6 @@ async fn provider_template_failure_retains_native_prompt_error_and_terminal_publ
         assert!(published[1].has_compaction_failed());
     }
     sessions.close().await.unwrap();
-    fixture
-        .repository
-        .events()
-        .database()
-        .close()
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn status_steering_appends_records_and_publishes_the_newest_standing() {
-    let fixture = Fixture::with_identity("agent", "mode");
-    let history = fixture.history();
-    user(&history, "existing").await;
-    let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
-    let events = Events::new(history.clone());
-    let notice = || ConversationEvent::Notice {
-        kind: "status".into(),
-        notice: "Status prompt injected".into(),
-    };
-    let standing = |hash: &str| {
-        parrot_core::StatusStanding::from([(parrot_core::StatusKey::new("mode"), hash.to_string())])
-    };
-    let addition = |content: &str, hash: &str| parrot_core::ConversationAddition {
-        messages: vec![parrot_core::Message::text(
-            parrot_core::Role::System,
-            content,
-        )],
-        persistence: parrot_core::ConversationPersistence::StatusSteering {
-            standing: standing(hash),
-            event: notice(),
-        },
-    };
-
-    parrot_runtime::compaction::add_conversation_messages(
-        &history,
-        &mut conversation,
-        addition("fitted status", "h1"),
-        &events,
-        &NeverCancelled,
-    )
-    .await
-    .unwrap();
-    assert_eq!(conversation.messages().len(), 2);
-    assert_eq!(conversation.messages()[1].content(), "fitted status");
-    assert_eq!(
-        history.standing_statuses().await.unwrap().unwrap(),
-        standing("h1")
-    );
-
-    parrot_runtime::compaction::add_conversation_messages(
-        &history,
-        &mut conversation,
-        addition("next status", "h2"),
-        &events,
-        &NeverCancelled,
-    )
-    .await
-    .unwrap();
-    assert_eq!(conversation.messages().len(), 3);
-    assert_eq!(conversation.messages()[2].content(), "next status");
-    assert_eq!(
-        history.standing_statuses().await.unwrap().unwrap(),
-        standing("h2")
-    );
-    assert_eq!(events.published.lock().unwrap().len(), 2);
-    // Project-only status notices are retained broadcasts, not durable Event rows.
-    assert!(events.committed.lock().unwrap().is_empty());
-    assert!(
-        !history
-            .repository()
-            .events()
-            .replay()
-            .await
-            .unwrap()
-            .iter()
-            .any(|event| event.agent_notice().kind == "status")
-    );
     fixture
         .repository
         .events()

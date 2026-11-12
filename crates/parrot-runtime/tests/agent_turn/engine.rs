@@ -272,7 +272,19 @@ impl Fixture {
         let trace = tools.trace.clone();
         let output = Arc::new(Output::default());
         let activity = Arc::new(Activity::new(trace.clone()));
+        let (store, activation) = match overrides.state {
+            Some(store) => (store, overrides.activation),
+            None => (
+                crate::agent_state_support::test_agent_state_store(
+                    &self.path.join("agent-state"),
+                    "agent",
+                )
+                .await,
+                None,
+            ),
+        };
         let runtime_config = RuntimeConfig {
+            agent_state: store.clone(),
             tool_execution: tool_execution_config(&self.history, templates.clone(), erased.clone()),
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_max_turns: false,
@@ -327,21 +339,11 @@ impl Fixture {
         )
         .await
         .unwrap();
-        let session = match overrides.state {
-            Some(store) => match overrides.activation {
-                Some(activation) => {
-                    AgentSession::with_startup_activation(backend, lifetime, store, activation)
-                }
-                None => AgentSession::with_state(backend, lifetime, store),
-            },
-            None => {
-                let store = crate::agent_state_support::test_agent_state_store(
-                    &self.path.join("agent-state"),
-                    "agent",
-                )
-                .await;
-                AgentSession::with_state(backend, lifetime, store)
+        let session = match activation {
+            Some(activation) => {
+                AgentSession::with_startup_activation(backend, lifetime, store, activation)
             }
+            None => AgentSession::with_state(backend, lifetime, store),
         };
         Runtime {
             session,

@@ -138,6 +138,7 @@ impl ToolFactory<Security> for BudgetTools {
 }
 struct BudgetRuntime {
     session: AgentSession<RuntimeBackend<Security>>,
+    store: Arc<dyn parrot_domain::contracts::agent_state::AgentStateStore>,
     selection: Arc<Selection>,
     activity: Arc<Activity>,
 }
@@ -228,7 +229,13 @@ impl BudgetRuntime {
         .unwrap();
         let context =
             ContextController::new(compactor, fixture.history.clone(), blobs, templates.clone());
+        let store = crate::agent_state_support::test_agent_state_store(
+            &fixture.path.join("agent-state"),
+            "agent",
+        )
+        .await;
         let runtime_config = RuntimeConfig {
+            agent_state: store.clone(),
             tool_execution: tool_execution_config(
                 &fixture.history,
                 templates.clone(),
@@ -273,17 +280,21 @@ impl BudgetRuntime {
         .await
         .unwrap();
         Self {
-            session: {
-                let store = crate::agent_state_support::test_agent_state_store(
-                    &fixture.path.join("agent-state"),
-                    "agent",
-                )
-                .await;
-                AgentSession::with_state(backend, Arc::new(Signal::new()), store)
-            },
+            session: AgentSession::with_state(backend, Arc::new(Signal::new()), store.clone()),
+            store,
             selection,
             activity,
         }
+    }
+    async fn read_standing_statuses(&self) -> parrot_core::StatusStanding {
+        self.store
+            .load()
+            .await
+            .unwrap()
+            .unwrap()
+            .core
+            .unwrap_or_default()
+            .standing_statuses
     }
     async fn send(
         &self,
@@ -393,7 +404,7 @@ async fn selection_changes_during_tools_apply_to_the_next_step() {
             2
         );
     }
-    let standing = fixture.history.standing_statuses().await.unwrap().unwrap();
+    let standing = runtime.read_standing_statuses().await;
     assert!(standing.contains_key(&parrot_core::StatusKey::new("profile:updated")));
     {
         let requests = provider.requests.lock().unwrap();
@@ -996,12 +1007,9 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
         );
     }
     assert!(
-        fixture
-            .history
-            .standing_statuses()
+        runtime
+            .read_standing_statuses()
             .await
-            .unwrap()
-            .unwrap_or_default()
             .contains_key(&parrot_core::StatusKey::new("runtime:context"))
     );
 
@@ -1012,12 +1020,7 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
         bounded(second.execution.join()).await.unwrap().status,
         ExecutionStatus::Succeeded
     );
-    let standing = fixture
-        .history
-        .standing_statuses()
-        .await
-        .unwrap()
-        .unwrap_or_default();
+    let standing = runtime.read_standing_statuses().await;
     assert!(standing.contains_key(&parrot_core::StatusKey::new("runtime:context")));
     assert!(standing.contains_key(&parrot_core::StatusKey::new("profile:original")));
     let reminder = {
@@ -1066,12 +1069,9 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
         );
     }
     assert!(
-        fixture
-            .history
-            .standing_statuses()
+        runtime
+            .read_standing_statuses()
             .await
-            .unwrap()
-            .unwrap_or_default()
             .contains_key(&parrot_core::StatusKey::new("runtime:context"))
     );
     assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 3);

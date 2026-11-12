@@ -22,6 +22,7 @@ use crate::{
 use parrot_domain::values::tools::ToolCycleImageBudget;
 use parrot_domain::{
     contracts::{
+        agent_state::AgentStateStore,
         async_ops::{BoxFuture, Cancellation, OperationError},
         events::EventPublisher,
         security::AccessSnapshot,
@@ -57,6 +58,7 @@ pub type Publisher = dyn EventPublisher<Event = Event, Error = BrokerError>;
 pub struct RuntimeConfig<S: AccessSnapshot + 'static> {
     pub identity: SessionIdentity,
     pub agent_limits: AgentLimitsConfig,
+    pub agent_state: Arc<dyn AgentStateStore>,
     pub history: AgentHistoryView,
     pub broker: Arc<EventBroker>,
     pub publisher: Arc<Publisher>,
@@ -79,6 +81,8 @@ pub struct RuntimeConfig<S: AccessSnapshot + 'static> {
 
 struct State {
     agent_state: parrot_core::AgentState,
+    /// The agent state as last read from or written to its store; absent until first read.
+    persisted_agent_state: Option<parrot_core::AgentState>,
     conversation: AgentConversation,
     tool_conversation: ToolConversation,
     context: ContextController,
@@ -89,6 +93,8 @@ struct State {
 pub struct RuntimeBackend<S: AccessSnapshot + 'static> {
     identity: SessionIdentity,
     history: AgentHistoryView,
+    agent_state: Arc<dyn AgentStateStore>,
+    disable_max_turns: bool,
     broker: Arc<EventBroker>,
     publisher: Arc<Publisher>,
     selection: Arc<dyn SelectionSource<S>>,
@@ -156,10 +162,11 @@ where
                 .render("agent-session.interrupted-result", &[], &NeverCancelled)
                 .map_err(|error| TurnError::Service(error.to_string()))?,
         };
-        let agent_state = parrot_core::AgentState::new(config.agent_limits.disable_max_turns);
         Ok(Arc::new(Self {
             identity: config.identity,
             history: config.history,
+            agent_state: config.agent_state,
+            disable_max_turns: config.agent_limits.disable_max_turns,
             broker: config.broker,
             publisher: config.publisher,
             selection: config.selection,
@@ -183,7 +190,8 @@ where
             materialized_tools: std::sync::Mutex::new(None),
             compactor: config.context.compactor().clone(),
             state: Mutex::new(State {
-                agent_state,
+                agent_state: parrot_core::AgentState::default(),
+                persisted_agent_state: None,
                 conversation,
                 tool_conversation,
                 context: config.context,
@@ -245,6 +253,7 @@ where
     ) -> Result<crate::compaction::ContextCompactionResult, TurnError> {
         let mut guard = self.state.lock().await;
         let state = &mut *guard;
+        state.restore_agent_state(self.agent_state.as_ref()).await?;
         let snapshot = self.snapshot(selection)?;
         let definitions = snapshot.definitions().to_vec();
         let status = self.status.bind(selection);

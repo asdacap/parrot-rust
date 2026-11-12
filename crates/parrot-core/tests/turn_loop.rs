@@ -590,8 +590,7 @@ struct MemoryState {
     fitted_statuses: Vec<String>,
     status_offering: StatusOffering,
     next_status_offering: Option<StatusOffering>,
-    status_standing: StatusStanding,
-    status_steered: Vec<(String, StatusStanding)>,
+    status_steered: Vec<String>,
     status_reads: AtomicUsize,
     last_capture_request: Option<usize>,
     fail_at: Option<&'static str>,
@@ -661,6 +660,10 @@ impl MemoryState {
                     ConfigKey::FinalRequestTemplate,
                     "Finish the current turn.".into(),
                 ),
+                (
+                    ConfigKey::RestoredToolsTemplate,
+                    "Tools are available again.".into(),
+                ),
                 (ConfigKey::RunawayTemplate, RUNAWAY_NOTICE.into()),
                 (
                     ConfigKey::SkillSelectedTemplate,
@@ -719,12 +722,11 @@ impl MemoryState {
             fitted_statuses: Vec::new(),
             status_offering: StatusOffering::default(),
             next_status_offering: None,
-            status_standing: StatusStanding::default(),
             status_steered: Vec::new(),
             status_reads: AtomicUsize::new(0),
             last_capture_request: None,
             fail_at: None,
-            budget: AgentState::new(false),
+            budget: AgentState::default(),
             budget_read_error: None,
             budget_write_error: None,
             budget_writes: 0,
@@ -792,6 +794,7 @@ impl MemoryState {
             reasoning: self.reasoning.clone(),
             provider_preferences: self.provider_preferences.clone(),
             include_router_metadata: self.include_router_metadata,
+            disable_max_turns: self.unlimited,
         }
     }
     fn prime_context(&mut self, estimate: i64) {
@@ -841,6 +844,7 @@ impl MemoryState {
         self.reasoning = options.reasoning.clone();
         self.provider_preferences = options.provider_preferences.clone();
         self.include_router_metadata = options.include_router_metadata;
+        self.unlimited = options.disable_max_turns;
     }
     fn run_with(
         &mut self,
@@ -849,9 +853,7 @@ impl MemoryState {
     ) -> Result<Outcome, Error> {
         *self.compaction.lock().unwrap() =
             MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
-        let calibration = std::mem::take(&mut self.budget.last_request_statistic);
-        self.budget = AgentState::new(self.unlimited);
-        self.budget.last_request_statistic = calibration;
+        self.budget.restart();
         let source = self.cancellation.clone();
         finish(run(
             self,
@@ -862,9 +864,7 @@ impl MemoryState {
     }
     fn run_with_compaction(&mut self, compaction: &mut MemoryCompaction) -> Result<Outcome, Error> {
         std::mem::swap(&mut *self.compaction.lock().unwrap(), compaction);
-        let calibration = std::mem::take(&mut self.budget.last_request_statistic);
-        self.budget = AgentState::new(self.unlimited);
-        self.budget.last_request_statistic = calibration;
+        self.budget.restart();
         let tools = self.tools.clone();
         let provider = self.provider.clone();
         let result = finish(run(
@@ -895,6 +895,31 @@ impl States for MemoryState {
             let mut sequence = 0;
             match &addition.persistence {
                 ConversationPersistence::Append { origin, event } => match event {
+                    ConversationEvent::Notice { kind, .. }
+                        if kind == "tool_availability_restored_prompt" =>
+                    {
+                        return Ok(ConversationReceipt::default());
+                    }
+                    ConversationEvent::Notice { kind, .. }
+                        if kind == "final_provider_request_prompt" =>
+                    {
+                        self.step("final_request")?;
+                        let count = self.request().rendered_instructions.len();
+                        self.final_requests.push(count);
+                    }
+                    ConversationEvent::Notice { kind, notice } if kind == "status" => {
+                        self.step("steer_status")?;
+                        assert!(notice.starts_with("Status prompt injected\n"));
+                        let content = addition.messages[0]
+                            .contents
+                            .iter()
+                            .map(|part| match part {
+                                Content::Text(text) => text.as_str(),
+                                _ => "",
+                            })
+                            .collect::<String>();
+                        self.status_steered.push(content);
+                    }
                     ConversationEvent::Notice { kind, .. } if kind == "skill_context" => {
                         self.step("record_input_context")?;
                         let content = addition.messages[0]
@@ -945,33 +970,6 @@ impl States for MemoryState {
                     }
                 }
                 ConversationPersistence::Committed(_) => {}
-                ConversationPersistence::Phase { final_phase, .. } => {
-                    if !final_phase {
-                        return Ok(ConversationReceipt::default());
-                    }
-                    self.step("final_request")?;
-                    let count = self.request().rendered_instructions.len();
-                    self.final_requests.push(count);
-                }
-                ConversationPersistence::StatusSteering { standing, event } => {
-                    self.step("steer_status")?;
-                    assert!(matches!(
-                        event,
-                        ConversationEvent::Notice { kind, notice }
-                            if kind == "status"
-                                && notice.starts_with("Status prompt injected\n")
-                    ));
-                    let content = addition.messages[0]
-                        .contents
-                        .iter()
-                        .map(|part| match part {
-                            Content::Text(text) => text.as_str(),
-                            _ => "",
-                        })
-                        .collect::<String>();
-                    self.status_steered.push((content, standing.clone()));
-                    self.status_standing = standing.clone();
-                }
                 ConversationPersistence::CompletionBlockerFeedback(feedback) => {
                     self.step("completion_blocker_feedback")?;
                     self.completion_blocker_feedback.push(feedback.clone());
@@ -995,7 +993,13 @@ impl States for MemoryState {
                 ) {
                     self.request().messages.push(message.clone());
                 }
-                if !matches!(&addition.persistence, ConversationPersistence::Phase { .. }) {
+                if !matches!(
+                    &addition.persistence,
+                    ConversationPersistence::Append {
+                        event: ConversationEvent::Notice { kind, .. },
+                        ..
+                    } if kind == "final_provider_request_prompt"
+                ) {
                     self.append_turn_message(message);
                 }
             }
@@ -1064,10 +1068,7 @@ impl States for MemoryState {
             if let Some(error) = &self.budget_read_error {
                 return Err(error.clone());
             }
-            let mut state = self.budget.clone();
-            state.final_phase = false;
-            state.standing_statuses = self.status_standing.clone();
-            Ok(state)
+            Ok(self.budget.clone())
         })
     }
     fn set_agent_state(&mut self, state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
@@ -1391,7 +1392,7 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
             .all(|tools| tools == &["read"])
     );
     assert!(state.final_requests.contains(&1));
-    assert_eq!(state.final_requests, [1, 2, 3, 4, 5]);
+    assert_eq!(state.final_requests, [1]);
     assert_eq!(
         state
             .trace
@@ -1435,7 +1436,7 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
         let tools = state.tools.clone();
         let provider = state.provider.clone();
 
-        state.budget = AgentState::new(disable_limits);
+        state.unlimited = disable_limits;
 
         assert_eq!(
             finish(run(
@@ -1674,8 +1675,9 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
         }),
         provider_preferences: " { \"raw\" : [1.2300] } ".into(),
         include_router_metadata: true,
+        disable_max_turns: false,
     };
-    state.budget = AgentState::new(false);
+    state.budget = AgentState::default();
 
     assert_eq!(
         finish({
@@ -1711,6 +1713,7 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
         reasoning: None,
         provider_preferences: "second preferences".into(),
         include_router_metadata: false,
+        disable_max_turns: false,
     };
     state.enqueue_message(Delivery::Queue, "second question");
 
@@ -1777,7 +1780,7 @@ fn no_work_and_cancellation_never_open_a_turn_or_invoke_the_provider() {
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = AgentState::new(false);
+    state.budget = AgentState::default();
 
     assert_eq!(
         finish(run_turn(
@@ -1853,7 +1856,7 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
     );
     assert_eq!(state.request().rendered_instructions.len(), 6);
     assert!(state.final_requests.contains(&1));
-    assert_eq!(state.final_requests, [1, 2, 3, 4, 5, 6]);
+    assert_eq!(state.final_requests, [1, 3]);
     assert_eq!(
         state
             .trace
@@ -1902,7 +1905,7 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
     assert_eq!(catalogs[1], ["read"]);
     assert_eq!(catalogs[2], ["read"]);
     assert_eq!(catalogs[3], ["read", "write"]);
-    assert_eq!(state.final_requests, [2, 3, 5, 6, 7, 8, 9]);
+    assert_eq!(state.final_requests, [2]);
     assert!(catalogs[4..].iter().all(|tools| tools == &["read"]));
     assert!(state.tools.flags.lock().unwrap()[3].final_phase);
     assert!(
@@ -2303,12 +2306,10 @@ fn steering_commits_the_initial_assembly_once_before_the_first_request() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.status_offering = status_offer(&[("selection", true, "h1"), ("time", false, "t1")]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(state.status_steered, ["fitted status"]);
     assert_eq!(
-        state.status_steered,
-        [(
-            "fitted status".into(),
-            status_standing(&[("selection", "h1"), ("time", "t1")])
-        )]
+        state.budget.standing_statuses,
+        status_standing(&[("selection", "h1"), ("time", "t1")])
     );
     let request_messages = state.request().messages.clone();
     let steered = request_messages
@@ -2341,12 +2342,10 @@ fn unchanged_hashes_never_steer_again_across_turns() {
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     state.enqueue_message(Delivery::Queue, "follow up");
     assert_eq!(state.run(), Ok(Outcome::Completed("second answer".into())));
+    assert_eq!(state.status_steered, ["fitted status"]);
     assert_eq!(
-        state.status_steered,
-        [(
-            "fitted status".into(),
-            status_standing(&[("selection", "h1"), ("time", "t1")])
-        )]
+        state.budget.standing_statuses,
+        status_standing(&[("selection", "h1"), ("time", "t1")])
     );
     let steered = state
         .trace
@@ -2363,15 +2362,10 @@ fn changed_auto_hash_steers_again_at_the_next_safe_point() {
     state.status_offering = status_offer(&[("selection", true, "h1")]);
     state.next_status_offering = Some(status_offer(&[("selection", true, "h2")]));
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(state.status_steered, ["fitted status", "selection"]);
     assert_eq!(
-        state.status_steered,
-        [
-            (
-                "fitted status".into(),
-                status_standing(&[("selection", "h1")])
-            ),
-            ("selection".into(), status_standing(&[("selection", "h2")])),
-        ]
+        state.budget.standing_statuses,
+        status_standing(&[("selection", "h2")])
     );
     assert_eq!(
         state
@@ -2390,15 +2384,10 @@ fn changed_auto_hash_steers_at_a_retry_continuation() {
     state.status_offering = status_offer(&[("selection", true, "h1")]);
     state.next_status_offering = Some(status_offer(&[("selection", true, "h2")]));
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(state.status_steered, ["fitted status", "selection"]);
     assert_eq!(
-        state.status_steered,
-        [
-            (
-                "fitted status".into(),
-                status_standing(&[("selection", "h1")])
-            ),
-            ("selection".into(), status_standing(&[("selection", "h2")])),
-        ]
+        state.budget.standing_statuses,
+        status_standing(&[("selection", "h2")])
     );
     assert_eq!(
         state

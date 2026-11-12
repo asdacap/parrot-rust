@@ -45,7 +45,13 @@ async fn root_runtime(
     );
     let output = Arc::new(Output::default());
     let activity = Arc::new(Activity::new(trace.clone()));
+    let store = crate::agent_state_support::test_agent_state_store(
+        &fixture.path.join("agent-state"),
+        "agent",
+    )
+    .await;
     let runtime_config = RuntimeConfig {
+        agent_state: store.clone(),
         tool_execution: tool_execution_config(&fixture.history, templates.clone(), erased.clone()),
         agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
             disable_max_turns: false,
@@ -97,14 +103,7 @@ async fn root_runtime(
     .await
     .unwrap();
     Runtime {
-        session: {
-            let store = crate::agent_state_support::test_agent_state_store(
-                &fixture.path.join("agent-state"),
-                "agent",
-            )
-            .await;
-            AgentSession::with_state(backend, Arc::new(Signal::new()), store)
-        },
+        session: AgentSession::with_state(backend, Arc::new(Signal::new()), store),
         publisher,
         output,
         activity,

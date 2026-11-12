@@ -18,6 +18,9 @@ pub struct AgentStateSnapshot {
     pub children: Vec<RetainedChild>,
     pub tasks: TaskGraphSnapshot,
     pub execution: Option<ExecutionCheckpoint>,
+    /// Turn state core owns across turns and restarts. Absent until core first saves it.
+    #[serde(default)]
+    pub core: Option<parrot_core::AgentState>,
 }
 impl AgentStateSnapshot {
     pub fn new(owner_session_id: String, descriptor: AgentDescriptor) -> Self {
@@ -29,6 +32,7 @@ impl AgentStateSnapshot {
             children: Vec::new(),
             tasks: TaskGraphSnapshot::default(),
             execution: None,
+            core: None,
         }
     }
 }
@@ -375,4 +379,5 @@ pub enum AgentStateUpdate {
     Children(Vec<RetainedChild>),
     Tasks(TaskGraphSnapshot),
     Execution(Option<ExecutionCheckpoint>),
+    Core(parrot_core::AgentState),
 }

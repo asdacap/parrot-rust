@@ -1548,6 +1548,7 @@ where
                 let backend = RuntimeBackend::with_sessions(
                     RuntimeConfig {
                         agent_limits: self.config.configuration.runtime.agent_limits,
+                        agent_state: prepared.agent_state.clone(),
                         identity: identity.session.clone(),
                         history: prepared.history.clone(),
                         broker: self.user.broker.clone(),

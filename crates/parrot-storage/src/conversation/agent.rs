@@ -2,7 +2,6 @@ use super::*;
 use crate::events::{
     Admission, AdmittedInput, NeverCancelled, Promotion, ToolExecutionTerminal, timestamp,
 };
-use parrot_core::StatusStanding;
 use parrot_domain::protocol::messages::parrot::{Delivery, Event, RequestUsageRecorded};
 
 impl ConversationRepository {
@@ -229,21 +228,6 @@ impl AgentHistoryView {
             .append_compaction_status(event, snapshot, content)
             .await
     }
-    pub async fn read_final_phase(&self) -> Result<bool, EventError> {
-        self.repository.read_final_phase(self.agent.clone()).await
-    }
-    pub async fn standing_statuses(&self) -> Result<Option<StatusStanding>, EventError> {
-        self.repository.standing_statuses(self.agent.clone()).await
-    }
-    pub async fn append_status_assembly(
-        &self,
-        standing: StatusStanding,
-        content: String,
-    ) -> Result<(), EventError> {
-        self.repository
-            .append_status_assembly(self.agent.clone(), standing, content)
-            .await
-    }
     pub async fn append_system_prompt(&self, content: String) -> Result<(), EventError> {
         self.repository
             .append_system_prompt(self.agent.clone(), content)
@@ -257,15 +241,6 @@ impl AgentHistoryView {
     ) -> Result<(), EventError> {
         self.repository
             .append_retained_reminder(event, assistant, reminder)
-            .await
-    }
-    pub async fn append_phase_prompt(
-        &self,
-        final_phase: bool,
-        content: String,
-    ) -> Result<(), EventError> {
-        self.repository
-            .append_phase_prompt(self.agent.clone(), final_phase, content)
             .await
     }
     pub async fn find_request_usage(

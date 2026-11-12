@@ -126,7 +126,7 @@ async fn execute_turn<M: ToolResultMetadata>(
     if state.final_phase {
         let restored =
             rendering::render_template(states, ConfigKey::RestoredToolsTemplate, &[]).await?;
-        add_phase_prompt(states, &restored, false).await?;
+        add_phase_prompt(states, state, &restored, false).await?;
     }
     let mut compacted_oversized = false;
     let mut skills = skills::SkillPreparation::default();
@@ -175,7 +175,7 @@ async fn execute_turn<M: ToolResultMetadata>(
                     .await?;
             }
         }
-        let Some(flags) = state.admit(options.maximum_requests) else {
+        let Some(flags) = state.admit(options.maximum_requests, options.disable_max_turns) else {
             return exhaust_budget(states).await;
         };
         let definitions = if flags.final_phase {
@@ -183,11 +183,11 @@ async fn execute_turn<M: ToolResultMetadata>(
         } else {
             &catalog.normal
         };
-        steer_status(states, provider, definitions, cancellation).await?;
+        steer_status(states, state, provider, definitions, cancellation).await?;
         if flags.final_phase {
             let content =
                 rendering::render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
-            add_phase_prompt(states, &content, true).await?;
+            add_phase_prompt(states, state, &content, true).await?;
         }
         let prepared = context::prepare_request(
             states,

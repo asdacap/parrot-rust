@@ -1,5 +1,4 @@
 use super::conversation_state;
-use parrot_core::{StatusKey, StatusStanding};
 use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
 use parrot_domain::protocol::messages::parrot::Event;
 use parrot_storage::conversation::{
@@ -63,12 +62,6 @@ fn snapshot(summary: &str, watermark: i64) -> CompactionSnapshot {
         summary: summary.into(),
         watermark,
     }
-}
-fn standing(entries: &[(&str, &str)]) -> StatusStanding {
-    entries
-        .iter()
-        .map(|(key, hash)| (StatusKey::new(*key), (*hash).into()))
-        .collect()
 }
 async fn append(repo: &ConversationRepository, id: &str, role: MessageRole, content: &str) {
     let mut message = ConversationMessage::text(role, content);
@@ -246,19 +239,9 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
         .last()
         .unwrap()
         .sequence;
-    repo.append_status_assembly(
-        "agent".into(),
-        standing(&[("runtime:context-reminder", "h1"), ("other", "h2")]),
-        "assembly".into(),
-    )
-    .await
-    .unwrap();
-    assert!(
-        repo.standing_statuses("agent".into())
-            .await
-            .unwrap()
-            .is_some()
-    );
+    repo.append_system_prompt("agent".into(), "assembly".into())
+        .await
+        .unwrap();
     assert!(
         repo.append_compaction_status(
             event("second-status"),
@@ -267,16 +250,6 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
         )
         .await
         .unwrap()
-    );
-    let standing = repo
-        .standing_statuses("agent".into())
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(!standing.contains_key(&StatusKey::new("runtime:context-reminder")));
-    assert_eq!(
-        standing.get(&StatusKey::new("other")).map(String::as_str),
-        Some("h2")
     );
     append(&repo, "after", MessageRole::User, "after").await;
     let context = repo
@@ -337,16 +310,12 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
 }
 
 #[tokio::test]
-async fn compaction_projection_failure_rolls_back_snapshot_event_history_and_reminder_clear() {
+async fn compaction_projection_failure_rolls_back_snapshot_event_and_history() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
-    repo.append_status_assembly(
-        "agent".into(),
-        standing(&[("runtime:context-reminder", "h1")]),
-        "assembly".into(),
-    )
-    .await
-    .unwrap();
+    repo.append_system_prompt("agent".into(), "assembly".into())
+        .await
+        .unwrap();
     let before = repo.agent_history("agent".into()).await.unwrap();
     fail_projection(&repo).await;
     assert!(
@@ -373,15 +342,6 @@ async fn compaction_projection_failure_rolls_back_snapshot_event_history_and_rem
         .await
         .unwrap();
     assert_eq!(associations, 0);
-    assert_eq!(
-        repo.standing_statuses("agent".into())
-            .await
-            .unwrap()
-            .unwrap()
-            .get(&StatusKey::new("runtime:context-reminder"))
-            .map(String::as_str),
-        Some("h1")
-    );
     resume_projection(&repo).await;
     assert!(
         repo.append_compaction_status(
@@ -393,250 +353,7 @@ async fn compaction_projection_failure_rolls_back_snapshot_event_history_and_rem
         .unwrap()
     );
     assert_eq!(count(&repo, "event").await, 1);
-    assert!(
-        repo.standing_statuses("agent".into())
-            .await
-            .unwrap()
-            .unwrap()
-            .is_empty()
-    );
     repo.events().database().close().await.unwrap();
-}
-
-#[tokio::test]
-async fn status_standing_belongs_to_its_assembly_message_after_reopen() {
-    let fixture = Fixture::new();
-    let repo = fixture.repository();
-    repo.append_status_assembly(
-        "agent".into(),
-        standing(&[("runtime:context-reminder", "h1")]),
-        "rendered warning".into(),
-    )
-    .await
-    .unwrap();
-    let items = conversation_state(&repo, "agent").await.unwrap().items;
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0].item.message.role, MessageRole::System);
-    assert_eq!(
-        items[0].item.message.parts,
-        vec![parrot_storage::events::ConversationPart::text(
-            "rendered warning"
-        )]
-    );
-    let sequence = items[0].item.sequence;
-    repo.events().database().close().await.unwrap();
-
-    let reopened = fixture.repository();
-    assert_eq!(
-        reopened
-            .standing_statuses("agent".into())
-            .await
-            .unwrap()
-            .unwrap()
-            .get(&StatusKey::new("runtime:context-reminder"))
-            .map(String::as_str),
-        Some("h1")
-    );
-    reopened
-        .events()
-        .transaction(move |tx| {
-            tx.execute(
-                "DELETE FROM conversation_item WHERE sequence = ?1;",
-                [sequence],
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    assert!(
-        reopened
-            .standing_statuses("agent".into())
-            .await
-            .unwrap()
-            .is_none()
-    );
-    reopened.events().database().close().await.unwrap();
-}
-
-#[tokio::test]
-async fn compaction_removes_the_reminder_standing_even_when_the_assembly_is_retained() {
-    let fixture = Fixture::new();
-    let repo = fixture.repository();
-    repo.append_status_assembly(
-        "agent".into(),
-        standing(&[("runtime:context-reminder", "h1"), ("other", "h2")]),
-        "retained assembly".into(),
-    )
-    .await
-    .unwrap();
-    assert!(
-        repo.append_compaction_status(event("status"), snapshot("summary", 0), "compacted".into())
-            .await
-            .unwrap()
-    );
-    let status_sequence = repo
-        .compaction_history("agent".into())
-        .await
-        .unwrap()
-        .unwrap()
-        .status
-        .unwrap()
-        .sequence;
-    repo.events()
-        .transaction(move |tx| {
-            tx.execute(
-                "DELETE FROM conversation_item WHERE sequence = ?1;",
-                [status_sequence],
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    repo.save_compaction("agent".into(), snapshot("statusless summary", 1))
-        .await
-        .unwrap();
-    let after = repo
-        .standing_statuses("agent".into())
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(!after.contains_key(&StatusKey::new("runtime:context-reminder")));
-    assert_eq!(
-        after.get(&StatusKey::new("other")).map(String::as_str),
-        Some("h2")
-    );
-    repo.append_status_assembly(
-        "agent".into(),
-        standing(&[("runtime:context-reminder", "h1")]),
-        "new cycle".into(),
-    )
-    .await
-    .unwrap();
-    repo.save_compaction("agent".into(), snapshot("another statusless summary", 2))
-        .await
-        .unwrap();
-    assert_eq!(
-        repo.standing_statuses("agent".into())
-            .await
-            .unwrap()
-            .unwrap()
-            .get(&StatusKey::new("runtime:context-reminder"))
-            .map(String::as_str),
-        Some("h1")
-    );
-    repo.events().database().close().await.unwrap();
-}
-
-#[tokio::test]
-async fn final_request_messages_and_tool_restoration_roll_back_with_projected_messages() {
-    let fixture = Fixture::new();
-    let repo = fixture.repository();
-    repo.append_phase_prompt("agent".into(), false, "absent".into())
-        .await
-        .unwrap();
-    repo.append_phase_prompt("agent".into(), true, "final".into())
-        .await
-        .unwrap();
-    repo.append_phase_prompt("agent".into(), true, "duplicate".into())
-        .await
-        .unwrap();
-    assert_eq!(count(&repo, "conversation_item").await, 3);
-    fail_projection(&repo).await;
-    assert!(
-        repo.append_phase_prompt("agent".into(), false, "failed".into())
-            .await
-            .is_err()
-    );
-    assert!(
-        repo.conversation("agent".into())
-            .await
-            .unwrap()
-            .last()
-            .unwrap()
-            .final_phase
-    );
-    assert_eq!(count(&repo, "conversation_item").await, 3);
-    resume_projection(&repo).await;
-    repo.append_phase_prompt("agent".into(), false, "restored".into())
-        .await
-        .unwrap();
-    repo.append_system_prompt("agent".into(), "system".into())
-        .await
-        .unwrap();
-    assert_eq!(count(&repo, "conversation_item").await, 5);
-    assert_eq!(count(&repo, "event").await, 0);
-    repo.events().database().close().await.unwrap();
-}
-
-#[tokio::test]
-async fn final_request_state_survives_later_messages_and_reopen() {
-    let fixture = Fixture::new();
-    let repo = fixture.repository();
-    repo.append_phase_prompt("agent".into(), true, "final".into())
-        .await
-        .unwrap();
-    repo.save_compaction("agent".into(), snapshot("summary", 0))
-        .await
-        .unwrap();
-    for (id, role) in [
-        ("assistant", MessageRole::Assistant),
-        ("tool", MessageRole::Tool),
-        ("user", MessageRole::User),
-        ("system", MessageRole::System),
-    ] {
-        append(&repo, id, role, id).await;
-    }
-    repo.append_phase_prompt("agent".into(), true, "duplicate".into())
-        .await
-        .unwrap();
-    let messages = repo.conversation("agent".into()).await.unwrap();
-    assert_eq!(messages.len(), 6);
-    assert!(messages.iter().all(|item| item.final_phase));
-    let state = conversation_state(&repo, "agent").await.unwrap();
-    assert_eq!(state.items.len(), 6);
-    assert!(state.items.iter().all(|item| item.item.final_phase));
-    repo.events().database().close().await.unwrap();
-
-    let reopened = fixture.repository();
-    assert_eq!(
-        reopened.conversation("agent".into()).await.unwrap(),
-        messages
-    );
-    reopened
-        .append_phase_prompt("agent".into(), false, "restored".into())
-        .await
-        .unwrap();
-    reopened
-        .append_phase_prompt("agent".into(), false, "duplicate".into())
-        .await
-        .unwrap();
-    let restored = reopened.conversation("agent".into()).await.unwrap();
-    assert_eq!(restored.len(), 8);
-    assert!(!restored.last().unwrap().final_phase);
-    append(&reopened, "later", MessageRole::Assistant, "later").await;
-    assert!(
-        !reopened
-            .conversation("agent".into())
-            .await
-            .unwrap()
-            .last()
-            .unwrap()
-            .final_phase
-    );
-    reopened
-        .append_phase_prompt("agent".into(), true, "next final".into())
-        .await
-        .unwrap();
-    assert!(
-        reopened
-            .conversation("agent".into())
-            .await
-            .unwrap()
-            .last()
-            .unwrap()
-            .final_phase
-    );
-    reopened.events().database().close().await.unwrap();
 }
 
 #[tokio::test]

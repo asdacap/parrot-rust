@@ -133,7 +133,7 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = AgentState::new(false);
+    state.budget = AgentState::default();
 
     assert_eq!(
         finish(run_turn(
@@ -309,7 +309,7 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = AgentState::new(false);
+    state.budget = AgentState::default();
 
     assert_eq!(
         finish(run_turn(
@@ -338,7 +338,7 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
-    state.budget = AgentState::new(false);
+    state.budget = AgentState::default();
 
     assert_eq!(
         finish(run_turn(
@@ -542,7 +542,7 @@ fn provider_errors_write_the_consumed_request_budget_back_to_states() {
         Err(Error::failed("provider failure"))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
-    assert!(state.budget.admit(1).is_none());
+    assert!(state.budget.admit(1, false).is_none());
     assert!(state.recorded_tools.is_empty());
     assert!(state.last_turn.as_ref().unwrap().needs_response());
 }

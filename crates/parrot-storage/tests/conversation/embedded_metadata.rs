@@ -6,7 +6,7 @@ use parrot_storage::conversation::{
 };
 
 #[tokio::test]
-async fn embedded_provider_parts_calls_and_final_phase_survive_reopen() {
+async fn embedded_provider_parts_and_calls_survive_reopen() {
     let fixture = Fixture::new();
     let repository = fixture.repository();
     let mut message = ConversationMessage::text(MessageRole::Assistant, "unused");
@@ -44,7 +44,7 @@ async fn embedded_provider_parts_calls_and_final_phase_survive_reopen() {
         .await
         .unwrap();
     repository
-        .append_phase_prompt("agent".into(), true, "final instructions".into())
+        .append_system_prompt("agent".into(), "final instructions".into())
         .await
         .unwrap();
     repository
@@ -69,13 +69,6 @@ async fn embedded_provider_parts_calls_and_final_phase_survive_reopen() {
         [ConversationPart::text("final instructions")]
     );
     assert_eq!(items[2].message.parts, [ConversationPart::text("tail")]);
-    assert_eq!(
-        items
-            .iter()
-            .map(|item| item.final_phase)
-            .collect::<Vec<_>>(),
-        [false, true, true]
-    );
     let retired_tables = reopened
         .events()
         .transaction(|tx| {

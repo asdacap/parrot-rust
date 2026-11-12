@@ -335,7 +335,17 @@ impl ScopeFactory<Security> for Factory {
                 prepared.identity.session.session_id.clone(),
                 prepared.identity.session.parent_session_id.clone(),
             );
+            let store = crate::agent_state_support::test_agent_state_store(
+                &self
+                    .histories
+                    .path
+                    .join("agent-state")
+                    .join(prepared.identity.name_path.join("--")),
+                &prepared.identity.session.name,
+            )
+            .await;
             let runtime_config = RuntimeConfig {
+                agent_state: store.clone(),
                 tool_execution: crate::tool_execution_support::tool_execution_config(
                     &prepared.history,
                     templates.clone(),
@@ -373,18 +383,7 @@ impl ScopeFactory<Security> for Factory {
             let adapter = Arc::new(SessionAdapter::new(
                 prepared.identity.clone(),
                 prepared.selection,
-                {
-                    let store = crate::agent_state_support::test_agent_state_store(
-                        &self
-                            .histories
-                            .path
-                            .join("agent-state")
-                            .join(prepared.identity.name_path.join("--")),
-                        &prepared.identity.session.name,
-                    )
-                    .await;
-                    AgentSession::with_state(backend, prepared.lifetime, store)
-                },
+                AgentSession::with_state(backend, prepared.lifetime, store),
             ));
             let services = Arc::new(SessionServices {
                 adapter: adapter.clone(),

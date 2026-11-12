@@ -260,7 +260,13 @@ async fn usage_runtime(
         .await
         .unwrap(),
     );
+    let store = crate::agent_state_support::test_agent_state_store(
+        &fixture.path.join("agent-state"),
+        "agent",
+    )
+    .await;
     let runtime_config = RuntimeConfig {
+        agent_state: store.clone(),
         tool_execution: tool_execution_config(
             &fixture.history,
             templates.clone(),
@@ -313,11 +319,6 @@ async fn usage_runtime(
     )
     .await
     .unwrap();
-    let store = crate::agent_state_support::test_agent_state_store(
-        &fixture.path.join("agent-state"),
-        "agent",
-    )
-    .await;
     AgentSession::with_state(backend, Arc::new(Signal::new()), store)
 }
 

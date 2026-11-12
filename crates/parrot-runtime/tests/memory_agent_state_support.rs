@@ -71,6 +71,7 @@ impl AgentStateStore for MemoryAgentStateStore {
                 AgentStateUpdate::Children(children) => snapshot.children = children,
                 AgentStateUpdate::Tasks(tasks) => snapshot.tasks = tasks,
                 AgentStateUpdate::Execution(execution) => snapshot.execution = execution,
+                AgentStateUpdate::Core(state) => snapshot.core = Some(state),
             }
             snapshot.revision += 1;
             Ok(snapshot.clone())

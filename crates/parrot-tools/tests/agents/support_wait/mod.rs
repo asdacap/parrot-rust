@@ -668,7 +668,13 @@ impl Harness {
             tool: wait_tool(bridge.clone()),
         })));
         let provider = Scripted::default();
+        let store = crate::agent_state_support::test_agent_state_store(
+            &directory.join("agent-state"),
+            "agent",
+        )
+        .await;
         let runtime_config = RuntimeConfig {
+            agent_state: store.clone(),
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_max_turns: false,
                 ..Default::default()
@@ -713,11 +719,6 @@ impl Harness {
         )
         .await
         .unwrap();
-        let store = crate::agent_state_support::test_agent_state_store(
-            &directory.join("agent-state"),
-            "agent",
-        )
-        .await;
         let session = AgentSession::with_state(backend, Arc::new(Signal::new()), store);
         *bridge.service.lock().unwrap() = Some(WaitService {
             session: session.clone(),

@@ -661,27 +661,6 @@ impl EpochStates<'_> {
 }
 
 impl parrot_core::States for EpochStates<'_> {
-    fn add_conversation_messages(
-        &mut self,
-        addition: parrot_core::ConversationAddition,
-    ) -> BoxFuture<'_, Result<parrot_core::ConversationReceipt, parrot_core::Error>> {
-        Box::pin(async move {
-            let result = {
-                let controller = self.controller.lock().await;
-                let history = controller.history.clone();
-                super::add_conversation_messages(
-                    &history,
-                    self.conversation,
-                    addition,
-                    self.events,
-                    self.cancellation,
-                )
-                .await
-            };
-            result.map_err(|error| self.capture_error(error))
-        })
-    }
-
     fn read_status_offering(
         &self,
         context: parrot_core::ContextSnapshot,

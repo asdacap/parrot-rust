@@ -85,7 +85,13 @@ impl EdgeRuntime {
             .await
             .unwrap(),
         );
+        let store = crate::agent_state_support::test_agent_state_store(
+            &fixture.path.join("agent-state"),
+            "agent",
+        )
+        .await;
         let runtime_config = RuntimeConfig {
+            agent_state: store.clone(),
             tool_execution: tool_execution_config(
                 &fixture.history,
                 templates.clone(),
@@ -136,14 +142,7 @@ impl EdgeRuntime {
         .await
         .unwrap();
         Self {
-            session: {
-                let store = crate::agent_state_support::test_agent_state_store(
-                    &fixture.path.join("agent-state"),
-                    "agent",
-                )
-                .await;
-                AgentSession::with_state(backend, Arc::new(Signal::new()), store)
-            },
+            session: AgentSession::with_state(backend, Arc::new(Signal::new()), store),
         }
     }
     async fn execute(&self) -> Execution {

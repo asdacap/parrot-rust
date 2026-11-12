@@ -76,6 +76,7 @@ impl LegacyAgentStateSnapshot {
             children: self.children,
             tasks: self.tasks.normalize(),
             execution: self.execution,
+            core: None,
         }
     }
 }

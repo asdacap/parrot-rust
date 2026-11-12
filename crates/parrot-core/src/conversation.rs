@@ -46,16 +46,6 @@ pub enum ConversationPersistence {
         event: ConversationEvent,
     },
     Committed(ConversationPublication),
-    Phase {
-        final_phase: bool,
-        event: ConversationEvent,
-    },
-    /// Persists one steered status assembly. `standing` records the per-slot
-    /// hashes the assembly stands for, so the next safe point can diff against it.
-    StatusSteering {
-        standing: crate::StatusStanding,
-        event: ConversationEvent,
-    },
     CompletionBlockerFeedback(CompletionBlockerFeedback),
     ToolResult {
         assistant_sequence: i64,

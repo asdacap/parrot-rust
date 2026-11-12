@@ -163,7 +163,9 @@ pub(super) async fn runtime_with_publisher(
         image_bytes_per_cycle: 1024 * 1024,
     };
     let tools = factory.clone();
+    let store = test_agent_state_store(&fixture.path.join("agent-state"), "agent").await;
     let runtime_config = RuntimeConfig {
+        agent_state: store.clone(),
         agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
             disable_max_turns: false,
             ..Default::default()
@@ -199,7 +201,6 @@ pub(super) async fn runtime_with_publisher(
     )
     .await
     .unwrap();
-    let store = test_agent_state_store(&fixture.path.join("agent-state"), "agent").await;
     (
         AgentSession::with_state(backend, Arc::new(Signal::new()), store),
         factory,

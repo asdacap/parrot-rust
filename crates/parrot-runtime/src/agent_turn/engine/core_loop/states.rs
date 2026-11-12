@@ -1,9 +1,12 @@
 use super::conversation::{render_event, render_origin, render_record};
 use super::*;
 use parrot_core::{ConversationAddition, ConversationPersistence, ConversationReceipt};
+use parrot_domain::values::agent_state::AgentStateUpdate;
 
 pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) history: &'a AgentHistoryView,
+    pub(super) agent_state: &'a dyn AgentStateStore,
+    pub(super) disable_max_turns: bool,
     pub(super) activity: &'a dyn SessionActivity,
     pub(super) state: &'a Mutex<State>,
     pub(super) prompt: &'a SessionPrompt,
@@ -30,6 +33,8 @@ impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
     ) -> Self {
         Self {
             history: &backend.history,
+            agent_state: backend.agent_state.as_ref(),
+            disable_max_turns: backend.disable_max_turns,
             activity: backend.activity.as_ref(),
             state: &backend.state,
             prompt: &backend.prompt,
@@ -93,21 +98,6 @@ where
                         publication.event,
                     );
                     publications.push(event);
-                }
-                persistence @ (ConversationPersistence::Phase { .. }
-                | ConversationPersistence::StatusSteering { .. }) => {
-                    return crate::compaction::add_conversation_messages(
-                        self.history,
-                        &mut state.conversation,
-                        ConversationAddition {
-                            messages: addition.messages,
-                            persistence,
-                        },
-                        &self.events,
-                        cancellation,
-                    )
-                    .await
-                    .map_err(Into::into);
                 }
                 persistence @ ConversationPersistence::ToolResult { .. } => {
                     return state
@@ -255,30 +245,22 @@ where
         })
     }
     fn get_agent_state(&self) -> BoxFuture<'_, Result<parrot_core::AgentState, CoreError>> {
-        adapt_operation(async move {
-            let mut state = self.state.lock().await.agent_state.clone();
-            state.final_phase = self
-                .history
-                .read_final_phase()
-                .await
-                .map_err(TurnError::from)?;
-            state.standing_statuses = self
-                .history
-                .standing_statuses()
-                .await
-                .map_err(TurnError::from)?
-                .unwrap_or_default();
-            Ok(state)
-        })
+        adapt_operation(async move { Ok(self.state.lock().await.agent_state.clone()) })
     }
-    // The durable final-phase marker is only ever flipped by phase-prompt additions,
-    // so saving the state never writes the marker durably.
     fn set_agent_state(
         &mut self,
         state: parrot_core::AgentState,
     ) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
-            self.state.lock().await.agent_state = state;
+            let mut guard = self.state.lock().await;
+            if guard.persisted_agent_state.as_ref() != Some(&state) {
+                self.agent_state
+                    .update(AgentStateUpdate::Core(state.clone()))
+                    .await
+                    .map_err(|error| TurnError::Service(error.to_string()))?;
+                guard.persisted_agent_state = Some(state.clone());
+            }
+            guard.agent_state = state;
             Ok(())
         })
     }
@@ -297,6 +279,7 @@ where
                         reasoning: selection.model.canonical_model.reasoning(),
                         provider_preferences: String::new(),
                         include_router_metadata: false,
+                        disable_max_turns: self.disable_max_turns,
                     }))
                 }
                 ConfigKey::Context => {

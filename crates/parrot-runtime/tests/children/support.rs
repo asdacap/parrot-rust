@@ -533,7 +533,13 @@ impl Factory {
                 (id, handle)
             })
             .collect();
+        let store = crate::agent_state_support::test_agent_state_store(
+            &histories.path.join("agent-state").join(name.clone()),
+            &name,
+        )
+        .await;
         let runtime_config = RuntimeConfig {
+            agent_state: store.clone(),
             tool_execution: tool_execution_config(&history, templates.clone(), publisher.clone()),
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_max_turns: false,
@@ -567,14 +573,7 @@ impl Factory {
         let adapter = Arc::new(SessionAdapter::new(
             prepared.identity.clone(),
             prepared.selection.clone(),
-            {
-                let store = crate::agent_state_support::test_agent_state_store(
-                    &histories.path.join("agent-state").join(name.clone()),
-                    &name,
-                )
-                .await;
-                AgentSession::with_state(backend, prepared.lifetime, store)
-            },
+            AgentSession::with_state(backend, prepared.lifetime, store),
         ));
         self.built.lock().unwrap().insert(
             name.clone(),

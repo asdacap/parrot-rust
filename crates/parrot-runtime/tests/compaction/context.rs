@@ -369,7 +369,7 @@ impl Default for EpochPrompt {
     fn default() -> Self {
         let sampled = Arc::new(AtomicUsize::new(0));
         Self {
-            agent_state: parrot_core::AgentState::new(false),
+            agent_state: parrot_core::AgentState::default(),
             prompt: SessionPrompt::new(Box::new(EpochProduct {
                 sampled: sampled.clone(),
                 sampling: false,

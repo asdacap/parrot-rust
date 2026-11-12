@@ -44,7 +44,8 @@ pub struct ContextCompaction {
     pub reduced: bool,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RequestStatistic {
     pub(crate) selector: Option<String>,
     pub(crate) estimated_input_tokens: i64,

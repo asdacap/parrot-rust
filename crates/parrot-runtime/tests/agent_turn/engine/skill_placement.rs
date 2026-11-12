@@ -115,7 +115,13 @@ async fn skill_session(
     // read skill files or infer permissions from these inert path descriptions.
     let instructions =
         format!("Available Markdown skills:\n- $first ({first_path})\n- $second ({second_path})");
+    let store = crate::agent_state_support::test_agent_state_store(
+        &fixture.path.join("agent-state"),
+        "agent",
+    )
+    .await;
     let runtime_config = RuntimeConfig {
+        agent_state: store.clone(),
         tool_execution: tool_execution_config(
             &fixture.history,
             templates.clone(),
@@ -164,11 +170,6 @@ async fn skill_session(
     )
     .await
     .unwrap();
-    let store = crate::agent_state_support::test_agent_state_store(
-        &fixture.path.join("agent-state"),
-        "agent",
-    )
-    .await;
     AgentSession::with_state(backend, Arc::new(Signal::new()), store)
 }
 

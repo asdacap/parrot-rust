@@ -79,6 +79,22 @@ impl From<TurnError> for CoreError {
 }
 
 impl State {
+    pub(super) async fn restore_agent_state(
+        &mut self,
+        store: &dyn AgentStateStore,
+    ) -> Result<(), TurnError> {
+        if self.persisted_agent_state.is_none() {
+            let restored = store
+                .load()
+                .await
+                .map_err(|error| TurnError::Service(error.to_string()))?
+                .and_then(|snapshot| snapshot.core)
+                .unwrap_or_default();
+            self.agent_state = restored.clone();
+            self.persisted_agent_state = Some(restored);
+        }
+        Ok(())
+    }
     fn read_last_turn(&self) -> Option<parrot_core::ConversationTurn> {
         self.conversation
             .read_last_turn_messages()
@@ -223,16 +239,20 @@ pub(super) async fn run<S>(
 where
     S: AccessSnapshot + 'static,
 {
-    let initialized = {
+    let initialized = async {
         let mut guard = backend.state.lock().await;
         let state = &mut *guard;
+        state
+            .restore_agent_state(backend.agent_state.as_ref())
+            .await?;
         state.agent_state.restart();
         state.tool_conversation.reset_pending();
         state
             .tool_conversation
             .restore_results(&mut state.conversation)
             .await
-    };
+    }
+    .await;
     if let Err(error) = initialized {
         return (Err(error), None);
     }
