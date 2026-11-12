@@ -52,6 +52,17 @@ impl parrot_core::EventPublisher for RuntimeEventPublisher<'_> {
                 .map_err(Into::into)
         })
     }
+    fn report_compaction_finished(&self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.state
+                .lock()
+                .await
+                .context
+                .report_epoch_finished(&self.events)
+                .await
+                .map_err(Into::into)
+        })
+    }
     fn report_compaction_progress<'a, 'c>(
         &'a self,
         progress: parrot_core::CompactionProgress,

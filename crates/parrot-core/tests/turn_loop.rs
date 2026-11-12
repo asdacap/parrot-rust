@@ -1,14 +1,13 @@
 use parrot_core::{
     AgentState, BoxFuture, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConfigValue,
-    Content, ContextCompaction, ContextConfiguration, ContextModel, ContextSnapshot,
-    ConversationAddition, ConversationEvent, ConversationOrigin, ConversationPersistence,
-    ConversationReceipt, ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind,
-    EventPublisher, FinishReason, InputAdmission, Message, Outcome, PendingMessage, PromotedInput,
-    PromptTemplate, Provider, ProviderRequest, ProviderResponse, Reasoning, Role, Skill,
-    SkillContent, SkillMention, SkillReference, States, StatusKey, StatusOffer, StatusOffering,
-    StatusStanding, TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition,
-    ToolExecutionRequest, ToolImage, ToolResult, ToolStatus, Tools, TurnFlags, TurnOptions,
-    parse_skill_mentions,
+    Content, ContextConfiguration, ContextModel, ContextSnapshot, ConversationAddition,
+    ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationReceipt,
+    ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind, EventPublisher,
+    FinishReason, InputAdmission, Message, Outcome, PendingMessage, PromotedInput, PromptTemplate,
+    Provider, ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent,
+    SkillMention, SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding,
+    TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest,
+    ToolImage, ToolResult, ToolStatus, Tools, TurnFlags, TurnOptions, parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -75,6 +74,12 @@ impl EventPublisher for MemoryEventPublisher {
         })
     }
     fn report_compaction_failed(&self, _: String) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.compacting.store(false, Ordering::SeqCst);
+            Ok(())
+        })
+    }
+    fn report_compaction_finished(&self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.compacting.store(false, Ordering::SeqCst);
             Ok(())
@@ -397,7 +402,6 @@ struct CompactedContext {
     instructions: String,
     messages: Vec<Message>,
     state: MemoryContext,
-    reduced: bool,
 }
 
 struct MemoryRequestData {
@@ -449,7 +453,6 @@ struct MemoryState {
     cancellation: Arc<CancellationSource>,
     unlimited: bool,
     maximum: i32,
-    reduced: bool,
     compaction_plan: Option<parrot_core::CompactionPlan>,
     summary_provider: compaction_support::Provider,
     recorded_compactions: Vec<Result<Option<parrot_core::CompactionResult>, Error>>,
@@ -577,7 +580,6 @@ impl MemoryState {
             cancellation,
             unlimited: false,
             maximum: 10,
-            reduced: true,
             compaction_plan: None,
             summary_provider: compaction_support::Provider::new([]),
             recorded_compactions: Vec::new(),
@@ -1117,6 +1119,9 @@ impl States for MemoryState {
             Ok(self.request().messages.clone())
         })
     }
+    fn read_usage_totals(&self) -> BoxFuture<'_, Result<parrot_core::UsageTotals, Error>> {
+        Box::pin(async move { Ok(parrot_core::UsageTotals::default()) })
+    }
     fn read_conversation_summary(
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationSummary>, Error>> {
@@ -1175,7 +1180,7 @@ impl States for MemoryState {
         instructions: &'a str,
         definitions: &'a [ToolDefinition],
         result: Result<Option<parrot_core::FittedCompaction>, Error>,
-    ) -> BoxFuture<'a, Result<ContextCompaction, Error>> {
+    ) -> BoxFuture<'a, Result<String, Error>> {
         Box::pin(async move {
             self.compacting.store(false, Ordering::SeqCst);
             self.step("compact")?;
@@ -1193,15 +1198,8 @@ impl States for MemoryState {
                 self.request().instructions = compacted.instructions;
                 self.request().messages = compacted.messages;
                 self.request().context = compacted.state;
-                return Ok(ContextCompaction {
-                    instructions: self.request().instructions.clone(),
-                    reduced: compacted.reduced,
-                });
             }
-            Ok(ContextCompaction {
-                instructions: self.request().instructions.clone(),
-                reduced: self.reduced,
-            })
+            Ok(self.request().instructions.clone())
         })
     }
 }
@@ -1491,6 +1489,13 @@ fn oversized_requests_compact_once_until_a_successful_response_resets_the_guard(
         Reply::TooLarge("second"),
         Reply::final_response("answer"),
     ]);
+    state.compaction_plan = Some(compaction_support::plan(&["original group", "tail"]));
+    state.summary_provider.replies.lock().unwrap().push_back(Ok(
+        parrot_core::SummaryResponse::Summary("first summary".into()),
+    ));
+    state.summary_provider.replies.lock().unwrap().push_back(Ok(
+        parrot_core::SummaryResponse::Summary("second summary".into()),
+    ));
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(
         state
@@ -1507,6 +1512,10 @@ fn oversized_requests_compact_once_until_a_successful_response_resets_the_guard(
 #[test]
 fn a_second_oversized_failure_propagates_without_repeating_compaction() {
     let mut state = MemoryState::new([Reply::TooLarge("first"), Reply::TooLarge("second")]);
+    state.compaction_plan = Some(compaction_support::plan(&["original group", "tail"]));
+    state.summary_provider.replies.lock().unwrap().push_back(Ok(
+        parrot_core::SummaryResponse::Summary("core summary".into()),
+    ));
     assert_eq!(state.run(), Err(request_too_large("second")));
     assert_eq!(
         state
@@ -1523,7 +1532,6 @@ fn a_second_oversized_failure_propagates_without_repeating_compaction() {
 #[test]
 fn compaction_that_does_not_reduce_context_returns_the_original_provider_error() {
     let mut state = MemoryState::new([Reply::TooLarge("original")]);
-    state.reduced = false;
     assert_eq!(state.run(), Err(request_too_large("original")));
     assert_eq!(state.request().rendered_instructions.len(), 1);
     assert_eq!(state.trace.values().last().unwrap(), "compact");
@@ -1545,6 +1553,14 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
         .prompts()
         .exit_blockers
         .push_back(vec!["work remains".into()]);
+    state.compaction_plan = Some(compaction_support::plan(&["original group", "tail"]));
+    state.summary_provider.replies.lock().unwrap().push_back(Ok(
+        parrot_core::SummaryResponse::Summary("core summary".into()),
+    ));
+    *state.compaction.lock().unwrap() = MemoryCompaction::new(
+        state.compaction_plan.clone(),
+        state.summary_provider.clone(),
+    );
     let tools = state.tools.clone();
     let provider = state.provider.clone();
     let options = TurnOptions {
@@ -2070,7 +2086,6 @@ fn fixed_error_metadata_and_original_oversized_error_survive_core_recovery() {
         response_body: "unredacted top-level body".into(),
     };
     let mut states = MemoryState::new([Reply::Error(error.clone())]);
-    states.reduced = false;
     assert_eq!(states.run(), Err(error.clone()));
     assert_eq!(error.to_string(), "request rejected");
     assert_eq!(error.code.code(), "http");

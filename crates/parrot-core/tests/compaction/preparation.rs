@@ -63,6 +63,12 @@ impl EventPublisher for PreparationEventPublisher {
             Ok(())
         })
     }
+    fn report_compaction_finished(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            self.events.lock().unwrap().push("finished".into());
+            Ok(())
+        })
+    }
     fn report_compaction_progress<'a, 'c>(
         &'a self,
         _: parrot_core::CompactionProgress,

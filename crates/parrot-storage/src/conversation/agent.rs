@@ -305,7 +305,7 @@ impl AgentHistoryView {
         &self,
         event: Event,
         content: String,
-    ) -> Result<bool, EventError> {
+    ) -> Result<(), EventError> {
         self.repository
             .append_final_provider_request_prompt(event, content)
             .await
@@ -314,7 +314,7 @@ impl AgentHistoryView {
         &self,
         event: Event,
         content: String,
-    ) -> Result<bool, EventError> {
+    ) -> Result<(), EventError> {
         self.repository
             .append_tool_availability_restored_prompt(event, content)
             .await

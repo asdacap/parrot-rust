@@ -309,8 +309,24 @@ impl ContextController {
             .map_err(|error| errors.restore(error, ContextError::from));
             (prepared, result)
         };
-        self.record_epoch_compaction(&mut input, prepared.instructions, result, cancellation)
-            .await
+        let recorded = self
+            .record_epoch_compaction(&mut input, prepared.instructions, result, cancellation)
+            .await;
+        let outcome = match recorded {
+            Ok(result) => self
+                .report_epoch_finished(input.events)
+                .await
+                .map(|()| result),
+            Err(error) => Err(error),
+        };
+        match outcome {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                self.fail_epoch_compaction(error.to_string(), input.events)
+                    .await?;
+                Err(error)
+            }
+        }
     }
 
     pub(crate) async fn report_epoch_started(
@@ -322,6 +338,15 @@ impl ContextController {
         events.emit(started, &Uncancelled).await
     }
 
+    pub(crate) async fn report_epoch_finished(
+        &self,
+        events: &dyn ContextEvents,
+    ) -> ContextResult<()> {
+        let mut finished = self.event()?;
+        finished.set_compaction_finished(CompactionFinished::new());
+        events.emit(finished, &Uncancelled).await
+    }
+
     pub(crate) async fn record_epoch_compaction(
         &mut self,
         input: &mut EpochInput<'_>,
@@ -329,24 +354,8 @@ impl ContextController {
         result: ContextResult<Option<parrot_core::FittedCompaction>>,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<EpochResult> {
-        let outcome: ContextResult<EpochResult> = async {
-            let result = self
-                .apply_compaction(input, instructions, result?, cancellation)
-                .await?;
-            let mut finished = self.event()?;
-            finished.set_compaction_finished(CompactionFinished::new());
-            input.events.emit(finished, &Uncancelled).await?;
-            Ok(result)
-        }
-        .await;
-        match outcome {
-            Ok(result) => Ok(result),
-            Err(error) => {
-                self.fail_epoch_compaction(error.to_string(), input.events)
-                    .await?;
-                Err(error)
-            }
-        }
+        self.apply_compaction(input, instructions, result?, cancellation)
+            .await
     }
 
     pub(crate) async fn fail_epoch_compaction(
@@ -423,6 +432,7 @@ impl ContextController {
         let mut reduced = false;
         if let Some(compacted) = compacted {
             let status = compacted.status;
+            let notice = compacted.notice;
             let compacted: CompactionResult = compacted.result.into();
             let mut saving = self.event()?;
             saving.set_compaction_progress(CompactionProgressEvent {
@@ -430,8 +440,8 @@ impl ContextController {
                 ..CompactionProgressEvent::new()
             });
             input.events.emit(saving, cancellation).await?;
-            let published = self.notice("status", format!("Status prompt injected\n{status}"))?;
-            if !self
+            let published = self.notice("status", notice)?;
+            let appended = self
                 .history
                 .append_compaction_status(
                     published.clone(),
@@ -441,19 +451,16 @@ impl ContextController {
                     },
                     status,
                 )
-                .await?
-            {
-                return Err(ContextError::InvalidOperation(
-                    "compaction snapshot was already persisted".into(),
-                ));
-            }
+                .await?;
             reduced = true;
             self.budget.reset();
             input.conversation.reload().await?;
-            input
-                .events
-                .publish_committed(Committed::after_commit(published), &Uncancelled)
-                .await?;
+            if appended {
+                input
+                    .events
+                    .publish_committed(Committed::after_commit(published), &Uncancelled)
+                    .await?;
+            }
         }
         Ok(EpochResult {
             instructions,
@@ -534,6 +541,19 @@ impl parrot_core::EventPublisher for EpochEventPublisher<'_> {
                 .lock()
                 .await
                 .fail_epoch_compaction(message, self.events)
+                .await
+                .map_err(|error| {
+                    let diagnostic = describe_context_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
+        })
+    }
+    fn report_compaction_finished(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async move {
+            self.controller
+                .lock()
+                .await
+                .report_epoch_finished(self.events)
                 .await
                 .map_err(|error| {
                     let diagnostic = describe_context_error(&error);
@@ -695,12 +715,11 @@ impl parrot_core::States for EpochStates<'_> {
         instructions: &'a str,
         definitions: &'a [parrot_core::ToolDefinition],
         result: Result<Option<parrot_core::FittedCompaction>, parrot_core::Error>,
-    ) -> BoxFuture<'a, Result<parrot_core::ContextCompaction, parrot_core::Error>> {
+    ) -> BoxFuture<'a, Result<String, parrot_core::Error>> {
         Box::pin(async move {
             let definitions = definitions.to_vec();
             let result = result.map_err(|error| self.errors.restore(error, ContextError::from));
-            let recorded = self
-                .controller
+            self.controller
                 .lock()
                 .await
                 .record_epoch_compaction(
@@ -717,12 +736,8 @@ impl parrot_core::States for EpochStates<'_> {
                     result,
                     self.cancellation,
                 )
-                .await;
-            recorded
-                .map(|result| parrot_core::ContextCompaction {
-                    instructions: result.instructions,
-                    reduced: result.reduced,
-                })
+                .await
+                .map(|result| result.instructions)
                 .map_err(|error| self.capture_error(error))
         })
     }

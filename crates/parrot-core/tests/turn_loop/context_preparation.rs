@@ -108,7 +108,6 @@ fn raw_and_calibrated_triggers_compact_and_use_returned_epoch() {
             instructions: "sampled compacted instructions".into(),
             messages: messages.clone(),
             state: compacted_state,
-            reduced: true,
         });
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
         assert_eq!(state.request().rendered_instructions, ["core request"]);
@@ -164,7 +163,6 @@ fn separate_context_reads_use_compaction_configuration_and_calibration() {
             ..Message::default()
         }],
         state: compacted,
-        reduced: true,
     });
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
@@ -238,7 +236,6 @@ fn post_compaction_raw_input_failure_precedes_further_provider_effects() {
         instructions: "compacted but too large".into(),
         messages: vec![],
         state: context,
-        reduced: false,
     });
     let error = state.run().unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidOperation);

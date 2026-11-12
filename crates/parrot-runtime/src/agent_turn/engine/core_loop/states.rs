@@ -114,7 +114,10 @@ where
                             .await?;
                     }
                 }
-                ConversationPersistence::CloseTurn { finish_reason } => {
+                ConversationPersistence::CloseTurn {
+                    finish_reason,
+                    usage,
+                } => {
                     self.work
                         .join_mutations()
                         .await
@@ -123,7 +126,6 @@ where
                         .persistence_key
                         .as_ref()
                         .ok_or_else(|| TurnError::Service("turn start is unavailable".into()))?;
-                    let totals = self.usage.capture().own.totals;
                     let mut event = self.events.event();
                     let completed: sessions::Completion = ProviderResponse {
                         finish_reason,
@@ -132,8 +134,8 @@ where
                     .into();
                     event.set_turn_ended(protocol::TurnEnded {
                         finish_reason: completed.finish_reason,
-                        input_tokens: totals.input_tokens,
-                        output_tokens: totals.output_tokens,
+                        input_tokens: usage.input_tokens,
+                        output_tokens: usage.output_tokens,
                         ..Default::default()
                     });
                     let record = render_record(&addition.messages[0], ConversationOrigin::Model)?;
@@ -570,6 +572,15 @@ where
                 .collect())
         })
     }
+    fn read_usage_totals(&self) -> BoxFuture<'_, Result<parrot_core::UsageTotals, CoreError>> {
+        adapt_operation(async move {
+            let totals = self.usage.capture().own.totals;
+            Ok(parrot_core::UsageTotals {
+                input_tokens: totals.input_tokens,
+                output_tokens: totals.output_tokens,
+            })
+        })
+    }
     fn read_conversation_summary(
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationSummary>, CoreError>> {
@@ -612,24 +623,15 @@ where
         instructions: &'a str,
         definitions: &'a [ToolDefinition],
         result: Result<Option<parrot_core::FittedCompaction>, CoreError>,
-    ) -> BoxFuture<'a, Result<CoreContextCompaction, CoreError>> {
+    ) -> BoxFuture<'a, Result<String, CoreError>> {
         Box::pin(async move {
             let definitions: Vec<sessions::Tool> = definitions.to_vec();
 
             let mut guard = self.state.lock().await;
             let state = &mut *guard;
-            let events = self.events;
             let compacted = match result {
                 Ok(compacted) => compacted,
-                Err(error) => {
-                    state
-                        .context
-                        .fail_epoch_compaction(error.to_string(), &events)
-                        .await
-                        .map_err(TurnError::from)
-                        .map_err(CoreError::from)?;
-                    return Err(error);
-                }
+                Err(error) => return Err(error),
             };
             let selection = self.binding.capture_selection().map_err(CoreError::from)?;
             let status = state
@@ -646,7 +648,7 @@ where
                         prompt: self.prompt,
                         sessions: self.sessions,
                         status: status.as_ref(),
-                        events: &events,
+                        events: &self.events,
                     },
                     instructions.into(),
                     Ok(compacted),
@@ -655,10 +657,7 @@ where
                 .await
                 .map_err(TurnError::from)
                 .map_err(CoreError::from)?;
-            Ok(CoreContextCompaction {
-                instructions: result.instructions,
-                reduced: result.reduced,
-            })
+            Ok(result.instructions)
         })
     }
 }

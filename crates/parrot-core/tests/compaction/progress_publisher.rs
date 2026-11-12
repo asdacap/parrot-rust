@@ -23,6 +23,13 @@ impl EventPublisher for ProgressPublisher {
             ))
         })
     }
+    fn report_compaction_finished(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async {
+            Err(Error::unsupported(
+                "ProgressPublisher.report_compaction_finished",
+            ))
+        })
+    }
     fn report_compaction_progress<'a, 'c>(
         &'a self,
         progress: CompactionProgress,

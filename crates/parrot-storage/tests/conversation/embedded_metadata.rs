@@ -43,18 +43,16 @@ async fn embedded_provider_parts_calls_and_final_phase_survive_reopen() {
         )
         .await
         .unwrap();
-    assert!(
-        repository
-            .append_final_provider_request_prompt(
-                Event {
-                    agent_session_id: "agent".into(),
-                    ..Default::default()
-                },
-                "final instructions".into(),
-            )
-            .await
-            .unwrap()
-    );
+    repository
+        .append_final_provider_request_prompt(
+            Event {
+                agent_session_id: "agent".into(),
+                ..Default::default()
+            },
+            "final instructions".into(),
+        )
+        .await
+        .unwrap();
     repository
         .append_conversation(
             Event {

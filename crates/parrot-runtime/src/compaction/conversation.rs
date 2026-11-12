@@ -35,16 +35,16 @@ pub async fn add_conversation_messages(
     let (inserted, published) = match addition.persistence {
         ConversationPersistence::Phase { final_phase, event } => {
             let published = notice(history, event)?;
-            let inserted = if final_phase {
+            if final_phase {
                 history
                     .append_final_provider_request_prompt(published.clone(), content)
-                    .await?
+                    .await?;
             } else {
                 history
                     .append_tool_availability_restored_prompt(published.clone(), content)
-                    .await?
-            };
-            (inserted, published)
+                    .await?;
+            }
+            (true, published)
         }
         ConversationPersistence::StatusSteering { standing, event } => {
             let published = notice(history, event)?;

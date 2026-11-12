@@ -219,11 +219,13 @@ async fn execute_turn(
         }
         let messages = states.collect_completion_blockers().await?;
         if messages.is_empty() {
+            let usage = states.read_usage_totals().await?;
             states
                 .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::from_response(&response)],
                     persistence: ConversationPersistence::CloseTurn {
                         finish_reason: response.finish_reason.clone(),
+                        usage,
                     },
                 })
                 .await?;
@@ -253,11 +255,13 @@ async fn execute_turn(
 /// Records an interrupted assistant turn through the same generic conversation operation.
 pub async fn interrupt_turn(states: &mut dyn States) -> Result<Option<String>, Error> {
     let content = rendering::render_template(states, ConfigKey::InterruptedTemplate, &[]).await?;
+    let usage = states.read_usage_totals().await?;
     let receipt = states
         .add_conversation_messages(ConversationAddition {
             messages: vec![Message::text(Role::Assistant, &content)],
             persistence: ConversationPersistence::CloseTurn {
                 finish_reason: FinishReason::Interrupted,
+                usage,
             },
         })
         .await?;

@@ -28,9 +28,25 @@ pub(crate) async fn compact_context(
         cancellation,
     )
     .await;
-    states
+    let reduced = compacted.as_ref().is_ok_and(|fitted| fitted.is_some());
+    let recorded = states
         .finalize_compaction(&input.instructions, definitions, compacted)
-        .await
+        .await;
+    match recorded {
+        Ok(instructions) => {
+            publisher.report_compaction_finished().await?;
+            Ok(ContextCompaction {
+                instructions,
+                reduced,
+            })
+        }
+        Err(error) => {
+            publisher
+                .report_compaction_failed(error.to_string())
+                .await?;
+            Err(error)
+        }
+    }
 }
 
 pub(crate) async fn prepare_request(

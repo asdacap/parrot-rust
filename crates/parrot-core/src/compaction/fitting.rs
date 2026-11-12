@@ -98,7 +98,8 @@ pub async fn fit_compaction(
     }
     Ok(Some(FittedCompaction {
         result,
-        status: fitted,
+        status: fitted.clone(),
+        notice: crate::status_notice(&fitted),
     }))
 }
 

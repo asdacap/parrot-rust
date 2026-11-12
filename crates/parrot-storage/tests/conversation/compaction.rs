@@ -531,22 +531,16 @@ async fn compaction_removes_the_reminder_standing_even_when_the_assembly_is_reta
 async fn final_request_messages_and_tool_restoration_roll_back_with_projected_messages() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
-    assert!(
-        !repo
-            .append_tool_availability_restored_prompt(event("same"), "absent".into())
-            .await
-            .unwrap()
-    );
+    repo.append_tool_availability_restored_prompt(event("same"), "absent".into())
+        .await
+        .unwrap();
     repo.append_final_provider_request_prompt(event("same"), "final".into())
         .await
         .unwrap();
-    assert!(
-        !repo
-            .append_final_provider_request_prompt(event("same"), "duplicate".into())
-            .await
-            .unwrap()
-    );
-    assert_eq!(count(&repo, "conversation_item").await, 1);
+    repo.append_final_provider_request_prompt(event("same"), "duplicate".into())
+        .await
+        .unwrap();
+    assert_eq!(count(&repo, "conversation_item").await, 3);
     fail_projection(&repo).await;
     assert!(
         repo.append_tool_availability_restored_prompt(event("same"), "failed".into())
@@ -561,29 +555,21 @@ async fn final_request_messages_and_tool_restoration_roll_back_with_projected_me
             .unwrap()
             .final_phase
     );
-    assert_eq!(count(&repo, "conversation_item").await, 1);
+    assert_eq!(count(&repo, "conversation_item").await, 3);
     resume_projection(&repo).await;
-    assert!(
-        repo.append_tool_availability_restored_prompt(event("same"), "restored".into())
-            .await
-            .unwrap()
-    );
-    assert!(
-        !repo
-            .append_tool_availability_restored_prompt(event("same"), "duplicate".into())
-            .await
-            .unwrap()
-    );
+    repo.append_tool_availability_restored_prompt(event("same"), "restored".into())
+        .await
+        .unwrap();
     repo.append_system_prompt(event("same"), "system".into())
         .await
         .unwrap();
-    assert_eq!(count(&repo, "conversation_item").await, 3);
+    assert_eq!(count(&repo, "conversation_item").await, 5);
     assert_eq!(count(&repo, "event").await, 0);
     repo.events().database().close().await.unwrap();
 }
 
 #[tokio::test]
-async fn final_request_state_survives_later_messages_and_reopen_without_duplicate_prompts() {
+async fn final_request_state_survives_later_messages_and_reopen() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
     repo.append_final_provider_request_prompt(event("final"), "final".into())
@@ -604,10 +590,10 @@ async fn final_request_state_survives_later_messages_and_reopen_without_duplicat
         .await
         .unwrap();
     let messages = repo.conversation("agent".into()).await.unwrap();
-    assert_eq!(messages.len(), 5);
+    assert_eq!(messages.len(), 6);
     assert!(messages.iter().all(|item| item.final_phase));
     let state = conversation_state(&repo, "agent").await.unwrap();
-    assert_eq!(state.items.len(), 5);
+    assert_eq!(state.items.len(), 6);
     assert!(state.items.iter().all(|item| item.item.final_phase));
     repo.events().database().close().await.unwrap();
 
@@ -616,20 +602,16 @@ async fn final_request_state_survives_later_messages_and_reopen_without_duplicat
         reopened.conversation("agent".into()).await.unwrap(),
         messages
     );
-    assert!(
-        reopened
-            .append_tool_availability_restored_prompt(event("restored"), "restored".into())
-            .await
-            .unwrap()
-    );
-    assert!(
-        !reopened
-            .append_tool_availability_restored_prompt(event("duplicate"), "duplicate".into())
-            .await
-            .unwrap()
-    );
+    reopened
+        .append_tool_availability_restored_prompt(event("restored"), "restored".into())
+        .await
+        .unwrap();
+    reopened
+        .append_tool_availability_restored_prompt(event("duplicate"), "duplicate".into())
+        .await
+        .unwrap();
     let restored = reopened.conversation("agent".into()).await.unwrap();
-    assert_eq!(restored.len(), 6);
+    assert_eq!(restored.len(), 8);
     assert!(!restored.last().unwrap().final_phase);
     append(&reopened, "later", MessageRole::Assistant, "later").await;
     assert!(
@@ -641,11 +623,18 @@ async fn final_request_state_survives_later_messages_and_reopen_without_duplicat
             .unwrap()
             .final_phase
     );
+    reopened
+        .append_final_provider_request_prompt(event("next-final"), "next final".into())
+        .await
+        .unwrap();
     assert!(
         reopened
-            .append_final_provider_request_prompt(event("next-final"), "next final".into())
+            .conversation("agent".into())
             .await
             .unwrap()
+            .last()
+            .unwrap()
+            .final_phase
     );
     reopened.events().database().close().await.unwrap();
 }

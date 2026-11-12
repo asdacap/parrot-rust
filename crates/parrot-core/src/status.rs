@@ -5,6 +5,12 @@ use crate::{
 };
 use std::{collections::BTreeMap, fmt};
 
+/// The notice text that records one injected status message. Status steering and
+/// compaction both persist a status under this notice.
+pub(crate) fn status_notice(content: &str) -> String {
+    format!("Status prompt injected\n{content}")
+}
+
 /// Names one status slot of a conversation. Keys are stable across engine restarts
 /// and iterate in string order so status assembly stays deterministic.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -124,7 +130,7 @@ pub async fn steer_status(
     for (key, offer) in updates {
         standing.insert(key.clone(), offer.hash.clone());
     }
-    let notice = format!("Status prompt injected\n{content}");
+    let notice = status_notice(&content);
     states
         .add_conversation_messages(ConversationAddition {
             messages: vec![Message::text(Role::System, content)],

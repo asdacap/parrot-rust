@@ -1,8 +1,8 @@
 use super::*;
 use parrot_core::{
-    ContextCompaction as CoreContextCompaction, ContextSnapshot as CoreContextSnapshot,
-    Error as CoreError, ErrorKind, ProviderRequest, ProviderResponse, States as CoreStates,
-    TokenCalibration, ToolCatalog, ToolDefinition, TurnOptions,
+    ContextSnapshot as CoreContextSnapshot, Error as CoreError, ErrorKind, ProviderRequest,
+    ProviderResponse, States as CoreStates, TokenCalibration, ToolCatalog, ToolDefinition,
+    TurnOptions,
 };
 
 mod conversation;

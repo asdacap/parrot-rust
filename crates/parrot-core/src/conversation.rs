@@ -85,7 +85,16 @@ pub enum ConversationPersistence {
     },
     CloseTurn {
         finish_reason: FinishReason,
+        usage: UsageTotals,
     },
+}
+
+/// The request token totals a close-turn terminal event reports, as recorded by
+/// the states side for the current turn.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UsageTotals {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

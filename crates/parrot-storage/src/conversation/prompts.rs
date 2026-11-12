@@ -107,55 +107,41 @@ impl ConversationRepository {
         &self,
         published: Event,
         content: String,
-    ) -> Result<bool, EventError> {
+    ) -> Result<(), EventError> {
         self.validate(&published.agent_session_id)?;
         let agent = published.agent_session_id;
         let refresh_agent = agent.clone();
-        let appended = self
-            .events
+        self.events
             .transaction(move |tx| {
-                if projection::read_latest_final_phase(tx, &agent)? {
-                    return Ok(false);
-                }
                 let item = project_system(tx, &agent, content)?;
                 tx.execute(
                     "UPDATE conversation_item SET final_phase = 1 WHERE sequence = ?1;",
                     [item.sequence],
                 )?;
-                Ok(true)
+                Ok(())
             })
             .await?;
-        if appended {
-            self.refresh_agent_history(&refresh_agent).await?;
-        }
-        Ok(appended)
+        self.refresh_agent_history(&refresh_agent).await
     }
     pub async fn append_tool_availability_restored_prompt(
         &self,
         published: Event,
         content: String,
-    ) -> Result<bool, EventError> {
+    ) -> Result<(), EventError> {
         self.validate(&published.agent_session_id)?;
         let agent = published.agent_session_id;
         let refresh_agent = agent.clone();
-        let appended = self
-            .events
+        self.events
             .transaction(move |tx| {
-                if !projection::read_latest_final_phase(tx, &agent)? {
-                    return Ok(false);
-                }
                 let item = project_system(tx, &agent, content)?;
                 tx.execute(
                     "UPDATE conversation_item SET final_phase = 0 WHERE sequence = ?1;",
                     [item.sequence],
                 )?;
-                Ok(true)
+                Ok(())
             })
             .await?;
-        if appended {
-            self.refresh_agent_history(&refresh_agent).await?;
-        }
-        Ok(appended)
+        self.refresh_agent_history(&refresh_agent).await
     }
 }
 

@@ -68,6 +68,8 @@ pub struct CompactionResult {
 pub struct FittedCompaction {
     pub result: CompactionResult,
     pub status: String,
+    /// The notice text the status is persisted under, built by core.
+    pub notice: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

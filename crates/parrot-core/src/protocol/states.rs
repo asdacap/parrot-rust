@@ -1,5 +1,5 @@
 use super::config::{ConfigKey, ConfigValue};
-use super::context::{ContextCompaction, ContextSnapshot, TokenCalibration};
+use super::context::{ContextSnapshot, TokenCalibration};
 use super::conversation::{ConversationHistoryItem, ConversationSummary};
 use super::message::{ConversationTurn, InputAdmission, Message, PendingMessage, PromotedInput};
 use super::skill::{Skill, SkillContent, SkillReference};
@@ -115,6 +115,11 @@ pub trait States: Send + Sync {
     fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_provider_messages")) })
     }
+    /// Reads the token totals the states side recorded for the current turn,
+    /// for the terminal TurnEnded event assembled by core at close time.
+    fn read_usage_totals(&self) -> BoxFuture<'_, Result<crate::UsageTotals, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_usage_totals")) })
+    }
     /// Reads the latest stored summary and its compaction watermark.
     fn read_conversation_summary(
         &self,
@@ -134,13 +139,14 @@ pub trait States: Send + Sync {
         Box::pin(async { Err(Error::unsupported("States.read_checkpoint_sequences")) })
     }
     /// Persists the fitted compaction with the supplied sampled instructions and tools,
-    /// awaiting terminal lifecycle effects on success or failure.
+    /// awaiting terminal lifecycle effects on success or failure. Returns the instructions
+    /// the epoch uses after the persisted compaction; the caller computes the reduction outcome.
     fn finalize_compaction<'a>(
         &'a mut self,
         _instructions: &'a str,
         _definitions: &'a [ToolDefinition],
         _result: Result<Option<crate::FittedCompaction>, Error>,
-    ) -> BoxFuture<'a, Result<ContextCompaction, Error>> {
+    ) -> BoxFuture<'a, Result<String, Error>> {
         Box::pin(async { Err(Error::unsupported("States.finalize_compaction")) })
     }
 }

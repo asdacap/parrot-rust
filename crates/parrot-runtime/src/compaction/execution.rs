@@ -550,6 +550,13 @@ impl parrot_core::EventPublisher for ObserverPublisher<'_> {
             ))
         })
     }
+    fn report_compaction_finished(&self) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async {
+            Err(parrot_core::Error::unsupported(
+                "ObserverPublisher.report_compaction_finished",
+            ))
+        })
+    }
     fn report_compaction_progress<'a, 'c>(
         &'a self,
         progress: CompactionProgress,
