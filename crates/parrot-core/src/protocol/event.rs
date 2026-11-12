@@ -10,6 +10,14 @@ pub trait EventPublisher: Send + Sync {
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("EventPublisher.publish")) })
     }
+    /// Publishes the turn start event and returns its durable event id, which keys the turn.
+    fn report_turn_started<'a>(
+        &'a self,
+        _model: &'a crate::TurnModel,
+        _cancellation: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<String, Error>> {
+        Box::pin(async { Err(Error::unsupported("EventPublisher.report_turn_started")) })
+    }
     /// Begins a prompt epoch before instructions are read, awaiting native refresh hooks.
     fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Publishes compaction start without request cancellation.

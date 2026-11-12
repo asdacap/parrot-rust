@@ -118,6 +118,7 @@ where
             let mut states = RuntimeStates {
                 history: &backend.history,
                 sessions: &backend.sessions,
+                selection: backend.selection.as_ref(),
                 activity: backend.activity.as_ref(),
                 state: &backend.state,
                 prompt: &backend.prompt,
@@ -174,47 +175,19 @@ where
                 captured: std::sync::Mutex::new(None),
             };
             let result = async {
-                adapt_operation(async {
-                    let mut guard = backend.state.lock().await;
-                    let state = &mut *guard;
-                    backend.skills.end_turn().await;
-                    let selection = backend.selection.capture()?;
-                    backend.sessions.begin_turn().await?;
-                    let mut started = backend.event();
-                    let mut payload = protocol::TurnStarted {
-                        model: selection.model.canonical_model.selector(),
-                        ..Default::default()
-                    };
-                    if let Some(icon) = selection
-                        .model
-                        .alias
-                        .as_ref()
-                        .and_then(|alias| alias.icon.as_ref())
-                    {
-                        payload.model_alias_icon =
-                            protobuf::MessageField::some(protocol::TurnModelAliasIcon {
-                                glyph: icon.glyph.clone(),
-                                color: protobuf::EnumOrUnknown::from_i32(icon.color as i32),
-                                ..Default::default()
-                            });
-                    }
-                    started.set_turn_started(payload);
-                    states.persistence_key = Some(TurnKey {
-                        agent_session_id: backend.identity.session_id.clone(),
-                        start_event_id: started.id.clone(),
-                    });
-                    backend.activity.turn_started(&started.id);
-                    backend.emit(started, cancellation).await?;
-                    state
-                        .context
-                        .ensure_epoch(&backend.prompt, cancellation)
-                        .await?;
-                    state.request_status = Some(backend.status.bind(&selection));
-                    backend.skills.begin_turn(cancellation).await?;
-                    binding.bind(selection);
-                    Ok(())
-                })
-                .await?;
+                let publisher = RuntimeEventPublisher {
+                    events: ContextEmitter::new(
+                        &backend.history,
+                        backend.publisher.as_ref(),
+                        &backend.broker,
+                        backend.event_id.as_ref(),
+                    ),
+                    prompt: &backend.prompt,
+                    state: &backend.state,
+                    cancellation,
+                };
+                let token = parrot_core::CancellationToken::new(cancellation);
+                parrot_core::open_turn(&mut states, &publisher, token).await?;
                 let provider = RuntimeProvider {
                     model: binding.capture_selection().map_err(CoreError::from)?.model,
                     sessions: &backend.sessions,
@@ -231,24 +204,7 @@ where
                         backend.event_id.as_ref(),
                     ),
                 };
-                parrot_core::run_turn(
-                    &mut states,
-                    &tools,
-                    &provider,
-                    &RuntimeEventPublisher {
-                        events: ContextEmitter::new(
-                            &backend.history,
-                            backend.publisher.as_ref(),
-                            &backend.broker,
-                            backend.event_id.as_ref(),
-                        ),
-                        prompt: &backend.prompt,
-                        state: &backend.state,
-                        cancellation,
-                    },
-                    parrot_core::CancellationToken::new(cancellation),
-                )
-                .await
+                parrot_core::run_turn(&mut states, &tools, &provider, &publisher, token).await
             }
             .await;
             match result {
@@ -305,6 +261,7 @@ where
     let mut states = RuntimeStates {
         history: &backend.history,
         sessions: &backend.sessions,
+        selection: backend.selection.as_ref(),
         activity: backend.activity.as_ref(),
         state: &backend.state,
         prompt: &backend.prompt,

@@ -14,6 +14,38 @@ pub struct CompletionBlockerFeedback {
     pub messages: Vec<String>,
     pub candidate: ProviderResponse,
 }
+/// Describes the model a turn runs under, as presented by the turn start event.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TurnModel {
+    /// Provider-qualified selector of the selected model.
+    pub selector: String,
+    /// Alias icon configured for the selected model.
+    pub alias_icon: Option<TurnModelIcon>,
+}
+
+/// Icon an alias associates with the model a turn runs under.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TurnModelIcon {
+    /// Grapheme shown beside the model.
+    pub glyph: String,
+    /// Color the presentation assigns to the glyph.
+    pub color: TurnModelIconColor,
+}
+
+/// Colors available to model alias icons.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TurnModelIconColor {
+    Black,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    White,
+    Gray,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TurnOptions {
     pub maximum_requests: i32,

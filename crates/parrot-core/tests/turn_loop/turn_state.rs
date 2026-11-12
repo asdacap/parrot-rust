@@ -172,6 +172,30 @@ fn run_turn_completes_one_turn_at_a_time_and_reuses_the_existing_budget() {
 }
 
 #[test]
+fn run_turn_opens_the_turn_and_presents_the_selected_model() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    let tools = state.tools.clone();
+    let provider = state.provider.clone();
+    assert_eq!(
+        finish(run_turn(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(provider.cancellation.as_ref())
+        )),
+        Ok(Outcome::Completed("answer".into()))
+    );
+    assert_eq!(
+        *state.started_turns.lock().unwrap(),
+        [TurnModel {
+            selector: "memory/model".into(),
+            alias_icon: None,
+        }]
+    );
+    assert_eq!(state.turn_ids, ["turn-start-0"]);
+}
+
+#[test]
 fn run_convenience_drains_real_pending_messages_and_returns_the_latest_answer() {
     let mut state = MemoryState::new([
         Reply::final_response("first answer"),

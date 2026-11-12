@@ -27,6 +27,7 @@ pub async fn run(
         {
             return Ok(Outcome::Completed(answer));
         }
+        open_turn(states, publisher, cancellation).await?;
         match run_turn(states, tools, provider, publisher, cancellation).await? {
             Outcome::Completed(completed) => answer = completed,
             Outcome::BudgetExhausted => return Ok(Outcome::BudgetExhausted),
@@ -34,7 +35,23 @@ pub async fn run(
     }
 }
 
+/// Opens the turn through the states and publisher sides. The states side begins the
+/// turn and names the model; the publisher renders and persists the start event; the
+/// states side records that event as the turn's durable key and activates the turn.
+/// Callers run exactly one `run_turn` after each open.
+pub async fn open_turn(
+    states: &mut dyn States,
+    publisher: &dyn EventPublisher,
+    cancellation: CancellationToken<'_>,
+) -> Result<(), Error> {
+    let model = states.begin_turn().await?;
+    let turn_id = publisher.report_turn_started(&model, cancellation).await?;
+    states.record_turn_started(&turn_id).await?;
+    states.activate_turn().await
+}
+
 /// Runs one active turn using state-backed settings and tools captured once.
+/// The caller opens the turn first.
 pub async fn run_turn(
     states: &mut dyn States,
     tools: &dyn Tools,

@@ -7,7 +7,8 @@ use parrot_core::{
     Provider, ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent,
     SkillMention, SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding,
     TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest,
-    ToolImage, ToolResult, ToolStatus, Tools, TurnFlags, TurnOptions, parse_skill_mentions,
+    ToolImage, ToolResult, ToolStatus, Tools, TurnFlags, TurnModel, TurnOptions,
+    parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -49,6 +50,7 @@ use compaction_dependencies::MemoryCompaction;
 
 struct MemoryEventPublisher {
     events: Arc<Mutex<Vec<ConversationEvent>>>,
+    started_turns: Arc<Mutex<Vec<TurnModel>>>,
     compacting: Arc<AtomicBool>,
     compaction: Arc<Mutex<MemoryCompaction>>,
 }
@@ -62,6 +64,18 @@ impl EventPublisher for MemoryEventPublisher {
         Box::pin(async move {
             self.events.lock().unwrap().push(event);
             Ok(())
+        })
+    }
+    fn report_turn_started<'a>(
+        &'a self,
+        model: &'a TurnModel,
+        _: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<String, Error>> {
+        Box::pin(async move {
+            let mut started = self.started_turns.lock().unwrap();
+            let turn_id = format!("turn-start-{}", started.len());
+            started.push(model.clone());
+            Ok(turn_id)
         })
     }
     fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>> {
@@ -115,6 +129,7 @@ async fn run(
 ) -> Result<Outcome, Error> {
     let publisher = MemoryEventPublisher {
         events: states.events.clone(),
+        started_turns: states.started_turns.clone(),
         compacting: states.compacting.clone(),
         compaction: states.compaction.clone(),
     };
@@ -129,9 +144,11 @@ async fn run_turn(
 ) -> Result<Outcome, Error> {
     let publisher = MemoryEventPublisher {
         events: states.events.clone(),
+        started_turns: states.started_turns.clone(),
         compacting: states.compacting.clone(),
         compaction: states.compaction.clone(),
     };
+    parrot_core::open_turn(states, &publisher, cancellation).await?;
     parrot_core::run_turn(states, tools, provider, &publisher, cancellation).await
 }
 
@@ -422,6 +439,8 @@ struct MemoryPromptData {
 
 struct MemoryState {
     events: Arc<Mutex<Vec<ConversationEvent>>>,
+    started_turns: Arc<Mutex<Vec<TurnModel>>>,
+    turn_ids: Vec<String>,
     skill_rows: Vec<(Skill, SkillContent)>,
     steers_after_results: VecDeque<String>,
     skill_lookups: Mutex<Vec<SkillReference>>,
@@ -507,6 +526,8 @@ impl MemoryState {
         let compacting = Arc::new(AtomicBool::new(false));
         let mut state = Self {
             events: Arc::default(),
+            started_turns: Arc::default(),
+            turn_ids: Vec::new(),
             skill_rows: Vec::new(),
             steers_after_results: VecDeque::new(),
             skill_lookups: Mutex::default(),
@@ -947,6 +968,21 @@ impl States for MemoryState {
             self.budget = state;
             Ok(())
         })
+    }
+    fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnModel, Error>> {
+        Box::pin(async move {
+            Ok(TurnModel {
+                selector: self.model.clone(),
+                alias_icon: None,
+            })
+        })
+    }
+    fn record_turn_started(&mut self, turn_id: &str) -> BoxFuture<'_, Result<(), Error>> {
+        self.turn_ids.push(turn_id.to_owned());
+        Box::pin(async { Ok(()) })
+    }
+    fn activate_turn(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Ok(()) })
     }
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async move {

@@ -40,4 +40,7 @@ pub use states::States;
 pub use tool::{
     ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolImage, ToolResult, ToolStatus,
 };
-pub use turn::{AgentState, CompletionBlockerFeedback, Outcome, TurnFlags, TurnOptions};
+pub use turn::{
+    AgentState, CompletionBlockerFeedback, Outcome, TurnFlags, TurnModel, TurnModelIcon,
+    TurnModelIconColor, TurnOptions,
+};

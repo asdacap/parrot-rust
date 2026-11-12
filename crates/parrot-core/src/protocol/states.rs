@@ -49,6 +49,22 @@ pub trait States: Send + Sync {
     fn set_agent_state(&mut self, _state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("States.set_agent_state")) })
     }
+    /// Begins the turn: captures the selection it runs under, releases the previous
+    /// turn's skill snapshot, and begins the provider session. Returns the model the
+    /// start event presents.
+    fn begin_turn(&mut self) -> BoxFuture<'_, Result<crate::TurnModel, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.begin_turn")) })
+    }
+    /// Records the published start event as the turn's durable key and reports the
+    /// turn start to session activity.
+    fn record_turn_started(&mut self, _turn_id: &str) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.record_turn_started")) })
+    }
+    /// Activates the recorded turn: samples the prompt epoch, binds turn status, and
+    /// starts the turn's skill snapshot.
+    fn activate_turn(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.activate_turn")) })
+    }
     /// Joins accepted mutations and reads ordered completion blockers.
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.collect_completion_blockers")) })
