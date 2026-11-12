@@ -335,7 +335,9 @@ fn tool_names(request: &Request) -> Vec<&str> {
 
 #[tokio::test]
 async fn actual_requests_reserve_source_headroom_for_unknown_and_known_context_windows() {
-    for (context_window, output_limit) in [(0, 0), (100_000, 0), (20_000, 8_192)] {
+    for (context_window, output_limit) in
+        [(0, 0), (100_000, 0), (20_000, 8_192), (1_000_000, 131_072)]
+    {
         let fixture = Fixture::new();
         let provider = Scripted::new(vec![Step::complete("done")]);
         let runtime = BudgetRuntime::new(
@@ -371,7 +373,7 @@ async fn actual_requests_reserve_source_headroom_for_unknown_and_known_context_w
             .unwrap();
             let headroom = (estimated + 19) / 20;
             let requested = if output_limit > 0 {
-                32_768_i64.min(i64::from(output_limit))
+                i64::from(output_limit)
             } else {
                 32_768
             };

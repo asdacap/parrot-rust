@@ -29,7 +29,7 @@ impl ContextModel {
 
     pub fn calculate_requested_output_tokens(&self) -> i32 {
         if self.maximum_output_tokens > 0 {
-            Self::DEFAULT_REQUESTED_OUTPUT_TOKENS.min(self.maximum_output_tokens)
+            self.maximum_output_tokens
         } else {
             Self::DEFAULT_REQUESTED_OUTPUT_TOKENS
         }

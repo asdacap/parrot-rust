@@ -266,6 +266,25 @@ fn unknown_context_uses_output_configuration_without_inventing_reminder_or_compa
 }
 
 #[test]
+fn model_output_limit_above_fallback_reaches_provider_request() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.request().context.configuration.model.context_window = 1000000;
+    state
+        .request()
+        .context
+        .configuration
+        .model
+        .maximum_output_tokens = 131072;
+    state.request().estimated_input_tokens = 1000;
+
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(
+        state.provider.requests.lock().unwrap()[0].max_output_tokens,
+        131072
+    );
+}
+
+#[test]
 fn context_primitive_failures_stop_at_the_effect_without_invoking_provider_or_tools() {
     for stage in [
         "context_configuration",
