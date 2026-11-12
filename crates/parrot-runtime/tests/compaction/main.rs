@@ -169,7 +169,8 @@ fn original_output_budget_rows() {
     for (context, output, input, estimate, expected) in [
         (0, 0, 0, 1000, 32768),
         (0, 8192, 0, 1000, 8192),
-        (0, 65536, 0, 1000, 32768),
+        (0, 65536, 0, 1000, 65536),
+        (1000000, 131072, 0, 1000, 131072),
         (200000, 0, 0, 1000, 32768),
         (2000, 0, 0, 1001, 948),
         (2000, 100, 0, 1001, 100),
@@ -227,11 +228,7 @@ fn compaction_boundaries_preserve_full_requested_output_and_request_headroom() {
             .unwrap();
         let trigger = snapshot.trigger_tokens.unwrap();
         let budget = ProviderTokenBudget::default();
-        let requested = if output > 0 {
-            output.min(32 * 1024)
-        } else {
-            32 * 1024
-        };
+        let requested = if output > 0 { output } else { 32 * 1024 };
         assert_eq!(
             budget.calculate_maximum_output_tokens("provider/model", trigger, &selected.model),
             Ok(requested)

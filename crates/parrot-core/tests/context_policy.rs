@@ -83,11 +83,14 @@ fn calibration_clamps_negative_previous_estimates_and_ignores_nonpositive_actual
 }
 
 #[test]
-fn output_capacity_preserves_default_caps_and_integer_headroom_rows() {
+fn output_capacity_uses_model_limits_or_fallback_and_preserves_integer_headroom() {
     for (context, output, input, estimate, expected) in [
         (0, 0, 0, 1000, 32768),
+        (0, -1, 0, 1000, 32768),
         (0, 8192, 0, 1000, 8192),
-        (0, 65536, 0, 1000, 32768),
+        (0, 65536, 0, 1000, 65536),
+        (1000000, 131072, 0, 1000, 131072),
+        (100000, 131072, 0, 1000, 98950),
         (200000, 0, 0, 1000, 32768),
         (2000, 0, 0, 1001, 948),
         (2000, 100, 0, 1001, 100),
