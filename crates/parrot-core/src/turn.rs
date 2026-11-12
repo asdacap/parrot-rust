@@ -54,10 +54,10 @@ pub async fn open_turn(
     publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
 ) -> Result<(), Error> {
-    let model = states.begin_turn().await?;
+    let model = states.begin_conversation_turn().await?;
     let turn_id = publisher.report_turn_started(&model, cancellation).await?;
-    states.record_turn_started(&turn_id).await?;
-    states.activate_turn().await
+    states.record_conversation_turn_started(&turn_id).await?;
+    states.activate_conversation_turn().await
 }
 
 /// Runs one active turn using state-backed settings and tools captured once.

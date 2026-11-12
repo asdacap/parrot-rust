@@ -1013,7 +1013,7 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnModel, Error>> {
+    fn begin_conversation_turn(&mut self) -> BoxFuture<'_, Result<TurnModel, Error>> {
         Box::pin(async move {
             Ok(TurnModel {
                 selector: self.model.clone(),
@@ -1021,11 +1021,14 @@ impl States for MemoryState {
             })
         })
     }
-    fn record_turn_started(&mut self, turn_id: &str) -> BoxFuture<'_, Result<(), Error>> {
+    fn record_conversation_turn_started(
+        &mut self,
+        turn_id: &str,
+    ) -> BoxFuture<'_, Result<(), Error>> {
         self.turn_ids.push(turn_id.to_owned());
         Box::pin(async { Ok(()) })
     }
-    fn activate_turn(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+    fn activate_conversation_turn(&mut self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Ok(()) })
     }
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
