@@ -29,7 +29,6 @@ use parrot_domain::{
     values::{
         activity::{AgentSessionActivitySnapshot, DrainState},
         agent_tasks::{Task, TaskSetResponse, TaskView},
-        context::{ContextSize, ContextSnapshot},
         progress::{ProgressSnapshot, ProgressUpdate},
     },
 };
@@ -56,8 +55,8 @@ use parrot_tools::{
         },
     },
     session::{
-        Compaction, Failure, ImageProvider, PermissionReply, PermissionServices, SessionServices,
-        WriteTarget, WriteTargetKind,
+        Failure, ImageProvider, PermissionReply, PermissionServices, SessionServices, WriteTarget,
+        WriteTargetKind,
     },
     tasks_queues::{
         ToolFailure,
@@ -477,9 +476,6 @@ impl AgentCommunication for Services {
     }
 }
 
-pub fn context_snapshot() -> ContextSnapshot {
-    ContextSnapshot::new(100, 1000, Some(10), 80)
-}
 impl SessionServices for Services {
     type Security = Snapshot;
     type Selection = Selection;
@@ -574,35 +570,6 @@ impl SessionServices for Services {
             );
             Ok("catalog statistics".into())
         })
-    }
-    fn compact<'a>(
-        &'a self,
-        selection: &'a Selection,
-        target: Option<ContextSize>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<Compaction, Failure>> {
-        Box::pin(async move {
-            cancelled(cancellation)?;
-            self.record("compact", format!("{target:?}"), None, Some(selection.id));
-            Ok(Compaction {
-                reduced: true,
-                context: context_snapshot(),
-            })
-        })
-    }
-    fn estimate_after_tool_result(
-        &self,
-        selection: &Selection,
-        call_id: &str,
-        rendered_result: &str,
-    ) -> Result<ContextSnapshot, Failure> {
-        self.record(
-            "estimate",
-            format!("{call_id} {rendered_result}"),
-            None,
-            Some(selection.id),
-        );
-        Ok(context_snapshot())
     }
 }
 impl ImageProvider for Services {

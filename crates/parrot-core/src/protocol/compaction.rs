@@ -2,6 +2,11 @@ use super::context::{ContextConfiguration, ContextLimit};
 use super::message::{Message, Reasoning};
 use super::tool::ToolDefinition;
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CompactionRequest {
+    pub target: Option<ContextLimit>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompactionConfiguration {
     pub context: ContextConfiguration,

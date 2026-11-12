@@ -404,7 +404,6 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
         "wait",
         "runtime_status",
         "statistics_status",
-        "compact",
         "image_generate",
         "task_update",
         "permission_request",

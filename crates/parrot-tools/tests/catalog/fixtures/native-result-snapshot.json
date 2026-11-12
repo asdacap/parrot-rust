@@ -24,7 +24,7 @@
   "agent_status": "Agent status\nName: child\nLive output file: catalog/child/output.txt\nLifecycle: idle\nRequest session duration: none\nProvider request duration: none\nCurrent activity: none\nActive direct subagents: none\nActive processes: none\nRecent entries: none",
   "wait": "wait interrupted",
   "status": "catalog runtime\n\ncatalog statistics",
-  "compact_context": "Compacted this calling agent session. Context is now 10% used (100 estimated tokens / 1000 limit); notifications occur every 10%; automatic compaction triggers strictly above 80%.",
+  "compact_context": "Context compaction requested.",
   "queue_create": "{\"path\":\"catalog/work\",\"name\":\"work\",\"size\":0}",
   "queue_info": "{\"path\":\"catalog/work\",\"name\":\"work\",\"size\":0}",
   "queue_push": "{\"path\":\"catalog/work\",\"name\":\"work\",\"size\":1}",

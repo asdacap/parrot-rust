@@ -4,18 +4,23 @@ use crate::{
     compaction::{compact_conversation, prepare_compaction},
 };
 
-pub(crate) async fn compact_context(
+/// Compacts context, finalizes the result, and resets request statistics after a reduction.
+pub async fn compact_context(
     states: &mut dyn States,
     state: &mut AgentState,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
+    request: crate::CompactionRequest,
     cancellation: CancellationToken<'_>,
 ) -> Result<ContextCompaction, Error> {
-    let configuration = states
+    let mut configuration = states
         .get_config(ConfigKey::Compaction)
         .await?
         .into_compaction()?;
+    if let Some(target) = request.target {
+        configuration.target = Some(target);
+    }
     let input =
         prepare_compaction(states, provider, publisher, definitions, &configuration).await?;
     let compacted = compact_conversation(

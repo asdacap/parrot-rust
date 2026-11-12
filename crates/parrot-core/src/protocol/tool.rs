@@ -60,6 +60,12 @@ pub struct ToolResult<M> {
     pub metadata: Option<M>,
 }
 
+impl<M> ToolResult<M> {
+    pub fn requests_compaction(&self) -> bool {
+        self.status == ToolStatus::Finished && self.tool_name == "compact_context"
+    }
+}
+
 impl<M: ToolResultMetadata> ToolResult<M> {
     /// Encodes the metadata into the byte form conversation persistence stores.
     pub(crate) fn encode_metadata(&self) -> Result<ToolResult<Vec<u8>>, Error> {

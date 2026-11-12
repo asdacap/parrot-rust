@@ -701,6 +701,10 @@ async fn second_compaction_uses_snapshot_once_and_advances_only_after_new_histor
     let sessions = ProviderSessions::new();
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
     let mut prompt = EpochPrompt::default();
+    prompt
+        .agent_state
+        .last_request_statistic
+        .observe_usage("scripted/model", 100, 1000);
     let status = Status::default();
     let events = Events::new(history.clone());
     let mut controller = fixture.controller(history.clone(), 90);
@@ -722,6 +726,15 @@ async fn second_compaction_uses_snapshot_once_and_advances_only_after_new_histor
             .unwrap()
             .reduced
     );
+    assert_eq!(
+        prompt.agent_state.last_request_statistic,
+        parrot_core::RequestStatistic::default()
+    );
+    prompt
+        .agent_state
+        .last_request_statistic
+        .observe_usage("scripted/model", 100, 1000);
+    let calibration = prompt.agent_state.last_request_statistic.clone();
     events.published.lock().unwrap().clear();
     let snapshot = fixture.repository.compaction("agent".into()).await.unwrap();
     assert!(
@@ -746,6 +759,7 @@ async fn second_compaction_uses_snapshot_once_and_advances_only_after_new_histor
         fixture.repository.compaction("agent".into()).await.unwrap(),
         snapshot
     );
+    assert_eq!(prompt.agent_state.last_request_statistic, calibration);
     let no_op = events.published.lock().unwrap().clone();
     assert_eq!(no_op.len(), 2);
     assert!(no_op[0].has_compaction_started());
@@ -798,7 +812,7 @@ async fn second_compaction_uses_snapshot_once_and_advances_only_after_new_histor
 }
 
 #[tokio::test]
-async fn terminal_publication_failure_reports_failed_after_durable_snapshot() {
+async fn terminal_publication_failure_preserves_snapshot_without_reporting_failed() {
     let fixture = Fixture::new();
     let history = fixture.history();
     user(&history, "old").await;
@@ -856,7 +870,7 @@ async fn terminal_publication_failure_reports_failed_after_durable_snapshot() {
             .iter()
             .filter(|event| event.has_compaction_failed())
             .count(),
-        1
+        0
     );
     assert_eq!(
         AgentConversation::new(history).await.unwrap().messages(),

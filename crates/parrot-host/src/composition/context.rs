@@ -1,32 +1,25 @@
-//! Retained context-tool routing. Only the invocation owns a route to the
-//! already-borrowed drain; external compaction uses the session's scheduled work.
+//! Retained context-tool routing. Status observes the already-borrowed drain.
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
         security::{AccessSnapshot, InvocationContext},
         tools::Tool,
     },
-    values::{
-        context::{ContextSize, ContextSnapshot},
-        progress::ProgressUpdate,
-    },
+    values::{context::ContextSnapshot, progress::ProgressUpdate},
 };
-use parrot_foundation::template_catalog::PromptTemplateCatalog;
-use parrot_provider::{routing::aliases::ResolvedModelSelection, sessions};
 use parrot_runtime::{
     agent_turn::services::{TurnError, TurnSelection},
-    compaction::{CompactionPlanner, ContextCompactionResult, EpochInput, provider_message},
+    compaction::EpochInput,
     tool_settlement::{
         BorrowedTool, BorrowedToolContext, SharedSecurity, ToolFailure, ToolInvocation,
         ToolMetadata, ToolOutput,
     },
 };
-use parrot_storage::{conversation::AgentConversation, events::NeverCancelled};
 use parrot_tools::{
     catalog,
-    session::{Compaction, Failure, FailureKind, SessionServices},
+    session::{Failure, FailureKind, SessionServices},
 };
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
 fn failure(message: impl Into<String>) -> Failure {
@@ -39,18 +32,8 @@ fn turn_failure(error: TurnError) -> OperationError<Failure> {
         OperationError::Failed(failure(error.to_string()))
     }
 }
-fn compact_result(result: ContextCompactionResult) -> Compaction {
-    Compaction {
-        reduced: result.reduced,
-        context: result.context,
-    }
-}
 
 enum InlineRequest {
-    Compact {
-        target: Option<ContextSize>,
-        reply: oneshot::Sender<OperationResult<Compaction, Failure>>,
-    },
     Estimate {
         reply: oneshot::Sender<OperationResult<ContextSnapshot, Failure>>,
     },
@@ -58,11 +41,9 @@ enum InlineRequest {
 #[derive(Clone)]
 struct InlineRoute {
     sender: mpsc::Sender<InlineRequest>,
-    estimate: Arc<Mutex<Option<EstimateSnapshot>>>,
 }
 
-/// Owned selection handed to the existing retained Tool. No borrowed resource
-/// escapes through the domain's owned + 'static invocation contract.
+/// Owned selection handed to the retained tool. Borrowed resources stay in its invocation.
 pub struct ContextSelection<S: AccessSnapshot> {
     pub turn: TurnSelection<S>,
     route: Option<InlineRoute>,
@@ -79,9 +60,7 @@ impl<S: AccessSnapshot> ContextSelection<S> {
     pub fn external(turn: TurnSelection<S>) -> Self {
         Self { turn, route: None }
     }
-    /// Observes the actual current epoch, conversation and permitted tool list
-    /// while the retained invocation owns the drain's borrowed resources.
-    /// External protocol observations have a separate runtime-owned boundary.
+    /// Observes the current epoch, conversation, and permitted tools during a borrowed invocation.
     pub fn estimate_context<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,
@@ -110,40 +89,7 @@ impl<S: AccessSnapshot> ContextSelection<S> {
     }
 }
 
-struct EstimateSnapshot {
-    planner: Arc<CompactionPlanner>,
-    selected: ResolvedModelSelection,
-    instructions: String,
-    tools: Vec<sessions::Tool>,
-    messages: Vec<sessions::Message>,
-    templates: Arc<PromptTemplateCatalog>,
-}
-impl EstimateSnapshot {
-    fn estimate(&self, call_id: &str, result: &str) -> Result<ContextSnapshot, Failure> {
-        if call_id.trim().is_empty() {
-            return Err(Failure::new(
-                FailureKind::Argument,
-                "toolCallId must not be empty or whitespace",
-            ));
-        }
-        let rendered = self
-            .templates
-            .render(
-                "tool-result.text",
-                &[("value".into(), result.into())],
-                &NeverCancelled,
-            )
-            .map_err(|error| failure(error.to_string()))?;
-        let mut messages = self.messages.clone();
-        messages.push(sessions::Message::tool_result(call_id, rendered));
-        self.planner
-            .estimate_selected_context(&self.selected, &self.instructions, &self.tools, &messages)
-            .map_err(|error| failure(error.to_string()))
-    }
-}
-
-/// The retained SessionTool uses this service object for its entire scope.
-/// Noncompact operations are delegated without defaults or placeholder results.
+/// Delegates retained session operations while status uses the invocation's borrowed context.
 pub struct ContextServices<S: AccessSnapshot, O: SessionServices> {
     ancillary: Arc<O>,
     marker: std::marker::PhantomData<fn() -> S>,
@@ -203,50 +149,6 @@ where
     ) -> BoxFuture<'a, OperationResult<String, Failure>> {
         self.ancillary.statistics_status(selection, cancellation)
     }
-    fn compact<'a>(
-        &'a self,
-        selection: &'a ContextSelection<S>,
-        target: Option<ContextSize>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<Compaction, Failure>> {
-        Box::pin(async move {
-            let route = selection.route.clone().ok_or_else(|| OperationError::Failed(failure(
-                "A retained compact tool requires its active invocation route; external controls use CompactRequest::external.",
-            )))?;
-            cancellation
-                .check()
-                .map_err(|_| OperationError::Cancelled)?;
-            let (reply, response) = oneshot::channel();
-            route
-                .sender
-                .send(InlineRequest::Compact { target, reply })
-                .await
-                .map_err(|_| {
-                    OperationError::Failed(failure("The compact invocation has ended."))
-                })?;
-            // The borrowed invocation owns and joins the mutation. Do not
-            // abandon its response after admission on caller cancellation.
-            response
-                .await
-                .map_err(|_| OperationError::Failed(failure("The compact invocation has ended.")))?
-        })
-    }
-    fn estimate_after_tool_result(
-        &self,
-        selection: &ContextSelection<S>,
-        call_id: &str,
-        rendered_result: &str,
-    ) -> Result<ContextSnapshot, Failure> {
-        let route = selection
-            .route
-            .as_ref()
-            .ok_or_else(|| failure("The compact invocation has ended."))?;
-        let estimate = route.estimate.lock().expect("context estimate poisoned");
-        estimate
-            .as_ref()
-            .ok_or_else(|| failure("The compact invocation has no estimate."))?
-            .estimate(call_id, rendered_result)
-    }
 }
 
 type RetainedSessionTool<S> = dyn Tool<
@@ -261,37 +163,24 @@ enum CompactToolHandle<S: AccessSnapshot + 'static> {
     Catalog(Arc<catalog::RetainedTool<SharedSecurity<S>, ContextSelection<S>>>),
     Session(Arc<RetainedSessionTool<S>>),
 }
-/// A retained tool handle is adapted, never recreated per invocation.
-/// The planner must be constructed with the SAME settings/profiles used for the
-/// scope's ContextController; both perform the same pure estimate algorithm.
 pub struct RetainedCompactTool<S: AccessSnapshot + 'static> {
     tool: CompactToolHandle<S>,
     metadata: ToolMetadata,
-    planner: Arc<CompactionPlanner>,
-    templates: Arc<PromptTemplateCatalog>,
 }
 impl<S: AccessSnapshot + 'static> RetainedCompactTool<S> {
     pub fn new(
         factory: &catalog::Factory<SharedSecurity<S>, ContextSelection<S>>,
-        planner: Arc<CompactionPlanner>,
-        templates: Arc<PromptTemplateCatalog>,
     ) -> Result<Self, Failure> {
-        Self::from_factory(factory, "compact_context", planner, templates)
+        Self::from_factory(factory, "compact_context")
     }
-    /// The status Tool also observes the current in-drain context and must not
-    /// attempt to re-lock the backend that is awaiting its retained invocation.
     pub fn status(
         factory: &catalog::Factory<SharedSecurity<S>, ContextSelection<S>>,
-        planner: Arc<CompactionPlanner>,
-        templates: Arc<PromptTemplateCatalog>,
     ) -> Result<Self, Failure> {
-        Self::from_factory(factory, "status", planner, templates)
+        Self::from_factory(factory, "status")
     }
     fn from_factory(
         factory: &catalog::Factory<SharedSecurity<S>, ContextSelection<S>>,
         name: &str,
-        planner: Arc<CompactionPlanner>,
-        templates: Arc<PromptTemplateCatalog>,
     ) -> Result<Self, Failure> {
         if factory.name() != name {
             return Err(failure(format!(
@@ -308,37 +197,27 @@ impl<S: AccessSnapshot + 'static> RetainedCompactTool<S> {
                     .map(|name| (*name).into())
                     .collect(),
             },
-            planner,
-            templates,
         })
     }
-    /// Also accepts an already-retained SessionTool before catalog erasure.
     pub fn from_session<O>(
         tool: Arc<parrot_tools::session::SessionTool<O>>,
-        planner: Arc<CompactionPlanner>,
-        templates: Arc<PromptTemplateCatalog>,
     ) -> Result<Self, Failure>
     where
         O: SessionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>> + 'static,
     {
-        Self::from_session_kind(tool, "compact_context", planner, templates)
+        Self::from_session_kind(tool, "compact_context")
     }
-    /// Accepts the same retained status SessionTool before catalog erasure.
     pub fn from_status_session<O>(
         tool: Arc<parrot_tools::session::SessionTool<O>>,
-        planner: Arc<CompactionPlanner>,
-        templates: Arc<PromptTemplateCatalog>,
     ) -> Result<Self, Failure>
     where
         O: SessionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>> + 'static,
     {
-        Self::from_session_kind(tool, "status", planner, templates)
+        Self::from_session_kind(tool, "status")
     }
     fn from_session_kind<O>(
         tool: Arc<parrot_tools::session::SessionTool<O>>,
         name: &str,
-        planner: Arc<CompactionPlanner>,
-        templates: Arc<PromptTemplateCatalog>,
     ) -> Result<Self, Failure>
     where
         O: SessionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>> + 'static,
@@ -354,8 +233,6 @@ impl<S: AccessSnapshot + 'static> RetainedCompactTool<S> {
                 name: name.into(),
                 aliases: vec![],
             },
-            planner,
-            templates,
         })
     }
 }
@@ -377,13 +254,9 @@ impl<S: AccessSnapshot + 'static> BorrowedTool<S> for RetainedCompactTool<S> {
     ) -> BoxFuture<'a, OperationResult<ToolOutput, ToolFailure>> {
         Box::pin(async move {
             let (sender, mut requests) = mpsc::channel::<InlineRequest>(1);
-            let route = InlineRoute {
-                sender,
-                estimate: Arc::new(Mutex::new(None)),
-            };
             let scoped = ContextSelection {
                 turn: context.selection.clone(),
-                route: Some(route.clone()),
+                route: Some(InlineRoute { sender }),
             };
             let selected = catalog::Selection {
                 requested_model: context
@@ -428,57 +301,24 @@ impl<S: AccessSnapshot + 'static> BorrowedTool<S> for RetainedCompactTool<S> {
             loop {
                 tokio::select! {
                     result = &mut invoke => {
-                        *route.estimate.lock().expect("context estimate poisoned") = None;
                         return result.map(|output| ToolOutput::text(output.text)).map_err(|error| match error {
                             OperationError::Cancelled => OperationError::Cancelled,
                             OperationError::Failed(error) => OperationError::Failed(ToolFailure::new(error.to_string(), parrot_storage::diagnostics::FailureKind::InvalidOperation)),
                         });
                     }
-                    Some(request) = requests.recv() => match request {
-                        InlineRequest::Estimate { reply } => {
-                            let result = context.resources.context.estimate_context(EpochInput {
-                                selection: &context.selection.model,
-                                tools: context.definitions,
-                                conversation: context.resources.conversation,
-                                agent_state: context.resources.agent_state,
-                                prompt: context.resources.prompt,
-                                sessions: context.resources.sessions,
-                                status: context.resources.status,
-                                events: context.resources.events,
-                            }, cancellation).await
-                                .map_err(|error| turn_failure(TurnError::Context(error)));
-                            let _ = reply.send(result);
-                        }
-                        InlineRequest::Compact { target, reply } => {
-                        let result: OperationResult<Compaction, Failure> = async {
-                            let result = context.resources.context.compact(EpochInput {
-                                selection: &context.selection.model,
-                                tools: context.definitions,
-                                conversation: context.resources.conversation,
-                                agent_state: context.resources.agent_state,
-                                prompt: context.resources.prompt,
-                                sessions: context.resources.sessions,
-                                status: context.resources.status,
-                                events: context.resources.events,
-                            }, target.as_ref(), cancellation).await
-                                .map_err(|error| turn_failure(TurnError::Context(error)))?;
-                            // Match ContextController::estimate_context_after_tool_result:
-                            // reload authoritative history after compaction, then retain
-                            // only owned inputs for SessionServices' synchronous estimate.
-                            let history = AgentConversation::new(context.resources.history.clone()).await
-                                .map_err(|error| OperationError::Failed(failure(error.to_string())))?;
-                            let instructions = context.resources.prompt.build(&context.selection.model, cancellation).await
-                                .map_err(|error| turn_failure(TurnError::Prompt(error)))?;
-                            *route.estimate.lock().expect("context estimate poisoned") = Some(EstimateSnapshot {
-                                planner: self.planner.clone(), selected: context.selection.model.clone(),
-                                instructions, tools: context.definitions.to_vec(),
-                                messages: history.messages().iter().map(provider_message).collect(),
-                                templates: self.templates.clone(),
-                            });
-                            Ok(compact_result(result))
-                        }.await;
+                    Some(InlineRequest::Estimate { reply }) = requests.recv() => {
+                        let result = context.resources.context.estimate_context(EpochInput {
+                            selection: &context.selection.model,
+                            tools: context.definitions,
+                            conversation: context.resources.conversation,
+                            agent_state: context.resources.agent_state,
+                            prompt: context.resources.prompt,
+                            sessions: context.resources.sessions,
+                            status: context.resources.status,
+                            events: context.resources.events,
+                        }, cancellation).await
+                            .map_err(|error| turn_failure(TurnError::Context(error)));
                         let _ = reply.send(result);
-                        }
                     }
                 }
             }

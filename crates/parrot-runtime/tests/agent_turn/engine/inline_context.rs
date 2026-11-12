@@ -9,13 +9,10 @@ fn tool() -> Step {
     step
 }
 #[tokio::test]
-async fn tool_execution_borrows_actual_controller_and_compacted_state_reaches_next_provider_without_second_drain()
- {
+async fn tool_result_triggers_core_compaction_and_reaches_next_provider_without_second_drain() {
     let fixture = Fixture::new();
     fixture.seed().await;
     let tools = Arc::new(Tools::with_names(&["compact_context"]));
-    tools.inline_compact.store(true, Ordering::SeqCst);
-    let trace = tools.trace.clone();
     let mut calibrated_tool = tool();
     calibrated_tool.completion.as_mut().unwrap().input_tokens = 90_000;
     let provider = Scripted::new(vec![
@@ -32,12 +29,6 @@ async fn tool_execution_borrows_actual_controller_and_compacted_state_reaches_ne
     assert_eq!(
         bounded(sent.execution.join()).await.unwrap().status,
         ExecutionStatus::Succeeded
-    );
-    assert!(
-        trace
-            .values()
-            .iter()
-            .any(|value| value == "inline-compacted")
     );
     let requests = provider.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), 3);
@@ -63,6 +54,16 @@ async fn tool_execution_borrows_actual_controller_and_compacted_state_reaches_ne
             .is_some()
     );
     let events = fixture.events().await;
+    assert!(
+        events
+            .iter()
+            .position(|event| event.has_tool_finished())
+            .unwrap()
+            < events
+                .iter()
+                .position(|event| event.has_compaction_started())
+                .unwrap()
+    );
     assert_eq!(
         events
             .iter()
@@ -95,11 +96,10 @@ async fn tool_execution_borrows_actual_controller_and_compacted_state_reaches_ne
     runtime.close().await;
 }
 #[tokio::test]
-async fn interrupt_joins_actual_inline_compaction_cancellation_without_self_queue_or_second_turn() {
+async fn interrupt_joins_core_compaction_cancellation_without_self_queue_or_second_turn() {
     let fixture = Fixture::new();
     fixture.seed().await;
     let tools = Arc::new(Tools::with_names(&["compact_context"]));
-    tools.inline_compact.store(true, Ordering::SeqCst);
     let summary = Gate::new();
     let mut step = Step::complete("never commit summary");
     step.gate = Some(summary.clone());

@@ -147,6 +147,10 @@ prompt_templates:
     template: 'Context usage entered the {percentage}% notification band ({estimated_tokens} estimated tokens / {context_limit} configured limit). Notifications occur every {notification_interval}%; automatic compaction triggers strictly above {trigger}%.'
     allowed_arguments: [percentage, estimated_tokens, context_limit, notification_interval, trigger]
     required_arguments: [percentage, estimated_tokens, context_limit, notification_interval, trigger]
+  compact-context-tool.requested:
+    template: 'Context compaction requested.'
+    allowed_arguments: []
+    required_arguments: []
   compact-context-tool.result:
     engine: minijinja
     template: |-

@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn live_context_completes_while_actual_borrowed_tool_holds_inline_summary() {
+async fn live_context_completes_while_core_waits_for_compaction_summary() {
     let fixture = Fixture::new();
     fixture.seed().await;
     let compact = Arc::new(CompactTool::new());

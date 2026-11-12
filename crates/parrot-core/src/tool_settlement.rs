@@ -166,6 +166,7 @@ impl<M: ToolResultMetadata> ToolSettlement<M> {
     }
 }
 
+/// Settles the full tool batch and returns its first successful compaction request.
 pub async fn execute_tools<M: ToolResultMetadata>(
     states: &mut dyn States,
     tools: &dyn Tools<M>,
@@ -173,7 +174,7 @@ pub async fn execute_tools<M: ToolResultMetadata>(
     receipt: ToolCallReceipt,
     flags: TurnFlags,
     cancellation: CancellationToken<'_>,
-) -> Result<(), Error> {
+) -> Result<Option<crate::CompactionRequest>, Error> {
     let mut settlement = ToolSettlement::<M>::default();
     settlement.begin_execution(receipt.assistant_sequence, calls.clone())?;
     let mut results = Vec::with_capacity(calls.len());
@@ -199,5 +200,12 @@ pub async fn execute_tools<M: ToolResultMetadata>(
             .any(|result| result.status == ToolStatus::Cancelled);
         results.extend(chunk);
     }
-    settlement.complete_execution(&results)
+    settlement.complete_execution(&results)?;
+    Ok(calls.iter().zip(&results).find_map(|(call, result)| {
+        if result.requests_compaction() {
+            crate::CompactionRequest::parse(&call.arguments_json).ok()
+        } else {
+            None
+        }
+    }))
 }
