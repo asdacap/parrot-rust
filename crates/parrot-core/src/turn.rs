@@ -48,29 +48,39 @@ pub async fn run(
 /// Opens the turn through the states and publisher sides. The states side begins the
 /// turn and names the model; the publisher renders and persists the start event; the
 /// states side records that event as the turn's durable key and activates the turn.
-/// Callers run exactly one `run_turn` after each open.
+/// Returns the published start-event ID for the caller to supply to `run_turn`.
 pub async fn open_turn(
     states: &mut dyn States,
     publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
-) -> Result<(), Error> {
+) -> Result<String, Error> {
     let model = states.begin_conversation_turn().await?;
-    let turn_id = publisher.report_turn_started(&model, cancellation).await?;
-    states.record_conversation_turn_started(&turn_id).await?;
-    states.activate_conversation_turn().await
+    let start_event_id = publisher.report_turn_started(&model, cancellation).await?;
+    states.activate_conversation_turn(&start_event_id).await?;
+    Ok(start_event_id)
 }
 
 /// Runs one active turn using state-backed settings and tools captured once.
-/// The caller opens the turn first.
+/// The caller supplies the start-event ID returned by `open_turn`.
 pub async fn run_turn<M: ToolResultMetadata>(
     states: &mut dyn States,
     tools: &dyn Tools<M>,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
+    start_event_id: &str,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
     let mut state = states.get_agent_state().await?;
-    let result = execute_turn(states, tools, provider, publisher, cancellation, &mut state).await;
+    let result = execute_turn(
+        states,
+        tools,
+        provider,
+        publisher,
+        start_event_id,
+        cancellation,
+        &mut state,
+    )
+    .await;
     states.set_agent_state(state).await?;
     result
 }
@@ -80,6 +90,7 @@ async fn execute_turn<M: ToolResultMetadata>(
     tools: &dyn Tools<M>,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
+    start_event_id: &str,
     cancellation: CancellationToken<'_>,
     state: &mut AgentState,
 ) -> Result<Outcome, Error> {
@@ -251,6 +262,7 @@ async fn execute_turn<M: ToolResultMetadata>(
                 .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::from_response(&response)],
                     persistence: ConversationPersistence::CloseTurn {
+                        start_event_id: start_event_id.to_owned(),
                         finish_reason: response.finish_reason.clone(),
                         usage,
                     },
@@ -286,13 +298,17 @@ async fn exhaust_budget(states: &dyn States) -> Result<Outcome, Error> {
 }
 
 /// Records an interrupted assistant turn through the same generic conversation operation.
-pub async fn interrupt_turn(states: &mut dyn States) -> Result<Option<String>, Error> {
+pub async fn interrupt_turn(
+    states: &mut dyn States,
+    start_event_id: &str,
+) -> Result<Option<String>, Error> {
     let content = rendering::render_template(states, ConfigKey::InterruptedTemplate, &[]).await?;
     let usage = states.read_usage_totals().await?;
     let receipt = states
         .add_conversation_messages(ConversationAddition {
             messages: vec![Message::text(Role::Assistant, &content)],
             persistence: ConversationPersistence::CloseTurn {
+                start_event_id: start_event_id.to_owned(),
                 finish_reason: FinishReason::Interrupted,
                 usage,
             },

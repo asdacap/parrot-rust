@@ -81,6 +81,7 @@ pub enum ConversationPersistence {
         recovered: bool,
     },
     CloseTurn {
+        start_event_id: String,
         finish_reason: FinishReason,
         usage: UsageTotals,
     },

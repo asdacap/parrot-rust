@@ -141,12 +141,14 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
         cancellation: CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Outcome, Error>> {
         Box::pin(async move {
-            parrot_core::open_turn(self.states, self.publisher, cancellation).await?;
+            let start_event_id =
+                parrot_core::open_turn(self.states, self.publisher, cancellation).await?;
             parrot_core::run_turn(
                 self.states,
                 self.tools,
                 self.provider,
                 self.publisher,
+                &start_event_id,
                 cancellation,
             )
             .await
@@ -187,8 +189,16 @@ async fn run_turn(
         compacting: states.compacting.clone(),
         compaction: states.compaction.clone(),
     };
-    parrot_core::open_turn(states, &publisher, cancellation).await?;
-    parrot_core::run_turn(states, tools, provider, &publisher, cancellation).await
+    let start_event_id = parrot_core::open_turn(states, &publisher, cancellation).await?;
+    parrot_core::run_turn(
+        states,
+        tools,
+        provider,
+        &publisher,
+        &start_event_id,
+        cancellation,
+    )
+    .await
 }
 
 struct ThreadWake(thread::Thread);
@@ -482,6 +492,8 @@ struct MemoryState {
     events: Arc<Mutex<Vec<ConversationEvent>>>,
     started_turns: Arc<Mutex<Vec<TurnModel>>>,
     turn_ids: Vec<String>,
+    closed_turns: Vec<ConversationAddition>,
+    usage_totals: parrot_core::UsageTotals,
     skill_rows: Vec<(Skill, SkillContent)>,
     steers_after_results: VecDeque<String>,
     skill_lookups: Mutex<Vec<SkillReference>>,
@@ -569,6 +581,8 @@ impl MemoryState {
             events: Arc::default(),
             started_turns: Arc::default(),
             turn_ids: Vec::new(),
+            closed_turns: Vec::new(),
+            usage_totals: parrot_core::UsageTotals::default(),
             skill_rows: Vec::new(),
             steers_after_results: VecDeque::new(),
             skill_lookups: Mutex::default(),
@@ -913,6 +927,7 @@ impl States for MemoryState {
                 }
                 ConversationPersistence::CloseTurn { .. } => {
                     self.step("complete")?;
+                    self.closed_turns.push(addition.clone());
                 }
             }
             for message in addition.messages {
@@ -1021,14 +1036,8 @@ impl States for MemoryState {
             })
         })
     }
-    fn record_conversation_turn_started(
-        &mut self,
-        turn_id: &str,
-    ) -> BoxFuture<'_, Result<(), Error>> {
+    fn activate_conversation_turn(&mut self, turn_id: &str) -> BoxFuture<'_, Result<(), Error>> {
         self.turn_ids.push(turn_id.to_owned());
-        Box::pin(async { Ok(()) })
-    }
-    fn activate_conversation_turn(&mut self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Ok(()) })
     }
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
@@ -1203,7 +1212,7 @@ impl States for MemoryState {
         })
     }
     fn read_usage_totals(&self) -> BoxFuture<'_, Result<parrot_core::UsageTotals, Error>> {
-        Box::pin(async move { Ok(parrot_core::UsageTotals::default()) })
+        Box::pin(async move { Ok(self.usage_totals) })
     }
     fn read_conversation_summary(
         &self,
