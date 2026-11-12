@@ -1,15 +1,9 @@
 use super::conversation::{render_event, render_origin, render_record};
 use super::*;
-use parrot_core::{
-    ConversationAddition, ConversationPersistence, ConversationReceipt, TurnModel, TurnModelIcon,
-    TurnModelIconColor,
-};
-use parrot_provider::routing::aliases::{ModelAliasIconColor, ResolvedModelSelection};
+use parrot_core::{ConversationAddition, ConversationPersistence, ConversationReceipt};
 
 pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) history: &'a AgentHistoryView,
-    pub(super) sessions: &'a ProviderSessions,
-    pub(super) selection: &'a dyn SelectionSource<S>,
     pub(super) activity: &'a dyn SessionActivity,
     pub(super) state: &'a Mutex<State>,
     pub(super) prompt: &'a SessionPrompt,
@@ -25,7 +19,6 @@ pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) binding: &'a TurnBinding<S>,
     pub(super) cancellation: &'a dyn Cancellation,
     pub(super) work: &'a dyn DrainWork,
-    pub(super) persistence_key: Option<TurnKey>,
 }
 
 impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
@@ -37,8 +30,6 @@ impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
     ) -> Self {
         Self {
             history: &backend.history,
-            sessions: &backend.sessions,
-            selection: backend.selection.as_ref(),
             activity: backend.activity.as_ref(),
             state: &backend.state,
             prompt: &backend.prompt,
@@ -59,7 +50,6 @@ impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
             binding,
             cancellation,
             work,
-            persistence_key: None,
         }
     }
 }
@@ -289,43 +279,6 @@ where
     ) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
             self.state.lock().await.agent_state = state;
-            Ok(())
-        })
-    }
-    fn begin_conversation_turn(&mut self) -> BoxFuture<'_, Result<TurnModel, CoreError>> {
-        adapt_operation(async move {
-            self.skills.end_turn().await;
-            let selection = self.selection.capture()?;
-            self.sessions.begin_turn().await?;
-            let model = presented_model(&selection.model);
-            self.binding.bind(selection);
-            Ok(model)
-        })
-    }
-    fn activate_conversation_turn(
-        &mut self,
-        turn_id: &str,
-    ) -> BoxFuture<'_, Result<(), CoreError>> {
-        let turn_id = turn_id.to_owned();
-        adapt_operation(async move {
-            self.persistence_key = Some(TurnKey {
-                agent_session_id: self.history.agent_session_id().to_owned(),
-                start_event_id: turn_id.clone(),
-            });
-            self.activity.turn_started(&turn_id);
-            self.state
-                .lock()
-                .await
-                .context
-                .ensure_epoch(self.prompt, self.cancellation)
-                .await?;
-            self.skills.begin_turn(self.cancellation).await?;
-            Ok(())
-        })
-    }
-    fn begin_step(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.binding.bind(self.selection.capture()?);
             Ok(())
         })
     }
@@ -609,33 +562,5 @@ where
                 .map_err(TurnError::from)
                 .map_err(CoreError::from)
         })
-    }
-}
-
-fn presented_model(selection: &ResolvedModelSelection) -> TurnModel {
-    TurnModel {
-        selector: selection.canonical_model.selector(),
-        alias_icon: selection
-            .alias
-            .as_ref()
-            .and_then(|alias| alias.icon.as_ref())
-            .map(|icon| TurnModelIcon {
-                glyph: icon.glyph.clone(),
-                color: presented_icon_color(icon.color),
-            }),
-    }
-}
-
-fn presented_icon_color(color: ModelAliasIconColor) -> TurnModelIconColor {
-    match color {
-        ModelAliasIconColor::Black => TurnModelIconColor::Black,
-        ModelAliasIconColor::Red => TurnModelIconColor::Red,
-        ModelAliasIconColor::Green => TurnModelIconColor::Green,
-        ModelAliasIconColor::Yellow => TurnModelIconColor::Yellow,
-        ModelAliasIconColor::Blue => TurnModelIconColor::Blue,
-        ModelAliasIconColor::Magenta => TurnModelIconColor::Magenta,
-        ModelAliasIconColor::Cyan => TurnModelIconColor::Cyan,
-        ModelAliasIconColor::White => TurnModelIconColor::White,
-        ModelAliasIconColor::Gray => TurnModelIconColor::Gray,
     }
 }

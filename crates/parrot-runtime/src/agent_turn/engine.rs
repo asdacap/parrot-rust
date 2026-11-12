@@ -882,7 +882,6 @@ where
                 }
             }
             .await;
-            self.skills.end_turn().await;
             let execution = outcome?;
             let result_reference = if execution.status == ExecutionStatus::Succeeded {
                 self.history

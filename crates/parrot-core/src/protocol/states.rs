@@ -28,12 +28,6 @@ pub trait States: Send + Sync {
     ) -> BoxFuture<'_, Result<crate::StatusOffering, Error>> {
         Box::pin(async { Ok(crate::StatusOffering::default()) })
     }
-    /// Captures the settings shared by request preparation, provider routing, and tools
-    /// until the next step begins. In-flight operations retain their current settings.
-    /// Implementations without captured settings may leave this as a no-op.
-    fn begin_step(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Ok(()) })
-    }
     /// Reads typed configuration without rendering prompts or deciding request policy.
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>>;
     /// Reads the consolidated agent state that survives across turns, including
@@ -47,23 +41,6 @@ pub trait States: Send + Sync {
     /// Retains settlement extensions for subsequent turns in the same invocation.
     fn set_agent_state(&mut self, _state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("States.set_agent_state")) })
-    }
-    /// Prepares the conversation turn before core publishes its start event.
-    /// Runtime releases the previous conversation turn's skill snapshot, captures the model selection,
-    /// notifies provider sessions of the new conversation turn, and binds its initial selection.
-    /// Returns the model that core passes to the start-event publisher.
-    fn begin_conversation_turn(&mut self) -> BoxFuture<'_, Result<crate::TurnModel, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.begin_conversation_turn")) })
-    }
-    /// Records the published start-event ID and activates the conversation turn.
-    /// Runtime sets the persistence key and notifies session activity before preparing context.
-    /// It then ensures the prompt epoch, binds request status to the captured model selection,
-    /// and begins the conversation turn's skill snapshot.
-    fn activate_conversation_turn(
-        &mut self,
-        _start_event_id: &str,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.activate_conversation_turn")) })
     }
     /// Joins accepted mutations and reads ordered completion blockers.
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {

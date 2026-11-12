@@ -189,7 +189,7 @@ fn run_turn_opens_the_turn_and_presents_the_selected_model() {
             alias_icon: None,
         }]
     );
-    assert_eq!(state.turn_ids, ["turn-start-0"]);
+    assert_eq!(*state.turn_ids.lock().unwrap(), ["turn-start-0"]);
     assert_eq!(
         state.closed_turns,
         [ConversationAddition {
@@ -225,7 +225,7 @@ fn interruption_supplies_the_recovered_start_event_and_terminal_content_without_
         )),
         Ok(Some("interrupted response".into()))
     );
-    assert!(state.turn_ids.is_empty());
+    assert!(state.turn_ids.lock().unwrap().is_empty());
     assert_eq!(
         state.closed_turns,
         [ConversationAddition {

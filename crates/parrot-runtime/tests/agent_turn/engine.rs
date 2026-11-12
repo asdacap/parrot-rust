@@ -813,6 +813,8 @@ mod repository_fault;
 mod request_budget_edges;
 #[path = "engine/restart_retry.rs"]
 mod restart_retry;
+#[path = "engine/skill_lifecycle.rs"]
+mod skill_lifecycle;
 #[path = "engine/skill_placement.rs"]
 mod skill_placement;
 #[path = "engine/source_callback_reset.rs"]
@@ -1071,6 +1073,12 @@ async fn epoch_status_and_skill_input_order_is_awaited_in_actual_turn() {
     assert!(position("epoch-done") < position("skills-begin"));
     assert!(position("skills-begin") < position("skills-get"));
     assert!(position("skills-get") < position("status"));
+    let snapshots: Vec<_> = trace
+        .iter()
+        .filter(|entry| matches!(entry.as_str(), "skills-begin" | "skills-end"))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(snapshots, ["skills-begin", "skills-end"]);
     let requests = provider.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), 1);
     assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 1);

@@ -45,38 +45,63 @@ pub async fn run(
     }
 }
 
-/// Opens the turn through the states and publisher sides. The states side begins the
-/// turn and names the model; the publisher renders and persists the start event; the
-/// states side records that event as the turn's durable key and activates the turn.
-/// Returns the published start-event ID for the caller to supply to `run_turn`.
-pub async fn open_turn(
-    states: &mut dyn States,
+/// Receives core's lifecycle notifications independently of conversation storage.
+pub trait TurnHooks: Send + Sync {
+    /// Captures the initial model selection and notifies provider sessions before publication.
+    fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<crate::TurnModel, Error>>;
+    /// Starts runtime activity and prepares the prompt epoch and skill snapshot after publication.
+    fn activate_conversation_turn(&self, start_event_id: &str) -> BoxFuture<'_, Result<(), Error>>;
+    /// Captures settings for the next step without changing in-flight operations.
+    fn begin_step(&self) -> BoxFuture<'_, Result<(), Error>>;
+}
+
+/// A published turn start whose runtime activation occurs when `run_turn` begins.
+pub struct OpenedTurn<'a> {
+    start_event_id: String,
+    hooks: &'a dyn TurnHooks,
+}
+
+impl OpenedTurn<'_> {
+    pub fn start_event_id(&self) -> &str {
+        &self.start_event_id
+    }
+}
+
+/// Prepares the turn and publishes its start event before runtime activation.
+/// The returned turn retains the published ID even if activation later fails.
+pub async fn open_turn<'a>(
+    hooks: &'a dyn TurnHooks,
     publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
-) -> Result<String, Error> {
-    let model = states.begin_conversation_turn().await?;
+) -> Result<OpenedTurn<'a>, Error> {
+    let model = hooks.begin_conversation_turn().await?;
     let start_event_id = publisher.report_turn_started(&model, cancellation).await?;
-    states.activate_conversation_turn(&start_event_id).await?;
-    Ok(start_event_id)
+    Ok(OpenedTurn {
+        start_event_id,
+        hooks,
+    })
 }
 
 /// Runs one active turn using settings and tools captured at each step.
-/// The caller supplies the start-event ID returned by `open_turn`.
+/// Activates the published turn returned by `open_turn` before reading agent state.
 pub async fn run_turn<M: ToolResultMetadata>(
     states: &mut dyn States,
     tools: &dyn Tools<M>,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
-    start_event_id: &str,
+    turn: &OpenedTurn<'_>,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
+    turn.hooks
+        .activate_conversation_turn(turn.start_event_id())
+        .await?;
     let mut state = states.get_agent_state().await?;
     let result = execute_turn(
         states,
         tools,
         provider,
         publisher,
-        start_event_id,
+        turn,
         cancellation,
         &mut state,
     )
@@ -90,7 +115,7 @@ async fn execute_turn<M: ToolResultMetadata>(
     tools: &dyn Tools<M>,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
-    start_event_id: &str,
+    opened: &OpenedTurn<'_>,
     cancellation: CancellationToken<'_>,
     state: &mut AgentState,
 ) -> Result<Outcome, Error> {
@@ -109,7 +134,7 @@ async fn execute_turn<M: ToolResultMetadata>(
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
-        states.begin_step().await?;
+        opened.hooks.begin_step().await?;
         let options = states.get_config(ConfigKey::Turn).await?.into_turn()?;
         let catalog = tools.capture_catalog().await?;
         if cancellation.is_cancelled() {
@@ -281,7 +306,7 @@ async fn execute_turn<M: ToolResultMetadata>(
                 .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::from_response(&response)],
                     persistence: ConversationPersistence::CloseTurn {
-                        start_event_id: start_event_id.to_owned(),
+                        start_event_id: opened.start_event_id().to_owned(),
                         finish_reason: response.finish_reason.clone(),
                         usage,
                     },

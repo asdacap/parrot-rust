@@ -9,6 +9,8 @@ mod events;
 use events::RuntimeEventPublisher;
 mod provider;
 use provider::RuntimeProvider;
+mod hooks;
+use hooks::RuntimeTurnHooks;
 mod states;
 use states::RuntimeStates;
 mod tools;
@@ -136,64 +138,63 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                 interrupted_result: &backend.notices.interrupted_result,
                 captured: std::sync::Mutex::new(None),
             };
-            let result = async {
-                let publisher = RuntimeEventPublisher {
-                    events: ContextEmitter::new(
-                        &backend.history,
-                        backend.publisher.as_ref(),
-                        &backend.broker,
-                        backend.event_id.as_ref(),
-                    ),
-                    prompt: &backend.prompt,
-                    state: &backend.state,
-                    cancellation,
-                };
-                let token = parrot_core::CancellationToken::new(cancellation);
-                let start_event_id = parrot_core::open_turn(&mut states, &publisher, token).await?;
-                let provider = RuntimeProvider {
-                    binding: &binding,
-                    sessions: &backend.sessions,
-                    history: &backend.history,
-                    publisher: backend.publisher.as_ref(),
-                    event_id: backend.event_id.as_ref(),
-                    output: backend.output.as_ref(),
-                    activity: backend.activity.as_ref(),
-                    usage: &backend.usage,
-                    events: ContextEmitter::new(
-                        &backend.history,
-                        backend.publisher.as_ref(),
-                        &backend.broker,
-                        backend.event_id.as_ref(),
-                    ),
-                };
-                parrot_core::run_turn(
-                    &mut states,
-                    &tools,
-                    &provider,
-                    &publisher,
-                    &start_event_id,
-                    token,
-                )
-                .await
-            }
-            .await;
+            let hooks = RuntimeTurnHooks {
+                backend,
+                binding: &binding,
+                cancellation: self.cancellation,
+            };
+            let publisher = RuntimeEventPublisher {
+                events: ContextEmitter::new(
+                    &backend.history,
+                    backend.publisher.as_ref(),
+                    &backend.broker,
+                    backend.event_id.as_ref(),
+                ),
+                prompt: &backend.prompt,
+                state: &backend.state,
+                cancellation,
+            };
+            let token = parrot_core::CancellationToken::new(cancellation);
+            let turn = parrot_core::open_turn(&hooks, &publisher, token).await?;
+            let provider = RuntimeProvider {
+                binding: &binding,
+                sessions: &backend.sessions,
+                history: &backend.history,
+                publisher: backend.publisher.as_ref(),
+                event_id: backend.event_id.as_ref(),
+                output: backend.output.as_ref(),
+                activity: backend.activity.as_ref(),
+                usage: &backend.usage,
+                events: ContextEmitter::new(
+                    &backend.history,
+                    backend.publisher.as_ref(),
+                    &backend.broker,
+                    backend.event_id.as_ref(),
+                ),
+            };
+            let result =
+                parrot_core::run_turn(&mut states, &tools, &provider, &publisher, &turn, token)
+                    .await;
+            backend.skills.end_turn().await;
+            let key = TurnKey {
+                agent_session_id: backend.history.agent_session_id().to_owned(),
+                start_event_id: turn.start_event_id().to_owned(),
+            };
             match result {
                 Ok(parrot_core::Outcome::Completed(completed)) => {
-                    if let Some(key) = &states.persistence_key {
-                        backend
-                            .activity
-                            .turn_finished(&key.start_event_id, "completed", None);
-                    }
+                    backend
+                        .activity
+                        .turn_finished(&key.start_event_id, "completed", None);
                     backend.activity.assistant_message(&completed);
                     Ok(parrot_core::Outcome::Completed(completed))
                 }
                 Ok(parrot_core::Outcome::BudgetExhausted(notice)) => {
-                    self.failed_key = states.persistence_key.clone();
+                    self.failed_key = Some(key);
                     backend.fail(notice.clone(), String::new()).await?;
                     Ok(parrot_core::Outcome::BudgetExhausted(notice))
                 }
                 Err(error) => {
-                    self.failed_key = states.persistence_key.clone();
+                    self.failed_key = Some(key);
                     Err(error)
                 }
             }

@@ -142,6 +142,29 @@ impl EventPublisher for MemoryEventPublisher {
 
 const RUNAWAY_NOTICE: &str = "configured runaway notice";
 
+struct MemoryTurnHooks {
+    model: String,
+    turn_ids: Arc<Mutex<Vec<String>>>,
+}
+
+impl parrot_core::TurnHooks for MemoryTurnHooks {
+    fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<TurnModel, Error>> {
+        Box::pin(async move {
+            Ok(TurnModel {
+                selector: self.model.clone(),
+                alias_icon: None,
+            })
+        })
+    }
+    fn activate_conversation_turn(&self, turn_id: &str) -> BoxFuture<'_, Result<(), Error>> {
+        self.turn_ids.lock().unwrap().push(turn_id.to_owned());
+        Box::pin(async { Ok(()) })
+    }
+    fn begin_step(&self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
 struct MemoryTurnLifecycle<'a> {
     states: &'a mut MemoryState,
     tools: &'a dyn Tools<Vec<u8>>,
@@ -165,8 +188,12 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
         cancellation: CancellationToken<'a>,
     ) -> BoxFuture<'a, Result<Outcome, Error>> {
         Box::pin(async move {
+            let hooks = MemoryTurnHooks {
+                model: self.states.model.clone(),
+                turn_ids: self.states.turn_ids.clone(),
+            };
             let start_event_id =
-                parrot_core::open_turn(self.states, self.publisher, cancellation).await?;
+                parrot_core::open_turn(&hooks, self.publisher, cancellation).await?;
             parrot_core::run_turn(
                 self.states,
                 self.tools,
@@ -213,7 +240,11 @@ async fn run_turn(
         compacting: states.compacting.clone(),
         compaction: states.compaction.clone(),
     };
-    let start_event_id = parrot_core::open_turn(states, &publisher, cancellation).await?;
+    let hooks = MemoryTurnHooks {
+        model: states.model.clone(),
+        turn_ids: states.turn_ids.clone(),
+    };
+    let start_event_id = parrot_core::open_turn(&hooks, &publisher, cancellation).await?;
     parrot_core::run_turn(
         states,
         tools,
@@ -521,7 +552,7 @@ struct MemoryPromptData {
 struct MemoryState {
     events: Arc<Mutex<Vec<ConversationEvent>>>,
     started_turns: Arc<Mutex<Vec<TurnModel>>>,
-    turn_ids: Vec<String>,
+    turn_ids: Arc<Mutex<Vec<String>>>,
     closed_turns: Vec<ConversationAddition>,
     usage_totals: parrot_core::UsageTotals,
     skill_rows: Vec<(Skill, SkillContent)>,
@@ -607,7 +638,7 @@ impl MemoryState {
         let mut state = Self {
             events: Arc::default(),
             started_turns: Arc::default(),
-            turn_ids: Vec::new(),
+            turn_ids: Arc::new(Mutex::new(Vec::new())),
             closed_turns: Vec::new(),
             usage_totals: parrot_core::UsageTotals::default(),
             skill_rows: Vec::new(),
@@ -1056,18 +1087,6 @@ impl States for MemoryState {
             self.budget = state;
             Ok(())
         })
-    }
-    fn begin_conversation_turn(&mut self) -> BoxFuture<'_, Result<TurnModel, Error>> {
-        Box::pin(async move {
-            Ok(TurnModel {
-                selector: self.model.clone(),
-                alias_icon: None,
-            })
-        })
-    }
-    fn activate_conversation_turn(&mut self, turn_id: &str) -> BoxFuture<'_, Result<(), Error>> {
-        self.turn_ids.push(turn_id.to_owned());
-        Box::pin(async { Ok(()) })
     }
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async move {
