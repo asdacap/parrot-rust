@@ -1525,7 +1525,7 @@ async fn actual_initial_and_interactive_plans_approve_after_markdown_and_optiona
                 let state = rpc.state.lock().unwrap();
                 assert_eq!(state.created.len(), 1);
                 assert_eq!(state.created[0].mode, "plan");
-                assert_eq!(state.created[0].interactive_permissions, !initial_prompt);
+                assert!(state.created[0].interactive_permissions);
                 assert_eq!(state.sent[0].text, "draft plan");
             }
             rpc.publish("session-1", event("plan-started", wire::event::Payload::TurnStarted(wire::TurnStarted {
@@ -1903,7 +1903,7 @@ async fn initial_prompt_waits_for_mode_terminal_and_reports_failed_or_invalid_cr
         let stop = rpc.stopping.clone();
         let result = fixture::run_flow(cli, stop.clone(), terminal.end_input(), async {
             rpc.wait(|state| state.sent.len() == 1).await;
-            assert!(!rpc.state.lock().unwrap().created[0].interactive_permissions);
+            assert!(rpc.state.lock().unwrap().created[0].interactive_permissions);
             rpc.publish(
                 "session-1",
                 event(

@@ -592,13 +592,13 @@ impl Application {
             )
             .with_restore_progress(restore_progress)
             .with_legacy_path_read_fallback(legacy);
+            // The enhanced renderer answers pending interactions; the basic renderer
+            // answers them only in its REPL loop.
+            let enhanced = !options.basic && io::stdout().is_terminal();
+            let answers_interactions = enhanced || options.prompt.is_empty();
             let result = async {
                 let opened = match startup
-                    .open(
-                        options.session_start,
-                        options.prompt.is_empty(),
-                        cancellation,
-                    )
+                    .open(options.session_start, answers_interactions, cancellation)
                     .await
                 {
                     Ok(opened) => opened,

@@ -183,7 +183,9 @@ impl EnhancedCli {
         let exit_on_completion = !self.request.prompt.is_empty();
         let supplied = self.request.initial_session.is_some();
         let show_loaded_banner = !supplied;
-        self.request.session.interactive_permissions = !exit_on_completion;
+        // The input loop answers pending questions and permissions whether or not
+        // the run exits on completion.
+        self.request.session.interactive_permissions = true;
         let initial = match self.request.initial_session.take() {
             Some(session) => session,
             None => match crate::slash_sessions::native_call(
@@ -483,7 +485,7 @@ impl EnhancedInput {
             shared.snapshot().client,
             initial,
             self.configuration.clone(),
-            !exit_on_completion,
+            true,
             Box::new(binding),
         );
         let application = application_exit(shared.lifetime.clone());

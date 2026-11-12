@@ -342,6 +342,8 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             Some(session) => session,
             None => {
                 let mut request = self.request.session.clone();
+                // The REPL loop answers pending questions and permissions; once() renders
+                // the turn without offering them.
                 request.interactive_permissions = prompt.is_empty();
                 match native_call(self.client.create_session(request), application.as_ref()).await {
                     Ok(session) => session,
