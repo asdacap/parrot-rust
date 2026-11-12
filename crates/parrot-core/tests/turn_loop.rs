@@ -134,7 +134,11 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
         false
     }
     fn has_ready_turn(&mut self) -> BoxFuture<'_, Result<bool, Error>> {
-        Box::pin(async move { self.states.has_ready_turn().await })
+        Box::pin(async move {
+            let turn = self.states.get_last_turn().await?;
+            Ok(turn.as_ref().is_some_and(ConversationTurn::needs_response)
+                || self.states.peek_pending_input_header().await?.is_some())
+        })
     }
     fn run_turn<'a>(
         &'a mut self,
@@ -1199,29 +1203,14 @@ impl States for MemoryState {
                 .clone())
         })
     }
-    fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
-        Box::pin(async move {
-            self.trace.step("messages", self.fail_at)?;
-            Ok(self.request().messages.clone())
-        })
-    }
     fn read_usage_totals(&self) -> BoxFuture<'_, Result<parrot_core::UsageTotals, Error>> {
         Box::pin(async move { Ok(self.usage_totals) })
     }
-    fn read_conversation_summary(
+    fn read_conversation_state(
         &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationSummary>, Error>> {
+    ) -> BoxFuture<'_, Result<parrot_core::ConversationState, Error>> {
         Box::pin(async move {
-            self.trace.step("conversation_summary", self.fail_at)?;
-            Ok(None)
-        })
-    }
-    fn read_conversation_tail(
-        &self,
-        after: i64,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ConversationHistoryItem>, Error>> {
-        Box::pin(async move {
-            self.trace.step("conversation_tail", self.fail_at)?;
+            self.trace.step("conversation", self.fail_at)?;
             let (messages, first_sequence) = if let Some(plan) = &self.compaction_plan {
                 (
                     plan.groups
@@ -1250,9 +1239,12 @@ impl States for MemoryState {
                         message,
                     }
                 })
-                .filter(|item| item.sequence > after)
                 .collect();
-            Ok(history)
+            Ok(parrot_core::ConversationState {
+                summary: None,
+                history,
+                messages: self.request().messages.clone(),
+            })
         })
     }
     fn finalize_compaction<'a>(
@@ -1296,15 +1288,15 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "promote",
             "instruction_state",
             "render",
-            "messages",
+            "conversation",
             "context_configuration",
             "estimate",
             "instruction_state",
             "render",
-            "messages",
+            "conversation",
             "context_configuration",
             "estimate",
-            "messages",
+            "conversation",
             "context_configuration",
             "estimate",
             "invoke",
@@ -1314,15 +1306,15 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "promote",
             "instruction_state",
             "render",
-            "messages",
+            "conversation",
             "context_configuration",
             "estimate",
             "instruction_state",
             "render",
-            "messages",
+            "conversation",
             "context_configuration",
             "estimate",
-            "messages",
+            "conversation",
             "context_configuration",
             "estimate",
             "invoke",
@@ -1795,7 +1787,7 @@ fn adapter_errors_stop_at_the_failing_effect() {
         ("catalog", Reply::final_response("response")),
         ("promote", Reply::final_response("response")),
         ("render", Reply::final_response("response")),
-        ("messages", Reply::final_response("response")),
+        ("conversation", Reply::final_response("response")),
         ("invoke", Reply::final_response("response")),
         ("retry", Reply::invalid("response")),
         ("record_tools", Reply::tools("response")),
