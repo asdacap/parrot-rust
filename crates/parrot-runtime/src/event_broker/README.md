@@ -12,13 +12,14 @@ with a default of 1,024 events per class. A full class evicts only its oldest
 event. Surviving events preserve their interleaved order. Publication never waits
 for a subscriber to consume data.
 
-Inventory batches are validated before admission even when no listeners exist.
+The broker validates inventory batches before admission, even when no listeners
+exist.
 Pending batches replace earlier pending inventory for the same tool kind and
 owner. An active batch finishes contiguously. One ordinary event is preferred
 after each batch, preventing continual inventory replenishment from starving it.
 Inventory chunks do not consume ordinary-event capacity and are not truncated at
-1,024 chunks. Arbitrarily many distinct inventory owners are not globally bounded
-by these per-listener capacities.
+1,024 chunks. These per-listener capacities do not bound the number of distinct
+inventory owners across the broker, so that number can grow without limit.
 
 Explicit broker or listener completion stops new admission and drains buffered
 events and inventory chunks. `TurnEnded` does not close a subscription. Canceling
@@ -28,14 +29,14 @@ or dropping a single read observation does not close the owned listener.
 
 A replaying listener subscribes before loading the persisted snapshot so live
 events can overlap replay rather than falling into a subscription gap. A missing
-cursor skips persisted replay; an explicitly supplied empty cursor does not.
-Unknown cursors replay all stored events. Known cursors resume after the cursor's
-first occurrence.
+cursor skips persisted replay. An explicitly supplied empty cursor does not skip
+persisted replay. Unknown cursors replay all stored events. Known cursors resume
+after the cursor's first occurrence.
 
 Stored events remain unchanged, including duplicate terminal payloads and unknown
-protocol fields. Exactly one overlapping live copy is suppressed for each replayed
-event identity. Later duplicates are not globally filtered. The live event buffer
-remains bounded and lossy during replay.
+protocol fields. The replaying listener suppresses exactly one overlapping live
+copy for each replayed event identity. Later duplicates are not globally filtered.
+The live event buffer remains bounded and lossy during replay.
 
 After the selected persisted suffix has been consumed, the listener captures its
 initial scope snapshots and then usage in the supplied order. A slow replay
@@ -63,7 +64,7 @@ prove that the lifetimes of its child agents have ended.
 ## Capability limits
 
 The broker's nonblocking lossy fanout is distinct from host RPC backpressure.
-The RPC producer queue has four entries and can wait for its consumer; it does
+The RPC producer queue has four entries and can wait for its consumer. It does
 not change broker buffering semantics.
 
 Broker and repository checks do not by themselves establish actual session

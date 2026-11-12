@@ -16,7 +16,7 @@ cargo build -p parrot-cli --no-default-features --locked
 ```
 
 This produces a chat-and-serve-only `parrot` binary. The `web` cargo feature
-embeds `web/dist` and is on by default; a build without it refuses `parrot web`
+embeds `web/dist` and is on by default. A build without it refuses `parrot web`
 with a clear error and otherwise behaves the same.
 
 For a fully static release binary suitable for sandbox installs, build the same
@@ -83,15 +83,16 @@ pier run -p deep-swe/tasks --agent-import-path parrot_agent:ParrotAgent \
     --model openai/gpt-5.5 --env docker
 ```
 
-The wrapper installs Parrot from a release tarball URL (default:
+The wrapper installs Parrot from a release tarball URL. The default is
 `https://github.com/asdacap/parrot-rust/releases/latest/download/parrot-x86_64-unknown-linux-musl.tar.gz`,
-override with the `binary_url` and `binary_sha256` agent kwargs), runs
+which you can override with the `binary_url` and `binary_sha256` agent kwargs.
+The wrapper then runs
 `parrot chat --basic --new-session --jsonl /logs/agent/parrot.jsonl` inside the
 task directory, and converts the JSONL event log into Pier's trajectory format
-for scoring and the trajectory viewer. Provider API keys are passed through the
-agent `env` block, the network allowlist is derived from the model's provider
-endpoint, and a `provider_config` agent kwarg (the same provider shape as
-Parrot's YAML config) can point the model at a gateway or custom endpoint.
+for scoring and the trajectory viewer. It passes provider API keys through the
+agent `env` block and derives the network allowlist from the model's provider
+endpoint. A `provider_config` agent kwarg (the same provider shape as Parrot's
+YAML config) can point the model at a gateway or custom endpoint.
 
 Start with a single task while wiring everything up:
 
@@ -103,15 +104,15 @@ pier run -p deep-swe/tasks/<task-id> --agent-import-path parrot_agent:ParrotAgen
 ### Credentials and model selection
 
 Provider API keys flow from the Pier job environment into the sandbox through
-the agent `env` block or `--env-file`, matched by the model's provider id
-(`openai/...` takes `OPENAI_API_KEY`). A `provider_config` agent kwarg can add
+the agent `env` block or `--env-file`. The model's provider id selects the key,
+so `openai/...` takes `OPENAI_API_KEY`. A `provider_config` agent kwarg can add
 a gateway with its own `api_key_env`. OAuth-backed providers such as `chatgpt`
 have no environment key, so prefer API-key providers for benchmark runs.
 
 Pass the model as a fully qualified `provider/model` string. Parrot resolves
 it against the configured providers plus the models.dev catalog, which it
-fetches eagerly at startup; the wrapper allowlists `models.dev` for that. The
-config's `model_aliases` are user-session state and are not reachable in a
+fetches eagerly at startup. The wrapper allowlists `models.dev` for that fetch.
+The config's `model_aliases` are user-session state and are not reachable in a
 fresh sandbox.
 
 ### Iterating with a local build
@@ -132,8 +133,8 @@ pier run -p deep-swe/tasks/<task-id> --agent-import-path parrot_agent:ParrotAgen
 ```
 
 Use the host IP on the docker bridge (often `172.17.0.1`) or an address the
-container can reach; the wrapper adds the `binary_url` host to the network
-allowlist. A local URL only works with `--env docker`; for `--env modal` push
+container can reach. The wrapper adds the `binary_url` host to the network
+allowlist. A local URL only works with `--env docker`. For `--env modal`, push
 the tarball to a URL the sandbox can reach.
 
 ### Running Terminal-Bench
@@ -204,7 +205,7 @@ pier run -p frontier-swe-v2/tasks --agent-import-path parrot_agent:ParrotAgent \
 
 With `public`, the agent has unrestricted internet and the wrapper's
 allowlist is inert. The tasks' `no-network` declarations are verifier-side
-only; Parrot never runs there. Expect heavy resource requirements per task
+only. Parrot never runs there. Expect heavy resource requirements per task
 (up to 16 CPUs, 131 GB RAM, 512 GB storage, and GPUs on some tasks), and a
 72000-second agent timeout from each `task.toml`. Parrot's per-turn provider
 request cap comes from the selected profile's `max_turns` (1024 for the main
@@ -212,5 +213,5 @@ profiles in `predefined_config.profiles.yaml`). Running the benchmark's
 intended harness, `px-eval`, would need the wrapper repackaged as a Harbor
 agent directory instead of a Pier import path.
 
-Leaderboard submission is handled by the benchmark maintainers; see the
-DeepSWE run page for contact details.
+The benchmark maintainers handle leaderboard submissions. Contact them through
+the DeepSWE run page for details.

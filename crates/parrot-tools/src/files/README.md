@@ -12,7 +12,7 @@ ordinal matching. Unknown variables remain literal. `read_image` and `glob` pass
 path arguments unchanged to workspace-relative resolution.
 
 Reads remain bound to the expected physical path and captured security policy.
-Directory entries are re-inspected, and entries that cannot be read are filtered
+The read tool re-inspects directory entries and filters entries it cannot read
 where the operation permits. A fallback read must still be authorized.
 
 Text reads probe the first 8192 bytes for NUL and support byte-order-mark-aware

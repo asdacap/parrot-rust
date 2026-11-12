@@ -9,14 +9,14 @@ old database and artifacts. See [database formats and fresh startup](state-and-r
 
 ## Build prerequisites
 
-Use a real Git worktree with relevant source/config committed and the locked
-`flake.lock`, `Cargo.lock` and frontend lock. Nix supplies Rust1.85, the C toolchain,
-Node/npm and protobuf tooling. Ordinary initial dependency acquisition may need
-the network; **do not call that acquisition offline**. The commands below assume
-its dependency closure is already available. `nix --offline` is not itself a
-network sandbox for fixed-output builders.
+Use a real Git worktree with the relevant source and configuration committed and
+the locked `flake.lock`, `Cargo.lock` and frontend lock. Nix supplies Rust 1.85,
+the C toolchain, Node, npm, and protobuf tooling. Ordinary initial dependency
+acquisition may need the network. **Do not call that acquisition offline**. The
+commands below assume its dependency closure is already available.
+`nix --offline` is not itself a network sandbox for fixed-output builders.
 
-From the committed checkout on x86_64 Linux/NixOS:
+From the committed checkout on x86_64 Linux, including NixOS:
 
 ```sh
 REF="git+file:$PWD?rev=$(git rev-parse HEAD)"
@@ -27,9 +27,10 @@ nix build --offline --option eval-cache false --no-write-lock-file \
 ```
 
 The printed paths identify real package prefixes. Select the target you intend
-to install (its `share/parrot/target` records the target); do not substitute a
-fabricated prefix after a failed build. For example, obtain a Linux prefix and install into a **new, private**
-profile rather than silently modifying the user's default profile:
+to install. Its `share/parrot/target` records the target. Do not substitute a
+fabricated prefix after a failed build. For example, obtain a Linux prefix and
+install into a **new, private** profile rather than silently modifying the user's
+default profile:
 
 ```sh
 prefix="$(nix build --offline --no-write-lock-file --no-link --print-out-paths \
@@ -39,12 +40,12 @@ nix profile add --profile "$profile" "$prefix"
 bash scripts/package-smoke --prefix "$profile" --target x86_64-linux --artifact-only
 ```
 
-Use an unused profile path; keep an older known-good profile/package available
-rather than deleting it. This is not a universal installer or an
-operating-system service setup. Even help/version initialize
-diagnostic logs; prefer the smoke script's synthetic HOME/XDG/TMP roots over
-pointing an experimental binary at personal state. The script checks help,
-version, empty-root `sessions`, packaged resources/notices and architecture.
+Use an unused profile path. Keep an older known-good profile and package
+available rather than deleting it. This is not a universal installer or an
+operating-system service setup. Even help and version initialize diagnostic logs.
+Prefer the smoke script's synthetic HOME/XDG/TMP roots over pointing an
+experimental binary at personal state. The script checks help, version,
+empty-root `sessions`, packaged resources and notices, and architecture.
 
 For musl use `parrot-musl` and `--target x86_64-linux-musl`. A standalone
 installation must keep the complete `bin/` and `share/` trees together, including
@@ -56,23 +57,23 @@ Without `--artifact-only`, the required smoke also runs `parrot-cli`'s
 startup with isolated state and controlled provider responses. Artifact-only mode
 does not run these application checks and cannot replace the required smoke.
 
-## Native runtime / sandbox dependencies
+## Native runtime and sandbox dependencies
 
 - Linux shell isolation requires trusted-system-path **Bubblewrap (`bwrap`)** and
   usable unprivileged user namespaces. Linux PTY launch needs the retained helper
   beside the CLI. The package's static musl property does not install Bubblewrap,
   grant permissions or prove a working production sandbox.
 - macOS pipe isolation uses **`/usr/bin/sandbox-exec` (Seatbelt)** at a trusted,
-  non-writable system path; it is compatibility isolation, not a promised robust
+  non-writable system path. It is compatibility isolation, not a promised robust
   hostile-command boundary. PTY shell mode is unsupported on macOS. Missing
   sandbox support is not permission to run unconfined. The incomplete local
   production security bundle remains a separate blocker on every platform.
 - A source build uses the locked Nix toolchain. Native macOS requires a real
-  Apple Silicon macOS runner with its Darwin SDK/toolchain closure. The original
-  source guide lists Xcode Command Line Tools, but this native dependency closure
-  has not been validated here. Its .NET SDK requirement belongs to the original
-  development oracle, not the Rust runtime. Linux evaluation/cross-compilation
-  cannot establish that platform's behavior.
+  Apple Silicon macOS runner with its Darwin SDK and toolchain closure. The
+  original source guide lists Xcode Command Line Tools, but this native
+  dependency closure has not been validated here. Its .NET SDK requirement
+  belongs to the original development oracle, not the Rust runtime. Linux
+  evaluation or cross-compilation cannot establish that platform's behavior.
 
 The Apple Silicon recipe is **not executed natively in current evidence**:
 
@@ -82,13 +83,14 @@ nix build --offline --no-write-lock-file --no-link --print-out-paths \
   "$REF#packages.aarch64-darwin.parrot-darwin"
 ```
 
-A Darwin smoke on Linux returns exit2 / `blocked_external`; it is not a Mac
-test pass. Intel macOS, Windows and Linux ARM64 are not supported package targets.
+A Darwin smoke run on Linux exits with code 2 and reports `blocked_external`. It
+is not a Mac test pass. Intel macOS, Windows and Linux ARM64 are not supported
+package targets.
 
 ## Interfaces versus available operation
 
 `parrot help`, `parrot version` (or `--version`) and `parrot sessions` retain their
-interfaces. Top-level `sessions` reads metadata from the **new state root**; it is
+interfaces. Top-level `sessions` reads metadata from the **new state root**. It is
 not a merged legacy-session listing or evidence that local resume succeeded.
 `parrot chat --basic` selects the minimal renderer, not a security bypass.
 See [enhanced CLI Markdown output](markdown.md) for the enhanced renderer's syntax,
@@ -104,7 +106,7 @@ keeping the requested line range and the path within the root:
 `$USER_SKILLS`, `$REPO_SKILLS`, and `$SYSTEM_SKILLS` identify user, repository,
 and bundled skill roots reported by the session's server. This also applies to
 supporting files and directory reads, in local and remote sessions. Recognized
-skill reads use normal tool colors rather than muted gray; ordinary reads are
+skill reads use normal tool colors rather than muted gray. Ordinary reads are
 unchanged. Unknown roots, older servers without root metadata, and failed catalog
 refreshes leave paths unshortened and muted. These aliases are display-only,
 not environment variables or replacements for paths in tool calls. Failure
@@ -113,19 +115,19 @@ details retain the original request path.
 `parrot chat --connect <address> [--token-file <owner-only-file>]` is an explicit
 experimental attach interface for a separately authorized compatible server. It
 is separate from local chat startup. Addresses include `unix:/path`, HTTP and
-HTTPS. TCP uses an owner-only token file; plaintext non-loopback listening
+HTTPS. TCP uses an owner-only token file. Plaintext non-loopback listening
 also requires `--unsafe-allow-external`. HTTPS serving additionally requires
-`--tls-cert-file <PEM-chain>` and `--tls-key-file <unencrypted-PEM-key>`; see
+`--tls-cert-file <PEM-chain>` and `--tls-key-file <unencrypted-PEM-key>`. See
 [HTTPS provisioning](../../README.md#https-certificates-for-serve).
-No example here authorizes a live provider, remote server/account, OAuth or S3
-action. Authentication/model-list commands may access credentials or a network and
-are **not offline smoke checks**.
+No example here authorizes a live provider, a remote server or account, OAuth, or
+an S3 action. Authentication and model-list commands may access credentials or a
+network and are **not offline smoke checks**.
 Do not infer available local operation merely because help lists a command.
 
 ## Attribution and retention
 
 Keep `share/parrot/licenses/`, skill notices and `THIRD_PARTY_NOTICES.md` with the
-package; see [third-party notices](../../THIRD_PARTY_NOTICES.md) and the
+package. See [third-party notices](../../THIRD_PARTY_NOTICES.md) and the
 [package recipes](../../packaging/README.md). Some workspace license metadata is
 UNSPECIFIED and published dependency notices are incomplete. Legal clearance is
 not established by installation.

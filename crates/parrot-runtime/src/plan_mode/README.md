@@ -7,9 +7,9 @@ session's security policy.
 ## Plan artifacts and approval
 
 Planning creates correlated Markdown and task artifacts beneath the selected
-agent's plan directory. Files are private and created exclusively. Preparing a
-plan again does not truncate existing artifacts. Failure cleanup removes only
-artifacts created by that operation.
+agent's plan directory. Plan mode opens each artifact with exclusive creation and
+private permissions. Preparing a plan again does not truncate existing artifacts.
+Failure cleanup removes only artifacts created by that operation.
 
 Plan output must pass strict task parsing. Invalid output produces repair
 diagnostics. Valid output can produce an approval dialog, but the planning workflow

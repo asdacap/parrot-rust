@@ -14,12 +14,12 @@ system scan. File-based skill queues have no separate runtime blocker.
 Checks preserve configured section and reminder order. A present result with empty
 text still blocks completion. Any nonempty completion-feedback list retains the
 assistant's candidate response and forces continuation, including an active-work-only
-list. All completion categories are observed, so reminder render counts advance
-even when an earlier category also blocks completion.
+list. The completion check observes all categories, so reminder render counts
+advance even when an earlier category also blocks completion.
 
 Accepted reminder mutations finish before the next completion observation and
-final closure. The first feedback message records the candidate with its notice;
-later feedback notices can be retained without being durable event records.
+final closure. The first feedback message records the candidate with its notice.
+Later feedback notices can be retained without being durable event records.
 Retained publication must not be mistaken for proof of database commitment.
 
 Waiting wakes on admitted input, child completion, task-graph completion, process
@@ -39,8 +39,9 @@ clearing an existing title reset the count. Clearing an absent title does neithe
 Replacing a live title keeps its position. Reopening replays each change by
 removing the old title and appending its replacement, so order can differ after
 recovery. Malformed recorded reminder data is an opening error rather than an
-ignored entry. Rendering uses configured templates and ordinal numbering; its
-counter advances before a rendering error and retains signed wrapping behavior.
+ignored entry. Rendering uses configured templates and ordinal numbering. The
+counter advances before a rendering error can be reported, and it keeps signed
+wrapping behavior.
 
 An empty-description set has a retained compatibility quirk. The live reminder is
 present with empty text, but the recorded change clears it, so reopening omits it.
@@ -82,8 +83,8 @@ make an agent appear complete and does not replace process settlement or joins.
 The packaged queue skill coordinates files beneath the owner's
 `$AGENT_SCRATCH_DIR/queues/` through ordinary authorized command execution and a
 Python 3 helper. Workers receive explicit absolute paths. Owners refresh one
-aggregate progress report using taken and total items, with a waiting count;
-taken items may still be in flight. Active progress requires an explicit close.
+aggregate progress report using taken and total items, with a waiting count.
+Taken items may still be in flight. Active progress requires an explicit close.
 
 There is no queue watcher, native queue inventory, or queue-specific completion
 check. Old native queue files remain untouched and unattached. Historical protocol

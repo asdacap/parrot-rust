@@ -11,7 +11,7 @@ Context-window reporting and input-limit triggering are distinct. Estimates incl
 text, tools, selected-provider image costs, and fixed request overhead without
 loading image bytes. Calibration uses positive observed input usage for the selected
 model, preserves its previous value when usage is missing, and resets only after
-successful compaction persistence. Calibrated estimates saturate; aggregate token
+successful compaction persistence. Calibrated estimates saturate. Aggregate token
 overflow is an error. Output budgets retain five-percent headroom.
 
 Context reminders compare current usage with the last stored reminder for the
@@ -61,10 +61,11 @@ values without a combined atomic snapshot or cached capture. Native tail reads
 retain tool ownership and status classification and materialize historical image
 artifacts. Current transient messages remain separate.
 
-Summary requests and admitted cleanup are awaited. Cancellation reaches summaries
-and other compaction effects. Started, finished, and failed notices bracket the
-operation, including no-op completion. Preparation failure after a successful
-start publishes failure before returning without recording a replacement.
+Compaction awaits summary requests and admitted cleanup. Cancellation reaches
+summaries and other compaction effects. Started, finished, and failed notices
+bracket the operation, including no-op completion. Preparation failure after a
+successful start publishes failure before returning without recording a
+replacement.
 
 Progress reports completed and total conversation groups after successful folds,
 including recursive fallback folds, and reports a saving phase before commit.

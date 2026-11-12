@@ -13,8 +13,8 @@ remove inherited policy restrictions. Prompt descriptions are not security grant
 Profile comparison is case-sensitive.
 
 Child names use ASCII sanitation and numeric conflict suffixes starting at `-2`.
-An empty sanitized name uses the final six identity characters. Reserved names
-cannot become child directories. Maximum child depth is four.
+An empty sanitized name becomes `agent-` plus the final six identity characters.
+Reserved names cannot become child directories. Maximum child depth is four.
 
 Reusing a named child preserves its identity, history, services, and prompt scope
 while updating its current model, profile, and security selection. Getting an
@@ -39,14 +39,14 @@ normal policy limits. Failed publication startup leaves admission retryable whil
 preserving cleanup of work already started.
 
 Admission order determines child snapshot order. Closing disposes children in
-reverse order and hides live snapshots immediately. Already admitted construction
-and rejected-construction cleanup are joined before shutdown finishes. A failed
+reverse order and hides live snapshots immediately. Close joins already admitted
+construction and rejected-construction cleanup before shutdown finishes. A failed
 construction does not announce a successfully created or closed child.
 
 Close joins owned work, closes the session and child admission, disposes retained
 children and registered resources, releases retention, and joins started
 publications. Cleanup continues through failures. Later cleanup stages can replace
-an earlier reported error; within an ordered cleanup list, the first failure is
+an earlier reported error. Within an ordered cleanup list, the first failure is
 retained. Additional failures produce bounded diagnostic codes rather than
 exception, prompt, profile, or policy text.
 
