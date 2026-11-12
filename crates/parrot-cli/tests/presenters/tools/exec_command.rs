@@ -34,16 +34,24 @@ fn terminal(result: &str) -> ToolTerminalPresentation {
     }
 }
 #[test]
-fn yielded_process_defers_terminal_but_plain_output_does_not() {
+fn yielded_process_renders_a_yielded_line_and_plain_output_does_not() {
     let presenter = ExecCommandToolPresenter::default();
     let mut yielded = terminal("shell-42");
     yielded.yielded_process = Some(Default::default());
-    assert!(
-        presenter
+    for (start_omitted, expected) in [
+        (false, vec!["○ $ compile (yielded)".to_owned()]),
+        (
+            true,
+            vec!["○ $ compile (yielded)".to_owned(), "  compile".to_owned()],
+        ),
+    ] {
+        yielded.start_omitted = start_omitted;
+        let item = presenter
             .present_terminal(&call("compile"), &yielded)
             .unwrap()
-            .is_none()
-    );
+            .unwrap();
+        assert_eq!(rows(&item, false), expected);
+    }
     for (arguments, result) in [
         (r#"{"command":"status","name":"git"}"#, "git"),
         (r#"{"command":"status"}"#, "shell-42"),

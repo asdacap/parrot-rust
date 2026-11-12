@@ -1383,10 +1383,25 @@ fn tombstone(id: &str, elapsed: Option<i64>) -> process::CompletedShellProcess {
 }
 
 #[test]
-fn yielded_exec_remains_live_without_committing() {
+fn yielded_after_committed_start_adds_the_yielded_line() {
+    let command = format!("echo {}", "x".repeat(201));
+    let args =
+        serde_json::json!({"command":command,"name":"build","description":"Build it"}).to_string();
+    let mut fixture = Processes::new();
+    fixture.start_arguments("call", args);
+    assert_eq!(
+        commits(&fixture.view.tick(Duration::from_secs(3)).unwrap()).len(),
+        1
+    );
+    let yielded = fixture.finish("call", "build", "process-1", "inventory", 1, false);
+    assert_eq!(commits(&yielded), ["○ $ build · Build it (yielded)"]);
+}
+
+#[test]
+fn yielded_exec_commits_yielded_line_and_remains_live() {
     let mut fixture = Processes::new();
     let update = fixture.yield_process("call", "sleep 20", "process", "process-1", "inventory", 1);
-    assert!(commits(&update).is_empty());
+    assert_eq!(commits(&update), ["○ $ sleep 20 (yielded)"]);
     assert!(live(&fixture.view).contains("$ sleep 20 (process process running"));
 }
 
@@ -1460,6 +1475,7 @@ fn named_long_process_shows_name_and_description() {
     );
     let yielded = fixture.finish("call", "build", "process-1", "inventory", 1, false);
     assert_eq!(commits(&yielded).len(), 1);
+    assert!(commits(&yielded)[0].starts_with("○ $ build · Build it (yielded)"));
     assert_eq!(commits(&yielded)[0].matches('x').count(), 200);
     assert!(live(&fixture.view).contains("$ build · Build it (process build running"));
     assert_eq!(
@@ -2123,6 +2139,7 @@ fn deferred_started_command_commits_after_grace_or_yield_and_omits_fast_start() 
     fixture.start_arguments("yielded", args);
     let yielded = fixture.finish("yielded", "build", "process-1", "inventory", 1, false);
     assert_eq!(commits(&yielded).len(), 1);
+    assert!(commits(&yielded)[0].starts_with("○ $ build · Build it (yielded)"));
     assert_eq!(commits(&yielded)[0].matches('x').count(), 201);
 }
 
