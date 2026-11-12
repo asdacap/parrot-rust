@@ -50,9 +50,10 @@ Temporary visibility for dedicated activity identifies its worker, not the owner
 Explicit settlement rejects later graph updates, cancels unresolved work, joins
 admitted executions and stop records, and drains notifications. Repeated
 settlement observes the same cleanup. Cleanup continues through failures rather
-than abandoning later work. The first error follows shutdown publication,
-previous execution failures, remaining executions in start order, then notifier
-cleanup. Later failures remain available as bounded diagnostic codes.
+than abandoning later work. When cleanup reports several errors, the first error
+follows this order: shutdown publication, previous execution failures, remaining
+executions in start order, then notifier cleanup. Later failures remain available
+as bounded diagnostic codes.
 
 Diagnostics do not contain prompts, exception bodies, task or model names, or
 policy data. Successful cleanup does not emit failure diagnostics.
@@ -60,7 +61,7 @@ policy data. Successful cleanup does not emit failure diagnostics.
 ## Recovery and shutdown
 
 Recovery reconnects saved workers to retained direct children. Saved selectors
-resolve against current configuration; credentials and live security grants are
+resolve against current configuration. Credentials and live security grants are
 not restored. Each unfinished dedicated attempt continues with its existing
 worker, prompt identity, retry and repair counters, feedback, and carried result.
 It does not spend a new attempt merely because the session reopened.
@@ -75,14 +76,15 @@ recoverable notifications and execution intent. Explicit interruption, task
 cancellation, and superseding updates keep their cancellation semantics.
 Succeeded, failed, and explicitly canceled tasks remain terminal on reopening.
 
-Notifications are saved before delivery and reuse their message identity after
-interruption. A snapshot write failure is reported and blocks later transitions
-rather than starting unrecorded work. Snapshot files and SQLite are not one
-transaction, and recovery does not guarantee exactly-once external effects.
+The scheduler saves notifications before delivery, and each notification reuses
+its message identity after interruption. A snapshot write failure is reported and
+blocks later transitions rather than starting unrecorded work. Snapshot files and
+SQLite are not one transaction, and recovery does not guarantee exactly-once
+external effects.
 
 ## Snapshot compatibility
 
-Recovery snapshots use version `2`; AgentTask input artifacts use version `1`.
+Recovery snapshots use version `2`. AgentTask input artifacts use version `1`.
 Compatible version-`1` recovery snapshots convert once. Conversion stops and
 joins obsolete attempts and their nested work before reassignment. Terminal tasks
 and histories remain intact. Reassigned unfinished work can repeat partial
@@ -109,7 +111,7 @@ run, including owners of nested graphs. Self work consumes no child capacity, so
 retain their admission. Direct `agent_spawn` calls are outside this limit.
 
 Pending work starts automatically when capacity becomes available. Increasing the
-limit wakes eligible work. Decreasing it does not stop ongoing runs; later extra
+limit wakes eligible work. Decreasing it does not stop ongoing runs. Later extra
 starts wait until usage falls below the limit. Each owner's free allowance remains
 available. Saved running work resumes even if it exceeds a reduced limit.
 

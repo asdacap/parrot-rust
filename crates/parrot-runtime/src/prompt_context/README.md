@@ -37,18 +37,18 @@ operations.
 Displayed paths use the selected session resources and agent scratch identity.
 Path compression prefers longer parents and respects literal environment
 overrides. The platform identifier reflects the native operating system and
-architecture. Available command names are sorted ordinally; the expected `bwrap`
+architecture. Available command names are sorted ordinally. The expected `bwrap`
 entry is suppressed on macOS. Git context uses the resolved project workspace.
 These displayed values do not authorize filesystem or command access.
 
 ## Skill discovery
 
-Skill roots are searched in nearest-repository-ancestor, user, then packaged
+Skill discovery searches roots in nearest-repository-ancestor, user, then packaged
 order. Discovery proceeds breadth first with UTF-16 ordinal ordering. It has a
 maximum depth of 6, a 2,000-directory bound, and a 20,000-entry bound. Hidden
 directories, including dot-prefixed directories, are not traversed. Permitted
-directory links are cycle-checked. Disallowed system-root and file
-links are rejected. Canonical physical paths deduplicate discovered skills.
+directory links are cycle-checked. Discovery rejects disallowed system-root links
+and file links. Canonical physical paths deduplicate discovered skills.
 
 Skill reads require strict UTF-8 and a target-bound 1 MiB limit. Frontmatter and
 optional display YAML use strict parsing with bounded metadata. Skill lookup
@@ -57,7 +57,7 @@ aliases. Mention parsing retains UTF-16 positions and recognizes mentions inside
 code and backslash text.
 
 Metadata lookup does not read instruction bodies. Unknown references can refresh
-the catalog once per lookup batch; known disabled records do not trigger that
+the catalog once per lookup batch. Known disabled records do not trigger that
 refresh. The refreshed metadata is visible to later reads in the same prompt
 epoch. Body reads use fresh authorization against the expected physical target.
 Unavailable reads return diagnostics rather than an invented skill body.
@@ -67,7 +67,7 @@ Unavailable reads return diagnostics rather than an invented skill body.
 A turn captures its skill catalog. Selected skill identities are deduplicated
 before their bodies are read, and loaded content is ordered consistently. The
 selected-file limit is 8 KiB and the combined prompt limit is 1 MiB. The rendered
-catalog has a 64 KiB budget. Ending a turn releases its captured view; an idle
+catalog has a 64 KiB budget. Ending a turn releases its captured view. An idle
 prompt observation acquires a current catalog rather than keeping an old turn's
 copy.
 
@@ -85,8 +85,8 @@ intent, so no manually maintained source version is required.
 
 ## Capability limits
 
-Prompt context requires authorized reads and installation; inert descriptions
-and resolved-path reports do not prove filesystem enforcement. Configuration and
+Prompt context requires authorized reads and installation. Inert descriptions and
+resolved-path reports do not prove filesystem enforcement. Configuration and
 credentials do not gain legacy fallback from prompt discovery. Known blocked
 captured-file approval widening remains unresolved by this component.
 

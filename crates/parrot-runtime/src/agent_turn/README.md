@@ -85,7 +85,7 @@ can still require interruption cleanup.
 Normal shutdown joins admitted mutations, provider streams, provider sessions,
 and output cleanup. Dropping an operation's observer does not release the agent
 while accepted work remains unfinished. A mutation's reported failure belongs to
-that operation; an unexpected task failure also remains a cleanup error.
+that operation. An unexpected task failure also remains a cleanup error.
 
 ## Streaming, usage, and diagnostics
 
