@@ -3,7 +3,7 @@ use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
 use parrot_domain::protocol::messages::parrot::Event;
 use parrot_storage::conversation::forks::ForkError;
 use parrot_storage::conversation::*;
-use parrot_storage::database::SessionDatabase;
+use parrot_storage::database::{SessionDatabase, Transaction};
 use parrot_storage::events::{
     EventRepository, ToolExecutionStatus, ToolExecutionTerminal, projection, tools,
 };
@@ -65,6 +65,22 @@ fn single_text(item: &ConversationItem) -> &str {
         ConversationPart::Text(text) => text,
         _ => panic!("expected the source's single text part"),
     }
+}
+fn append_legacy_tool_images(
+    tx: &Transaction<'_>,
+    event: &Event,
+    assistant: i64,
+) -> Result<ConversationItem, parrot_storage::events::EventError> {
+    parrot_storage::events::record(tx, event, "at")?;
+    let mut value = message(MessageRole::User, "");
+    value.origin = ConversationOrigin::Tool;
+    value.parts = vec![super::Fixture::image("artifact", "image/png", "img")];
+    let item = projection::project(tx, &event.agent_session_id, &value, "at")?;
+    tx.execute(
+        "UPDATE conversation_item SET tool_owner_sequence = ?1 WHERE sequence = ?2;",
+        rusqlite::params![assistant, item.sequence],
+    )?;
+    Ok(item)
 }
 async fn append(repo: &ConversationRepository, agent: &str, value: ConversationMessage) -> i64 {
     let agent = agent.to_owned();
@@ -318,17 +334,8 @@ async fn raw_conversation_without_summary_keeps_noncontiguous_ownership_and_arti
     let published = event("synthetic", "agent");
     let synthetic = repo
         .events()
-        .transaction(move |tx| {
-            tools::append_tool_synthetic(
-                tx,
-                &published,
-                owner,
-                &[super::Fixture::image("artifact", "image/png", "img")],
-                &|| "at".into(),
-            )
-        })
+        .transaction(move |tx| append_legacy_tool_images(tx, &published, owner))
         .await
-        .unwrap()
         .unwrap();
     append(&repo, "other", message(MessageRole::User, "other agent")).await;
 
@@ -387,11 +394,7 @@ async fn noncontiguous_members_survive_reopen_forks_and_owner_deletion() {
     )
     .await;
     repo.events()
-        .append_tool_synthetic(
-            event("synthetic", "agent"),
-            owner,
-            vec![super::Fixture::image("artifact", "image/png", "img")],
-        )
+        .transaction(move |tx| append_legacy_tool_images(tx, &event("synthetic", "agent"), owner))
         .await
         .unwrap();
     let state = conversation_state(&repo, "agent").await.unwrap();
@@ -627,15 +630,7 @@ async fn named_fork_clones_complete_group_parts_provider_terminals_synthetic_and
     settle(&repo, "agent", checkpoint, "checkpoint").await;
     let published = event("synthetic", "agent");
     repo.events()
-        .transaction(move |tx| {
-            tools::append_tool_synthetic(
-                tx,
-                &published,
-                checkpoint,
-                &[super::Fixture::image("artifact", "image/png", "img")],
-                &|| "at".into(),
-            )
-        })
+        .transaction(move |tx| append_legacy_tool_images(tx, &published, checkpoint))
         .await
         .unwrap();
     append(

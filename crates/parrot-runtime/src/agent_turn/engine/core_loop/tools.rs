@@ -1,6 +1,6 @@
 use super::*;
 use crate::tool_settlement::*;
-use parrot_core::{ToolCall, ToolImage, ToolResult, ToolStatus};
+use parrot_core::{ToolCall, ToolResult, ToolStatus};
 use parrot_domain::{
     contracts::{storage::Committed, tools::ParallelSafety},
     values::{

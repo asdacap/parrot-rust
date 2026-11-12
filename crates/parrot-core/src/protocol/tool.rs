@@ -33,23 +33,8 @@ pub struct ToolResult {
     pub status: ToolStatus,
     pub text: String,
     pub error_message: String,
-    pub images: Vec<ToolImage>,
     /// Adapter-owned metadata forwarded unchanged to conversation persistence.
     pub metadata: Option<Vec<u8>>,
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ToolImage {
-    pub artifact_id: String,
-    pub sha256: String,
-    pub media_type: String,
-    pub byte_length: i64,
-    pub width: u32,
-    pub height: u32,
-    pub frame_count: u32,
-    pub aggregate_pixels: i64,
-    pub display_name: String,
-    pub origin: String,
 }
 
 /// Provider-visible definitions backed by retained executable identities in the adapter.

@@ -1,9 +1,7 @@
 use parrot_domain::protocol::messages::parrot::Event;
 use parrot_storage::events::error::EventError;
 use parrot_storage::events::projection::project;
-use parrot_storage::events::tools::{
-    append_tool_settlement, append_tool_synthetic, has_tool_synthetic, tool_terminals_of_calls,
-};
+use parrot_storage::events::tools::{append_tool_settlement, tool_terminals_of_calls};
 use parrot_storage::events::types::{
     ConversationMessage, ConversationOrigin, ConversationPart, MessageRole, ToolExecutionStatus,
     ToolExecutionTerminal,
@@ -279,54 +277,6 @@ fn results_survive_owner_deletion_without_losing_identity() {
         append_tool_settlement(&tx, &event("e2", "agent"), another, &result, &clock),
         Err(EventError::Conflict(_))
     ));
-}
-#[test]
-fn synthetic_requires_images_is_idempotent_and_validates_before_duplicate_lookup() {
-    let mut connection = database();
-    let tx = connection.transaction().unwrap();
-    let assistant = assistant(&tx, "agent");
-    let images = vec![
-        super::Fixture::image("one", "image/png", "first"),
-        super::Fixture::image("two", "image/jpeg", "second"),
-    ];
-    let item = append_tool_synthetic(&tx, &event("e1", "agent"), assistant, &images, &clock)
-        .unwrap()
-        .unwrap();
-    assert_eq!(item.message.origin, ConversationOrigin::Tool);
-    assert_eq!(item.message.role, MessageRole::User);
-    assert_eq!(item.message.parts, images);
-    assert!(item.message.tool_call_id.is_empty());
-    assert!(has_tool_synthetic(&tx, "agent", assistant).unwrap());
-    assert!(!has_tool_synthetic(&tx, "other", assistant).unwrap());
-    assert!(
-        append_tool_synthetic(
-            &tx,
-            &event("ignored", "agent"),
-            assistant,
-            &[super::Fixture::image("different", "image/gif", "different")],
-            &clock
-        )
-        .unwrap()
-        .is_none()
-    );
-    for parts in [
-        vec![],
-        vec![ConversationPart::text("text")],
-        vec![images[0].clone(), ConversationPart::text("mixed")],
-    ] {
-        let error =
-            append_tool_synthetic(&tx, &event("invalid", "agent"), assistant, &parts, &clock)
-                .unwrap_err();
-        assert!(matches!(error, EventError::Argument(_)));
-        assert_eq!(
-            error.to_string(),
-            "A tool synthetic message requires image artifact parts."
-        );
-    }
-    tx.commit().unwrap();
-    assert_eq!(count(&connection, "event"), 1);
-    assert_eq!(connection.query_row("SELECT COUNT(*) FROM conversation_item WHERE tool_owner_sequence IS NOT NULL AND role = 'user' AND origin = 'tool'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-    assert_eq!(count(&connection, "conversation_item"), 2);
 }
 #[test]
 fn result_reads_preserve_call_input_order_duplicates_and_all_statuses() {

@@ -13,7 +13,7 @@ async fn image_result_uses_bound_actual_filename_and_real_repository_preserves_o
         )
         .await
         .unwrap();
-    assert_eq!(original.text, "image read");
+    assert_eq!(original.text, original.image_artifacts[0].artifact_id);
     assert_eq!(original.outcome, FileToolOutcome::Finished);
     assert_eq!(original.image_artifacts.len(), 1);
     let artifact = &original.image_artifacts[0];

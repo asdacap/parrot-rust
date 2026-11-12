@@ -1,12 +1,13 @@
 use super::*;
 use parrot_domain::{
     contracts::{async_ops::OperationError, security::InvocationContext},
-    protocol::messages::parrot::ToolStarted,
+    protocol::messages::parrot::{Delivery, InputAdmitted, MessageContentPart, ToolStarted},
 };
 use parrot_storage::{
     artifacts::output_blobs::is_tool_output_oversized,
     conversation::ConversationOrigin,
     diagnostics::{DiagnosticFailure, DiagnosticSeverity, FailureKind},
+    events::ConversationPart,
 };
 use std::time::Instant;
 
@@ -179,22 +180,6 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                 }
                 text = self.config.output_blobs.substitute_process_notice(&text);
                 let yielded = result.yielded_process.is_some();
-                let images = result
-                    .image_artifacts
-                    .into_iter()
-                    .map(|image| ToolImage {
-                        artifact_id: image.artifact_id,
-                        sha256: image.sha256,
-                        media_type: image.media_type,
-                        byte_length: image.byte_length,
-                        width: image.width,
-                        height: image.height,
-                        frame_count: image.frame_count,
-                        aggregate_pixels: image.aggregate_pixels,
-                        display_name: image.display_name,
-                        origin: image.origin,
-                    })
-                    .collect();
                 let metadata = result
                     .yielded_process
                     .as_ref()
@@ -206,6 +191,57 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                             FailureKind::Unexpected,
                         ))
                     })?;
+                for image in result.image_artifacts {
+                    let parts = vec![
+                        ConversationPart::text(&image.artifact_id),
+                        ConversationPart::image(image),
+                    ];
+                    let mut event = self.event(history).map_err(turn_failure)?;
+                    let admission = history
+                        .admit_parts(
+                            Identifier::message_id().map_err(|error| {
+                                turn_failure(TurnError::Service(error.to_string()))
+                            })?,
+                            parts,
+                            Delivery::DELIVERY_STEER,
+                            move |input| {
+                                let parts = input
+                                    .parts
+                                    .iter()
+                                    .map(|part| {
+                                        let mut part_message = MessageContentPart::new();
+                                        match part {
+                                            ConversationPart::Text(text) => {
+                                                part_message.set_text(text.clone())
+                                            }
+                                            ConversationPart::ImageArtifact { metadata } => {
+                                                part_message
+                                                    .set_artifact_id(metadata.artifact_id.clone());
+                                                part_message.display_name =
+                                                    metadata.display_name.clone();
+                                            }
+                                        }
+                                        part_message
+                                    })
+                                    .collect();
+                                event.set_input_admitted(InputAdmitted {
+                                    input_id: input.id.clone(),
+                                    message_id: input.message_id.clone(),
+                                    content: input.content(),
+                                    delivery: input.delivery.into(),
+                                    parts,
+                                    ..InputAdmitted::new()
+                                });
+                                Ok(event)
+                            },
+                        )
+                        .await
+                        .map_err(TurnError::from)
+                        .map_err(turn_failure)?;
+                    if let Some(event) = admission.published {
+                        self.publish(event).await.map_err(turn_failure)?;
+                    }
+                }
                 self.diagnostic(
                     history,
                     call,
@@ -224,7 +260,6 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                     status: ToolStatus::Finished,
                     text,
                     error_message: String::new(),
-                    images,
                     metadata,
                 })
             }
@@ -276,7 +311,6 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
             status: ToolStatus::Cancelled,
             text: self.interrupted_result.into(),
             error_message: String::new(),
-            images: Vec::new(),
             metadata: None,
         }
     }
@@ -296,7 +330,6 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
             status: ToolStatus::Error,
             text,
             error_message: message,
-            images: Vec::new(),
             metadata: None,
         })
     }

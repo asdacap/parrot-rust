@@ -123,7 +123,7 @@ async fn image_references_preserve_each_bound_actual_filename_and_share_original
         )
         .await
         .unwrap();
-    assert_eq!(original.text, "image read");
+    assert_eq!(original.text, original.image_artifacts[0].artifact_id);
     assert_eq!(original.outcome, FileToolOutcome::Finished);
     assert_eq!(original.image_artifacts.len(), 1);
     let artifact = &original.image_artifacts[0];
@@ -247,7 +247,7 @@ async fn image_per_read_limit_is_inclusive_and_is_passed_to_service_with_post_re
         assert_eq!(
             result.text,
             if expected_count == 1 {
-                "image read".into()
+                result.image_artifacts[0].artifact_id.clone()
             } else {
                 format!("error: An image cannot exceed {limit} bytes.")
             }

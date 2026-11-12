@@ -1,7 +1,7 @@
 use crate::{
-    BoxFuture, CancellationToken, ConfigKey, Content, ConversationAddition,
-    ConversationPersistence, Error, Message, Role, States, ToolCall, ToolCallReceipt, ToolResult,
-    ToolStatus, Tools, TurnFlags, rendering::render_template,
+    BoxFuture, CancellationToken, ConfigKey, ConversationAddition, ConversationPersistence, Error,
+    Message, Role, States, ToolCall, ToolCallReceipt, ToolResult, ToolStatus, Tools, TurnFlags,
+    rendering::render_template,
 };
 use std::collections::HashMap;
 
@@ -29,7 +29,6 @@ pub struct ToolSettlement {
 struct ToolBatch {
     sequence: i64,
     calls: Vec<ToolCall>,
-    results: HashMap<String, ToolResult>,
     index: usize,
 }
 
@@ -45,7 +44,6 @@ impl ToolSettlement {
         self.pending = Some(ToolBatch {
             sequence,
             calls,
-            results: HashMap::new(),
             index: 0,
         });
         Ok(())
@@ -65,7 +63,6 @@ impl ToolSettlement {
             .into_iter()
             .map(|result| (result.call_id.clone(), result))
             .collect::<HashMap<_, _>>();
-        let mut settled = HashMap::new();
         for call in &batch.calls {
             let (result, recovered) = if let Some(result) = results.remove(&call.id) {
                 (result, true)
@@ -85,25 +82,13 @@ impl ToolSettlement {
                         status: ToolStatus::Error,
                         text,
                         error_message,
-                        images: Vec::new(),
                         metadata: None,
                     },
                     false,
                 )
             };
             Self::record_result(states, batch.sequence, &result, recovered).await?;
-            settled.insert(call.id.clone(), result);
         }
-        Self::finish_batch(
-            states,
-            &ToolBatch {
-                sequence: batch.sequence,
-                calls: batch.calls,
-                results: settled,
-                index: 0,
-            },
-        )
-        .await?;
         Ok(())
     }
 
@@ -130,18 +115,13 @@ impl ToolSettlement {
                 ));
             }
             Self::record_result(states, batch.sequence, result, false).await?;
-            batch.results.insert(result.call_id.clone(), result.clone());
             batch.index += 1;
         }
         self.pending = Some(batch);
         Ok(())
     }
 
-    pub async fn complete_execution(
-        &mut self,
-        states: &mut dyn States,
-        results: &[ToolResult],
-    ) -> Result<(), Error> {
+    pub fn complete_execution(&mut self, results: &[ToolResult]) -> Result<(), Error> {
         let batch = self
             .pending
             .take()
@@ -157,7 +137,7 @@ impl ToolSettlement {
                 "tool execution did not complete the recorded batch",
             ));
         }
-        Self::finish_batch(states, &batch).await
+        Ok(())
     }
 
     fn record_result<'a>(
@@ -168,9 +148,6 @@ impl ToolSettlement {
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let mut message = Message::text(Role::Tool, result.text.clone());
-            message
-                .contents
-                .extend(result.images.iter().cloned().map(Content::Artifact));
             message.tool_call_id = result.call_id.clone();
             states
                 .add_conversation_messages(ConversationAddition {
@@ -184,32 +161,6 @@ impl ToolSettlement {
                 .await?;
             Ok(())
         })
-    }
-
-    async fn finish_batch(states: &mut dyn States, batch: &ToolBatch) -> Result<(), Error> {
-        let contents = batch
-            .calls
-            .iter()
-            .filter_map(|call| batch.results.get(&call.id))
-            .filter(|result| result.status == ToolStatus::Finished)
-            .flat_map(|result| result.images.iter().cloned())
-            .map(Content::Artifact)
-            .collect::<Vec<_>>();
-        if !contents.is_empty() {
-            states
-                .add_conversation_messages(ConversationAddition {
-                    messages: vec![Message {
-                        role: Role::User,
-                        contents,
-                        ..Message::default()
-                    }],
-                    persistence: ConversationPersistence::ToolImages {
-                        assistant_sequence: batch.sequence,
-                    },
-                })
-                .await?;
-        }
-        Ok(())
     }
 }
 
@@ -246,5 +197,5 @@ pub async fn execute_tools(
             .any(|result| result.status == ToolStatus::Cancelled);
         results.extend(chunk);
     }
-    settlement.complete_execution(states, &results).await
+    settlement.complete_execution(&results)
 }

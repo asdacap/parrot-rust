@@ -255,14 +255,7 @@ impl Harness {
         results: &[parrot_core::ToolResult],
     ) -> Result<(), TurnError> {
         self.settlement
-            .complete_execution(
-                &mut SettlementStates {
-                    tools: &mut self.state,
-                    conversation: &mut self.runtime_state.get_mut().conversation,
-                },
-                results,
-            )
-            .await
+            .complete_execution(results)
             .map_err(TurnError::Core)
     }
     pub async fn restore(&mut self, fixture: &Fixture) -> Result<(), TurnError> {

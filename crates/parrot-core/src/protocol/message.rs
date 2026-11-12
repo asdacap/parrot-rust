@@ -1,4 +1,4 @@
-use super::tool::{ToolCall, ToolDefinition, ToolImage};
+use super::tool::{ToolCall, ToolDefinition};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PromotedInput {
@@ -36,8 +36,6 @@ pub enum Role {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Content {
     Text(String),
-    /// Durable image metadata that state materializes before provider-visible reads.
-    Artifact(ToolImage),
     Image {
         path: String,
         url: String,

@@ -122,8 +122,7 @@ where
                     .await
                     .map_err(Into::into);
                 }
-                persistence @ (ConversationPersistence::ToolResult { .. }
-                | ConversationPersistence::ToolImages { .. }) => {
+                persistence @ ConversationPersistence::ToolResult { .. } => {
                     return state
                         .tool_conversation
                         .add_conversation_messages(
@@ -184,9 +183,7 @@ where
                     let record = render_record(&addition.messages[0], ConversationOrigin::Model)?;
                     let mut live = Vec::new();
                     for message in addition.messages {
-                        live.push(
-                            crate::compaction::materialize_message(self.history, message).await?,
-                        );
+                        live.push(crate::compaction::materialize_message(message));
                     }
                     let result = self
                         .history
@@ -245,7 +242,7 @@ where
                 }
                 state
                     .conversation
-                    .add(crate::compaction::materialize_message(self.history, message).await?);
+                    .add(crate::compaction::materialize_message(message));
             }
             for event in publications {
                 self.publisher

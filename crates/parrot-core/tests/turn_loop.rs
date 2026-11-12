@@ -7,8 +7,7 @@ use parrot_core::{
     Provider, ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent,
     SkillMention, SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding,
     TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest,
-    ToolImage, ToolResult, ToolStatus, Tools, TurnFlags, TurnModel, TurnOptions,
-    parse_skill_mentions,
+    ToolResult, ToolStatus, Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -874,7 +873,6 @@ impl States for MemoryState {
                         self.status_offering = next;
                     }
                 }
-                ConversationPersistence::ToolImages { .. } => {}
                 ConversationPersistence::Committed(_) => {}
                 ConversationPersistence::Phase { final_phase, .. } => {
                     if !final_phase {
@@ -916,7 +914,6 @@ impl States for MemoryState {
                     &addition.persistence,
                     ConversationPersistence::Committed(_)
                         | ConversationPersistence::ToolResult { .. }
-                        | ConversationPersistence::ToolImages { .. }
                         | ConversationPersistence::CloseTurn { .. }
                         | ConversationPersistence::CompletionBlockerFeedback(_)
                         | ConversationPersistence::Append {

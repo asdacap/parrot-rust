@@ -29,7 +29,7 @@ pub async fn add_conversation_messages(
         .iter()
         .filter_map(|part| match part {
             Content::Text(text) => Some(text.as_str()),
-            Content::Image { .. } | Content::Artifact(_) => None,
+            Content::Image { .. } => None,
         })
         .collect::<String>();
     let (inserted, published) = match addition.persistence {
@@ -61,7 +61,7 @@ pub async fn add_conversation_messages(
     };
     if inserted {
         for message in addition.messages {
-            conversation.add(materialize_message(history, message).await?);
+            conversation.add(materialize_message(message));
         }
         events.publish(published, cancellation).await?;
     }
@@ -90,10 +90,7 @@ fn notice(history: &AgentHistoryView, event: ConversationEvent) -> ContextResult
     Ok(published)
 }
 
-pub(crate) async fn materialize_message(
-    history: &AgentHistoryView,
-    message: Message,
-) -> ContextResult<ModelMessage> {
+pub(crate) fn materialize_message(message: Message) -> ModelMessage {
     let mut contents = Vec::new();
     for content in message.contents {
         match content {
@@ -110,29 +107,9 @@ pub(crate) async fn materialize_message(
                 width,
                 height,
             }),
-            Content::Artifact(image) => {
-                contents.extend(
-                    history
-                        .materialize(vec![parrot_storage::events::ConversationPart::image(
-                            parrot_storage::artifacts::ImageArtifactMetadata {
-                                artifact_id: image.artifact_id,
-                                sha256: image.sha256,
-                                media_type: image.media_type,
-                                byte_length: image.byte_length,
-                                width: image.width,
-                                height: image.height,
-                                frame_count: image.frame_count,
-                                aggregate_pixels: image.aggregate_pixels,
-                                display_name: image.display_name,
-                                origin: image.origin,
-                            },
-                        )])
-                        .await?,
-                );
-            }
         }
     }
-    Ok(ModelMessage {
+    ModelMessage {
         role: match message.role {
             Role::System => MessageRole::System,
             Role::User => MessageRole::User,
@@ -154,5 +131,5 @@ pub(crate) async fn materialize_message(
             provider_id: message.provider_id,
             content: message.provider_content,
         },
-    })
+    }
 }

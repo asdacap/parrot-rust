@@ -145,18 +145,6 @@ fn complete_fresh_tool_results_reach_state_without_rewriting_metadata() {
         status: ToolStatus::Finished,
         text: "raw result \n\ttext".into(),
         error_message: String::new(),
-        images: vec![ToolImage {
-            artifact_id: "artifact".into(),
-            sha256: "digest".into(),
-            media_type: "image/webp".into(),
-            byte_length: 99,
-            width: 640,
-            height: 480,
-            frame_count: 2,
-            aggregate_pixels: 614_400,
-            display_name: "display".into(),
-            origin: "origin".into(),
-        }],
         metadata: Some(vec![0, 255, 128, 1]),
     };
     state
