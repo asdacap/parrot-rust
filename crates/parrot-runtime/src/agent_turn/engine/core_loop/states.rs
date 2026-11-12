@@ -284,7 +284,7 @@ where
             Ok(())
         })
     }
-    fn begin_turn(&mut self) -> BoxFuture<'_, Result<TurnModel, CoreError>> {
+    fn begin_conversation_turn(&mut self) -> BoxFuture<'_, Result<TurnModel, CoreError>> {
         adapt_operation(async move {
             self.skills.end_turn().await;
             let selection = self.selection.capture()?;
@@ -294,7 +294,10 @@ where
             Ok(model)
         })
     }
-    fn record_turn_started(&mut self, turn_id: &str) -> BoxFuture<'_, Result<(), CoreError>> {
+    fn record_conversation_turn_started(
+        &mut self,
+        turn_id: &str,
+    ) -> BoxFuture<'_, Result<(), CoreError>> {
         let turn_id = turn_id.to_owned();
         adapt_operation(async move {
             self.persistence_key = Some(TurnKey {
@@ -305,7 +308,7 @@ where
             Ok(())
         })
     }
-    fn activate_turn(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
+    fn activate_conversation_turn(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
             let selection = self.binding.capture_selection()?;
             {

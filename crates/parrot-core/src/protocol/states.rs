@@ -42,21 +42,31 @@ pub trait States: Send + Sync {
     fn set_agent_state(&mut self, _state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("States.set_agent_state")) })
     }
-    /// Begins the turn: captures the selection it runs under, releases the previous
-    /// turn's skill snapshot, and begins the provider session. Returns the model the
-    /// start event presents.
-    fn begin_turn(&mut self) -> BoxFuture<'_, Result<crate::TurnModel, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.begin_turn")) })
+    /// Prepares the conversation turn before core publishes its start event.
+    /// Runtime releases the previous conversation turn's skill snapshot, captures the model selection,
+    /// notifies provider sessions of the new conversation turn, and binds the selection for this conversation turn.
+    /// Returns the model that core passes to the start-event publisher.
+    fn begin_conversation_turn(&mut self) -> BoxFuture<'_, Result<crate::TurnModel, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.begin_conversation_turn")) })
     }
-    /// Records the published start event as the turn's durable key and reports the
-    /// turn start to session activity.
-    fn record_turn_started(&mut self, _turn_id: &str) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.record_turn_started")) })
+    /// Records the start-event ID after core publishes the event.
+    /// Runtime pairs the ID with the agent-session ID to key subsequent conversation-turn persistence
+    /// and notifies session activity that the conversation turn started.
+    fn record_conversation_turn_started(
+        &mut self,
+        _turn_id: &str,
+    ) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async {
+            Err(Error::unsupported(
+                "States.record_conversation_turn_started",
+            ))
+        })
     }
-    /// Activates the recorded turn: samples the prompt epoch, binds turn status, and
-    /// starts the turn's skill snapshot.
-    fn activate_turn(&mut self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.activate_turn")) })
+    /// Activates the conversation turn after core records its start-event ID.
+    /// Runtime ensures the context's prompt epoch, binds request status to the captured
+    /// model selection, and begins the conversation turn's skill snapshot.
+    fn activate_conversation_turn(&mut self) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.activate_conversation_turn")) })
     }
     /// Joins accepted mutations and reads ordered completion blockers.
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
