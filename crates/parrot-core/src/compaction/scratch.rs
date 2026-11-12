@@ -78,11 +78,6 @@ pub(super) async fn spill_group(
                     path,
                     media_type,
                 },
-                Content::Artifact(_) => {
-                    return Err(Error::failed(
-                        "Compaction image content has not been materialized.",
-                    ));
-                }
             });
         }
         artifact.messages.push(MessageArtifact {

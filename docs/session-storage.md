@@ -104,6 +104,16 @@ lifetime separate from removable recovery snapshots. The selected design instead
 accepts a growing metadata document and whole-document replacement on mutation.
 This reduces database use. It is not a measured performance improvement.
 
+Image tools return the stored image ID as their result text. Runtime admits an
+ordinary pending steer containing that ID and the image. The turn loop promotes
+these steers after every tool call in the batch has a result. Each image gets its
+own user message. Matching IDs associate images with tool results even when
+parallel calls finish in a different order.
+
+The image steer and tool result commit separately. A crash between commits can
+leave a pending image steer without a successful tool result. Recovery does not
+reconstruct missing image steers. This is a known flaw.
+
 ## Format boundary and inspection
 
 Formats 1 through 8, populated unversioned databases, and unknown formats fail to

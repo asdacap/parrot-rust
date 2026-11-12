@@ -3,8 +3,8 @@
 use super::error::EventError;
 use super::projection::{project, read_parts};
 use super::types::{
-    ConversationItem, ConversationMessage, ConversationOrigin, ConversationPart, MessageRole,
-    ProviderContent, ToolExecutionStatus, ToolExecutionTerminal,
+    ConversationItem, ConversationMessage, ConversationOrigin, MessageRole, ProviderContent,
+    ToolExecutionStatus, ToolExecutionTerminal,
 };
 use parrot_domain::protocol::messages::parrot::Event;
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -66,60 +66,6 @@ pub fn tool_terminals_of_calls(
         }
     }
     Ok(terminals)
-}
-
-pub fn has_tool_synthetic(
-    tx: &Transaction<'_>,
-    agent: &str,
-    assistant_sequence: i64,
-) -> Result<bool, EventError> {
-    Ok(tx.query_row(
-        "SELECT EXISTS (SELECT 1 FROM conversation_item \
-         WHERE agent_session = ?1 AND tool_owner_sequence = ?2 AND origin = 'tool' AND role = 'user');",
-        params![agent, assistant_sequence],
-        |row| row.get(0),
-    )?)
-}
-
-pub fn append_tool_synthetic(
-    tx: &Transaction<'_>,
-    event: &Event,
-    assistant_sequence: i64,
-    image_parts: &[ConversationPart],
-    clock: &dyn Fn() -> String,
-) -> Result<Option<ConversationItem>, EventError> {
-    if image_parts.is_empty()
-        || image_parts
-            .iter()
-            .any(|part| !matches!(part, ConversationPart::ImageArtifact { .. }))
-    {
-        return Err(EventError::Argument(
-            "A tool synthetic message requires image artifact parts.".into(),
-        ));
-    }
-    if has_tool_synthetic(tx, &event.agent_session_id, assistant_sequence)? {
-        return Ok(None);
-    }
-    super::record(tx, event, &clock())?;
-    let item = project(
-        tx,
-        &event.agent_session_id,
-        &ConversationMessage {
-            origin: ConversationOrigin::Tool,
-            role: MessageRole::User,
-            parts: image_parts.to_vec(),
-            tool_calls: Vec::new(),
-            tool_call_id: String::new(),
-            provider_content: ProviderContent::default(),
-        },
-        &clock(),
-    )?;
-    tx.execute(
-        "UPDATE conversation_item SET tool_owner_sequence = ?2 \
-         WHERE agent_session = ?1 AND sequence = ?3;",
-        params![event.agent_session_id, assistant_sequence, item.sequence],
-    )?;
-    Ok(Some(item))
 }
 
 fn read_tool_terminal(

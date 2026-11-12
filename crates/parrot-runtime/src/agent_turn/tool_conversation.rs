@@ -1,18 +1,17 @@
 use super::{engine::Publisher, services::TurnError};
 use parrot_core::{
-    BoxFuture, ConfigKey, ConfigValue, Content, ConversationAddition, ConversationPersistence,
-    ConversationReceipt, Error, PromptTemplate, States, ToolCall, ToolImage, ToolRecovery,
-    ToolResult, ToolSettlement, ToolStatus,
+    BoxFuture, ConfigKey, ConfigValue, ConversationAddition, ConversationPersistence,
+    ConversationReceipt, Error, PromptTemplate, States, ToolCall, ToolRecovery, ToolResult,
+    ToolResultMetadata, ToolSettlement, ToolStatus,
 };
 use parrot_domain::{
     contracts::storage::Committed,
     protocol::messages::parrot::{
-        ArtifactReference, Event, ToolCancelled, ToolError, ToolFinished, YieldedShellProcess,
+        Event, ToolCancelled, ToolError, ToolFinished, YieldedShellProcess,
     },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_storage::{
-    artifacts::ImageArtifactMetadata,
     conversation::{AgentConversation, AgentHistoryView},
     events::{
         ConversationItem, ConversationPart, NeverCancelled, ToolExecutionStatus,
@@ -22,7 +21,7 @@ use parrot_storage::{
 use std::{collections::HashMap, sync::Arc};
 
 pub struct ToolConversation {
-    settlement: ToolSettlement,
+    settlement: ToolSettlement<Vec<u8>>,
     backing: ToolBacking,
 }
 
@@ -177,7 +176,7 @@ impl ToolBacking {
             .into_iter()
             .map(|terminal| (terminal.tool_call_id.clone(), terminal))
             .collect::<HashMap<_, _>>();
-        let results: Vec<ToolResult> = assistant
+        let results: Vec<ToolResult<Vec<u8>>> = assistant
             .message
             .tool_calls
             .iter()
@@ -196,34 +195,10 @@ impl ToolBacking {
                     text,
                     error_message: String::new(),
                     metadata: None,
-                    images: terminal
-                        .result_parts
-                        .into_iter()
-                        .filter_map(|part| match part {
-                            ConversationPart::ImageArtifact { metadata } => Some(ToolImage {
-                                artifact_id: metadata.artifact_id,
-                                sha256: metadata.sha256,
-                                media_type: metadata.media_type,
-                                byte_length: metadata.byte_length,
-                                width: metadata.width,
-                                height: metadata.height,
-                                frame_count: metadata.frame_count,
-                                aggregate_pixels: metadata.aggregate_pixels,
-                                display_name: metadata.display_name,
-                                origin: metadata.origin,
-                            }),
-                            ConversationPart::Text(_) => None,
-                        })
-                        .collect(),
                 }
             })
             .collect();
-        let needs_images = results
-            .iter()
-            .any(|result| result.status == ToolStatus::Finished && !result.images.is_empty());
-        if results.len() == assistant.message.tool_calls.len()
-            && (!needs_images || self.history.has_tool_synthetic(assistant.sequence).await?)
-        {
+        if results.len() == assistant.message.tool_calls.len() {
             return Ok(None);
         }
         Ok(Some(ToolRecovery {
@@ -261,31 +236,7 @@ impl ToolBacking {
                         ToolStatus::Error => ToolExecutionStatus::Error,
                         ToolStatus::ImageBudgetExceeded => ToolExecutionStatus::ImageBudgetExceeded,
                     },
-                    result_parts: addition
-                        .messages
-                        .iter()
-                        .flat_map(|message| message.contents.iter())
-                        .map(|content| match content {
-                            Content::Text(text) => Ok(ConversationPart::text(text)),
-                            Content::Artifact(image) => {
-                                Ok(ConversationPart::image(ImageArtifactMetadata {
-                                    artifact_id: image.artifact_id.clone(),
-                                    sha256: image.sha256.clone(),
-                                    media_type: image.media_type.clone(),
-                                    byte_length: image.byte_length,
-                                    width: image.width,
-                                    height: image.height,
-                                    frame_count: image.frame_count,
-                                    aggregate_pixels: image.aggregate_pixels,
-                                    display_name: image.display_name.clone(),
-                                    origin: image.origin.clone(),
-                                }))
-                            }
-                            Content::Image { .. } => Err(TurnError::Service(
-                                "tool settlement requires artifact-backed images".into(),
-                            )),
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
+                    result_parts: vec![ConversationPart::text(&result.text)],
                 };
                 let mut event = self.event();
                 if !recovered {
@@ -294,29 +245,12 @@ impl ToolBacking {
                             tool_call_id: result.call_id.clone(),
                             tool_name: result.tool_name.clone(),
                             result: Some(result.text.clone()),
-                            artifacts: result
-                                .images
-                                .iter()
-                                .map(|image| ArtifactReference {
-                                    artifact_id: image.artifact_id.clone(),
-                                    sha256: image.sha256.clone(),
-                                    media_type: image.media_type.clone(),
-                                    byte_length: image.byte_length,
-                                    width: image.width as i32,
-                                    height: image.height as i32,
-                                    frame_count: image.frame_count as i32,
-                                    aggregate_pixels: image.aggregate_pixels,
-                                    display_name: image.display_name.clone(),
-                                    origin: image.origin.clone(),
-                                    ..ArtifactReference::new()
-                                })
-                                .collect(),
                             yielded_process: result
                                 .metadata
                                 .as_deref()
-                                .map(<YieldedShellProcess as protobuf::Message>::parse_from_bytes)
+                                .map(<YieldedShellProcess as ToolResultMetadata>::decode)
                                 .transpose()
-                                .map_err(|error| TurnError::Service(error.to_string()))?
+                                .map_err(TurnError::Core)?
                                 .into(),
                             ..ToolFinished::new()
                         }),
@@ -342,43 +276,6 @@ impl ToolBacking {
                     item,
                     events: if *recovered { Vec::new() } else { vec![event] },
                 })
-            }
-            ConversationPersistence::ToolImages { assistant_sequence } => {
-                let parts = addition
-                    .messages
-                    .iter()
-                    .flat_map(|message| message.contents.iter())
-                    .map(|content| match content {
-                        Content::Artifact(image) => {
-                            Ok(ConversationPart::image(ImageArtifactMetadata {
-                                artifact_id: image.artifact_id.clone(),
-                                sha256: image.sha256.clone(),
-                                media_type: image.media_type.clone(),
-                                byte_length: image.byte_length,
-                                width: image.width,
-                                height: image.height,
-                                frame_count: image.frame_count,
-                                aggregate_pixels: image.aggregate_pixels,
-                                display_name: image.display_name.clone(),
-                                origin: image.origin.clone(),
-                            }))
-                        }
-                        _ => Err(TurnError::Service(
-                            "synthetic tool images require artifact content".into(),
-                        )),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let event = self.event();
-                let item = self
-                    .history
-                    .append_tool_synthetic(event.clone(), *assistant_sequence, parts)
-                    .await?;
-                let events = if item.is_some() {
-                    vec![event]
-                } else {
-                    Vec::new()
-                };
-                Ok(ToolCommit { item, events })
             }
             _ => Err(TurnError::Service(
                 "tool backing received a non-tool conversation addition".into(),

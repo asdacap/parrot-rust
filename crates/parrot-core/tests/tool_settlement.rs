@@ -80,7 +80,7 @@ struct PrefixTools {
     observations: Mutex<Vec<Observation>>,
     fail_second: bool,
 }
-impl Tools for PrefixTools {
+impl Tools<Vec<u8>> for PrefixTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
         Box::pin(async { Ok(ToolCatalog::default()) })
     }
@@ -88,7 +88,7 @@ impl Tools for PrefixTools {
         &'a self,
         request: ToolExecutionRequest,
         _: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult<Vec<u8>>>, Error>> {
         Box::pin(async move {
             self.observations.lock().unwrap().push(Observation {
                 calls: request.calls.iter().map(|call| call.id.clone()).collect(),
@@ -142,7 +142,8 @@ fn settlement_forwards_opaque_metadata_unchanged_to_conversation_persistence() {
             ..ToolResult::default()
         };
         finish(settlement.record_results(&mut state, std::slice::from_ref(&execution))).unwrap();
-        finish(settlement.complete_execution(&mut state, std::slice::from_ref(&execution)))
+        settlement
+            .complete_execution(std::slice::from_ref(&execution))
             .unwrap();
         assert_eq!(state.additions.len(), 1);
         let addition = &state.additions[0];
@@ -244,7 +245,7 @@ fn recovery_constructs_configured_crash_results_and_preserves_existing_terminals
         }),
         ..State::default()
     };
-    finish(ToolSettlement::default().restore_results(&mut state)).unwrap();
+    finish(ToolSettlement::<Vec<u8>>::default().restore_results(&mut state)).unwrap();
     assert_eq!(state.additions.len(), 2);
     let ConversationPersistence::ToolResult {
         result, recovered, ..
@@ -268,70 +269,5 @@ fn recovery_constructs_configured_crash_results_and_preserves_existing_terminals
     assert_eq!(
         state.messages.lock().unwrap()[1].contents,
         [Content::Text("configured error configured crash".into())]
-    );
-}
-
-#[test]
-fn recovery_adds_successful_images_in_call_order_as_one_user_message() {
-    let mut calls = calls();
-    calls.push(ToolCall {
-        id: "third".into(),
-        name: "read".into(),
-        arguments_json: "{}".into(),
-    });
-    let first = parrot_core::ToolImage {
-        artifact_id: "first-image".into(),
-        ..parrot_core::ToolImage::default()
-    };
-    let third = parrot_core::ToolImage {
-        artifact_id: "third-image".into(),
-        ..parrot_core::ToolImage::default()
-    };
-    let results = vec![
-        ToolResult {
-            call_id: "third".into(),
-            tool_name: "read".into(),
-            images: vec![third.clone()],
-            ..ToolResult::default()
-        },
-        ToolResult {
-            call_id: "second".into(),
-            tool_name: "read".into(),
-            status: ToolStatus::Error,
-            images: vec![parrot_core::ToolImage {
-                artifact_id: "excluded".into(),
-                ..parrot_core::ToolImage::default()
-            }],
-            ..ToolResult::default()
-        },
-        ToolResult {
-            call_id: "first".into(),
-            tool_name: "read".into(),
-            images: vec![first.clone()],
-            ..ToolResult::default()
-        },
-    ];
-    let mut state = State {
-        recovery: Some(ToolRecovery {
-            sequence: 17,
-            calls,
-            results,
-        }),
-        ..State::default()
-    };
-    finish(ToolSettlement::default().restore_results(&mut state)).unwrap();
-    assert_eq!(state.additions.len(), 4);
-    let image_addition = &state.additions[3];
-    assert!(matches!(
-        image_addition.persistence,
-        ConversationPersistence::ToolImages {
-            assistant_sequence: 17
-        }
-    ));
-    assert_eq!(image_addition.messages.len(), 1);
-    assert_eq!(image_addition.messages[0].role, Role::User);
-    assert_eq!(
-        image_addition.messages[0].contents,
-        [Content::Artifact(first), Content::Artifact(third)]
     );
 }

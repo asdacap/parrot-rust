@@ -74,20 +74,6 @@ pub(super) fn render_record(
             .iter()
             .map(|content| match content {
                 parrot_core::Content::Text(text) => Ok(ConversationPart::text(text)),
-                parrot_core::Content::Artifact(image) => Ok(ConversationPart::image(
-                    parrot_storage::artifacts::ImageArtifactMetadata {
-                        artifact_id: image.artifact_id.clone(),
-                        sha256: image.sha256.clone(),
-                        media_type: image.media_type.clone(),
-                        byte_length: image.byte_length,
-                        width: image.width,
-                        height: image.height,
-                        frame_count: image.frame_count,
-                        aggregate_pixels: image.aggregate_pixels,
-                        display_name: image.display_name.clone(),
-                        origin: image.origin.clone(),
-                    },
-                )),
                 parrot_core::Content::Image { .. } => Err(TurnError::Service(
                     "file images must be admitted as input before they are recorded".into(),
                 )),

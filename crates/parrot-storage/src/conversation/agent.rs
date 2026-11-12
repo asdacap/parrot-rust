@@ -80,30 +80,6 @@ impl AgentHistoryView {
             .read_latest_assistant(self.agent.clone())
             .await
     }
-    pub async fn has_tool_synthetic(&self, assistant: i64) -> Result<bool, EventError> {
-        self.repository
-            .events
-            .has_tool_synthetic(self.agent.clone(), assistant)
-            .await
-    }
-    pub async fn append_tool_synthetic(
-        &self,
-        event: Event,
-        assistant: i64,
-        parts: Vec<ConversationPart>,
-    ) -> Result<Option<ConversationItem>, EventError> {
-        self.repository.validate(&event.agent_session_id)?;
-        let agent = event.agent_session_id.clone();
-        let item = self
-            .repository
-            .events
-            .append_tool_synthetic(event, assistant, parts)
-            .await?;
-        if item.is_some() {
-            self.repository.refresh_agent_history(&agent).await?;
-        }
-        Ok(item)
-    }
     pub async fn append_tool_settlement(
         &self,
         event: Event,

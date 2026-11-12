@@ -77,11 +77,8 @@ pub enum ConversationPersistence {
     CompletionBlockerFeedback(CompletionBlockerFeedback),
     ToolResult {
         assistant_sequence: i64,
-        result: crate::ToolResult,
+        result: crate::ToolResult<Vec<u8>>,
         recovered: bool,
-    },
-    ToolImages {
-        assistant_sequence: i64,
     },
     CloseTurn {
         finish_reason: FinishReason,

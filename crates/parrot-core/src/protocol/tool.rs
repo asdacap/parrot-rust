@@ -1,3 +1,6 @@
+use super::Error;
+use std::fmt::Debug;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ToolDefinition {
     pub name: String,
@@ -26,30 +29,67 @@ pub enum ToolStatus {
     ImageBudgetExceeded,
 }
 
+/// Adapter-owned payload carried in [`ToolResult::metadata`].
+///
+/// Settlement encodes the payload before conversation persistence stores it, so
+/// the adapter keeps its own metadata type instead of raw bytes.
+pub trait ToolResultMetadata: Clone + Debug + Default + PartialEq + Send + Sync {
+    /// Encodes the payload into the bytes conversation persistence stores.
+    fn encode(&self) -> Result<Vec<u8>, Error>;
+    /// Restores the payload from bytes conversation persistence returned.
+    fn decode(bytes: &[u8]) -> Result<Self, Error>;
+}
+
+impl ToolResultMetadata for Vec<u8> {
+    fn encode(&self) -> Result<Vec<u8>, Error> {
+        Ok(self.clone())
+    }
+    fn decode(bytes: &[u8]) -> Result<Self, Error> {
+        Ok(bytes.to_vec())
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ToolResult {
+pub struct ToolResult<M> {
     pub call_id: String,
     pub tool_name: String,
     pub status: ToolStatus,
     pub text: String,
     pub error_message: String,
-    pub images: Vec<ToolImage>,
-    /// Adapter-owned metadata forwarded unchanged to conversation persistence.
-    pub metadata: Option<Vec<u8>>,
+    /// Adapter-owned metadata encoded only at the persistence boundary.
+    pub metadata: Option<M>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ToolImage {
-    pub artifact_id: String,
-    pub sha256: String,
-    pub media_type: String,
-    pub byte_length: i64,
-    pub width: u32,
-    pub height: u32,
-    pub frame_count: u32,
-    pub aggregate_pixels: i64,
-    pub display_name: String,
-    pub origin: String,
+impl<M: ToolResultMetadata> ToolResult<M> {
+    /// Encodes the metadata into the byte form conversation persistence stores.
+    pub(crate) fn encode_metadata(&self) -> Result<ToolResult<Vec<u8>>, Error> {
+        Ok(ToolResult {
+            call_id: self.call_id.clone(),
+            tool_name: self.tool_name.clone(),
+            status: self.status,
+            text: self.text.clone(),
+            error_message: self.error_message.clone(),
+            metadata: self
+                .metadata
+                .as_ref()
+                .map(ToolResultMetadata::encode)
+                .transpose()?,
+        })
+    }
+}
+
+impl ToolResult<Vec<u8>> {
+    /// Decodes persisted metadata into the settlement's payload type.
+    pub(crate) fn decode_metadata<M: ToolResultMetadata>(self) -> Result<ToolResult<M>, Error> {
+        Ok(ToolResult {
+            call_id: self.call_id,
+            tool_name: self.tool_name,
+            status: self.status,
+            text: self.text,
+            error_message: self.error_message,
+            metadata: self.metadata.as_deref().map(M::decode).transpose()?,
+        })
+    }
 }
 
 /// Provider-visible definitions backed by retained executable identities in the adapter.

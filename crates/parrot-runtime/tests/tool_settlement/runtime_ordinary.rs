@@ -477,3 +477,117 @@ async fn actual_runtime_terminal_publication_failure_stops_tail_and_restart_neve
     );
     bounded(resumed.close()).await.unwrap();
 }
+
+#[tokio::test]
+async fn actual_runtime_delivers_matching_image_steers_only_after_all_tool_results() {
+    let fixture = Fixture::new();
+    let root = fixture.repository.events().database().selected_root();
+    let artifacts = parrot_storage::artifacts::ImageArtifactRepository::new(
+        fixture.repository.events().database().clone(),
+        parrot_storage::artifacts::ImageArtifactStore::for_session(root, "resources").unwrap(),
+    )
+    .unwrap();
+    let image = artifacts
+        .persist(
+            std::io::Cursor::new(include_bytes!("fixtures/pixel.png").to_vec()),
+            "pixel.png",
+            "read_image",
+            Some("image/png"),
+            None,
+            &NeverCancelled,
+        )
+        .await
+        .unwrap();
+    let mut other_bytes = include_bytes!("fixtures/pixel.png").to_vec();
+    other_bytes.push(0);
+    let other_image = artifacts
+        .persist(
+            std::io::Cursor::new(other_bytes),
+            "other.png",
+            "read_image",
+            Some("image/png"),
+            None,
+            &NeverCancelled,
+        )
+        .await
+        .unwrap();
+    assert_ne!(image.artifact_id, other_image.artifact_id);
+    let mut reader = RecordingTool::new(&fixture, "image", ParallelSafety::Sequential);
+    reader.output.text = image.artifact_id.clone();
+    reader.output.image_artifacts = vec![image.clone()];
+    let reader = Arc::new(reader);
+    let mut other_reader = RecordingTool::new(&fixture, "other-image", ParallelSafety::Sequential);
+    other_reader.output.text = other_image.artifact_id.clone();
+    other_reader.output.image_artifacts = vec![other_image.clone()];
+    let other_reader = Arc::new(other_reader);
+    let text = Arc::new(RecordingTool::new(
+        &fixture,
+        "text",
+        ParallelSafety::Sequential,
+    ));
+    let mut first = Step::complete("read images");
+    first.completion.as_mut().unwrap().tool_calls = vec![
+        call("first", "image"),
+        call("second", "text"),
+        call("third", "other-image"),
+    ];
+    let provider = Scripted::new(vec![first, Step::complete("answer using the images")]);
+    let (session, _) = runtime::runtime(
+        &fixture,
+        &provider,
+        vec![reader.handle(), text.handle(), other_reader.handle()],
+    )
+    .await;
+    let sent = runtime::send(&session).await;
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    let requests = provider.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+    let messages = requests[1]
+        .messages
+        .iter()
+        .filter(|message| message.role != sessions::Role::System)
+        .collect::<Vec<_>>();
+    let suffix = &messages[messages.len() - 5..];
+    assert_eq!(
+        suffix
+            .iter()
+            .map(|message| message.role)
+            .collect::<Vec<_>>(),
+        [
+            sessions::Role::Tool,
+            sessions::Role::Tool,
+            sessions::Role::Tool,
+            sessions::Role::User,
+            sessions::Role::User
+        ]
+    );
+    assert_eq!(
+        suffix[..3]
+            .iter()
+            .map(|message| message.tool_call_id.as_str())
+            .collect::<Vec<_>>(),
+        ["first", "second", "third"]
+    );
+    for message in &suffix[..3] {
+        assert!(
+            message
+                .contents()
+                .iter()
+                .all(|part| matches!(part, sessions::Content::Text(_)))
+        );
+    }
+    assert_eq!(suffix[0].content(), image.artifact_id);
+    assert_eq!(suffix[2].content(), other_image.artifact_id);
+    for (message, expected) in suffix[3..].iter().zip([&image, &other_image]) {
+        assert_eq!(message.content(), expected.artifact_id);
+        assert_eq!(message.contents().len(), 2);
+        assert!(matches!(
+            &message.contents()[1],
+            sessions::Content::Image { .. }
+        ));
+    }
+    bounded(session.close()).await.unwrap();
+}

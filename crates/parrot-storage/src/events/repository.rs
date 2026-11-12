@@ -191,25 +191,6 @@ impl EventRepository {
         })
         .await
     }
-    pub async fn append_tool_synthetic(
-        &self,
-        event: Event,
-        assistant_sequence: i64,
-        parts: Vec<ConversationPart>,
-    ) -> Result<Option<ConversationItem>, EventError> {
-        self.transaction(move |tx| {
-            tools::append_tool_synthetic(tx, &event, assistant_sequence, &parts, &timestamp)
-        })
-        .await
-    }
-    pub async fn has_tool_synthetic(
-        &self,
-        agent: String,
-        assistant_sequence: i64,
-    ) -> Result<bool, EventError> {
-        self.transaction(move |tx| tools::has_tool_synthetic(tx, &agent, assistant_sequence))
-            .await
-    }
     pub async fn tool_terminals_of_calls(
         &self,
         agent: String,

@@ -24,14 +24,14 @@ async fn competing_parallel_image_reads_share_budget_without_fixed_winner_and_al
         let mut next = RecordingTool::new(&fixture, "next", ParallelSafety::Sequential);
         next.output.image_artifacts = vec![image.clone()];
         let next = Arc::new(next);
-        let first = fixture
+        fixture
             .batch(vec![
                 call("a", "image-a"),
                 call("b", "image-b"),
                 call("text", "text"),
             ])
             .await;
-        let second = fixture.batch(vec![call("next", "next")]).await;
+        fixture.batch(vec![call("next", "next")]).await;
         let handles = vec![
             a.clone().handle(),
             b.clone().handle(),
@@ -70,10 +70,6 @@ async fn competing_parallel_image_reads_share_budget_without_fixed_winner_and_al
         );
         assert_eq!(terminals[2].status, ToolExecutionStatus::Finished);
         assert_eq!(terminals[3].status, ToolExecutionStatus::Finished);
-        assert!(fixture.history.has_tool_synthetic(first).await.unwrap());
-        assert!(fixture.history.has_tool_synthetic(second).await.unwrap());
-        // Reconstruct a new settlement instance (watermark zero) over persisted history.
-        // Terminal and synthetic identities, not an old in-memory watermark, suppress replay.
         let mut recovered =
             Harness::with_limit(&fixture, handles, image.byte_length as i32 + spare).await;
         recovered.run(&fixture, &NeverCancelled).await.unwrap();
@@ -87,8 +83,35 @@ async fn competing_parallel_image_reads_share_budget_without_fixed_winner_and_al
                 .iter()
                 .filter(|item| item.message.role == MessageRole::User)
                 .count(),
-            2
+            0
         );
+        let promotions = fixture
+            .history
+            .promote_steers(|input| {
+                let mut event = Event {
+                    id: id(),
+                    agent_session_id: "agent".into(),
+                    ..Event::new()
+                };
+                event.set_input_promoted(protocol::InputPromoted {
+                    input_id: input.id.clone(),
+                    message_id: input.message_id.clone(),
+                    ..Default::default()
+                });
+                Ok(event)
+            })
+            .await
+            .unwrap();
+        assert_eq!(promotions.len(), 2);
+        for promotion in promotions {
+            assert_eq!(
+                promotion.input.parts,
+                [
+                    ConversationPart::text(&image.artifact_id),
+                    ConversationPart::image(image.clone())
+                ]
+            );
+        }
         assert_eq!(
             history
                 .iter()

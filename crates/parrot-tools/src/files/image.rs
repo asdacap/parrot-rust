@@ -150,7 +150,7 @@ impl<S: AuthorizedReadService> ReadImageTool<S> {
             return exceeded(budget);
         }
         Ok(FileToolResult {
-            text: "image read".into(),
+            text: artifact.artifact_id.clone(),
             image_artifacts: vec![artifact],
             outcome: FileToolOutcome::Finished,
         })
