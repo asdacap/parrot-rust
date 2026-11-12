@@ -20,6 +20,7 @@ pub(super) struct RuntimeTools<'a, S: AccessSnapshot + 'static> {
     pub(super) state: &'a Mutex<State>,
     pub(super) history: &'a AgentHistoryView,
     pub(super) prompt: &'a SessionPrompt,
+    pub(super) status: &'a dyn TurnStatus<S>,
     pub(super) sessions: &'a ProviderSessions,
     pub(super) usage: &'a SessionUsageRecorder,
     pub(super) capture: &'a dyn SelectionSource<S>,
@@ -87,12 +88,9 @@ where
                     tools.normal.clone()
                 }
             };
+            let status = self.status.bind(&selection);
             let mut guard = self.state.lock().await;
             let state = &mut *guard;
-            let status = state
-                .request_status
-                .clone()
-                .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
             let resources = TurnResources {
                 history: self.history,
                 conversation: &mut state.conversation,

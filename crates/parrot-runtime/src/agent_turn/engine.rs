@@ -85,7 +85,6 @@ struct State {
     conversation: AgentConversation,
     tool_conversation: ToolConversation,
     context: ContextController,
-    request_status: Option<Arc<dyn crate::compaction::ContextStatus>>,
     request_accounting: Option<RequestAccounting>,
     usage: Arc<SessionUsageRecorder>,
 }
@@ -221,7 +220,6 @@ where
                 conversation,
                 tool_conversation,
                 context: config.context,
-                request_status: None,
                 request_accounting: None,
                 usage,
             }),

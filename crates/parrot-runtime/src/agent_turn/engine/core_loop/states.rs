@@ -303,15 +303,12 @@ where
                 start_event_id: turn_id.clone(),
             });
             self.activity.turn_started(&turn_id);
-            let selection = self.binding.capture_selection()?;
-            {
-                let mut state = self.state.lock().await;
-                state
-                    .context
-                    .ensure_epoch(self.prompt, self.cancellation)
-                    .await?;
-                state.request_status = Some(self.status.bind(&selection));
-            }
+            self.state
+                .lock()
+                .await
+                .context
+                .ensure_epoch(self.prompt, self.cancellation)
+                .await?;
             self.skills.begin_turn(self.cancellation).await?;
             Ok(())
         })
@@ -419,13 +416,8 @@ where
         context: CoreContextSnapshot,
     ) -> BoxFuture<'_, Result<parrot_core::StatusOffering, CoreError>> {
         adapt_operation(async move {
-            let status = self
-                .state
-                .lock()
-                .await
-                .request_status
-                .clone()
-                .ok_or_else(|| TurnError::Service("request status is unavailable".into()))?;
+            let selection = self.binding.capture_selection()?;
+            let status = self.status.bind(&selection);
             let slots = status
                 .slots(&context, self.cancellation)
                 .await
@@ -459,7 +451,6 @@ where
             let selection = self.binding.capture_selection()?;
             {
                 let mut state = self.state.lock().await;
-                state.request_status = Some(self.status.bind(&selection));
                 self.cancellation
                     .check()
                     .map_err(|_| ContextError::Cancelled)?;
@@ -609,14 +600,11 @@ where
         result: Result<Option<parrot_core::FittedCompaction>, CoreError>,
     ) -> BoxFuture<'a, Result<String, CoreError>> {
         Box::pin(async move {
-            let mut guard = self.state.lock().await;
-            let state = &mut *guard;
             let compacted = result?;
             let selection = self.binding.capture_selection().map_err(CoreError::from)?;
-            let status = state
-                .request_status
-                .clone()
-                .ok_or_else(|| CoreError::failed("request status is unavailable"))?;
+            let status = self.status.bind(&selection);
+            let mut guard = self.state.lock().await;
+            let state = &mut *guard;
             let result = state
                 .context
                 .record_epoch_compaction(

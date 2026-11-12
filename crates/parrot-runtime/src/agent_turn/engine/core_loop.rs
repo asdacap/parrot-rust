@@ -134,6 +134,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                 state: &backend.state,
                 history: &backend.history,
                 prompt: &backend.prompt,
+                status: backend.status.as_ref(),
                 sessions: &backend.sessions,
                 usage: &backend.usage,
                 capture: backend.selection.as_ref(),
@@ -219,7 +220,6 @@ where
         let mut guard = backend.state.lock().await;
         let state = &mut *guard;
         state.agent_state.restart();
-        state.request_status = None;
         state.request_accounting = None;
         state.tool_conversation.reset_pending();
         state
@@ -244,7 +244,6 @@ where
     let failed_key = lifecycle.failed_key.take();
     {
         let mut state = backend.state.lock().await;
-        state.request_status = None;
         state.request_accounting = None;
         state.tool_conversation.reset_pending();
     }
