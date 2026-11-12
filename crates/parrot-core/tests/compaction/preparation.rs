@@ -102,41 +102,15 @@ impl States for Preparation {
         })
     }
 
-    fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
+    fn read_conversation_state(&self) -> BoxFuture<'_, Result<ConversationState, Error>> {
         Box::pin(async move {
-            if self.failure == Some("messages") {
-                return Err(native_error("messages"));
+            if self.failure == Some("conversation") {
+                return Err(native_error("conversation"));
             }
-            Ok(self.raw.messages.clone())
-        })
-    }
-
-    fn read_conversation_summary(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<ConversationSummary>, Error>> {
-        Box::pin(async move {
-            if self.failure == Some("summary") {
-                return Err(native_error("summary"));
-            }
-            Ok(self.raw.summary.clone())
-        })
-    }
-
-    fn read_conversation_tail(
-        &self,
-        after: i64,
-    ) -> BoxFuture<'_, Result<Vec<ConversationHistoryItem>, Error>> {
-        Box::pin(async move {
-            if self.failure == Some("tail") {
-                return Err(native_error("tail"));
-            }
-            Ok(self
-                .raw
-                .history
-                .iter()
-                .filter(|item| item.sequence > after)
-                .cloned()
-                .collect())
+            let mut raw = self.raw.clone();
+            let watermark = raw.summary.as_ref().map_or(0, |summary| summary.watermark);
+            raw.history.retain(|item| item.sequence > watermark);
+            Ok(raw)
         })
     }
 
@@ -384,9 +358,7 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
         "start",
         "sample",
         "instructions",
-        "summary",
-        "tail",
-        "messages",
+        "conversation",
         "estimate",
         "status",
         "cancel",

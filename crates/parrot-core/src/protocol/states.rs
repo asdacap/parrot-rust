@@ -1,7 +1,7 @@
 use super::config::{ConfigKey, ConfigValue};
 use super::context::{ContextSnapshot, TokenCalibration};
-use super::conversation::{ConversationHistoryItem, ConversationSummary};
-use super::message::{ConversationTurn, InputAdmission, Message, PendingMessage, PromotedInput};
+use super::conversation::ConversationState;
+use super::message::{ConversationTurn, InputAdmission, PendingMessage, PromotedInput};
 use super::skill::{Skill, SkillContent, SkillReference};
 use super::tool::ToolDefinition;
 use super::turn::AgentState;
@@ -129,28 +129,15 @@ pub trait States: Send + Sync {
     fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_token_calibration")) })
     }
-    /// Reads the current provider-visible conversation after context preparation.
-    fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_provider_messages")) })
-    }
     /// Reads the token totals the states side recorded for the current turn,
     /// for the terminal TurnEnded event assembled by core at close time.
     fn read_usage_totals(&self) -> BoxFuture<'_, Result<crate::UsageTotals, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_usage_totals")) })
     }
-    /// Reads the latest stored summary and its compaction watermark.
-    fn read_conversation_summary(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<ConversationSummary>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_conversation_summary")) })
-    }
-    /// Reads the chronological durable tail after the supplied watermark.
-    /// Retains stored ownership and status metadata and materializes message contents.
-    fn read_conversation_tail(
-        &self,
-        _after: i64,
-    ) -> BoxFuture<'_, Result<Vec<ConversationHistoryItem>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_conversation_tail")) })
+    /// Captures durable summary and history facts together with the current live messages.
+    /// Live messages retain uncommitted completion candidates and retry feedback absent from durable history.
+    fn read_conversation_state(&self) -> BoxFuture<'_, Result<ConversationState, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.read_conversation_state")) })
     }
     /// Persists the fitted compaction with the supplied sampled instructions and tools,
     /// awaiting terminal lifecycle effects on success or failure. Returns the instructions

@@ -627,20 +627,6 @@ where
             Ok(state.context.budget().capture_state())
         })
     }
-    fn read_provider_messages(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, CoreError>> {
-        adapt_operation(async move {
-            let state = self.state.lock().await;
-            Ok(state
-                .conversation
-                .messages()
-                .iter()
-                .map(provider_message)
-                .map(Into::into)
-                .collect())
-        })
-    }
     fn read_usage_totals(&self) -> BoxFuture<'_, Result<parrot_core::UsageTotals, CoreError>> {
         adapt_operation(async move {
             let totals = self.usage.capture().own.totals;
@@ -650,28 +636,14 @@ where
             })
         })
     }
-    fn read_conversation_summary(
+    fn read_conversation_state(
         &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationSummary>, CoreError>> {
-        adapt_operation(async move {
-            self.state
-                .lock()
-                .await
-                .context
-                .read_conversation_summary()
-                .await
-                .map_err(Into::into)
-        })
-    }
-    fn read_conversation_tail(
-        &self,
-        after: i64,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ConversationHistoryItem>, CoreError>> {
+    ) -> BoxFuture<'_, Result<parrot_core::ConversationState, CoreError>> {
         adapt_operation(async move {
             let state = self.state.lock().await;
             state
                 .context
-                .read_conversation_tail(&state.conversation, after)
+                .read_conversation_state(&state.conversation)
                 .await
                 .map_err(Into::into)
         })

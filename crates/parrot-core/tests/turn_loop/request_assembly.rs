@@ -110,10 +110,15 @@ fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparati
             .trace
             .values()
             .into_iter()
-            .filter(|step| matches!(step.as_str(), "render" | "messages" | "invoke"))
+            .filter(|step| matches!(step.as_str(), "render" | "conversation" | "invoke"))
             .collect::<Vec<_>>(),
         [
-            "render", "messages", "render", "messages", "messages", "invoke"
+            "render",
+            "conversation",
+            "render",
+            "conversation",
+            "conversation",
+            "invoke"
         ]
     );
 }
@@ -203,22 +208,22 @@ fn tool_followup_reads_messages_and_context_again_after_results_are_recorded() {
             .into_iter()
             .filter(|step| matches!(
                 step.as_str(),
-                "record_results" | "render" | "messages" | "invoke"
+                "record_results" | "render" | "conversation" | "invoke"
             ))
             .collect::<Vec<_>>(),
         [
             "render",
-            "messages",
+            "conversation",
             "render",
-            "messages",
-            "messages",
+            "conversation",
+            "conversation",
             "invoke",
             "record_results",
             "render",
-            "messages",
+            "conversation",
             "render",
-            "messages",
-            "messages",
+            "conversation",
+            "conversation",
             "invoke"
         ]
     );
@@ -226,7 +231,7 @@ fn tool_followup_reads_messages_and_context_again_after_results_are_recorded() {
 
 #[test]
 fn context_preparation_and_message_read_errors_stop_before_provider_invocation() {
-    for stage in ["instruction_state", "render", "messages"] {
+    for stage in ["instruction_state", "render", "conversation"] {
         let mut state = MemoryState::new([Reply::final_response("not invoked")]);
         state.fail_at = Some(stage);
         assert_eq!(state.run(), Err(Error::failed(stage)));
@@ -235,8 +240,12 @@ fn context_preparation_and_message_read_errors_stop_before_provider_invocation()
         assert!(state.tools.requests.lock().unwrap().is_empty());
         assert_eq!(state.trace.values().last().unwrap(), stage);
         assert_eq!(
-            state.trace.values().iter().any(|step| step == "messages"),
-            stage == "messages"
+            state
+                .trace
+                .values()
+                .iter()
+                .any(|step| step == "conversation"),
+            stage == "conversation"
         );
     }
 }

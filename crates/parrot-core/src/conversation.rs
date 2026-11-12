@@ -1,20 +1,4 @@
-use crate::{
-    CompletionBlockerFeedback, Content, ConversationState, Error, FinishReason, Message,
-    ProviderResponse, Role, States,
-};
-
-/// Assembles summary, durable tail, and the current provider-visible messages.
-pub async fn read_conversation_state(states: &dyn States) -> Result<ConversationState, Error> {
-    let summary = states.read_conversation_summary().await?;
-    let watermark = summary.as_ref().map_or(0, |summary| summary.watermark);
-    let history = states.read_conversation_tail(watermark).await?;
-    let messages = states.read_provider_messages().await?;
-    Ok(ConversationState {
-        summary,
-        history,
-        messages,
-    })
-}
+use crate::{CompletionBlockerFeedback, Content, FinishReason, Message, ProviderResponse, Role};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConversationOrigin {
