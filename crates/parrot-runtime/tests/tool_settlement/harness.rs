@@ -1,3 +1,4 @@
+use parrot_domain::protocol::messages::parrot::YieldedShellProcess;
 use parrot_storage::conversation::ConversationOrigin;
 
 use super::*;
@@ -67,7 +68,7 @@ pub struct Harness {
     pub selection: TurnSelection<Security>,
     pub capture: Arc<Selection>,
     pub state: parrot_runtime::agent_turn::tool_conversation::ToolConversation,
-    pub settlement: parrot_core::ToolSettlement,
+    pub settlement: parrot_core::ToolSettlement<YieldedShellProcess>,
     pub publisher: Arc<Publisher>,
     pub activity: Arc<AgentSessionActivity>,
     pub diagnostics: Arc<Diagnostics>,
@@ -187,7 +188,7 @@ impl Harness {
         request: ToolExecutionChunk,
         capture: &dyn SelectionSource<Security>,
         cancellation: &dyn Cancellation,
-    ) -> Result<Vec<parrot_core::ToolResult>, TurnError> {
+    ) -> Result<Vec<parrot_core::ToolResult<YieldedShellProcess>>, TurnError> {
         let binding = TurnBinding::new();
         binding.bind(self.selection.clone());
         let tools = RuntimeTools {
@@ -237,7 +238,7 @@ impl Harness {
     }
     pub async fn record_results(
         &mut self,
-        results: &[parrot_core::ToolResult],
+        results: &[parrot_core::ToolResult<YieldedShellProcess>],
     ) -> Result<(), TurnError> {
         self.settlement
             .record_results(
@@ -252,7 +253,7 @@ impl Harness {
     }
     pub async fn complete_execution(
         &mut self,
-        results: &[parrot_core::ToolResult],
+        results: &[parrot_core::ToolResult<YieldedShellProcess>],
     ) -> Result<(), TurnError> {
         self.settlement
             .complete_execution(

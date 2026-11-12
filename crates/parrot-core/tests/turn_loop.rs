@@ -125,7 +125,7 @@ const RUNAWAY_NOTICE: &str = "configured runaway notice";
 
 struct MemoryTurnLifecycle<'a> {
     states: &'a mut MemoryState,
-    tools: &'a dyn Tools,
+    tools: &'a dyn Tools<Vec<u8>>,
     provider: &'a dyn Provider,
     publisher: &'a MemoryEventPublisher,
 }
@@ -157,7 +157,7 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
 
 async fn run(
     states: &mut MemoryState,
-    tools: &dyn Tools,
+    tools: &dyn Tools<Vec<u8>>,
     provider: &dyn Provider,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
@@ -178,7 +178,7 @@ async fn run(
 
 async fn run_turn(
     states: &mut MemoryState,
-    tools: &dyn Tools,
+    tools: &dyn Tools<Vec<u8>>,
     provider: &dyn Provider,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
@@ -289,16 +289,18 @@ impl Trace {
     }
 }
 
+type ScriptedReplies = Arc<Mutex<VecDeque<Vec<ToolResult<Vec<u8>>>>>>;
+
 #[derive(Clone)]
 struct MemoryTools {
     trace: Trace,
     fail_at: Arc<Mutex<Option<&'static str>>>,
     requests: Arc<Mutex<Vec<Vec<ToolCall>>>>,
-    replies: Arc<Mutex<VecDeque<Vec<ToolResult>>>>,
+    replies: ScriptedReplies,
     receipts: Arc<Mutex<Vec<ToolCallReceipt>>>,
     flags: Arc<Mutex<Vec<TurnFlags>>>,
 }
-impl Tools for MemoryTools {
+impl Tools<Vec<u8>> for MemoryTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
         Box::pin(async move {
             self.trace.step("catalog", *self.fail_at.lock().unwrap())?;
@@ -322,7 +324,7 @@ impl Tools for MemoryTools {
         &'a self,
         request: ToolExecutionRequest,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult<Vec<u8>>>, Error>> {
         Box::pin(async move {
             let ToolExecutionRequest {
                 calls,
@@ -496,7 +498,7 @@ struct MemoryState {
     final_requests: Vec<usize>,
     retries: Vec<(String, i32)>,
     recorded_tools: Vec<Message>,
-    applied_results: Vec<ToolResult>,
+    applied_results: Vec<ToolResult<Vec<u8>>>,
     recorded_catalogs: Vec<Vec<String>>,
     model: String,
     reasoning: Option<Reasoning>,
@@ -777,7 +779,11 @@ impl MemoryState {
         self.provider_preferences = options.provider_preferences.clone();
         self.include_router_metadata = options.include_router_metadata;
     }
-    fn run_with(&mut self, tools: &dyn Tools, provider: &dyn Provider) -> Result<Outcome, Error> {
+    fn run_with(
+        &mut self,
+        tools: &dyn Tools<Vec<u8>>,
+        provider: &dyn Provider,
+    ) -> Result<Outcome, Error> {
         *self.compaction.lock().unwrap() =
             MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
         self.budget = AgentState::new(self.unlimited);
@@ -1926,7 +1932,7 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
 #[test]
 fn tools_and_provider_operate_without_states() {
     let state = MemoryState::new([Reply::final_response("standalone")]);
-    let tools: &dyn Tools = &state.tools;
+    let tools: &dyn Tools<Vec<u8>> = &state.tools;
     let catalog = finish(tools.capture_catalog()).unwrap();
     let calls = vec![ToolCall {
         id: "explicit-call".into(),

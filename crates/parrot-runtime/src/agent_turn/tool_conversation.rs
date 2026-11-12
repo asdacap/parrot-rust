@@ -2,7 +2,7 @@ use super::{engine::Publisher, services::TurnError};
 use parrot_core::{
     BoxFuture, ConfigKey, ConfigValue, Content, ConversationAddition, ConversationPersistence,
     ConversationReceipt, Error, PromptTemplate, States, ToolCall, ToolImage, ToolRecovery,
-    ToolResult, ToolSettlement, ToolStatus,
+    ToolResult, ToolResultMetadata, ToolSettlement, ToolStatus,
 };
 use parrot_domain::{
     contracts::storage::Committed,
@@ -22,7 +22,7 @@ use parrot_storage::{
 use std::{collections::HashMap, sync::Arc};
 
 pub struct ToolConversation {
-    settlement: ToolSettlement,
+    settlement: ToolSettlement<Vec<u8>>,
     backing: ToolBacking,
 }
 
@@ -177,7 +177,7 @@ impl ToolBacking {
             .into_iter()
             .map(|terminal| (terminal.tool_call_id.clone(), terminal))
             .collect::<HashMap<_, _>>();
-        let results: Vec<ToolResult> = assistant
+        let results: Vec<ToolResult<Vec<u8>>> = assistant
             .message
             .tool_calls
             .iter()
@@ -314,9 +314,9 @@ impl ToolBacking {
                             yielded_process: result
                                 .metadata
                                 .as_deref()
-                                .map(<YieldedShellProcess as protobuf::Message>::parse_from_bytes)
+                                .map(<YieldedShellProcess as ToolResultMetadata>::decode)
                                 .transpose()
-                                .map_err(|error| TurnError::Service(error.to_string()))?
+                                .map_err(TurnError::Core)?
                                 .into(),
                             ..ToolFinished::new()
                         }),

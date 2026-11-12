@@ -1,7 +1,7 @@
 use crate::{
     BoxFuture, CancellationToken, ConfigKey, Content, ConversationAddition,
     ConversationPersistence, Error, Message, Role, States, ToolCall, ToolCallReceipt, ToolResult,
-    ToolStatus, Tools, TurnFlags, rendering::render_template,
+    ToolResultMetadata, ToolStatus, Tools, TurnFlags, rendering::render_template,
 };
 use std::collections::HashMap;
 
@@ -18,22 +18,22 @@ pub struct ToolExecutionRequest {
 pub struct ToolRecovery {
     pub sequence: i64,
     pub calls: Vec<ToolCall>,
-    pub results: Vec<ToolResult>,
+    pub results: Vec<ToolResult<Vec<u8>>>,
 }
 
 #[derive(Default)]
-pub struct ToolSettlement {
-    pending: Option<ToolBatch>,
+pub struct ToolSettlement<M> {
+    pending: Option<ToolBatch<M>>,
 }
 
-struct ToolBatch {
+struct ToolBatch<M> {
     sequence: i64,
     calls: Vec<ToolCall>,
-    results: HashMap<String, ToolResult>,
+    results: HashMap<String, ToolResult<M>>,
     index: usize,
 }
 
-impl ToolSettlement {
+impl<M: ToolResultMetadata> ToolSettlement<M> {
     pub fn reset_pending(&mut self) {
         self.pending = None;
     }
@@ -63,8 +63,9 @@ impl ToolSettlement {
         let mut results = batch
             .results
             .into_iter()
-            .map(|result| (result.call_id.clone(), result))
-            .collect::<HashMap<_, _>>();
+            .map(|result| result.decode_metadata::<M>())
+            .map(|result| result.map(|result| (result.call_id.clone(), result)))
+            .collect::<Result<HashMap<_, _>, _>>()?;
         let mut settled = HashMap::new();
         for call in &batch.calls {
             let (result, recovered) = if let Some(result) = results.remove(&call.id) {
@@ -110,7 +111,7 @@ impl ToolSettlement {
     pub async fn record_results(
         &mut self,
         states: &mut dyn States,
-        results: &[ToolResult],
+        results: &[ToolResult<M>],
     ) -> Result<(), Error> {
         let mut batch = self
             .pending
@@ -140,7 +141,7 @@ impl ToolSettlement {
     pub async fn complete_execution(
         &mut self,
         states: &mut dyn States,
-        results: &[ToolResult],
+        results: &[ToolResult<M>],
     ) -> Result<(), Error> {
         let batch = self
             .pending
@@ -163,7 +164,7 @@ impl ToolSettlement {
     fn record_result<'a>(
         states: &'a mut dyn States,
         sequence: i64,
-        result: &'a ToolResult,
+        result: &'a ToolResult<M>,
         recovered: bool,
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
@@ -177,7 +178,7 @@ impl ToolSettlement {
                     messages: vec![message],
                     persistence: ConversationPersistence::ToolResult {
                         assistant_sequence: sequence,
-                        result: result.clone(),
+                        result: result.encode_metadata()?,
                         recovered,
                     },
                 })
@@ -186,7 +187,7 @@ impl ToolSettlement {
         })
     }
 
-    async fn finish_batch(states: &mut dyn States, batch: &ToolBatch) -> Result<(), Error> {
+    async fn finish_batch(states: &mut dyn States, batch: &ToolBatch<M>) -> Result<(), Error> {
         let contents = batch
             .calls
             .iter()
@@ -213,15 +214,15 @@ impl ToolSettlement {
     }
 }
 
-pub async fn execute_tools(
+pub async fn execute_tools<M: ToolResultMetadata>(
     states: &mut dyn States,
-    tools: &dyn Tools,
+    tools: &dyn Tools<M>,
     calls: Vec<ToolCall>,
     receipt: ToolCallReceipt,
     flags: TurnFlags,
     cancellation: CancellationToken<'_>,
 ) -> Result<(), Error> {
-    let mut settlement = ToolSettlement::default();
+    let mut settlement = ToolSettlement::<M>::default();
     settlement.begin_execution(receipt.assistant_sequence, calls.clone())?;
     let mut results = Vec::with_capacity(calls.len());
     let mut cancel_remaining = false;

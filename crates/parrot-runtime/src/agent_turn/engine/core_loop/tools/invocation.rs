@@ -17,7 +17,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
         borrowed: Option<TurnResources<'a>>,
         call: &'a ToolCall,
         launched: Option<Arc<AtomicBool>>,
-    ) -> BoxFuture<'a, Result<ToolResult, TurnError>> {
+    ) -> BoxFuture<'a, Result<ToolResult<YieldedShellProcess>, TurnError>> {
         let InvocationResources {
             history,
             usage,
@@ -195,17 +195,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                         origin: image.origin,
                     })
                     .collect();
-                let metadata = result
-                    .yielded_process
-                    .as_ref()
-                    .map(protobuf::Message::write_to_bytes)
-                    .transpose()
-                    .map_err(|error| {
-                        OperationError::Failed(ToolFailure::new(
-                            error.to_string(),
-                            FailureKind::Unexpected,
-                        ))
-                    })?;
+                let metadata = result.yielded_process;
                 self.diagnostic(
                     history,
                     call,
@@ -269,7 +259,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
             }
         })
     }
-    pub(super) fn cancel(&self, call: &ToolCall) -> ToolResult {
+    pub(super) fn cancel(&self, call: &ToolCall) -> ToolResult<YieldedShellProcess> {
         ToolResult {
             call_id: call.id.clone(),
             tool_name: call.name.clone(),
@@ -280,7 +270,11 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
             metadata: None,
         }
     }
-    fn fail(&self, call: &ToolCall, message: String) -> Result<ToolResult, TurnError> {
+    fn fail(
+        &self,
+        call: &ToolCall,
+        message: String,
+    ) -> Result<ToolResult<YieldedShellProcess>, TurnError> {
         let text = self
             .config
             .templates

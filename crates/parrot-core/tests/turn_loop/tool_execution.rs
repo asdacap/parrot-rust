@@ -199,7 +199,7 @@ fn core_passes_each_recording_receipt_and_turn_flags_into_execution() {
 
 struct EchoTools;
 
-impl Tools for EchoTools {
+impl Tools<Vec<u8>> for EchoTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
         Box::pin(async { Ok(ToolCatalog::default()) })
     }
@@ -208,7 +208,7 @@ impl Tools for EchoTools {
         &'a self,
         request: ToolExecutionRequest,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult<Vec<u8>>>, Error>> {
         Box::pin(async move {
             let ToolExecutionRequest {
                 calls,

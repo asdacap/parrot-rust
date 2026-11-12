@@ -1,7 +1,7 @@
 use super::compaction::SummaryResponse;
 use super::{
     BoxFuture, CancellationToken, Error, Message, ProviderRequest, ProviderResponse, ToolCatalog,
-    ToolDefinition,
+    ToolDefinition, ToolResultMetadata,
 };
 
 /// Invokes models using the core protocol while owning transport and stream cleanup.
@@ -43,7 +43,7 @@ pub trait Provider: Send + Sync {
 }
 
 /// Retains executable tools and executes explicitly supplied calls.
-pub trait Tools: Send + Sync {
+pub trait Tools<M: ToolResultMetadata>: Send + Sync {
     /// Captures permitted definitions backed by the original executable identities
     /// for this turn. The final catalog is the subset permitted in the final phase.
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>>;
@@ -53,5 +53,5 @@ pub trait Tools: Send + Sync {
         &'a self,
         request: crate::ToolExecutionRequest,
         cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<crate::ToolResult>, Error>>;
+    ) -> BoxFuture<'a, Result<Vec<crate::ToolResult<M>>, Error>>;
 }
