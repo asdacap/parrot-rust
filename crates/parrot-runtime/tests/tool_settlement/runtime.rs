@@ -2,7 +2,7 @@ include!("runtime_support.rs");
 use parrot_runtime::agent_turn::lifecycle::ExecutionStatus;
 
 #[tokio::test]
-async fn actual_runtime_retains_tool_factory_and_inline_actual_t45_state_reaches_next_provider() {
+async fn actual_runtime_retains_tool_factory_and_core_compaction_reaches_next_provider() {
     let fixture = Fixture::new();
     fixture.seed().await;
     let compact = Arc::new(CompactTool::new());
@@ -98,7 +98,7 @@ async fn actual_runtime_retains_tool_factory_and_inline_actual_t45_state_reaches
 }
 
 #[tokio::test]
-async fn actual_runtime_interrupt_joins_inline_actual_t45_without_self_queue_or_second_drain() {
+async fn actual_runtime_interrupt_joins_core_compaction_without_self_queue_or_second_drain() {
     let fixture = Fixture::new();
     fixture.seed().await;
     let compact = Arc::new(CompactTool::new());
@@ -139,7 +139,7 @@ async fn actual_runtime_interrupt_joins_inline_actual_t45_without_self_queue_or_
     assert_eq!(
         events
             .iter()
-            .filter(|event| event.has_tool_cancelled())
+            .filter(|event| event.has_tool_finished())
             .count(),
         1
     );
@@ -196,48 +196,15 @@ impl BorrowedTool<Security> for CompactTool {
     fn invoke<'a>(
         &'a self,
         _: ToolInvocation,
-        context: BorrowedToolContext<'a, Security>,
+        _: BorrowedToolContext<'a, Security>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            let resources = context.resources;
-            let result = resources
-                .context
-                .compact(
-                    EpochInput {
-                        selection: &context.selection.model,
-                        tools: context.definitions,
-                        conversation: resources.conversation,
-                        agent_state: resources.agent_state,
-                        prompt: resources.prompt,
-                        sessions: resources.sessions,
-                        status: resources.status,
-                        events: resources.events,
-                    },
-                    None,
-                    cancellation,
-                )
-                .await
-                .map_err(|error| {
-                    if matches!(
-                        error,
-                        ContextError::Cancelled
-                            | ContextError::Compaction(
-                                CompactionError::Cancelled
-                                    | CompactionError::Provider(Error::Cancelled)
-                            )
-                    ) {
-                        OperationError::Cancelled
-                    } else {
-                        OperationError::Failed(ToolFailure::new(
-                            error.to_string(),
-                            FailureKind::InvalidOperation,
-                        ))
-                    }
-                })?;
-            assert!(result.reduced);
-            Ok(ToolOutput::text("compacted inline"))
+            cancellation
+                .check()
+                .map_err(|_| OperationError::Cancelled)?;
+            Ok(ToolOutput::text("compaction requested"))
         })
     }
 }

@@ -28,6 +28,8 @@ enum Delivery {
 
 #[path = "turn_loop/cancellation.rs"]
 mod cancellation;
+#[path = "turn_loop/compact_tools.rs"]
+mod compact_tools;
 #[path = "turn_loop/compaction_dependencies.rs"]
 mod compaction_dependencies;
 #[path = "turn_loop/completion_policy.rs"]
@@ -1282,7 +1284,6 @@ impl States for MemoryState {
                     .map(|result| result.map(|fitted| fitted.result)),
             );
             if let Some(fitted) = result? {
-                self.budget.last_request_statistic.reset();
                 self.fitted_statuses.push(fitted.status);
             }
             if let Some(compacted) = self.compactions.pop_front() {

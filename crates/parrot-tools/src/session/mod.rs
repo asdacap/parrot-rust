@@ -12,5 +12,5 @@ pub use image::{ImageGenerationTool, ImageProvider};
 pub use permission::{
     PermissionReply, PermissionServices, RequestWritePermissionTool, WriteTarget, WriteTargetKind,
 };
-pub use services::{Compaction, Failure, FailureKind, SessionServices};
+pub use services::{Failure, FailureKind, SessionServices};
 pub use tools::{Invocation, Kind, Output, SessionTool};

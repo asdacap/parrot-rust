@@ -6,10 +6,8 @@ use parrot_domain::contracts::{
     security::{AccessSnapshot, InvocationContext},
     tools::{ParallelSafety, Tool},
 };
-use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_runtime::{
     agent_turn::services::{TurnError, TurnSelection},
-    compaction::CompactionPlanner,
     tool_settlement::{
         SharedSecurity, ToolFactory, ToolFailure, ToolHandle, ToolInventory, ToolInvocation,
         ToolMetadata, ToolOutcome, ToolOutput,
@@ -24,27 +22,22 @@ type RetainedTool<S> = catalog::RetainedTool<SharedSecurity<S>, ContextSelection
 
 /// One adapter per agent scope. Neither materialization nor invocation rebuilds
 /// a family tool: all handles below retain the catalog's original tool Arcs.
-/// Context-reading status and context-mutating compaction both borrow the active
-/// drain, rather than re-locking the backend that is awaiting their result.
+/// Status borrows the active drain. Compact tools expose a request for core after settlement.
 pub struct CatalogAdapter<S: AccessSnapshot + 'static> {
     catalog: ScopedCatalog<S>,
     tools: Vec<ToolHandle<S>>,
 }
 impl<S: AccessSnapshot + 'static> CatalogAdapter<S> {
-    pub fn new(
-        catalog: ScopedCatalog<S>,
-        planner: Arc<CompactionPlanner>,
-        templates: Arc<PromptTemplateCatalog>,
-    ) -> Result<Self, TurnError> {
+    pub fn new(catalog: ScopedCatalog<S>) -> Result<Self, TurnError> {
         let tools = catalog
             .factories()
             .iter()
             .map(|factory| {
                 if matches!(factory.name(), "compact_context" | "status") {
                     let tool = if factory.name() == "status" {
-                        RetainedCompactTool::status(factory, planner.clone(), templates.clone())
+                        RetainedCompactTool::status(factory)
                     } else {
-                        RetainedCompactTool::new(factory, planner.clone(), templates.clone())
+                        RetainedCompactTool::new(factory)
                     };
                     tool.map(|tool| ToolHandle::Borrowed(Arc::new(tool)))
                         .map_err(|error| TurnError::Service(error.to_string()))

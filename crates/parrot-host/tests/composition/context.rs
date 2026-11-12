@@ -16,7 +16,6 @@ mod resources;
 use resources::BorrowedContextResources;
 #[path = "../../../parrot-runtime/tests/tool_settlement/runtime.rs"]
 mod runtime;
-use parrot_core::ContextReminderCheckpoint;
 use parrot_host::composition::context::{ContextSelection, ContextServices, RetainedCompactTool};
 use parrot_runtime::{agent_turn::lifecycle::ExecutionStatus, prompt_context::SessionPrompt};
 use parrot_tools::session::{self, Failure, SessionServices};
@@ -64,22 +63,6 @@ impl SessionServices for Ancillary {
     ) -> BoxFuture<'a, Result<String, OperationError<Failure>>> {
         panic!("not exercised by compact")
     }
-    fn compact<'a>(
-        &'a self,
-        _: &'a Self::Selection,
-        _: Option<ContextSize>,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<session::Compaction, OperationError<Failure>>> {
-        panic!("must route through the retained compact invocation")
-    }
-    fn estimate_after_tool_result(
-        &self,
-        _: &Self::Selection,
-        _: &str,
-        _: &str,
-    ) -> Result<ContextSnapshot, Failure> {
-        panic!("must estimate actual postcompact history")
-    }
 }
 type Bridge = (
     Arc<RetainedCompactTool<Security>>,
@@ -92,19 +75,7 @@ fn bridge() -> Bridge {
         ConfiguredToolDefinition::new("Compact current context", r#"{"type":"object"}"#),
         services,
     ));
-    let planner = Arc::new(CompactionPlanner::new(
-        CompactionSettings {
-            trigger_percent: 95,
-            target_percent: 30,
-            maximum_input_tokens: 60000,
-            summary_output_tokens: 1024,
-            summary_instructions: String::new(),
-            summary_prefix: String::new(),
-        },
-        ModelProfiles::new(&BTreeMap::new()),
-    ));
-    let adapter =
-        Arc::new(RetainedCompactTool::from_session(tool.clone(), planner, templates()).unwrap());
+    let adapter = Arc::new(RetainedCompactTool::from_session(tool.clone()).unwrap());
     (adapter, tool)
 }
 fn compact_step() -> Step {
@@ -115,7 +86,7 @@ fn compact_step() -> Step {
 }
 
 #[tokio::test]
-async fn retained_session_tool_reaches_real_inline_context_and_reuses_identity() {
+async fn retained_session_tool_finishes_before_core_compaction_and_reuses_identity() {
     let fixture = Fixture::new();
     fixture.seed().await;
     let (adapter, retained) = bridge();
@@ -165,9 +136,19 @@ async fn retained_session_tool_reaches_real_inline_context_and_reuses_identity()
         .unwrap();
     assert_eq!(result.role, sessions::Role::Tool);
     assert!(!result.content().contains("error:"));
-    assert!(result.content().contains("Context"));
+    assert!(!result.content().is_empty());
     drop(requests);
     let events = fixture.events().await;
+    assert!(
+        events
+            .iter()
+            .position(|event| event.has_tool_finished())
+            .unwrap()
+            < events
+                .iter()
+                .position(|event| event.has_compaction_started())
+                .unwrap()
+    );
     assert_eq!(
         events
             .iter()
@@ -198,7 +179,7 @@ async fn retained_session_tool_reaches_real_inline_context_and_reuses_identity()
 }
 
 #[tokio::test]
-async fn retained_inline_cancellation_shutdown_joins_real_provider_work() {
+async fn core_compaction_cancellation_joins_real_provider_work_after_tool_finished() {
     let fixture = Fixture::new();
     fixture.seed().await;
     let (adapter, _) = bridge();
@@ -224,7 +205,7 @@ async fn retained_inline_cancellation_shutdown_joins_real_provider_work() {
     assert_eq!(
         events
             .iter()
-            .filter(|event| event.has_tool_cancelled())
+            .filter(|event| event.has_tool_finished())
             .count(),
         1
     );
@@ -232,20 +213,19 @@ async fn retained_inline_cancellation_shutdown_joins_real_provider_work() {
 }
 
 #[tokio::test]
-async fn retained_result_fixedpoint_matches_actual_controller_history_estimate() {
+async fn retained_compact_invocation_only_acknowledges_without_mutating_context() {
     let fixture = Fixture::new();
     fixture.seed().await;
-    let sequence = fixture
-        .batch(vec![call("fixedpoint", "compact_context")])
-        .await;
+    let sequence = fixture.batch(vec![call("inert", "compact_context")]).await;
     let (adapter, _) = bridge();
     let mut harness =
         BorrowedContextResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
-    let provider = Scripted::new(vec![Step::complete("fixedpoint summary")]);
+    let provider = Scripted::default();
     harness.selection = selection(&provider);
+    let before = fixture.history.conversation().await.unwrap();
     let definitions = harness.snapshot.definitions().to_vec();
     let output = bounded(adapter.invoke(
-        ToolInvocation::new("fixedpoint", "{}", sequence, templates()),
+        ToolInvocation::new("inert", "{}", sequence, templates()),
         BorrowedToolContext {
             selection: &harness.selection,
             definitions: &definitions,
@@ -265,80 +245,59 @@ async fn retained_result_fixedpoint_matches_actual_controller_history_estimate()
     ))
     .await
     .unwrap();
-    let reloaded = parrot_storage::conversation::AgentConversation::new(fixture.history.clone())
-        .await
-        .unwrap();
-    let mut messages: Vec<_> = reloaded.messages().iter().map(provider_message).collect();
-    messages.push(sessions::Message::tool_result(
-        "fixedpoint",
-        templates()
-            .render(
-                "tool-result.text",
-                &[("value".into(), output.text.clone().into())],
-                &NeverCancelled,
-            )
-            .unwrap(),
-    ));
-    let instructions = harness
-        .prompt
-        .build(&harness.selection.model, &NeverCancelled)
-        .await
-        .unwrap();
-    let estimated = harness
-        .context
-        .compactor()
-        .planner()
-        .estimate_selected_context(
-            &harness.selection.model,
-            &instructions,
-            &definitions,
-            &messages,
-        )
-        .unwrap();
-    assert!(estimated.is_available());
-    let arguments = [
-        ("outcome".into(), "compacted".into()),
-        (
-            "has_context_limit_override".into(),
-            estimated.has_context_limit_override.into(),
-        ),
-        (
-            "trigger_tokens".into(),
-            estimated
-                .trigger_tokens
-                .map_or_else(|| "unavailable".into(), |value| value.to_string())
-                .into(),
-        ),
-        (
-            "estimated_tokens".into(),
-            estimated.estimated_tokens.to_string().into(),
-        ),
-        (
-            "context_limit".into(),
-            estimated.context_limit.to_string().into(),
-        ),
-        (
-            "notification_interval".into(),
-            ContextReminderCheckpoint::NOTIFICATION_INTERVAL
-                .to_string()
-                .into(),
-        ),
-        (
-            "trigger".into(),
-            estimated.trigger_percent.to_string().into(),
-        ),
-        (
-            "usage".into(),
-            estimated.usage_percent.unwrap().to_string().into(),
-        ),
-    ];
-    let expected = templates()
-        .render("compact-context-tool.result", &arguments, &NeverCancelled)
-        .unwrap();
-    assert_eq!(
-        output.text, expected,
-        "retained Tool result must reach the real controller's token fixed point"
+    assert!(!output.text.is_empty());
+    assert!(provider.requests.lock().unwrap().is_empty());
+    assert_eq!(fixture.history.conversation().await.unwrap(), before);
+    assert!(
+        fixture
+            .history
+            .compaction_history()
+            .await
+            .unwrap()
+            .is_none()
     );
+    assert!(
+        !fixture
+            .events()
+            .await
+            .iter()
+            .any(|event| event.has_compaction_started())
+    );
+}
+
+#[tokio::test]
+async fn invalid_compact_target_returns_tool_error_without_compaction() {
+    let fixture = Fixture::new();
+    fixture.seed().await;
+    let (adapter, _) = bridge();
+    let mut requested = compact_step();
+    requested.completion.as_mut().unwrap().tool_calls[0].arguments_json =
+        r#"{"target_context_size":"invalid"}"#.into();
+    let provider = Scripted::new(vec![requested, Step::complete("invalid target handled")]);
+    let (session, _) =
+        runtime::runtime(&fixture, &provider, vec![ToolHandle::Borrowed(adapter)]).await;
+    let sent = runtime::send(&session).await;
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    let requests = provider.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+    let result = requests[1]
+        .messages
+        .iter()
+        .find(|message| message.tool_call_id == "retained-compact")
+        .unwrap();
+    assert!(result.content().contains("error:"));
+    drop(requests);
+    assert!(
+        !fixture
+            .events()
+            .await
+            .iter()
+            .any(|event| event.has_compaction_started())
+    );
+    bounded(session.close()).await.unwrap();
 }
 
 // The retained status tool must use the activity+context registry, not the full
@@ -437,23 +396,6 @@ impl SessionServices for StatusAncillary {
                 .map_err(status_error)
         })
     }
-    fn compact<'a>(
-        &'a self,
-        selection: &'a Self::Selection,
-        target: Option<ContextSize>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<session::Compaction, OperationError<Failure>>> {
-        SessionServices::compact(&self.other, selection, target, cancellation)
-    }
-    fn estimate_after_tool_result(
-        &self,
-        selection: &Self::Selection,
-        call: &str,
-        result: &str,
-    ) -> Result<ContextSnapshot, Failure> {
-        self.other
-            .estimate_after_tool_result(selection, call, result)
-    }
 }
 type StatusBridge = (
     Arc<RetainedCompactTool<Security>>,
@@ -485,20 +427,7 @@ fn status_bridge_with_prompt(prompt_probe: Option<Arc<SessionPrompt>>) -> Status
         ConfiguredToolDefinition::new("Observe runtime status", r#"{"type":"object"}"#),
         services,
     ));
-    let planner = Arc::new(CompactionPlanner::new(
-        CompactionSettings {
-            trigger_percent: 95,
-            target_percent: 30,
-            maximum_input_tokens: 60000,
-            summary_output_tokens: 1024,
-            summary_instructions: String::new(),
-            summary_prefix: String::new(),
-        },
-        ModelProfiles::new(&BTreeMap::new()),
-    ));
-    let adapter = Arc::new(
-        RetainedCompactTool::from_status_session(tool.clone(), planner, templates()).unwrap(),
-    );
+    let adapter = Arc::new(RetainedCompactTool::from_status_session(tool.clone()).unwrap());
     (adapter, ancillary, tool)
 }
 fn status_step(call_id: &str) -> Step {
@@ -728,86 +657,4 @@ async fn retained_status_precancel_does_not_estimate_and_external_selection_has_
         .await
         .unwrap_err();
     assert!(matches!(error, OperationError::Failed(_)));
-}
-
-struct CancelAfterCompactionPrompt {
-    history: AgentHistoryView,
-    cancelled_builds: Arc<AtomicUsize>,
-}
-impl SystemPrompt for CancelAfterCompactionPrompt {
-    fn renew_epoch(&mut self) {}
-    fn read_system_prompts(
-        &mut self,
-        _: &parrot_provider::routing::aliases::ResolvedModelSelection,
-    ) -> PromptResult<Vec<(String, String)>> {
-        Ok(vec![(
-            "test:instructions".into(),
-            "actual post-compaction cancellation instructions".into(),
-        )])
-    }
-    fn read_system_prompts_live<'a>(
-        &'a mut self,
-        selection: &'a parrot_provider::routing::aliases::ResolvedModelSelection,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, PromptResult<Vec<(String, String)>>> {
-        Box::pin(async move {
-            let events = self.history.repository().events().replay().await.unwrap();
-            if events.iter().any(|event| event.has_compaction_finished()) {
-                self.cancelled_builds.fetch_add(1, Ordering::SeqCst);
-                return Err(parrot_runtime::prompt_context::PromptError::Cancelled);
-            }
-            self.read_system_prompts(selection)
-        })
-    }
-}
-
-#[tokio::test]
-async fn retained_compact_preserves_live_prompt_cancellation_after_successful_compaction() {
-    let fixture = Fixture::new();
-    fixture.seed().await;
-    let sequence = fixture
-        .batch(vec![call("cancel-build", "compact_context")])
-        .await;
-    let (adapter, _) = bridge();
-    let mut harness =
-        BorrowedContextResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
-    let provider = Scripted::new(vec![Step::complete("actual completed summary")]);
-    harness.selection = selection(&provider);
-    let definitions = harness.snapshot.definitions().to_vec();
-    let cancelled_builds = Arc::new(AtomicUsize::new(0));
-    let prompt = SessionPrompt::new(Box::new(CancelAfterCompactionPrompt {
-        history: fixture.history.clone(),
-        cancelled_builds: cancelled_builds.clone(),
-    }));
-    let result = bounded(adapter.invoke(
-        ToolInvocation::new("cancel-build", "{}", sequence, templates()),
-        BorrowedToolContext {
-            selection: &harness.selection,
-            definitions: &definitions,
-            resources: TurnResources {
-                history: &fixture.history,
-                conversation: &mut harness.conversation,
-                agent_state: &mut harness.agent_state,
-                context: &mut harness.context,
-                prompt: &prompt,
-                sessions: &harness.sessions,
-                status: &Status,
-                events: &harness.events,
-                usage: &harness.usage,
-            },
-        },
-        &NeverCancelled,
-    ))
-    .await;
-    assert!(matches!(result, Err(OperationError::Cancelled)));
-    assert_eq!(cancelled_builds.load(Ordering::SeqCst), 1);
-    let events = fixture.events().await;
-    assert_eq!(
-        events
-            .iter()
-            .filter(|event| event.has_compaction_finished())
-            .count(),
-        1
-    );
-    assert!(!events.iter().any(|event| event.has_compaction_failed()));
 }

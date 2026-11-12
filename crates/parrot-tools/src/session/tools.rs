@@ -1,16 +1,12 @@
-use super::{Compaction, Failure, FailureKind, SessionServices, input};
-use parrot_core::{ContextReminderCheckpoint, NeverCancelled};
+use super::{Failure, FailureKind, SessionServices, input};
+use parrot_core::{CompactionRequest, NeverCancelled};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
         security::InvocationContext,
         tools::{ParallelSafety, Tool},
     },
-    values::{
-        context::{ContextSize, ContextSnapshot},
-        progress::ProgressUpdate,
-        tools::ConfiguredToolDefinition,
-    },
+    values::{progress::ProgressUpdate, tools::ConfiguredToolDefinition},
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use serde_json::Value;
@@ -121,48 +117,18 @@ impl<S: SessionServices> SessionTool<S> {
                 }
             }
             Kind::CompactContext => {
-                let target = (|| {
-                    let object =
-                        input::object(&invocation.arguments_json, &["target_context_size"])?;
-                    input::optional_string(&object, "target_context_size")?
-                        .map(|text| {
-                            if text.is_empty() {
-                                return Err(input::format(
-                                    "target_context_size must not be empty.",
-                                ));
-                            }
-                            ContextSize::parse(text)
-                                .map_err(|error| input::format(error.to_string()))
-                        })
-                        .transpose()
-                })();
-                let target = match target {
-                    Ok(target) => target,
-                    Err(error) => return error_output(invocation, &error.message),
-                };
-                let Compaction {
-                    reduced,
-                    mut context,
-                } = self
-                    .services
-                    .compact(selection, target, cancellation)
-                    .await?;
-                let mut result = self.render_compaction(invocation, reduced, &context)?;
-                for _ in 0..8 {
-                    let observed = self
-                        .services
-                        .estimate_after_tool_result(selection, &invocation.call_id, &result)
-                        .map_err(OperationError::Failed)?;
-                    let rendered = self.render_compaction(invocation, reduced, &observed)?;
-                    context = observed;
-                    if rendered == result {
-                        return Ok(result.into());
-                    }
-                    result = rendered;
+                if let Err(error) = CompactionRequest::parse(&invocation.arguments_json) {
+                    return error_output(invocation, &error.message);
                 }
-                Ok(self
-                    .render_compaction(invocation, reduced, &context)?
-                    .into())
+                cancellation
+                    .check()
+                    .map_err(|_| OperationError::Cancelled)?;
+                let text = render(
+                    &invocation.prompt_templates,
+                    "compact-context-tool.requested",
+                    &[],
+                )?;
+                text_output(invocation, &text)
             }
         }
     }
@@ -277,61 +243,6 @@ impl<S: SessionServices> SessionTool<S> {
             }
             result => result,
         }
-    }
-
-    fn render_compaction(
-        &self,
-        invocation: &Invocation,
-        reduced: bool,
-        context: &ContextSnapshot,
-    ) -> OperationResult<String, Failure> {
-        let outcome = if !context.is_available() {
-            "unavailable"
-        } else if reduced {
-            "compacted"
-        } else {
-            "no-op"
-        };
-        invocation
-            .prompt_templates
-            .render(
-                "compact-context-tool.result",
-                &[
-                    ("outcome".into(), outcome.into()),
-                    (
-                        "has_context_limit_override".into(),
-                        context.has_context_limit_override.into(),
-                    ),
-                    ("estimated_tokens".into(), context.estimated_tokens.into()),
-                    ("context_limit".into(), context.context_limit.into()),
-                    (
-                        "notification_interval".into(),
-                        ContextReminderCheckpoint::NOTIFICATION_INTERVAL.into(),
-                    ),
-                    ("trigger".into(), context.trigger_percent.into()),
-                    (
-                        "trigger_tokens".into(),
-                        context
-                            .trigger_tokens
-                            .map_or_else(|| "unavailable".into(), |value| value.to_string())
-                            .into(),
-                    ),
-                    (
-                        "usage".into(),
-                        context
-                            .usage_percent
-                            .map_or_else(|| "unavailable".into(), |value| value.to_string())
-                            .into(),
-                    ),
-                ],
-                &NeverCancelled,
-            )
-            .map_err(|error| match error {
-                OperationError::Cancelled => OperationError::Cancelled,
-                OperationError::Failed(error) => {
-                    OperationError::Failed(Failure::new(FailureKind::Argument, error.to_string()))
-                }
-            })
     }
 }
 

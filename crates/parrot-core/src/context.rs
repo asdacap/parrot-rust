@@ -1,11 +1,42 @@
 use crate::{ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, RequestStatistic};
 mod preparation;
-pub(crate) use preparation::{compact_context, prepare_request};
+pub use preparation::compact_context;
+pub(crate) use preparation::prepare_request;
 
 use crate::{Error, ErrorCode, ErrorKind};
 use std::fmt;
 
 impl ContextLimit {
+    pub fn parse(text: &str) -> Result<Self, Error> {
+        let invalid_size = || Error {
+            code: ErrorCode::Argument,
+            ..Error::failed(
+                "Context size must be positive whole tokens, an integer k suffix, or a whole percentage from 1% to 100%.",
+            )
+        };
+        let text = text.trim();
+        let is_percentage = text.ends_with('%');
+        let thousands = text.ends_with(['k', 'K']);
+        let digits = if is_percentage || thousands {
+            &text[..text.len() - 1]
+        } else {
+            text
+        };
+        if digits.is_empty() || !digits.bytes().all(|digit| digit.is_ascii_digit()) {
+            return Err(invalid_size());
+        }
+        let parsed: i64 = digits.parse().map_err(|_| invalid_size())?;
+        if parsed <= 0 || (is_percentage && parsed > 100) || (thousands && parsed > i64::MAX / 1000)
+        {
+            return Err(invalid_size());
+        }
+        Ok(if is_percentage {
+            Self::Percentage(parsed)
+        } else {
+            Self::Tokens(if thousands { parsed * 1000 } else { parsed })
+        })
+    }
+
     pub fn resolve_tokens(&self, context_window: i32) -> Option<i64> {
         match self {
             Self::Tokens(tokens) => Some(*tokens),

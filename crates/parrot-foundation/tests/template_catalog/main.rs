@@ -163,7 +163,7 @@ fn m1_three_mixed_category_assertions_remain_scalar_and_exact() {
             .render("agent-task.stop-succeeded", &[], &CancellationState::Active)
             .unwrap()
     );
-    assert_eq!(template_specs(content).len(), 110);
+    assert_eq!(template_specs(content).len(), 111);
 }
 
 #[test]
@@ -508,7 +508,7 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
         Ok(())
     })
     .unwrap();
-    assert_eq!(loaded, 111);
+    assert_eq!(loaded, 112);
     assert_eq!(
         catalog
             .render(

@@ -484,7 +484,6 @@ impl SelectionSource<Security> for Selection {
 #[derive(Clone, Default)]
 struct Tools {
     trace: Arc<Trace>,
-    inline_compact: Arc<AtomicBool>,
     prompt_cancelled: Arc<AtomicBool>,
     executions: Arc<AtomicUsize>,
     definitions: Vec<sessions::Tool>,
@@ -588,39 +587,6 @@ impl BorrowedTool<Security> for FixtureTool {
                         parrot_storage::diagnostics::FailureKind::InvalidOperation,
                     ))
                 })?;
-            }
-            let resources = context.resources;
-            if self.tools.inline_compact.swap(false, Ordering::SeqCst) {
-                let result = resources
-                    .context
-                    .compact(
-                        EpochInput {
-                            selection: &context.selection.model,
-                            tools: &[],
-                            conversation: resources.conversation,
-                            agent_state: resources.agent_state,
-                            prompt: resources.prompt,
-                            sessions: resources.sessions,
-                            status: resources.status,
-                            events: resources.events,
-                        },
-                        None,
-                        cancellation,
-                    )
-                    .await
-                    .map_err(|error| {
-                        let error = TurnError::Context(error);
-                        if error.is_cancelled() {
-                            OperationError::Cancelled
-                        } else {
-                            OperationError::Failed(ToolFailure::new(
-                                error.to_string(),
-                                parrot_storage::diagnostics::FailureKind::InvalidOperation,
-                            ))
-                        }
-                    })?;
-                assert!(result.reduced);
-                self.tools.trace.push("inline-compacted");
             }
             Ok(ToolOutput::text(self.text))
         })
