@@ -64,6 +64,9 @@ pub(super) struct MemoryCompaction {
     pub(super) effects: compaction_support::Effects,
     pub(super) provider: compaction_support::Provider,
     pub(super) status: MemoryStatus,
+    pub(super) saving_count: usize,
+    pub(super) saving_error: Option<Error>,
+    pub(super) failures: Vec<String>,
 }
 
 impl Default for MemoryCompaction {
@@ -119,6 +122,9 @@ impl MemoryCompaction {
                 contexts: Mutex::default(),
                 failure: None,
             },
+            saving_count: 0,
+            saving_error: None,
+            failures: Vec::new(),
         }
     }
 }
@@ -178,6 +184,31 @@ fn core_plans_and_fits_using_only_owned_data_and_injected_native_effects() {
     );
     assert!(!compaction.status.contexts.lock().unwrap().is_empty());
     assert_eq!(compaction.effects.progress.lock().unwrap().len(), 2);
+    assert_eq!(compaction.saving_count, 1);
+    assert!(compaction.saving_error.is_none());
+}
+
+#[test]
+fn saving_publication_failure_prevents_persistence_and_reports_failure() {
+    let mut state = MemoryState::new([Reply::TooLarge("oversized")]);
+    state.compaction_plan = Some(compaction_support::plan(&["saved group", "retained tail"]));
+    let provider = compaction_support::Provider::new([parrot_core::SummaryResponse::Summary(
+        "not committed".into(),
+    )]);
+    let mut compaction = MemoryCompaction::new(state.compaction_plan.clone(), provider);
+    let error = Error::failed("saving publication failed");
+    compaction.saving_error = Some(error.clone());
+
+    assert_eq!(
+        state.run_with_compaction(&mut compaction),
+        Err(error.clone())
+    );
+    assert_eq!(compaction.saving_count, 1);
+    assert_eq!(compaction.failures, [error.to_string()]);
+    assert_eq!(state.recorded_compactions, [Err(error)]);
+    assert!(state.fitted_statuses.is_empty());
+    assert!(!state.compacting.load(Ordering::SeqCst));
+    assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
 }
 
 #[test]

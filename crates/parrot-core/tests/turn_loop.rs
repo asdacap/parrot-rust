@@ -92,9 +92,10 @@ impl EventPublisher for MemoryEventPublisher {
             Ok(())
         })
     }
-    fn report_compaction_failed(&self, _: String) -> BoxFuture<'_, Result<(), Error>> {
+    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.compacting.store(false, Ordering::SeqCst);
+            self.compaction.lock().unwrap().failures.push(message);
             Ok(())
         })
     }
@@ -102,6 +103,19 @@ impl EventPublisher for MemoryEventPublisher {
         Box::pin(async move {
             self.compacting.store(false, Ordering::SeqCst);
             Ok(())
+        })
+    }
+    fn report_compaction_saving<'a>(
+        &'a self,
+        _: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            let mut compaction = self.compaction.lock().unwrap();
+            compaction.saving_count += 1;
+            match &compaction.saving_error {
+                Some(error) => Err(error.clone()),
+                None => Ok(()),
+            }
         })
     }
     fn report_compaction_progress<'a, 'c>(
@@ -476,7 +490,6 @@ struct MemoryContext {
 }
 
 struct CompactedContext {
-    instructions: String,
     messages: Vec<Message>,
     state: MemoryContext,
 }
@@ -525,7 +538,6 @@ struct MemoryState {
     provider_preferences: String,
     include_router_metadata: bool,
     compactions: VecDeque<CompactedContext>,
-    compacted_definitions: Vec<Vec<ToolDefinition>>,
     last_turn: Option<ConversationTurn>,
     pending_messages: VecDeque<(Delivery, Message)>,
     turn_reads: AtomicUsize,
@@ -655,7 +667,6 @@ impl MemoryState {
             provider_preferences: String::new(),
             include_router_metadata: false,
             compactions: VecDeque::new(),
-            compacted_definitions: Vec::new(),
             last_turn: None,
             pending_messages: VecDeque::new(),
             turn_reads: AtomicUsize::new(0),
@@ -1239,17 +1250,13 @@ impl States for MemoryState {
             })
         })
     }
-    fn finalize_compaction<'a>(
-        &'a mut self,
-        instructions: &'a str,
-        definitions: &'a [ToolDefinition],
+    fn finalize_compaction(
+        &mut self,
         result: Result<Option<parrot_core::FittedCompaction>, Error>,
-    ) -> BoxFuture<'a, Result<String, Error>> {
+    ) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.compacting.store(false, Ordering::SeqCst);
             self.step("compact")?;
-            self.compacted_definitions.push(definitions.to_vec());
-            self.request().instructions = instructions.into();
             self.recorded_compactions.push(
                 result
                     .clone()
@@ -1260,11 +1267,10 @@ impl States for MemoryState {
                 self.fitted_statuses.push(fitted.status);
             }
             if let Some(compacted) = self.compactions.pop_front() {
-                self.request().instructions = compacted.instructions;
                 self.request().messages = compacted.messages;
                 self.request().context = compacted.state;
             }
-            Ok(self.request().instructions.clone())
+            Ok(())
         })
     }
 }

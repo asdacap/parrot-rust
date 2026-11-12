@@ -426,6 +426,7 @@ struct Events {
     published: Mutex<Vec<Event>>,
     committed: Mutex<Vec<Event>>,
     fail_finished: AtomicBool,
+    fail_saving: AtomicBool,
 }
 impl Events {
     fn new(history: AgentHistoryView) -> Self {
@@ -434,6 +435,7 @@ impl Events {
             published: Mutex::new(Vec::new()),
             committed: Mutex::new(Vec::new()),
             fail_finished: AtomicBool::new(false),
+            fail_saving: AtomicBool::new(false),
         }
     }
 }
@@ -471,6 +473,13 @@ impl ContextEvents for Events {
     ) -> BoxFuture<'a, ContextResult<()>> {
         Box::pin(async move {
             assert!(!cancellation.is_cancelled());
+            if event.has_compaction_progress()
+                && event.compaction_progress().phase
+                    == parrot_domain::protocol::messages::parrot::CompactionPhase::COMPACTION_PHASE_SAVING.into()
+                && self.fail_saving.load(Ordering::Relaxed)
+            {
+                return Err(ContextError::Operation("saving publication failed".into()));
+            }
             if event.has_compaction_finished() && self.fail_finished.load(Ordering::Relaxed) {
                 return Err(ContextError::Operation("finish publication failed".into()));
             }

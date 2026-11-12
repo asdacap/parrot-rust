@@ -233,7 +233,7 @@ impl ContextController {
 
     pub async fn compact_epoch(
         &mut self,
-        mut input: EpochInput<'_>,
+        input: EpochInput<'_>,
         target: Option<&ContextSize>,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<EpochResult> {
@@ -260,7 +260,6 @@ impl ContextController {
                 prompt: input.prompt,
                 selection: input.selection,
                 status: input.status,
-                sessions: input.sessions,
                 events: input.events,
                 configuration: configuration.clone(),
                 templates,
@@ -297,18 +296,31 @@ impl ContextController {
                 &publisher,
                 parrot_core::CancellationToken::new(cancellation),
             )
-            .await
+            .await;
+            let result = match result {
+                Ok(Some(fitted)) => parrot_core::EventPublisher::report_compaction_saving(
+                    &publisher,
+                    parrot_core::CancellationToken::new(cancellation),
+                )
+                .await
+                .map(|()| Some(fitted)),
+                result => result,
+            }
             .map_err(|error| errors.restore(error, ContextError::from));
             (prepared, result)
         };
+        let reduced = result.as_ref().is_ok_and(|fitted| fitted.is_some());
         let recorded = self
-            .record_epoch_compaction(&mut input, prepared.instructions, result, cancellation)
+            .record_epoch_compaction(input.conversation, input.agent_state, input.events, result)
             .await;
         let outcome = match recorded {
-            Ok(result) => self
+            Ok(()) => self
                 .report_epoch_finished(input.events)
                 .await
-                .map(|()| result),
+                .map(|()| EpochResult {
+                    instructions: prepared.instructions,
+                    reduced,
+                }),
             Err(error) => Err(error),
         };
         match outcome {
@@ -330,6 +342,19 @@ impl ContextController {
         events.emit(started, &NeverCancelled).await
     }
 
+    pub(crate) async fn report_epoch_saving(
+        &self,
+        events: &dyn ContextEvents,
+        cancellation: &dyn Cancellation,
+    ) -> ContextResult<()> {
+        let mut saving = self.event()?;
+        saving.set_compaction_progress(CompactionProgressEvent {
+            phase: CompactionPhase::COMPACTION_PHASE_SAVING.into(),
+            ..CompactionProgressEvent::new()
+        });
+        events.emit(saving, cancellation).await
+    }
+
     pub(crate) async fn report_epoch_finished(
         &self,
         events: &dyn ContextEvents,
@@ -337,17 +362,6 @@ impl ContextController {
         let mut finished = self.event()?;
         finished.set_compaction_finished(CompactionFinished::new());
         events.emit(finished, &NeverCancelled).await
-    }
-
-    pub(crate) async fn record_epoch_compaction(
-        &mut self,
-        input: &mut EpochInput<'_>,
-        instructions: String,
-        result: ContextResult<Option<parrot_core::FittedCompaction>>,
-        cancellation: &dyn Cancellation,
-    ) -> ContextResult<EpochResult> {
-        self.apply_compaction(input, instructions, result?, cancellation)
-            .await
     }
 
     pub(crate) async fn fail_epoch_compaction(
@@ -425,24 +439,17 @@ impl ContextController {
         Ok(history)
     }
 
-    async fn apply_compaction(
+    pub(crate) async fn record_epoch_compaction(
         &mut self,
-        input: &mut EpochInput<'_>,
-        instructions: String,
-        compacted: Option<parrot_core::FittedCompaction>,
-        cancellation: &dyn Cancellation,
-    ) -> ContextResult<EpochResult> {
-        let mut reduced = false;
-        if let Some(compacted) = compacted {
+        conversation: &mut AgentConversation,
+        agent_state: &mut parrot_core::AgentState,
+        events: &dyn ContextEvents,
+        result: ContextResult<Option<parrot_core::FittedCompaction>>,
+    ) -> ContextResult<()> {
+        if let Some(compacted) = result? {
             let status = compacted.status;
             let notice = compacted.notice;
             let compacted: CompactionResult = compacted.result.into();
-            let mut saving = self.event()?;
-            saving.set_compaction_progress(CompactionProgressEvent {
-                phase: CompactionPhase::COMPACTION_PHASE_SAVING.into(),
-                ..CompactionProgressEvent::new()
-            });
-            input.events.emit(saving, cancellation).await?;
             let published = self.notice("status", notice)?;
             let appended = self
                 .history
@@ -455,20 +462,15 @@ impl ContextController {
                     status,
                 )
                 .await?;
-            reduced = true;
-            input.agent_state.last_request_statistic.reset();
-            input.conversation.reload().await?;
+            agent_state.last_request_statistic.reset();
+            conversation.reload().await?;
             if appended {
-                input
-                    .events
+                events
                     .publish_committed(Committed::after_commit(published), &NeverCancelled)
                     .await?;
             }
         }
-        Ok(EpochResult {
-            instructions,
-            reduced,
-        })
+        Ok(())
     }
 
     fn estimate(
@@ -564,6 +566,22 @@ impl parrot_core::EventPublisher for EpochEventPublisher<'_> {
                 })
         })
     }
+    fn report_compaction_saving<'a>(
+        &'a self,
+        cancellation: parrot_core::CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<(), parrot_core::Error>> {
+        Box::pin(async move {
+            self.controller
+                .lock()
+                .await
+                .report_epoch_saving(self.events, &cancellation)
+                .await
+                .map_err(|error| {
+                    let diagnostic = describe_context_error(&error);
+                    self.errors.capture(error, diagnostic)
+                })
+        })
+    }
     fn report_compaction_progress<'a, 'c>(
         &'a self,
         progress: parrot_core::CompactionProgress,
@@ -593,7 +611,6 @@ struct EpochStates<'a> {
     prompt: &'a SessionPrompt,
     selection: &'a ResolvedModelSelection,
     status: &'a dyn ContextStatus,
-    sessions: &'a ProviderSessions,
     events: &'a dyn ContextEvents,
     configuration: parrot_core::CompactionConfiguration,
     templates: Arc<PromptTemplateCatalog>,
@@ -677,34 +694,17 @@ impl parrot_core::States for EpochStates<'_> {
         })
     }
 
-    fn finalize_compaction<'a>(
-        &'a mut self,
-        instructions: &'a str,
-        definitions: &'a [parrot_core::ToolDefinition],
+    fn finalize_compaction(
+        &mut self,
         result: Result<Option<parrot_core::FittedCompaction>, parrot_core::Error>,
-    ) -> BoxFuture<'a, Result<String, parrot_core::Error>> {
+    ) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
         Box::pin(async move {
             let result = result.map_err(|error| self.errors.restore(error, ContextError::from));
             self.controller
                 .lock()
                 .await
-                .record_epoch_compaction(
-                    &mut EpochInput {
-                        selection: self.selection,
-                        tools: definitions,
-                        conversation: self.conversation,
-                        agent_state: self.agent_state,
-                        prompt: self.prompt,
-                        sessions: self.sessions,
-                        status: self.status,
-                        events: self.events,
-                    },
-                    instructions.into(),
-                    result,
-                    self.cancellation,
-                )
+                .record_epoch_compaction(self.conversation, self.agent_state, self.events, result)
                 .await
-                .map(|result| result.instructions)
                 .map_err(|error| self.capture_error(error))
         })
     }

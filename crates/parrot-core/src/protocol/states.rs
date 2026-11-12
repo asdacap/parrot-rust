@@ -3,7 +3,6 @@ use super::context::ContextSnapshot;
 use super::conversation::ConversationState;
 use super::message::{ConversationTurn, InputAdmission, PromotedInput};
 use super::skill::{Skill, SkillContent, SkillReference};
-use super::tool::ToolDefinition;
 use super::turn::AgentState;
 use super::{BoxFuture, CancellationToken, Error};
 
@@ -129,15 +128,11 @@ pub trait States: Send + Sync {
     fn read_conversation_state(&self) -> BoxFuture<'_, Result<ConversationState, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_conversation_state")) })
     }
-    /// Persists the fitted compaction with the supplied sampled instructions and tools,
-    /// awaiting terminal lifecycle effects on success or failure. Returns the instructions
-    /// the epoch uses after the persisted compaction; the caller computes the reduction outcome.
-    fn finalize_compaction<'a>(
-        &'a mut self,
-        _instructions: &'a str,
-        _definitions: &'a [ToolDefinition],
+    /// Persists the fitted compaction and refreshes the live conversation, or propagates its failure.
+    fn finalize_compaction(
+        &mut self,
         _result: Result<Option<crate::FittedCompaction>, Error>,
-    ) -> BoxFuture<'a, Result<String, Error>> {
+    ) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("States.finalize_compaction")) })
     }
 }

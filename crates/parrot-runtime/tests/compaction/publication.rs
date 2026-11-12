@@ -3,6 +3,70 @@ use super::*;
 use parrot_domain::protocol::messages::parrot::CompactionPhase;
 
 #[tokio::test]
+async fn saving_publication_failure_leaves_history_unchanged_and_reports_failure() {
+    let fixture = Fixture::new();
+    let history = fixture.history();
+    user(&history, "old").await;
+    user(&history, "tail").await;
+    let provider = Scripted::default();
+    let selection = provider.selection(10000);
+    let sessions = ProviderSessions::new();
+    let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
+    let before = conversation.messages().to_vec();
+    let prompt = EpochPrompt::default();
+    let status = Status::default();
+    let events = Events::new(history.clone());
+    events.fail_saving.store(true, Ordering::Relaxed);
+    let mut controller = fixture.controller(history, 90);
+
+    let error = controller
+        .compact_epoch(
+            EpochInput {
+                selection: &selection,
+                tools: &[],
+                conversation: &mut conversation,
+                agent_state: &mut parrot_core::AgentState::new(false),
+                prompt: &prompt.prompt,
+                sessions: &sessions,
+                status: &status,
+                events: &events,
+            },
+            None,
+            &NeverCancelled,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, ContextError::Operation(_)));
+    assert_eq!(error.to_string(), "saving publication failed");
+    assert_eq!(conversation.messages(), before);
+    assert!(
+        fixture
+            .repository
+            .compaction("agent".into())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let committed = events.committed.lock().unwrap().clone();
+    assert!(committed.last().unwrap().has_compaction_failed());
+    assert!(
+        !committed
+            .iter()
+            .any(|event| event.has_compaction_finished())
+    );
+    assert!(!committed.iter().any(|event| event.has_agent_notice()));
+    sessions.close().await.unwrap();
+    fixture
+        .repository
+        .events()
+        .database()
+        .close()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn committed_status_publication_requires_true_success_not_duplicate_or_sqlite_failure() {
     for sqlite_failure in [false, true] {
         let fixture = Fixture::new();

@@ -88,6 +88,20 @@ impl parrot_core::EventPublisher for RuntimeEventPublisher<'_> {
                 .map_err(Into::into)
         })
     }
+    fn report_compaction_saving<'a>(
+        &'a self,
+        cancellation: parrot_core::CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.state
+                .lock()
+                .await
+                .context
+                .report_epoch_saving(&self.events, &cancellation)
+                .await
+                .map_err(Into::into)
+        })
+    }
     fn report_compaction_progress<'a, 'c>(
         &'a self,
         progress: parrot_core::CompactionProgress,

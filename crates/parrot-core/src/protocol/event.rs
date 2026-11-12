@@ -26,6 +26,17 @@ pub trait EventPublisher: Send + Sync {
     fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), Error>>;
     /// Publishes compaction completion without request cancellation.
     fn report_compaction_finished(&self) -> BoxFuture<'_, Result<(), Error>>;
+    /// Publishes the saving phase before fitted compaction persistence.
+    fn report_compaction_saving<'a>(
+        &'a self,
+        _cancellation: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async {
+            Err(Error::unsupported(
+                "EventPublisher.report_compaction_saving",
+            ))
+        })
+    }
     /// Publishes aggregate compaction progress without disclosing generated content.
     fn report_compaction_progress<'a, 'c>(
         &'a self,

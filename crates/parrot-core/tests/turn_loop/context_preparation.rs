@@ -68,7 +68,7 @@ fn core_records_each_final_request_before_rendering_and_retains_final_catalogs()
 }
 
 #[test]
-fn raw_and_calibrated_triggers_compact_and_use_returned_epoch() {
+fn raw_and_calibrated_triggers_compact_and_keep_sampled_instructions() {
     for calibrated in [false, true] {
         let mut state = MemoryState::new([Reply::final_response("answer")]);
         state.request().context.configuration.model.context_window = 1000;
@@ -103,7 +103,6 @@ fn raw_and_calibrated_triggers_compact_and_use_returned_epoch() {
                 "automatic summary".into(),
             )]);
         state.compactions.push_back(CompactedContext {
-            instructions: "sampled compacted instructions".into(),
             messages: messages.clone(),
             state: compacted_state,
         });
@@ -120,10 +119,9 @@ fn raw_and_calibrated_triggers_compact_and_use_returned_epoch() {
             [Content::Text("prefix:automatic summary".into())]
         );
         let requests = state.provider.requests.lock().unwrap();
-        assert_eq!(requests[0].instructions, "sampled compacted instructions");
+        assert_eq!(requests[0].instructions, "core request");
         assert_eq!(requests[0].messages, messages);
         assert_eq!(requests[0].max_output_tokens, 100);
-        assert_eq!(state.compacted_definitions, [requests[0].tools.clone()]);
         let estimates = state.capture_request_estimates();
         assert_eq!(estimates[0].tokens, 100);
         assert_eq!(estimates[0].instructions, requests[0].instructions);
@@ -157,7 +155,6 @@ fn separate_context_reads_use_compaction_configuration_and_calibration() {
             "summary".into(),
         )]);
     state.compactions.push_back(CompactedContext {
-        instructions: "compacted instructions".into(),
         messages: vec![Message {
             role: Role::System,
             contents: vec![Content::Text("compacted history".into())],
@@ -167,7 +164,7 @@ fn separate_context_reads_use_compaction_configuration_and_calibration() {
     });
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.compacted_definitions.len(), 1);
+    assert_eq!(state.recorded_compactions.len(), 1);
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].max_output_tokens,
         200
@@ -208,7 +205,7 @@ fn equality_at_the_raw_trigger_does_not_compact_or_discard_requested_output() {
     state.request().context.configuration.trigger_percent = 80;
     state.request().estimated_input_tokens = 800;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert!(state.compacted_definitions.is_empty());
+    assert!(state.recorded_compactions.is_empty());
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].max_output_tokens,
         100
@@ -234,7 +231,6 @@ fn post_compaction_raw_input_failure_precedes_further_provider_effects() {
     state.request().estimated_input_tokens = 701;
     let context = state.request().context.clone();
     state.compactions.push_back(CompactedContext {
-        instructions: "compacted but too large".into(),
         messages: vec![],
         state: context,
     });
@@ -259,7 +255,7 @@ fn unknown_context_uses_output_configuration_without_inventing_reminder_or_compa
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.request().estimated_input_tokens = i64::MAX;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert!(state.compacted_definitions.is_empty());
+    assert!(state.recorded_compactions.is_empty());
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].max_output_tokens,
         32768

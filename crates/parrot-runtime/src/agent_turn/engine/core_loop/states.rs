@@ -602,42 +602,25 @@ where
                 .map_err(Into::into)
         })
     }
-    fn finalize_compaction<'a>(
-        &'a mut self,
-        instructions: &'a str,
-        definitions: &'a [ToolDefinition],
+    fn finalize_compaction(
+        &mut self,
         result: Result<Option<parrot_core::FittedCompaction>, CoreError>,
-    ) -> BoxFuture<'a, Result<String, CoreError>> {
+    ) -> BoxFuture<'_, Result<(), CoreError>> {
         Box::pin(async move {
             let mut guard = self.state.lock().await;
             let state = &mut *guard;
             let compacted = result?;
-            let selection = self.binding.capture_selection().map_err(CoreError::from)?;
-            let status = state
-                .request_status
-                .clone()
-                .ok_or_else(|| CoreError::failed("request status is unavailable"))?;
-            let result = state
+            state
                 .context
                 .record_epoch_compaction(
-                    &mut EpochInput {
-                        selection: &selection.model,
-                        tools: definitions,
-                        conversation: &mut state.conversation,
-                        agent_state: &mut state.agent_state,
-                        prompt: self.prompt,
-                        sessions: self.sessions,
-                        status: status.as_ref(),
-                        events: &self.events,
-                    },
-                    instructions.into(),
+                    &mut state.conversation,
+                    &mut state.agent_state,
+                    &self.events,
                     Ok(compacted),
-                    self.cancellation,
                 )
                 .await
                 .map_err(TurnError::from)
-                .map_err(CoreError::from)?;
-            Ok(result.instructions)
+                .map_err(CoreError::from)
         })
     }
 }

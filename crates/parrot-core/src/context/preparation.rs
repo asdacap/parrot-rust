@@ -28,20 +28,25 @@ pub(crate) async fn compact_context(
         cancellation,
     )
     .await;
-    let reduced = compacted.as_ref().is_ok_and(|fitted| fitted.is_some());
     states.set_agent_state(state.clone()).await?;
-    let recorded = states
-        .finalize_compaction(&input.instructions, definitions, compacted)
-        .await;
+    let compacted = match compacted {
+        Ok(Some(fitted)) => publisher
+            .report_compaction_saving(cancellation)
+            .await
+            .map(|()| Some(fitted)),
+        result => result,
+    };
+    let reduced = compacted.as_ref().is_ok_and(|fitted| fitted.is_some());
+    let recorded = states.finalize_compaction(compacted).await;
     *state = states.get_agent_state().await?;
     if reduced && recorded.is_ok() {
         state.last_request_statistic.reset();
     }
     match recorded {
-        Ok(instructions) => {
+        Ok(()) => {
             publisher.report_compaction_finished().await?;
             Ok(ContextCompaction {
-                instructions,
+                instructions: input.instructions,
                 reduced,
             })
         }
