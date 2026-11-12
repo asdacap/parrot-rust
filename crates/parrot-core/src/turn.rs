@@ -4,8 +4,8 @@ use crate::{
     AgentState, BoxFuture, CancellationToken, CompletionBlockerFeedback, ConfigKey,
     ConversationAddition, ConversationEvent, ConversationOrigin, ConversationPersistence,
     ConversationTurn, Error, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message,
-    Outcome, Provider, Role, States, ToolCallReceipt, Tools, add_phase_prompt, context,
-    execute_tools, rendering, skills, steer_status,
+    Outcome, Provider, Role, States, ToolCallReceipt, ToolResultMetadata, Tools, add_phase_prompt,
+    context, execute_tools, rendering, skills, steer_status,
 };
 
 /// Supplies the drain loop with runtime-owned lifecycle facts and per-turn work.
@@ -62,9 +62,9 @@ pub async fn open_turn(
 
 /// Runs one active turn using state-backed settings and tools captured once.
 /// The caller opens the turn first.
-pub async fn run_turn(
+pub async fn run_turn<M: ToolResultMetadata>(
     states: &mut dyn States,
-    tools: &dyn Tools,
+    tools: &dyn Tools<M>,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
@@ -75,9 +75,9 @@ pub async fn run_turn(
     result
 }
 
-async fn execute_turn(
+async fn execute_turn<M: ToolResultMetadata>(
     states: &mut dyn States,
-    tools: &dyn Tools,
+    tools: &dyn Tools<M>,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,

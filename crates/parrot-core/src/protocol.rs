@@ -37,7 +37,10 @@ pub use message::{
 pub use provider::{Provider, Tools};
 pub use skill::{DerivedContext, Skill, SkillContent, SkillReference};
 pub use states::States;
-pub use tool::{ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolResult, ToolStatus};
+pub use tool::{
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolResult, ToolResultMetadata,
+    ToolStatus,
+};
 pub use turn::{
     AgentState, CompletionBlockerFeedback, Outcome, TurnFlags, TurnModel, TurnModelIcon,
     TurnModelIconColor, TurnOptions,

@@ -80,7 +80,7 @@ struct PrefixTools {
     observations: Mutex<Vec<Observation>>,
     fail_second: bool,
 }
-impl Tools for PrefixTools {
+impl Tools<Vec<u8>> for PrefixTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
         Box::pin(async { Ok(ToolCatalog::default()) })
     }
@@ -88,7 +88,7 @@ impl Tools for PrefixTools {
         &'a self,
         request: ToolExecutionRequest,
         _: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult<Vec<u8>>>, Error>> {
         Box::pin(async move {
             self.observations.lock().unwrap().push(Observation {
                 calls: request.calls.iter().map(|call| call.id.clone()).collect(),
@@ -245,7 +245,7 @@ fn recovery_constructs_configured_crash_results_and_preserves_existing_terminals
         }),
         ..State::default()
     };
-    finish(ToolSettlement::default().restore_results(&mut state)).unwrap();
+    finish(ToolSettlement::<Vec<u8>>::default().restore_results(&mut state)).unwrap();
     assert_eq!(state.additions.len(), 2);
     let ConversationPersistence::ToolResult {
         result, recovered, ..

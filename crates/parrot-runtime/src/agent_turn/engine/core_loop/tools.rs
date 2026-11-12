@@ -3,6 +3,7 @@ use crate::tool_settlement::*;
 use parrot_core::{ToolCall, ToolResult, ToolStatus};
 use parrot_domain::{
     contracts::{storage::Committed, tools::ParallelSafety},
+    protocol::messages::parrot::YieldedShellProcess,
     values::{
         activity::AgentSessionActivity, identifiers::Identifier, tools::ToolCycleImageBudget,
     },
@@ -39,7 +40,7 @@ struct InvocationResources<'a, S: AccessSnapshot + 'static> {
     cancellation: &'a dyn Cancellation,
 }
 
-impl<S> parrot_core::Tools for RuntimeTools<'_, S>
+impl<S> parrot_core::Tools<YieldedShellProcess> for RuntimeTools<'_, S>
 where
     S: AccessSnapshot + 'static,
 {
@@ -72,7 +73,7 @@ where
         &'a self,
         request: parrot_core::ToolExecutionRequest,
         cancellation: parrot_core::CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, CoreError>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult<YieldedShellProcess>>, CoreError>> {
         adapt_operation(async move {
             let selection = self.binding.capture_selection()?;
             let snapshot = {
