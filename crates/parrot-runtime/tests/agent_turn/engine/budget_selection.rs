@@ -334,6 +334,83 @@ fn tool_names(request: &Request) -> Vec<&str> {
 }
 
 #[tokio::test]
+async fn selection_changes_during_tools_apply_to_the_next_step() {
+    let fixture = Fixture::new();
+    let provider = Scripted::new(vec![tool_step("worker"), Step::complete("done")]);
+    let tools = BudgetTools::new(&["worker", "new-tool"]);
+    let gate = Gate::new();
+    *tools.inner.execution_gate.lock().unwrap() = Some(gate.clone());
+    let mut original = profile();
+    original.allowed_tools = Some(vec!["worker".into()]);
+    let runtime = BudgetRuntime::compose(
+        &fixture,
+        &provider,
+        BudgetLimits {
+            context_window: 100_000,
+            maximum_input_tokens: 0,
+            maximum_output_tokens: 0,
+        },
+        original,
+        tools.clone(),
+        |_| RealReminderStatus::new(),
+    )
+    .await;
+    let sent = runtime
+        .send("prompt", protocol::Delivery::DELIVERY_STEER)
+        .await;
+    gate.entered().await;
+    let next_provider = Scripted::new(vec![Step::complete("updated answer")]);
+    let mut updated = runtime.selection.capture().unwrap();
+    updated.model.canonical_model.provider = Arc::new(next_provider.clone());
+    updated.model.canonical_model.model.id = "updated-model".into();
+    updated.model.canonical_model.variant =
+        Some(parrot_provider::catalogs::ModelVariant::new("high", "high"));
+    updated.profile.id = "updated".into();
+    updated.profile.allowed_tools = Some(vec!["new-tool".into()]);
+    runtime.selection.update(updated).unwrap();
+    gate.open();
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    {
+        let requests = next_provider.requests.lock().unwrap();
+        assert_eq!(
+            requests.len(),
+            1,
+            "next step must route through the updated selection"
+        );
+        assert_eq!(requests[0].model, "updated-model");
+        assert_eq!(requests[0].reasoning.as_ref().unwrap().effort, "high");
+        assert_eq!(tool_names(&requests[0]), ["new-tool"]);
+        assert_eq!(
+            requests[0]
+                .messages
+                .iter()
+                .filter(|message| message.role == sessions::Role::System
+                    && message.content().contains("Standing profile instructions"))
+                .count(),
+            2
+        );
+    }
+    let standing = fixture.history.standing_statuses().await.unwrap().unwrap();
+    assert!(standing.contains_key(&parrot_core::StatusKey::new("profile:updated")));
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].model, "model");
+        assert!(requests[0].reasoning.is_none());
+        assert_eq!(tool_names(&requests[0]), ["worker"]);
+    }
+    assert_eq!(
+        *tools.executions.lock().unwrap(),
+        [("original".into(), vec!["worker".into()])]
+    );
+    assert_eq!(tools.materializations.load(Ordering::SeqCst), 1);
+    runtime.close().await;
+}
+
+#[tokio::test]
 async fn actual_requests_reserve_source_headroom_for_unknown_and_known_context_windows() {
     for (context_window, output_limit) in
         [(0, 0), (100_000, 0), (20_000, 8_192), (1_000_000, 131_072)]
@@ -750,8 +827,7 @@ async fn scheduled_work_precedes_queued_input_and_starts_a_fresh_core_budget_sco
 }
 
 #[tokio::test]
-async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_turn_restores_current_selection()
- {
+async fn actual_steps_refresh_profile_and_final_phase_filters_tools_until_next_turn() {
     let fixture = Fixture::new();
     let first_gate = Gate::new();
     let final_gate = Gate::new();
@@ -792,7 +868,8 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
     let mut updated = runtime.selection.capture().unwrap();
     updated.profile = profile();
     updated.profile.id = "updated".into();
-    updated.profile.allowed_tools = Some(vec!["new-tool".into()]);
+    updated.profile.maximum_requests = 2;
+    updated.profile.allowed_tools = Some(vec!["survivor".into(), "new-tool".into()]);
     runtime.selection.update(updated).unwrap();
     runtime
         .send("queued prompt", protocol::Delivery::DELIVERY_QUEUE)
@@ -824,7 +901,7 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
     {
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 4);
-        assert_eq!(tool_names(&requests[3]), ["new-tool"]);
+        assert_eq!(tool_names(&requests[3]), ["survivor", "new-tool"]);
         let restored: Vec<_> = requests[3]
             .messages
             .iter()
@@ -872,8 +949,8 @@ async fn actual_turn_captures_profile_then_final_phase_filters_tools_and_next_tu
         *tools.executions.lock().unwrap(),
         [
             ("original".into(), vec!["worker".into(), "survivor".into()]),
-            ("original".into(), vec!["survivor".into()]),
-            ("updated".into(), vec!["new-tool".into()]),
+            ("updated".into(), vec!["survivor".into()]),
+            ("updated".into(), vec!["survivor".into(), "new-tool".into()]),
         ]
     );
     runtime.close().await;

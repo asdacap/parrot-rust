@@ -1303,6 +1303,7 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "record_tools",
             "execute",
             "record_results",
+            "catalog",
             "promote",
             "instruction_state",
             "render",
@@ -1549,7 +1550,7 @@ fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
             .iter()
             .filter(|entry| *entry == "catalog")
             .count(),
-        1
+        3
     );
     assert_eq!(
         state
@@ -1622,7 +1623,7 @@ fn compaction_that_does_not_reduce_context_returns_the_original_provider_error()
 }
 
 #[test]
-fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
+fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
     let mut state = MemoryState::new([
         Reply::invalid("invalid"),
         Reply::TooLarge("oversized"),
@@ -1683,7 +1684,7 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
             && request.include_router_metadata == options.include_router_metadata
     }));
     let trace = state.trace.values();
-    assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 1);
+    assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 5);
     assert_eq!(trace.iter().filter(|step| *step == "compact").count(), 1);
     assert_eq!(trace.iter().filter(|step| *step == "complete").count(), 1);
 
@@ -1724,7 +1725,7 @@ fn fresh_invocations_use_supplied_settings_and_capture_tools_once() {
     assert!(state.final_requests.contains(&6));
     assert_eq!(state.turn_reads.load(Ordering::SeqCst), 6);
     let trace = state.trace.values();
-    assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 2);
+    assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 6);
     assert_eq!(trace.iter().filter(|step| *step == "complete").count(), 2);
 
     *tools.fail_at.lock().unwrap() = Some("catalog");
@@ -1843,7 +1844,7 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
             .iter()
             .filter(|entry| *entry == "catalog")
             .count(),
-        2
+        6
     );
     assert_eq!(
         state

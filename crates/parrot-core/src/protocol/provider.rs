@@ -45,7 +45,7 @@ pub trait Provider: Send + Sync {
 /// Retains executable tools and executes explicitly supplied calls.
 pub trait Tools<M: ToolResultMetadata>: Send + Sync {
     /// Captures permitted definitions backed by the original executable identities
-    /// for this turn. The final catalog is the subset permitted in the final phase.
+    /// for this step. The final catalog is the subset permitted in the final phase.
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>>;
     /// Executes one ordered prefix of the supplied calls, joining all admitted work.
     /// Core settles the returned chunk before requesting the next prefix.

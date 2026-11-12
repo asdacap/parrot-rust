@@ -153,7 +153,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                 let token = parrot_core::CancellationToken::new(cancellation);
                 let start_event_id = parrot_core::open_turn(&mut states, &publisher, token).await?;
                 let provider = RuntimeProvider {
-                    model: binding.capture_selection().map_err(CoreError::from)?.model,
+                    binding: &binding,
                     sessions: &backend.sessions,
                     history: &backend.history,
                     publisher: backend.publisher.as_ref(),

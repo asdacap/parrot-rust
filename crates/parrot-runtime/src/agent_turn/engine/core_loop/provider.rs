@@ -3,14 +3,11 @@ use crate::agent_turn::provider_call::{
     OutputWriter, ProviderActivity, ProviderCallError, ProviderUsage, StreamedFragmentBuffer,
     translate_provider_event,
 };
-use parrot_provider::{
-    routing::aliases::ResolvedModelSelection,
-    sessions::{Completion, EventStream, Request, Session},
-};
+use parrot_provider::sessions::{Completion, EventStream, Request, Session};
 use parrot_storage::conversation::ConversationOrigin;
 
-pub(super) struct RuntimeProvider<'a> {
-    pub(super) model: ResolvedModelSelection,
+pub(super) struct RuntimeProvider<'a, S: AccessSnapshot> {
+    pub(super) binding: &'a TurnBinding<S>,
     pub(super) sessions: &'a ProviderSessions,
     pub(super) history: &'a AgentHistoryView,
     pub(super) publisher: &'a Publisher,
@@ -37,14 +34,15 @@ struct StreamProgress {
     streamed_text: bool,
 }
 
-impl parrot_core::Provider for RuntimeProvider<'_> {
+impl<S: AccessSnapshot> parrot_core::Provider for RuntimeProvider<'_, S> {
     fn estimate_input_tokens(
         &self,
         instructions: &str,
         definitions: &[ToolDefinition],
         messages: &[parrot_core::Message],
     ) -> Result<i64, CoreError> {
-        crate::compaction::CompactionEstimates::new(&self.model)
+        let selection = self.binding.capture_selection()?;
+        crate::compaction::CompactionEstimates::new(&selection.model)
             .estimate_input_tokens(instructions, definitions, messages)
             .map_err(Into::into)
     }
@@ -57,13 +55,14 @@ impl parrot_core::Provider for RuntimeProvider<'_> {
         'c: 'a,
     {
         Box::pin(async move {
+            let selection = self.binding.capture_selection()?;
             let result: Result<_, crate::compaction::CompactionError> = async {
                 cancellation
                     .check()
                     .map_err(|_| crate::compaction::CompactionError::Cancelled)?;
                 let session = self
                     .sessions
-                    .get(self.model.canonical_model.provider.clone())
+                    .get(selection.model.canonical_model.provider.clone())
                     .await?;
                 let mut stream = session.call(request.into())?;
                 let result = async {
@@ -94,7 +93,8 @@ impl parrot_core::Provider for RuntimeProvider<'_> {
         'c: 'a,
     {
         Box::pin(async move {
-            let selected = &self.model.canonical_model;
+            let selection = self.binding.capture_selection()?;
+            let selected = &selection.model.canonical_model;
             let mut state = self.state.lock().await;
             let request: sessions::Request = request.into();
             let estimate = crate::compaction::CompactionPlanner::estimate_input_tokens(
@@ -122,7 +122,7 @@ impl parrot_core::Provider for RuntimeProvider<'_> {
                 output: &output,
                 activity: &activity,
             };
-            let event = match Self::stream(
+            let event = match StreamEffects::stream(
                 effects,
                 &mut *state,
                 session.as_ref(),
@@ -158,7 +158,7 @@ impl parrot_core::Provider for RuntimeProvider<'_> {
     }
 }
 
-impl RuntimeProvider<'_> {
+impl StreamEffects<'_> {
     /// The caller owns session begin/close. This method owns and closes exactly
     /// the returned call stream, also after cancellation or a commit failure.
     /// As with other owned runtime operations, the caller must await completion

@@ -1,4 +1,4 @@
-use super::{RuntimeProvider, StreamEffects};
+use super::StreamEffects;
 use std::{
     collections::VecDeque,
     io,
@@ -462,7 +462,7 @@ async fn batches_fragments_by_source_stream_and_returns_the_whole_last_completio
         state.clone(),
     );
     let request = request();
-    let actual = RuntimeProvider::stream(
+    let actual = StreamEffects::stream(
         StreamEffects {
             history: &fixture.history,
             publisher: &publisher,
@@ -584,7 +584,7 @@ async fn stalled_next_flushes_held_suffix_without_restarting_or_detaching_the_re
         output: &output,
         activity: &activity,
     };
-    let future = RuntimeProvider::stream(effects, &mut usage, &session, request(), &NeverCancelled);
+    let future = StreamEffects::stream(effects, &mut usage, &session, request(), &NeverCancelled);
     fn assert_send<T: Send>(_: &T) {}
     assert_send(&future);
     let (result, ()) = tokio::join!(future, async {
@@ -630,7 +630,7 @@ async fn cancellation_keeps_held_fragments_and_awaits_actual_stream_close() {
     let (result, ()) = tokio::join!(
         async {
             let result =
-                RuntimeProvider::stream(effects, &mut usage, &session, request(), &token).await;
+                StreamEffects::stream(effects, &mut usage, &session, request(), &token).await;
             returned.store(true, Ordering::SeqCst);
             result
         },
@@ -684,7 +684,7 @@ async fn stream_failure_keeps_suffix_and_original_provider_body_until_close_fini
         activity: &activity,
     };
     let (result, ()) = tokio::join!(
-        RuntimeProvider::stream(effects, &mut usage, &session, request(), &NeverCancelled),
+        StreamEffects::stream(effects, &mut usage, &session, request(), &NeverCancelled),
         async {
             state.wait_for_close().await;
             assert_eq!(publisher.retained().len(), 2);
@@ -734,7 +734,7 @@ async fn retry_flushes_output_marks_attempt_and_empty_data_does_not_end_header_p
         ],
         state.clone(),
     );
-    let result = RuntimeProvider::stream(
+    let result = StreamEffects::stream(
         StreamEffects {
             history: &fixture.history,
             publisher: &publisher,
@@ -823,7 +823,7 @@ async fn retry_after_text_without_more_text_does_not_add_an_extra_final_newline(
         ],
         state.clone(),
     );
-    RuntimeProvider::stream(
+    StreamEffects::stream(
         StreamEffects {
             history: &fixture.history,
             publisher: &publisher,
@@ -872,7 +872,7 @@ async fn storage_publication_output_and_usage_failures_all_close_the_real_stream
             ]
         };
         let session = FakeSession::new(steps, state.clone());
-        let result = RuntimeProvider::stream(
+        let result = StreamEffects::stream(
             StreamEffects {
                 history: &fixture.history,
                 publisher: &publisher,
@@ -918,7 +918,7 @@ async fn close_failure_is_awaited_and_does_not_skip_idle_activity_or_newline() {
     let session = FakeSession::new(vec![text("a")], state.clone());
     session.stream.lock().unwrap().as_mut().unwrap().close_error =
         Some(Error::Io("close failed".into()));
-    let result = RuntimeProvider::stream(
+    let result = StreamEffects::stream(
         StreamEffects {
             history: &fixture.history,
             publisher: &publisher,

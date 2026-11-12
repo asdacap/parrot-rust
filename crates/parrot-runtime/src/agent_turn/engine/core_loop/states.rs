@@ -316,6 +316,12 @@ where
             Ok(())
         })
     }
+    fn begin_step(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            self.binding.bind(self.selection.capture()?);
+            Ok(())
+        })
+    }
     fn get_config(
         &self,
         key: parrot_core::ConfigKey,

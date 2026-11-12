@@ -49,7 +49,7 @@ fn ordered_blocker_messages_are_recorded_together_and_retain_the_candidate_once(
             .iter()
             .filter(|step| *step == "catalog")
             .count(),
-        1
+        2
     );
 }
 
@@ -151,7 +151,7 @@ fn every_blocker_list_retains_the_exact_candidate_and_forces_continuation() {
                 .iter()
                 .filter(|step| *step == "catalog")
                 .count(),
-            1
+            2
         );
         assert!(!state.trace.values().iter().any(|entry| entry == "complete"));
     }
@@ -201,7 +201,7 @@ fn blocker_snapshots_restart_budget_and_close_only_after_the_list_clears() {
         ["first candidate", "second candidate", "third candidate"]
     );
     let trace = state.trace.values();
-    assert_eq!(trace.iter().filter(|entry| *entry == "catalog").count(), 1);
+    assert_eq!(trace.iter().filter(|entry| *entry == "catalog").count(), 4);
     assert_eq!(trace.iter().filter(|entry| *entry == "complete").count(), 1);
     assert_eq!(
         trace

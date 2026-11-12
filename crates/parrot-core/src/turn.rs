@@ -60,7 +60,7 @@ pub async fn open_turn(
     Ok(start_event_id)
 }
 
-/// Runs one active turn using state-backed settings and tools captured once.
+/// Runs one active turn using settings and tools captured at each step.
 /// The caller supplies the start-event ID returned by `open_turn`.
 pub async fn run_turn<M: ToolResultMetadata>(
     states: &mut dyn States,
@@ -97,9 +97,7 @@ async fn execute_turn<M: ToolResultMetadata>(
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
-    let options = states.get_config(ConfigKey::Turn).await?.into_turn()?;
     state.begin_turn();
-    let catalog = tools.capture_catalog().await?;
     if state.final_phase {
         let restored =
             rendering::render_template(states, ConfigKey::RestoredToolsTemplate, &[]).await?;
@@ -108,6 +106,12 @@ async fn execute_turn<M: ToolResultMetadata>(
     let mut compacted_oversized = false;
     let mut skills = skills::SkillPreparation::default();
     loop {
+        if cancellation.is_cancelled() {
+            return Err(Error::cancelled());
+        }
+        states.begin_step().await?;
+        let options = states.get_config(ConfigKey::Turn).await?.into_turn()?;
+        let catalog = tools.capture_catalog().await?;
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
