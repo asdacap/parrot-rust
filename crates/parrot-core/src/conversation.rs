@@ -3,17 +3,15 @@ use crate::{
     ProviderResponse, Role, States,
 };
 
-/// Assembles summary, durable tail, checkpoints, and the current provider-visible messages.
+/// Assembles summary, durable tail, and the current provider-visible messages.
 pub async fn read_conversation_state(states: &dyn States) -> Result<ConversationState, Error> {
     let summary = states.read_conversation_summary().await?;
     let watermark = summary.as_ref().map_or(0, |summary| summary.watermark);
     let history = states.read_conversation_tail(watermark).await?;
-    let checkpoint_sequences = states.read_checkpoint_sequences().await?;
     let messages = states.read_provider_messages().await?;
     Ok(ConversationState {
         summary,
         history,
-        checkpoint_sequences,
         messages,
     })
 }

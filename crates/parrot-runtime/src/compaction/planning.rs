@@ -14,7 +14,6 @@ use parrot_provider::{
 pub struct CompactionGroup<'a> {
     pub messages: &'a [Message],
     pub end_watermark: i64,
-    pub has_checkpoint_before: bool,
     pub is_complete: bool,
 }
 
@@ -51,7 +50,6 @@ impl PlanningInput<'_> {
                 .map(|group| CompactionHistoryGroup {
                     messages: group.messages.iter().cloned().map(Into::into).collect(),
                     end_watermark: group.end_watermark,
-                    has_checkpoint_before: group.has_checkpoint_before,
                     is_complete: group.is_complete,
                 })
                 .collect(),
@@ -215,32 +213,5 @@ impl CompactionPlanner {
     ) -> Result<ContextSnapshot, PlanningError> {
         let estimated = Self::estimate_input_tokens(selected, instructions, tools, history)?;
         Ok(ContextSnapshot::estimate(estimated, configuration))
-    }
-}
-
-pub(crate) struct PlanningProvider<'a> {
-    selected: &'a ProviderModel,
-}
-
-impl<'a> PlanningProvider<'a> {
-    pub(crate) fn new(selected: &'a ProviderModel) -> Self {
-        Self { selected }
-    }
-}
-
-impl parrot_core::Provider for PlanningProvider<'_> {
-    fn estimate_input_tokens(
-        &self,
-        instructions: &str,
-        definitions: &[parrot_core::ToolDefinition],
-        messages: &[parrot_core::Message],
-    ) -> Result<i64, parrot_core::Error> {
-        CompactionPlanner::estimate_input_tokens(
-            self.selected,
-            instructions,
-            definitions,
-            &messages.iter().cloned().map(Into::into).collect::<Vec<_>>(),
-        )
-        .map_err(Into::into)
     }
 }

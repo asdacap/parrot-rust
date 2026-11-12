@@ -3,7 +3,7 @@ use crate::{
     ConversationHistoryItem, ConversationState, Error, EventPublisher, HistoryGroupMember, Message,
     Provider, Role, States, ToolDefinition, assemble_history_groups, join_status_offering,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 /// Samples instructions and assembles compaction input from raw conversation reads.
 /// Preparation errors publish failure after a successful start, before returning.
@@ -49,12 +49,7 @@ pub async fn prepare_compaction(
 }
 
 pub(crate) fn assemble_groups(raw: &ConversationState) -> Vec<CompactionHistoryGroup> {
-    let checkpoints: BTreeSet<_> = raw.checkpoint_sequences.iter().copied().collect();
     let members: Vec<HistoryGroupMember> = raw.history.iter().map(history_group_member).collect();
-    let member_by_sequence: BTreeMap<i64, HistoryGroupMember> = members
-        .iter()
-        .map(|member| (member.sequence, member.clone()))
-        .collect();
     let items: BTreeMap<i64, &ConversationHistoryItem> = raw
         .history
         .iter()
@@ -69,12 +64,10 @@ pub(crate) fn assemble_groups(raw: &ConversationState) -> Vec<CompactionHistoryG
                 ..Message::default()
             }],
             end_watermark: summary.watermark,
-            has_checkpoint_before: false,
             is_complete: true,
         });
     }
     for group in assemble_history_groups(&members) {
-        let owner = &member_by_sequence[&group.owner_sequence];
         groups.push(CompactionHistoryGroup {
             end_watermark: *group.member_sequences.last().expect("group has its owner"),
             messages: group
@@ -82,9 +75,6 @@ pub(crate) fn assemble_groups(raw: &ConversationState) -> Vec<CompactionHistoryG
                 .iter()
                 .map(|sequence| items[sequence].message.clone())
                 .collect(),
-            has_checkpoint_before: owner.makes_tool_calls()
-                && group.owner_sequence > 0
-                && checkpoints.contains(&group.owner_sequence),
             is_complete: group.is_complete,
         });
     }

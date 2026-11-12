@@ -1211,12 +1211,6 @@ impl States for MemoryState {
             Ok(None)
         })
     }
-    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, Error>> {
-        Box::pin(async move {
-            self.trace.step("checkpoint_sequences", self.fail_at)?;
-            Ok(Vec::new())
-        })
-    }
     fn read_conversation_tail(
         &self,
         after: i64,

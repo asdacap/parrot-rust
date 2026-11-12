@@ -326,7 +326,7 @@ async fn image_artifacts_are_materialized_loaded_by_summary_provider_and_retaine
 }
 
 #[tokio::test]
-async fn long_committed_history_keeps_the_checkpoint_suffix_and_exact_reopened_tool_results() {
+async fn long_committed_history_ignores_checkpoint_boundaries_and_preserves_durable_history() {
     let fixture = Fixture::new();
     let history = fixture.history();
     for index in 0..200 {
@@ -339,7 +339,8 @@ async fn long_committed_history_keeps_the_checkpoint_suffix_and_exact_reopened_t
     let selection = provider.selection(100000);
     let sessions = ProviderSessions::new();
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
-    let retained = conversation.messages()[150..].to_vec();
+    let retained = conversation.messages()[202..].to_vec();
+    let durable_history = history.conversation().await.unwrap();
     let mut prompt = EpochPrompt::default();
     let status = Status::default();
     let events = Events::new(history.clone());
@@ -369,9 +370,9 @@ async fn long_committed_history_keeps_the_checkpoint_suffix_and_exact_reopened_t
             .unwrap()
             .unwrap()
             .watermark,
-        150
+        202
     );
-    assert_eq!(provider.requests.lock().unwrap()[0].messages.len(), 151);
+    assert_eq!(provider.requests.lock().unwrap()[0].messages.len(), 203);
     fixture
         .repository
         .events()
@@ -381,6 +382,10 @@ async fn long_committed_history_keeps_the_checkpoint_suffix_and_exact_reopened_t
         .unwrap();
     let reopened = Fixture::open(&fixture.path);
     let history = Fixture::history_for(&reopened, "agent");
+    assert_eq!(
+        &history.conversation().await.unwrap()[..durable_history.len()],
+        durable_history
+    );
     assert_eq!(
         AgentConversation::new(history).await.unwrap().messages(),
         conversation.messages()

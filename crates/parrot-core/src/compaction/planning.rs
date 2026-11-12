@@ -105,24 +105,17 @@ fn cap_tokens(tokens: Option<i64>, input_limit: i32) -> Option<i64> {
     }
 }
 
-fn add(left: i64, right: i64) -> Result<i64, Error> {
-    left.checked_add(right)
-        .ok_or_else(|| PlanningError::TokenOverflow.into())
-}
-
 impl CompactionPlan {
     pub fn select(
         input: &CompactionInput,
         definitions: &[ToolDefinition],
         configuration: &CompactionConfiguration,
-        provider: &dyn Provider,
     ) -> Result<Option<Self>, Error> {
         Self::select_for_target(
             input,
             definitions,
             configuration,
             configuration.resolve_policy().target_tokens,
-            provider,
         )
     }
 
@@ -131,42 +124,13 @@ impl CompactionPlan {
         definitions: &[ToolDefinition],
         configuration: &CompactionConfiguration,
         target_tokens: Option<i64>,
-        provider: &dyn Provider,
     ) -> Result<Option<Self>, Error> {
         let groups = &input.groups;
-        let Some(target) = target_tokens.filter(|_| groups.len() >= 2) else {
+        let Some(_) = target_tokens.filter(|_| groups.len() >= 2) else {
             return Ok(None);
         };
         let mut keep = groups.len() - 1;
-        let estimate = |index: usize| {
-            let messages: Vec<_> = std::iter::once(&input.fixed_message)
-                .chain(groups[index..].iter().flat_map(|group| &group.messages))
-                .cloned()
-                .collect();
-            add(
-                provider.estimate_input_tokens(&input.instructions, definitions, &messages)?,
-                1,
-            )
-        };
-        let natural_exceeds = estimate(keep)? > target;
         let input_limit = configuration.context.model.calculate_input_limit();
-        let mut nearest = None;
-        for (index, group) in groups.iter().enumerate() {
-            if group.has_checkpoint_before {
-                let tokens = estimate(index)?;
-                if tokens <= target || (natural_exceeds && tokens <= i64::from(input_limit)) {
-                    let distance = index.abs_diff(keep);
-                    if nearest.is_none_or(|(best_distance, best_index)| {
-                        (distance, index) < (best_distance, best_index)
-                    }) {
-                        nearest = Some((distance, index));
-                    }
-                }
-            }
-        }
-        if let Some((_, index)) = nearest {
-            keep = index;
-        }
         if let Some(index) = groups[..keep].iter().position(|group| !group.is_complete) {
             keep = index;
         }
@@ -251,7 +215,6 @@ pub fn group_messages(messages: &[Message]) -> Vec<CompactionHistoryGroup> {
         groups.push(CompactionHistoryGroup {
             messages: slice.to_vec(),
             end_watermark: groups.len() as i64 + 1,
-            has_checkpoint_before: false,
             is_complete: is_complete(slice),
         });
         start = end;

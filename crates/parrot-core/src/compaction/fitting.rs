@@ -112,7 +112,7 @@ pub async fn compact_conversation(
     publisher: &dyn EventPublisher,
     cancellation: CancellationToken<'_>,
 ) -> Result<Option<FittedCompaction>, Error> {
-    let plan = CompactionPlan::select(input, definitions, configuration, provider)?;
+    let plan = CompactionPlan::select(input, definitions, configuration)?;
     let result = compact(plan, states, provider, publisher, cancellation).await?;
     fit_compaction(input, definitions, configuration, result, states, provider).await
 }
