@@ -1521,9 +1521,6 @@ where
                     asks: Some(asks.clone()),
                     active_work: active_work.clone(),
                     reminders: reminders.clone(),
-                    history: prepared.history.clone(),
-                    broker: self.user.broker.clone(),
-                    publisher: publisher.clone(),
                 });
                 let mut ancestors = Vec::new();
                 let mut parent = registry.snapshot_scopes().into_iter().find(|scope| {

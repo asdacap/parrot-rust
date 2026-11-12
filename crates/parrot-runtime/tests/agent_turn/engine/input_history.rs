@@ -263,18 +263,6 @@ impl CompletionStateSource for GatedRetryCompletion {
     ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move { Ok(None) })
     }
-    fn record_completion_blocker_feedback<'a>(
-        &'a self,
-        feedback: &'a CompletionBlockerFeedback,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async move {
-            assert_eq!(feedback.kind, CompletionBlockerFeedbackKind::ActiveWork);
-            assert_eq!(feedback.message, "retry first turn");
-            assert!(feedback.candidate.is_some());
-            Ok(())
-        })
-    }
 }
 
 // Pinned DrainTests.cs:307-347 and its GatedCompletionCallback at2731-2759.

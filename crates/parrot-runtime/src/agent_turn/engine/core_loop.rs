@@ -21,19 +21,12 @@ struct CapturedTools<T> {
 
 struct TurnBinding<S: AccessSnapshot> {
     selection: std::sync::Mutex<Option<TurnSelection<S>>>,
-    exit_blocker_sources: std::sync::Mutex<
-        Vec<(
-            Arc<dyn CompletionStateSource>,
-            CompletionBlockerFeedbackKind,
-        )>,
-    >,
 }
 
 impl<S: AccessSnapshot> TurnBinding<S> {
     fn new() -> Self {
         Self {
             selection: std::sync::Mutex::new(None),
-            exit_blocker_sources: std::sync::Mutex::new(Vec::new()),
         }
     }
     fn bind(&self, selection: TurnSelection<S>) {

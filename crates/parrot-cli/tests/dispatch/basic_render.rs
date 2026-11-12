@@ -289,7 +289,7 @@ fn admissions_only_print_after_start_and_keep_source_line_state() {
 fn notices_and_skill_loaded_are_separate_unindented_lines() {
     let notices = [
         "Status prompt injected",
-        "Active work reminder injected",
+        "Completion blocker injected",
         "Exit reminder set: port: finish the port",
         "Exit reminder cleared: port",
         "Context reminder injected (27% context used)",

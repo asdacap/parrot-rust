@@ -8,9 +8,7 @@ pub enum Outcome {
     BudgetExhausted(String),
 }
 
-/// One rejected completion attempt: the blocker feedback messages steering the
-/// next turn and the assistant candidate response they answered. The states side
-/// replays each message to its completion source when this addition is applied.
+/// A rejected completion attempt and the reminders steering the next request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompletionBlockerFeedback {
     pub messages: Vec<String>,

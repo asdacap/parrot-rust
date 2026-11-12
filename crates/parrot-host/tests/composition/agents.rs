@@ -677,9 +677,6 @@ mod fixture {
                     asks: Some(asks.clone()),
                     active_work: active_work.clone(),
                     reminders: reminders.clone(),
-                    history: prepared.history.clone(),
-                    broker,
-                    publisher,
                 })],
                 templates,
                 reminders,
@@ -1437,7 +1434,7 @@ async fn two_agent_asks_guard_completion(promoted_before_completion: bool) {
                 .filter(
                     |event| event.agent_session_id == h.root.identity().session.session_id
                         && event.has_agent_notice()
-                        && event.agent_notice().kind == "pending_ask_reminder"
+                        && event.agent_notice().kind == "completion_blocker"
                 )
                 .count(),
             1
@@ -1907,9 +1904,12 @@ async fn host_real_ask_tool_wait_keeps_queued_steers_and_replies_without_deadloc
                     && message.content().contains("queued while root waits")))
     );
     let events = h.events().await;
-    assert!(events.iter().any(
-        |event| event.has_agent_notice() && event.agent_notice().kind == "pending_ask_reminder"
-    ));
+    assert!(
+        events
+            .iter()
+            .any(|event| event.has_agent_notice()
+                && event.agent_notice().kind == "completion_blocker")
+    );
     assert!(h.user_questions().pending().is_empty());
     h.close().await;
 }

@@ -103,7 +103,7 @@ async fn progress_blocks_partial_and_full_completion_until_explicit_close() {
             );
             let events = fixture.user().lease.events.replay().await.unwrap();
             assert!(events.iter().any(|event| event.has_agent_notice()
-                && event.agent_notice().kind == "active_work_reminder"));
+                && event.agent_notice().kind == "completion_blocker"));
             assert_eq!(
                 events
                     .iter()

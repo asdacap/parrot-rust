@@ -54,13 +54,6 @@ impl CompletionStateSource for ArmAfterCallback {
             Ok(None)
         })
     }
-    fn record_completion_blocker_feedback<'a>(
-        &'a self,
-        feedback: &'a CompletionBlockerFeedback,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async move { panic!("this source has no reminder to record: {feedback:?}") })
-    }
 }
 #[tokio::test]
 async fn mutation_admitted_after_last_terminal_snapshot_is_joined_before_drain_settles() {

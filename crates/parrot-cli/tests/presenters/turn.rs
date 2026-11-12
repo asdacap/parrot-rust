@@ -130,7 +130,7 @@ fn typed_turn_events_render_cumulative_text_and_sanitize_terminal_content() {
     ];
     for (kind, notice) in [
         ("status", "Status prompt injected"),
-        ("active_work_reminder", "Active work reminder injected"),
+        ("completion_blocker", "Completion blocker injected"),
         (
             "exit_reminder_changed",
             "Exit reminder set: port\x1b[2J: finish the port\x1b[2J",
@@ -289,7 +289,7 @@ fn typed_turn_events_render_cumulative_text_and_sanitize_terminal_content() {
     assert!(errors.is_empty());
     for notice in [
         "Status prompt injected",
-        "Active work reminder injected",
+        "Completion blocker injected",
         "Exit reminder set: port[2J: finish the port[2J",
         "Exit reminder cleared: port",
         "Final provider request prompt injected",

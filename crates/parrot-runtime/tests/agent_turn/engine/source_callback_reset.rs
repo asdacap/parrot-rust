@@ -12,26 +12,18 @@ impl CompletionStateSource for RetryOnce {
         &'a self,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
-        Box::pin(async move { Ok(self.0.load(Ordering::SeqCst).then(|| "source retry".into())) })
+        Box::pin(async move {
+            Ok(self
+                .0
+                .swap(false, Ordering::SeqCst)
+                .then(|| "source retry".into()))
+        })
     }
     fn get_exit_reminder<'a>(
         &'a self,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
         Box::pin(async move { Ok(None) })
-    }
-    fn record_completion_blocker_feedback<'a>(
-        &'a self,
-        feedback: &'a CompletionBlockerFeedback,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async move {
-            assert_eq!(feedback.kind, CompletionBlockerFeedbackKind::ActiveWork);
-            assert_eq!(feedback.message, "source retry");
-            assert!(feedback.candidate.is_some());
-            assert!(self.0.swap(false, Ordering::SeqCst));
-            Ok(())
-        })
     }
 }
 #[tokio::test]
@@ -125,13 +117,6 @@ impl CompletionStateSource for BlockOnce {
             }
             Ok(None)
         })
-    }
-    fn record_completion_blocker_feedback<'a>(
-        &'a self,
-        feedback: &'a CompletionBlockerFeedback,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async move { panic!("this source has no reminder to record: {feedback:?}") })
     }
 }
 #[tokio::test]
