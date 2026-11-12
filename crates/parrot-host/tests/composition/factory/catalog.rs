@@ -1104,6 +1104,7 @@ mod fixture_binding {
                     questions: shared.clone(),
                     communication: shared.clone(),
                     agent_depth: 0,
+                    interactive: true,
                     templates: templates.clone(),
                     allow_parent,
                 },
@@ -1126,6 +1127,7 @@ mod fixture_binding {
                     filesystem: shared.clone(),
                     templates: templates.clone(),
                     agent_depth: depth,
+                    interactive: true,
                 },
                 &definitions,
             )
