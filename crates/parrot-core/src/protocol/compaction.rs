@@ -27,7 +27,6 @@ pub struct CompactionGroup {
 pub struct CompactionHistoryGroup {
     pub messages: Vec<Message>,
     pub end_watermark: i64,
-    pub has_checkpoint_before: bool,
     pub is_complete: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -1,8 +1,8 @@
 # Compaction and context budgets
 
 Compaction replaces an eligible conversation prefix with summaries while retaining
-recent history, protected checkpoints, and incomplete tool-call groups. Summarized
-history remains in the authoritative database. Retained messages preserve tool
+recent history and incomplete tool-call groups. Summarized history remains in the
+authoritative database. Retained messages preserve tool
 identities, results, image references, and provider-native replay content.
 
 ## Budgets and triggers
@@ -28,8 +28,8 @@ capacity is not a guarantee that every compaction entry point is a no-op.
 
 ## History selection and summaries
 
-Selection respects the active checkpoint boundary, the existing summary
-watermark, and the earliest incomplete tool-call group in the selected prefix.
+Selection respects the existing summary watermark and the earliest incomplete
+tool-call group in the selected prefix.
 Assistant calls and their following tool results remain causal groups. A group is
 complete when every tool-call identity has a result, without requiring equal call
 and result counts. Orphan messages stay separate. Blank tool-call identities are
@@ -55,9 +55,9 @@ a plausible replacement.
 Automatic, oversized-request, standalone, and inline compaction use the same
 selection, summary, and fitting behavior. Prompt inputs are refreshed before
 rendering the new epoch. The previous summary, its post-watermark durable tail,
-active checkpoints, and current messages are read separately during a serialized
-epoch. Core uses the summary watermark to bound the tail and assembles these
-values without a combined atomic snapshot or cached capture. Native tail reads
+and current messages are read separately during a serialized epoch. Core uses the
+summary watermark to bound the tail and assembles these values without a combined
+atomic snapshot or cached capture. Native tail reads
 retain tool ownership and status classification and materialize historical image
 artifacts. Current transient messages remain separate.
 

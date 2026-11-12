@@ -185,7 +185,6 @@ fn preparation_failures_stop_without_recording_or_invoking_a_summary() {
     for stage in [
         "conversation_summary",
         "conversation_tail",
-        "checkpoint_sequences",
         "estimate",
         "status",
     ] {
@@ -195,7 +194,7 @@ fn preparation_failures_stop_without_recording_or_invoking_a_summary() {
         let mut compaction = MemoryCompaction::new(state.compaction_plan.clone(), provider.clone());
         let error = Error::failed(stage);
         match stage {
-            "conversation_summary" | "conversation_tail" | "checkpoint_sequences" => {
+            "conversation_summary" | "conversation_tail" => {
                 state.fail_at = Some(stage);
             }
             "estimate" => compaction.effects.context_failure = Some((1, error.clone())),

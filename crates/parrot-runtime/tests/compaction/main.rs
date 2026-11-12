@@ -36,7 +36,6 @@ pub(crate) fn group_messages(messages: &[Message]) -> Vec<CompactionGroup<'_>> {
             CompactionGroup {
                 messages: &messages[start..offset],
                 end_watermark: group.end_watermark,
-                has_checkpoint_before: group.has_checkpoint_before,
                 is_complete: group.is_complete,
             }
         })

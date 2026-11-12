@@ -63,11 +63,7 @@ fn estimate(messages: &[Message]) -> Result<i64, Error> {
         })
 }
 
-#[derive(Default)]
-struct PlanningProvider {
-    reject_estimates: bool,
-    failure: Option<Error>,
-}
+struct PlanningProvider;
 
 impl Provider for PlanningProvider {
     fn estimate_input_tokens(
@@ -76,14 +72,7 @@ impl Provider for PlanningProvider {
         _: &[ToolDefinition],
         messages: &[Message],
     ) -> Result<i64, Error> {
-        assert!(
-            !self.reject_estimates,
-            "an unavailable cut must not estimate context"
-        );
-        match &self.failure {
-            Some(error) => Err(error.clone()),
-            None => estimate(messages),
-        }
+        estimate(messages)
     }
 }
 
@@ -102,13 +91,7 @@ fn planning_error(failure: PlanningError) -> Error {
 }
 
 fn select(input: &CompactionInput, target: Option<i64>) -> Result<Option<CompactionPlan>, Error> {
-    CompactionPlan::select_for_target(
-        input,
-        &[],
-        &configuration(),
-        target,
-        &PlanningProvider::default(),
-    )
+    CompactionPlan::select_for_target(input, &[], &configuration(), target)
 }
 
 #[test]
@@ -204,27 +187,25 @@ fn raw_targets_preserve_override_unknown_window_and_output_reservation_rules() {
 
 #[test]
 fn selection_uses_core_configuration_without_a_native_planning_hook() {
-    let mut input = input(&[10, 10, 50, 50]);
-    input.groups[1].has_checkpoint_before = true;
+    let input = input(&[10, 10, 50, 50]);
     let mut configuration = configuration();
     configuration.target = Some(ContextLimit::Tokens(100));
-    let plan = CompactionPlan::select(&input, &[], &configuration, &PlanningProvider::default())
+    let plan = CompactionPlan::select(&input, &[], &configuration)
         .unwrap()
         .unwrap();
     assert_eq!(plan.keep_group_from, 3);
     configuration.target = Some(ContextLimit::Percentage(12));
-    let plan = CompactionPlan::select(&input, &[], &configuration, &PlanningProvider::default())
+    let plan = CompactionPlan::select(&input, &[], &configuration)
         .unwrap()
         .unwrap();
-    assert_eq!(plan.keep_group_from, 1);
-    assert_eq!(plan.watermark, 1);
+    assert_eq!(plan.keep_group_from, 3);
+    assert_eq!(plan.watermark, 3);
 }
 
 #[test]
-fn checkpoint_fallback_only_uses_input_capacity_when_natural_suffix_exceeds_target() {
-    let mut input = input(&[10, 10, 50, 50]);
-    input.groups[1].has_checkpoint_before = true;
-    for (target, expected_keep) in [(40, 1), (100, 3), (111, 1)] {
+fn selection_retains_the_normal_suffix_for_each_target() {
+    let input = input(&[10, 10, 50, 50]);
+    for (target, expected_keep) in [(40, 3), (100, 3), (111, 3)] {
         assert_eq!(
             select(&input, Some(target))
                 .unwrap()
@@ -250,87 +231,32 @@ fn incomplete_prefix_and_base_watermark_prevent_unsafe_or_nonadvancing_plans() {
 }
 
 #[test]
-fn unavailable_targets_and_single_groups_do_not_estimate_or_validate_summary_capacity() {
+fn unavailable_targets_and_single_groups_do_not_validate_summary_capacity() {
     let mut configuration = configuration();
     configuration.maximum_input_tokens = 0;
     for (input, target) in [(input(&[1, 1]), None), (input(&[1]), Some(100))] {
-        let result = CompactionPlan::select_for_target(
-            &input,
-            &[],
-            &configuration,
-            target,
-            &PlanningProvider {
-                reject_estimates: true,
-                failure: None,
-            },
-        );
+        let result = CompactionPlan::select_for_target(&input, &[], &configuration, target);
         assert!(result.unwrap().is_none());
     }
     let mut input = input(&[1, 1]);
     input.base_watermark = 1;
     assert!(
-        CompactionPlan::select_for_target(
-            &input,
-            &[],
-            &configuration,
-            Some(100),
-            &PlanningProvider::default()
-        )
-        .unwrap()
-        .is_none()
+        CompactionPlan::select_for_target(&input, &[], &configuration, Some(100))
+            .unwrap()
+            .is_none()
     );
     input.base_watermark = 0;
     assert_eq!(
-        CompactionPlan::select_for_target(
-            &input,
-            &[],
-            &configuration,
-            Some(100),
-            &PlanningProvider::default()
-        ),
+        CompactionPlan::select_for_target(&input, &[], &configuration, Some(100)),
         Err(planning_error(PlanningError::NoCompactionCapacity))
     );
 }
 
 #[test]
-fn selection_preserves_plan_boundaries_and_checked_suffix_overflow() {
+fn selection_preserves_plan_boundaries() {
     let plan = select(&input(&[1, 2, 3]), Some(100)).unwrap().unwrap();
     assert_eq!(plan.keep_group_from, 2);
     assert_eq!(plan.watermark, 2);
-    assert_eq!(
-        select(&input(&[1, i64::MAX]), Some(100)),
-        Err(planning_error(PlanningError::TokenOverflow))
-    );
-}
-
-#[test]
-fn checkpoint_selection_counts_request_overhead_once_for_the_retained_suffix() {
-    struct RequestOverheadProvider;
-
-    impl Provider for RequestOverheadProvider {
-        fn estimate_input_tokens(
-            &self,
-            _: &str,
-            _: &[ToolDefinition],
-            messages: &[Message],
-        ) -> Result<i64, Error> {
-            Ok(20 + estimate(messages)?)
-        }
-    }
-
-    let mut input = input(&[100, 10, 10, 10]);
-    input.groups[1].has_checkpoint_before = true;
-    let plan = CompactionPlan::select_for_target(
-        &input,
-        &[],
-        &configuration(),
-        Some(51),
-        &RequestOverheadProvider,
-    )
-    .unwrap()
-    .unwrap();
-    assert_eq!(plan.keep_group_from, 1);
-    assert_eq!(plan.watermark, 1);
 }
 
 #[test]
@@ -354,30 +280,20 @@ fn pure_spill_selection_uses_profile_capacity_and_requires_complete_tool_groups(
     };
     let mut configuration = configuration();
     configuration.profile_maximum_input_tokens = Some(10);
-    let mut plan = CompactionPlan::select_for_target(
-        &input,
-        &[],
-        &configuration,
-        Some(100),
-        &PlanningProvider::default(),
-    )
-    .unwrap()
-    .unwrap();
-    assert_eq!(
-        plan.select_spill_groups(&PlanningProvider::default())
-            .unwrap(),
-        [0]
-    );
+    let mut plan = CompactionPlan::select_for_target(&input, &[], &configuration, Some(100))
+        .unwrap()
+        .unwrap();
+    assert_eq!(plan.select_spill_groups(&PlanningProvider).unwrap(), [0]);
     assert_eq!(plan.groups[0].messages, input.groups[0].messages);
     plan.groups[0].is_complete = false;
     assert_eq!(
-        plan.select_spill_groups(&PlanningProvider::default()),
+        plan.select_spill_groups(&PlanningProvider),
         Err(planning_error(PlanningError::GroupExceedsBudget))
     );
     plan.groups[0].is_complete = true;
     plan.groups[0].messages[0].role = Role::User;
     assert_eq!(
-        plan.select_spill_groups(&PlanningProvider::default()),
+        plan.select_spill_groups(&PlanningProvider),
         Err(planning_error(PlanningError::GroupExceedsBudget))
     );
 }
@@ -425,28 +341,4 @@ fn grouping_preserves_contiguous_tool_results_and_exact_call_identity() {
         }
         .can_spill()
     );
-}
-
-#[test]
-fn native_estimation_failure_is_not_replaced_by_later_capacity_validation() {
-    let mut configuration = configuration();
-    configuration.maximum_input_tokens = 0;
-    let native = Error {
-        code: ErrorCode::Io,
-        response_body: "native estimation response body".into(),
-        detail: Some(ErrorDetail::Planning(PlanningError::NoOutputCapacity)),
-        ..Error::failed("exact native failure")
-    };
-    let error = CompactionPlan::select_for_target(
-        &input(&[1, 1]),
-        &[],
-        &configuration,
-        Some(100),
-        &PlanningProvider {
-            reject_estimates: false,
-            failure: Some(native.clone()),
-        },
-    )
-    .unwrap_err();
-    assert_eq!(error, native);
 }

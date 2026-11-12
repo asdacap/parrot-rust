@@ -140,15 +140,6 @@ impl States for Preparation {
         })
     }
 
-    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, Error>> {
-        Box::pin(async move {
-            if self.failure == Some("checkpoints") {
-                return Err(native_error("checkpoints"));
-            }
-            Ok(self.raw.checkpoint_sequences.clone())
-        })
-    }
-
     fn read_status_offering<'a>(
         &'a self,
         context: ContextSnapshot,
@@ -282,7 +273,6 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
             item(14, result.clone(), Some(11)),
             item(15, message("tail"), None),
         ],
-        checkpoint_sequences: vec![11, 13],
         messages: current.clone(),
     };
     let definitions = vec![parrot_core::ToolDefinition {
@@ -315,13 +305,10 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
     );
     assert_eq!(input.groups[0].end_watermark, 10);
     assert!(input.groups[0].is_complete);
-    assert!(!input.groups[0].has_checkpoint_before);
     assert_eq!(input.groups[1].messages, [assistant, result]);
     assert_eq!(input.groups[1].end_watermark, 14);
     assert!(input.groups[1].is_complete);
-    assert!(input.groups[1].has_checkpoint_before);
     assert_eq!(input.groups[2].messages, [message("intervening user")]);
-    assert!(!input.groups[2].has_checkpoint_before);
     assert_eq!(input.groups[3].messages, [message("tail")]);
     assert_eq!(input.messages, current);
     assert_eq!(input.instructions, "sampled instructions");
@@ -370,7 +357,6 @@ fn preparation_preserves_incomplete_roots_and_does_not_promote_orphaned_results(
                 None,
             ),
         ],
-        checkpoint_sequences: vec![2],
         ..Default::default()
     };
     let mut preparation = Preparation {
@@ -390,7 +376,6 @@ fn preparation_preserves_incomplete_roots_and_does_not_promote_orphaned_results(
     assert_eq!(input.groups.len(), 1);
     assert_eq!(input.groups[0].end_watermark, 2);
     assert!(!input.groups[0].is_complete);
-    assert!(input.groups[0].has_checkpoint_before);
 }
 
 #[test]
@@ -401,7 +386,6 @@ fn preparation_failures_publish_once_after_start_and_preserve_error_precedence()
         "instructions",
         "summary",
         "tail",
-        "checkpoints",
         "messages",
         "estimate",
         "status",

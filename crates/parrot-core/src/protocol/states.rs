@@ -158,10 +158,6 @@ pub trait States: Send + Sync {
     ) -> BoxFuture<'_, Result<Vec<ConversationHistoryItem>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_conversation_tail")) })
     }
-    /// Reads active checkpoint assistant sequences after the current summary watermark.
-    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_checkpoint_sequences")) })
-    }
     /// Persists the fitted compaction with the supplied sampled instructions and tools,
     /// awaiting terminal lifecycle effects on success or failure. Returns the instructions
     /// the epoch uses after the persisted compaction; the caller computes the reduction outcome.

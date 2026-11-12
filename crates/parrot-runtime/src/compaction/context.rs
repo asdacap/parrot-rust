@@ -413,15 +413,6 @@ impl ContextController {
         Ok(history)
     }
 
-    pub(crate) async fn read_checkpoint_sequences(&self) -> ContextResult<Vec<i64>> {
-        Ok(self
-            .history
-            .active_checkpoint_assistant_sequences()
-            .await?
-            .into_iter()
-            .collect())
-    }
-
     async fn apply_compaction(
         &mut self,
         input: &mut EpochInput<'_>,
@@ -786,16 +777,6 @@ impl parrot_core::States for EpochStates<'_> {
                 .lock()
                 .await
                 .read_conversation_tail(self.conversation, after)
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.controller
-                .lock()
-                .await
-                .read_checkpoint_sequences()
                 .await
                 .map_err(|error| self.capture_error(error))
         })

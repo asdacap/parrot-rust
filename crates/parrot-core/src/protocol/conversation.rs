@@ -6,7 +6,6 @@ pub struct ConversationState {
     pub summary: Option<ConversationSummary>,
     /// Contains the chronological durable tail after the captured summary watermark.
     pub history: Vec<ConversationHistoryItem>,
-    pub checkpoint_sequences: Vec<i64>,
     pub messages: Vec<Message>,
 }
 

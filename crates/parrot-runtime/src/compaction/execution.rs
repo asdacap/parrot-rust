@@ -162,9 +162,7 @@ impl Compactor {
             .capture_compaction_configuration(selected, target);
         let input_data = input.capture_input();
         let definitions: Vec<parrot_core::ToolDefinition> = input.tools.to_vec();
-        let estimates = CompactionEstimates::new(selected);
-        let provider = super::planning::PlanningProvider::new(&estimates.selected);
-        CompactionPlan::select(&input_data, &definitions, &configuration, &provider)
+        CompactionPlan::select(&input_data, &definitions, &configuration)
             .map_err(CompactionError::from)
     }
 

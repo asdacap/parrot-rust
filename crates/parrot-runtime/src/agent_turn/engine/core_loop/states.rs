@@ -683,17 +683,6 @@ where
                 .map_err(Into::into)
         })
     }
-    fn read_checkpoint_sequences(&self) -> BoxFuture<'_, Result<Vec<i64>, CoreError>> {
-        adapt_operation(async move {
-            self.state
-                .lock()
-                .await
-                .context
-                .read_checkpoint_sequences()
-                .await
-                .map_err(Into::into)
-        })
-    }
     fn finalize_compaction<'a>(
         &'a mut self,
         instructions: &'a str,
