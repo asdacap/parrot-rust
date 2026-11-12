@@ -758,6 +758,7 @@ pub struct RawActivityView {
     process_completions: BTreeMap<(String, String), process::CompletedShellProcess>,
     queues: BTreeMap<(String, String), queue::QueueState>,
     completed_processes: BTreeSet<(String, String)>,
+    yielded_processes: BTreeSet<(String, String)>,
     omitted_process_tools: BTreeSet<(String, String)>,
     terminal_process_tools: BTreeSet<(String, String)>,
     process_inventories: BTreeMap<String, InventoryState>,
@@ -784,6 +785,7 @@ impl RawActivityView {
             process_completions: BTreeMap::new(),
             queues: BTreeMap::new(),
             completed_processes: BTreeSet::new(),
+            yielded_processes: BTreeSet::new(),
             omitted_process_tools: BTreeSet::new(),
             terminal_process_tools: BTreeSet::new(),
             process_inventories: BTreeMap::new(),
@@ -1292,15 +1294,7 @@ impl RawActivityView {
             _ => return Ok(()),
         };
         let key = (owner.clone(), id.clone());
-        let mut start_omitted = false;
-        if let Some(pending) = self.pending_starts.remove(&key) {
-            if matches!(published.payload.as_ref(),Some(Payload::ToolFinished(tool))if tool.yielded_process.is_some())
-            {
-                self.commit_item(commits, pending.scrollback);
-            } else {
-                start_omitted = true;
-            }
-        }
+        let start_omitted = self.pending_starts.remove(&key).is_some();
         let resolver = self.resolver(owner);
         let (call, terminal) = self
             .state(owner)
@@ -1325,18 +1319,22 @@ impl RawActivityView {
         if let Some(yielded) = &terminal.yielded_process {
             let (command, description) = read_process_arguments(&call.arguments_json);
             let owner_name = self.state(owner).name().to_owned();
-            scrollback = if self.observe_deferred_process(
+            let process = (
+                owner.clone(),
+                process_key(&yielded.inventory_instance_id, &yielded.process_id),
+            );
+            let observed = self.observe_deferred_process(
                 yielded,
                 published,
                 &owner_name,
                 &command,
                 &description,
-            ) && !command.trim().is_empty()
-                && self.completed_processes.insert((
-                    owner.clone(),
-                    process_key(&yielded.inventory_instance_id, &yielded.process_id),
-                )) {
-                Some(self.wrap(
+            );
+            if observed
+                && !command.trim().is_empty()
+                && self.completed_processes.insert(process.clone())
+            {
+                scrollback = Some(self.wrap(
                     owner,
                     self.process_completion(
                         super::tools::exec_command::ExecCommandToolPresenter::summarize(
@@ -1347,10 +1345,12 @@ impl RawActivityView {
                         owner,
                         &yielded.process_id,
                     ),
-                ))
-            } else {
-                None
-            };
+                ));
+            } else if !self.processes.contains_key(&yielded.process_id)
+                || !self.yielded_processes.insert(process)
+            {
+                scrollback = None;
+            }
         }
         if let Some(scrollback) = scrollback {
             self.commit_item(commits, scrollback);

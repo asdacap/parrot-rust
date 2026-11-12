@@ -48,6 +48,16 @@ impl ExecCommandToolPresenter {
             ..self.metadata()
         }
     }
+    fn started_report(&self, args: &Arguments, label: String) -> Presentation {
+        let mut metadata = self.metadata_for(self.classifier.is_match(&args.command));
+        metadata.success_icon = "○".into();
+        Presentation::Tool(ToolReport::terminal(
+            label,
+            ToolBlock::empty(),
+            ToolTerminalStatus::Succeeded,
+            metadata,
+        ))
+    }
 }
 impl ToolPresenter for ExecCommandToolPresenter {
     fn tool_name(&self) -> &str {
@@ -90,35 +100,28 @@ impl ToolPresenter for ExecCommandToolPresenter {
         call: &ToolCallPresentation,
     ) -> PresenterResult<Option<Presentation>> {
         let args = Arguments::parse(&call.arguments_json)?;
-        Ok(
-            if is_named_long(
-                args.name.as_deref(),
-                args.description.as_deref(),
-                &args.command,
-            ) {
-                let mut metadata = self.metadata_for(self.classifier.is_match(&args.command));
-                metadata.success_icon = "○".into();
-                Some(Presentation::Tool(ToolReport::terminal(
-                    args.label_with_command(),
-                    ToolBlock::empty(),
-                    ToolTerminalStatus::Succeeded,
-                    metadata,
-                )))
-            } else {
-                None
-            },
+        Ok(is_named_long(
+            args.name.as_deref(),
+            args.description.as_deref(),
+            &args.command,
         )
+        .then(|| self.started_report(&args, args.label_with_command())))
     }
     fn present_terminal(
         &self,
         call: &ToolCallPresentation,
         terminal: &ToolTerminalPresentation,
     ) -> PresenterResult<Option<Presentation>> {
-        if terminal.yielded_process.is_some() {
-            return Ok(None);
-        }
         let args = Arguments::parse(&call.arguments_json)?;
         let read_only = self.classifier.is_match(&args.command);
+        if terminal.yielded_process.is_some() {
+            let label = if terminal.start_omitted {
+                args.yielded_label_with_command()
+            } else {
+                args.yielded_label()
+            };
+            return Ok(Some(self.started_report(&args, label)));
+        }
         let label = if terminal.start_omitted {
             args.label_with_command()
         } else {
@@ -180,7 +183,16 @@ impl Arguments {
         )
     }
     fn label_with_command(&self) -> String {
-        format!("{}\n{}", self.label(), self.command)
+        self.with_command(self.label())
+    }
+    fn yielded_label(&self) -> String {
+        format!("{} (yielded)", self.label())
+    }
+    fn yielded_label_with_command(&self) -> String {
+        self.with_command(self.yielded_label())
+    }
+    fn with_command(&self, label: String) -> String {
+        format!("{label}\n{}", self.command)
     }
 }
 fn is_named_long(name: Option<&str>, description: Option<&str>, command: &str) -> bool {
