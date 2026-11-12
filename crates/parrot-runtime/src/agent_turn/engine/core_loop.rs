@@ -76,6 +76,20 @@ impl From<TurnError> for CoreError {
     }
 }
 
+impl State {
+    fn read_last_turn(&self) -> Option<parrot_core::ConversationTurn> {
+        self.conversation
+            .read_last_turn_messages()
+            .map(|messages| parrot_core::ConversationTurn {
+                messages: messages
+                    .iter()
+                    .map(provider_message)
+                    .map(Into::into)
+                    .collect(),
+            })
+    }
+}
+
 struct CoreLoopLifecycle<'a, S: AccessSnapshot + 'static> {
     backend: &'a RuntimeBackend<S>,
     cancellation: &'a dyn Cancellation,
@@ -90,13 +104,12 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
 
     fn has_ready_turn(&mut self) -> BoxFuture<'_, Result<bool, CoreError>> {
         Box::pin(async move {
-            let binding = TurnBinding::new();
-            let states = RuntimeStates::bind(self.backend, &binding, self.cancellation, self.work);
-            let turn = states.get_last_turn().await?;
+            let turn = self.backend.state.lock().await.read_last_turn();
             Ok(turn
                 .as_ref()
                 .is_some_and(parrot_core::ConversationTurn::needs_response)
-                || states
+                || self
+                    .backend
                     .history
                     .has_pending_inputs()
                     .await
