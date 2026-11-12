@@ -980,12 +980,19 @@ impl Fixture {
         self.open_with_selector("local/model").await
     }
     async fn open_with_selector(&self, selector: &str) -> protocol::Result<Arc<dyn HostedSession>> {
+        self.open_session(selector, true).await
+    }
+    async fn open_session(
+        &self,
+        selector: &str,
+        interactive: bool,
+    ) -> protocol::Result<Arc<dyn HostedSession>> {
         let opened = self
             .store
             .create_fresh(
                 SessionModelRouter::resolve(&Policies, selector).unwrap(),
                 "build",
-                true,
+                interactive,
             )
             .await
             .map_err(|error| RpcError::new(RpcCode::Internal, error.to_string()))?;
@@ -1988,6 +1995,50 @@ async fn actual_drain_and_external_observer_share_live_routing_and_same_prepared
     assert!(Arc::ptr_eq(&prepared, &same_source));
     assert!(Arc::ptr_eq(&prepared, root.session().selection()));
     bounded(hosted.close()).await.unwrap();
+}
+
+async fn advertised_tool_names(interactive: bool) -> Vec<String> {
+    let fixture = Fixture::new(false, false).await;
+    let hosted = bounded(fixture.open_session("local/model", interactive))
+        .await
+        .unwrap();
+    let root = fixture.root();
+    let session = root.get_service::<RuntimeSession<Security>>().unwrap();
+    bounded(session.send_and_wait(
+        vec![ConversationPart::text("advertise the tool catalog")],
+        "advertised-tools".into(),
+        None,
+        None,
+        Arc::new(NeverCancelled),
+    ))
+    .await
+    .unwrap();
+    bounded(hosted.close()).await.unwrap();
+    fixture
+        .requests
+        .lock()
+        .unwrap()
+        .first()
+        .expect("the turn reached the provider")
+        .tools
+        .iter()
+        .map(|tool| tool.name.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn non_interactive_sessions_omit_tools_that_wait_for_the_user() {
+    let names = advertised_tool_names(false).await;
+    assert!(!names.iter().any(|name| name == "question"));
+    assert!(!names.iter().any(|name| name == "request_write_permission"));
+    assert!(names.iter().any(|name| name == "ask"));
+}
+
+#[tokio::test]
+async fn interactive_sessions_offer_tools_that_wait_for_the_user() {
+    let names = advertised_tool_names(true).await;
+    assert!(names.iter().any(|name| name == "question"));
+    assert!(names.iter().any(|name| name == "request_write_permission"));
 }
 
 #[tokio::test]

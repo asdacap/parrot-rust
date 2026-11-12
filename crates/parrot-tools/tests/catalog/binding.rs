@@ -134,6 +134,7 @@ impl Fixture {
                 questions: shared.clone(),
                 communication: shared.clone(),
                 agent_depth: depth,
+                interactive: true,
                 templates: templates.clone(),
                 allow_parent,
             },
@@ -156,6 +157,7 @@ impl Fixture {
                 filesystem: shared.clone(),
                 templates: templates.clone(),
                 agent_depth: depth,
+                interactive: true,
             },
             &definitions,
         )
