@@ -2,9 +2,9 @@
 
 A session keeps its root identity, mode, preferences, and permanent agent lineage
 in `meta.json`. SQLite database format 10 stores conversation history, including
-tool calls and results, context reminders, named checkpoints, compaction summaries,
-and image metadata. It has 5 application tables. Earlier database formats are not
-automatically converted.
+tool calls and results, context reminders, named checkpoints, compaction
+summaries, and image metadata. The database has 5 application tables. Earlier
+database formats are not automatically converted.
 
 Named checkpoints require a `set_checkpoint` call with valid title arguments and
 a completed successful result. Forking and compaction use the latest completed
@@ -75,16 +75,16 @@ root execution event or usage. Missing non-root ancestors remain errors.
 
 ## Append-only status assemblies
 
-Each status steering appends one conversation system row that carries a JSON
-record of the slot hashes the assembly stands for. Assemblies never rewrite or
-drop older rows, so the provider-visible trail keeps every superseded version.
+Each status steering appends one conversation system row. The row carries a JSON
+record of the slot hashes that the assembly stands for. Assemblies never rewrite
+or drop older rows, so the provider-visible trail keeps every superseded version.
 An agent restart compares each offered slot hash against the newest record and
 appends only genuine changes, without any in-memory pending flags.
 
 Fork copies carry the assembly records they inherit, so a forked session's
 standing trail matches its visible history. A committed record survives
 reopening and compaction without a duplicate assembly for unchanged hashes.
-The durable mode revision in `meta.json` remains metadata only; it does not
+The durable mode revision in `meta.json` remains metadata only. It does not
 gate status writes. Refreshing the derived `history.jsonl` happens after commit
 and does not determine whether the append succeeded.
 

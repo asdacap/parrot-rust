@@ -17,12 +17,12 @@ method is already obvious.
   - For example, if something is agent session specific, create an instance per agent session and store in the same
   scope as the agent session.
 - No .NET-style events.
-- No subclass unless necessary; prefer composition in Rust.
+- No subclass unless necessary. Prefer composition in Rust.
 - No subtrait unless necessary.
 - NEVER turn off lint rules repo wide or crate wide. Exception is test crates can have lint rules disabled AFTER user
   explicit permission.
 - Suffix the type name properly. If a type is an event, suffix it with Event.
-- Do not make a method/function just to construct an object, unless that method is on that type. Dont do create_event(something). Do Event::create(something).
+- Do not make a method or function just to construct an object, unless that method is on that type. Dont do create_event(something). Do Event::create(something).
 - Type names are nouns and declarative. Method names are imperative. Its an action (unless its the type constructor). So
   method names MUST have action please, come on man...
 - Reduce coupling, as in the public method count.
@@ -88,8 +88,8 @@ nix develop
 ```
 
 `nix run . -- <args>` works without the dev shell. The package recipes are in
-`nix/packages/default.nix`; Rust dependencies are locked in `Cargo.lock`, and
-frontend dependencies in `web/package-lock.json`. See the
+`nix/packages/default.nix`. Rust dependencies are locked in `Cargo.lock`, and
+frontend dependencies are locked in `web/package-lock.json`. See the
 [installation guide](docs/operator/installation.md) for package builds and
 platform requirements.
 
@@ -129,7 +129,7 @@ observed resource limit or tests that require serial execution, and report why.
 
 The [CI workflow](.github/workflows/check.yml) also defines frontend, contract,
 native-platform and package-smoke gates. The workspace denies Rust warnings and
-Clippy's `all` lint group; this is native Rust, not a .NET Native AOT build.
+Clippy's `all` lint group. This is native Rust, not a .NET Native AOT build.
 
 ## The rules that get broken most often
 
@@ -155,13 +155,13 @@ Clippy's `all` lint group; this is native Rust, not a .NET Native AOT build.
 
 A commit message for a migrated component names the upstream .NET components or
 source paths it absorbed. Check `git status` for unexpected changes before
-committing; if there are any, do not commit.
+committing. If there are any, do not commit.
 
-When the user says “commit”, also clean generated build, test, and dependency
+When the user says "commit", also clean generated build, test, and dependency
 artifacts from this worktree before committing. Preserve user files and unrelated
-changes; do not use broad cleanup commands.
+changes. Do not use broad cleanup commands.
 
 ## Nomenclature
 
 - A user-conversation-turn is from first message to final message.
-- A step is the provider request -> response.
+- A step is one provider request and its response.

@@ -2,7 +2,7 @@
 
 Ported from the [Parrot .NET README](https://github.com/asdacap/parrotdotnet/blob/28e206c43829aa366e31bdeb0dd52711e3108d88/README.md)
 at commit `28e206c43829aa366e31bdeb0dd52711e3108d88`. The principles and hypotheses
-below apply to the Rust port; they do not assert implementation parity. The
+below apply to the Rust port. They do not assert implementation parity. The
 model-alias link points to this repository's predefined configuration.
 
 ## Agent scope and context: design principles
@@ -10,7 +10,7 @@ model-alias link points to this repository's predefined configuration.
 Agents have limited context and cognitive capacity. Each agent should have a
 bounded concern and a limited view of collaborators and resources, rather than
 being presented with the whole system. These principles guide delegation and
-tool-interface design; they are not a claim that every tool already enforces
+tool-interface design. They are not a claim that every tool already enforces
 them.
 
 - **Keep resource discovery local.** An agent should only be presented with
@@ -24,18 +24,18 @@ them.
   still has limited cognitive capacity. Children should limit upward
   communication to useful results, blockers, and decisions requiring the parent,
   rather than streaming routine progress or raw working context. Avoid
-  unnecessary messages to the parent; each one consumes attention. A final
+  unnecessary messages to the parent. Each one consumes attention. A final
   report should be self-contained and detailed enough that the parent does not
   need to ask the child for clarification, which would add another communication
   round. Include relevant outcomes, decisions and their rationale, validation,
   limitations, and outstanding issues. A long final answer is appropriate when
-  needed; preferably compile a detailed report into a Markdown file and return
+  needed. Prefer to compile a detailed report into a Markdown file and return
   its address with a concise summary. Conserve attention by making the handoff
   complete, not by omitting information the parent needs.
 - **Delegate narrower scope.** A child should have a narrower scope than its
   parent and receive a more specific task or requirement. Scope includes not only
   task size, but also level of abstraction, decision responsibility, and
-  ambiguity. Greater ambiguity means broader scope; greater specificity means
+  ambiguity. Greater ambiguity means broader scope. Greater specificity means
   narrower scope. Ambiguity and task size are independent dimensions, and both
   count: making a task smaller does not by itself make it a suitably scoped
   delegation if it leaves the parent's broad, unresolved decisions to the child.
@@ -65,16 +65,16 @@ might score better by adding more checks, while a higher-tier model knows that
 those checks are not needed in practice. The latter can look less thorough even
 when it has made the better decision about what the work actually needs.
 
-In that sense, stronger models seem to have more robust intuitive, or system-1,
-thinking. Their work can look more ordinary or average, but these models are
-supposed to work with humans. Knowing when a conventional answer is enough,
-when to leave something alone, and which concerns deserve attention is part of
-being a good collaborator. We want that judgment, not extra work merely because
-it is easier to count.
+Stronger models seem to have more robust intuitive, or system-1, thinking.
+Their work can look more ordinary or average, but these models are supposed to
+work with humans. Knowing when a conventional answer is enough, when to leave
+something alone, and which concerns deserve attention is part of being a good
+collaborator. We want that judgment, not extra work merely because it is easier
+to count.
 
-This is also why delegating to a smaller model requires a more specific task.
+Delegating to a smaller model therefore requires a more specific task.
 Smaller models can focus deeply on something while losing sight of the wider
-picture. The answer is not necessarily to give them less work; it is to leave
+picture. The answer is not necessarily to give them less work. It is to leave
 them fewer unresolved decisions. A task has both quantity and ambiguity, but
 within a model's depth capability, ambiguity and judgment are what matter when
 choosing a lower tier, rather than quantity. A large amount of well-defined work
@@ -86,17 +86,15 @@ decisions have already been made, but reaching the same depth can take more
 work. Our hypothesis is that a stronger model's better intuition often lets it
 reach similar depth with far fewer tokens. A smaller model may need to think
 through the problem, write out a report, and check several possibilities before
-deciding on a solution. A bigger model is more like an experienced expert: it
-recognizes a familiar situation, catches the relevant details naturally, and
-knows what to do without having to reason through every step explicitly. It is
-like the way an expert seems to already know the answer from having seen the
-pattern before.
+deciding on a solution. A bigger model can recognize a familiar situation, catch
+the relevant details naturally, and know what to do without having to reason
+through every step explicitly.
 
 That token advantage does not mean the stronger model actually costs less.
 Luna is a useful example: its token price is so low that doing more thinking
 can still be much cheaper in money. In that case, the penalty is largely latency.
-We should not confuse fewer tokens with lower monetary cost, or assume that the
-possibility of a stronger model being cheaper makes it the cheaper choice.
+Fewer tokens do not mean lower monetary cost. Do not assume that a stronger
+model capable of being cheaper is therefore the cheaper choice.
 
 There is also a limit to how deep a smaller model can go, regardless of how long
 it thinks. More time does not indefinitely compensate for capability. Narrowing
@@ -109,7 +107,7 @@ may also be needed to step back, consider other perspectives, and judge whether
 the local work is the right thing to do at all.
 
 That is the reasoning behind the intended alias roles. `low_llm` handles explicit
-execution and bounded evidence gathering; `medium_llm` takes on settled component
+execution and bounded evidence gathering. `medium_llm` takes on settled component
 work that needs local judgment. `high_llm` is for work where ambiguity and wider
 perspective matter, while `xhigh_llm` is for strategic or architectural decisions
 whose consequences are broad and whose mistakes may be hard to detect. These

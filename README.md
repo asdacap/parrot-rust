@@ -1,17 +1,18 @@
-# Parrot — experimental native Rust port
+# Experimental native Rust port of Parrot
 
 Native port of Parrot, with behavior updates against .NET reference commit
-`4eb01b9acd83cfab7ce8b18491bb311180fff987`. The executable remains `parrot`;
-the retained browser frontend, protocols, prompts, skills and Linux C PTY helper
+`4eb01b9acd83cfab7ce8b18491bb311180fff987`. The executable remains `parrot`.
+The retained browser frontend, protocols, prompts, skills, and Linux C PTY helper
 are part of the project. The .NET application is a development reference, not a
 native runtime dependency.
 
 **Not a production-ready or release-accepted replacement.** Local session
-creation/resume, `serve` and `web` now use the native production service and
-security/capability bundle. These paths, existing-owner attachment and explicit
-remote `chat --connect` remain experimental; this is not a claim of complete
-.NET behavior parity. Do not substitute an unrestricted or test/denying backend.
-Templates use MiniJinja; existing Scriban templates require manual conversion.
+creation and resume, `serve`, and `web` now use the native production service and
+the security and capability bundle. These paths, existing-owner attachment, and
+explicit remote `chat --connect` remain experimental. This is not a claim of
+complete .NET behavior parity. Do not substitute an unrestricted or test/denying
+backend. Templates use MiniJinja. Existing Scriban templates require manual
+conversion.
 
 **Back up before opening existing state.** Incompatible databases are refused,
 not migrated or reset. Use `parrot chat --new-session` to start fresh without
@@ -104,7 +105,7 @@ multimodal content are preserved across request and history conversion.
 ## Compiler cache
 
 `nix develop` provides `sccache` and sets `RUSTC_WRAPPER` to use it. The compiler
-cache uses sccache's per-user default cache directory, shared across worktrees;
+cache uses sccache's per-user default cache directory, shared across worktrees.
 Cargo build artifacts remain worktree-local in `.tmp/cargo-target` unless
 `CARGO_TARGET_DIR` is set. Cargo's dependency cache also uses its normal per-user
 location unless `CARGO_HOME` is set externally.
@@ -112,7 +113,7 @@ location unless `CARGO_HOME` is set externally.
 Rust incremental compilations are not cacheable by sccache. To favor compiler
 cache reuse across clean targets or worktrees, run `CARGO_INCREMENTAL=0 cargo build`
 (or set that variable for the desired session). This does not make every Rust
-compilation cacheable; for example, linking binaries is not cached. Use
+compilation cacheable. For example, linking binaries is not cached. Use
 `sccache --show-stats` to inspect cache hits and non-cacheable compilations.
 
 Development and test builds keep file and line information for backtraces, but
@@ -143,11 +144,12 @@ nix flake check
 ```
 
 Keep the target directory and feature selection consistent between runs. Atomic
-compaction-artifact fixtures use `std::env::temp_dir()`; ensure `TMPDIR` is on a
-local filesystem supporting atomic rename exchange, not an NFS mount. Keep that
-path short: native host fixtures append session and listener names that must fit
-within the platform's Unix socket path limit. Production artifact quarantine also
-requires atomic rename exchange; this test setup does not establish NFS support.
+compaction-artifact fixtures use `std::env::temp_dir()`. Ensure that `TMPDIR` is
+on a local filesystem supporting atomic rename exchange, not an NFS mount. Keep
+that path short. Native host fixtures append session and listener names that must
+fit within the platform's Unix socket path limit. Production artifact quarantine
+also requires atomic rename exchange. This test setup does not establish NFS
+support.
 Additional native-platform and package-smoke gates are listed in
 [.github/workflows/check.yml](.github/workflows/check.yml).
 
@@ -176,7 +178,7 @@ are unaffected.
 
 The selection belongs to the user session and is shared by its root agent and
 subagents. Changes apply to subsequent requests, including requests from already
-running subagents; they do not change a request already in flight. Resuming a
+running subagents. They do not change a request already in flight. Resuming a
 session restores its own saved selection rather than replacing it with the
 current default.
 
@@ -189,8 +191,8 @@ turn ending alone does not mark a pending steer as consumed.
 
 ### HTTPS certificates for `serve`
 
-HTTPS serving uses the Rust-native Tonic/Rustls TLS stack with explicitly supplied
-PEM files:
+HTTPS serving uses a Rust-native TLS stack from Tonic and Rustls, with
+explicitly supplied PEM files:
 
 ```sh
 parrot serve --listen https://127.0.0.1:7443 \
@@ -200,17 +202,17 @@ parrot serve --listen https://127.0.0.1:7443 \
 ```
 
 Both TLS flags are required for HTTPS and rejected for HTTP or Unix-domain-socket
-serving. The certificate file contains the PEM certificate chain, leaf first;
-the key file contains its matching **unencrypted PEM private key**. Relative paths
-resolve against the process working directory. Invalid certificates or keys fail
-startup before the listening announcement. Keep the private key readable only by
-the server owner.
+serving. The certificate file contains the PEM certificate chain, with the leaf
+first. The key file contains its matching **unencrypted PEM private key**. Relative
+paths resolve against the process working directory. Invalid certificates or keys
+fail startup before the listening announcement. Keep the private key readable only
+by the server owner.
 
-There is no certificate discovery, generation, certificate-store lookup, PFX/PKCS12
-or encrypted-key support. TLS provisioning does not read environment variables or
-`appsettings*.json`. Files are loaded at startup, not through hot reload. HTTPS
-still requires the owner-only bearer token file; client certificate and hostname
-verification are never disabled.
+There is no certificate discovery, generation, certificate-store lookup, PFX,
+PKCS12, or encrypted-key support. TLS provisioning does not read environment
+variables or `appsettings*.json`. Files are loaded at startup, not through hot
+reload. HTTPS still requires the owner-only bearer token file. Client certificate
+and hostname verification are never disabled.
 
 ## Acknowledgments
 

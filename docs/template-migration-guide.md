@@ -1,8 +1,9 @@
-# Migrating prompt templates to MiniJinja
+# Migrate prompt templates to MiniJinja
 
-Scriban prompt templates are no longer supported. A configured `engine: scriban`
-is rejected with the template's configuration path. Configuration loading does
-not rewrite the user's file: migrate each affected template manually.
+Scriban prompt templates are no longer supported. Parrot rejects a configured
+`engine: scriban` and reports that template's configuration path. Configuration
+loading does not rewrite the user's file. Migrate each affected template
+manually.
 
 ## Update the engine and syntax together
 
@@ -21,9 +22,9 @@ prompt_templates:
 ```
 
 MiniJinja uses `{{ expression }}` for values and `{% ... %}` for control flow.
-A Scriban `{{ for item in items }}` / `{{ end }}` loop becomes
-`{% for item in items %}` / `{% endfor %}`. Conditions use
-`{% if condition %}` / `{% else %}` / `{% endif %}`. Review filters, functions,
+A Scriban `{{ for item in items }}` loop with `{{ end }}` becomes
+`{% for item in items %}` with `{% endfor %}`. Conditions use
+`{% if condition %}`, `{% else %}`, or `{% endif %}`. Review filters, functions,
 whitespace, and rendered output rather than assuming the engines are compatible.
 
 Keep argument declarations consistent with the caller: `required_arguments`
