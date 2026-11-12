@@ -23,12 +23,8 @@ use parrot_domain::{
     },
     protocol::messages::parrot::{Delivery, Event, InputSource},
     values::{
-        activity::AgentSessionActivity,
-        agent_state::TaskForkModeSnapshot,
-        config::ModelProfiles,
-        context::{ContextSize, ContextSnapshot},
-        identifiers::Identifier,
-        progress::ProgressUpdate,
+        activity::AgentSessionActivity, agent_state::TaskForkModeSnapshot, config::ModelProfiles,
+        context::ContextSnapshot, identifiers::Identifier, progress::ProgressUpdate,
     },
 };
 use parrot_foundation::{
@@ -75,8 +71,8 @@ use parrot_runtime::{
         ScopeParts, ServiceRegistration, SessionAdapter, SnapshotPublisher,
     },
     compaction::{
-        CompactionPlanner, CompactionSettings, Compactor, ContextController, ContextError,
-        ContextResult, ContextStatus, StatusOffering,
+        CompactionSettings, Compactor, ContextController, ContextError, ContextResult,
+        ContextStatus, StatusOffering,
     },
     interactions::{AgentAskIdentity, AgentAsks},
     plan_mode::{ModeResult, UserSessionModes},
@@ -114,9 +110,7 @@ use parrot_tools::{
             CommandRequest, ProcessResolver, ProcessToolServices, ProcessWorkspace, ResolvedProcess,
         },
     },
-    session::{
-        Compaction, Failure, FailureKind, ImageProvider, PermissionServices, SessionServices,
-    },
+    session::{Failure, FailureKind, ImageProvider, PermissionServices, SessionServices},
     task_artifacts::TaskArtifactParserAdapter,
     web_fetch::WebFetcher,
 };
@@ -956,30 +950,6 @@ impl<S: RestrictableAccessSnapshot + 'static> SessionServices for ScopedSessionS
                 })
         })
     }
-    fn compact<'a>(
-        &'a self,
-        _: &'a ContextSelection<S>,
-        _: Option<ContextSize>,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<Compaction, Failure>> {
-        // The public retained service is ContextServices, which supplies the
-        // invocation's borrowed route. Re-entering here would self-queue.
-        Box::pin(async {
-            Err(operation_failure(
-                "compaction must use its retained ContextServices route",
-            ))
-        })
-    }
-    fn estimate_after_tool_result(
-        &self,
-        _: &ContextSelection<S>,
-        _: &str,
-        _: &str,
-    ) -> Result<ContextSnapshot, Failure> {
-        Err(failure(
-            "tool-result estimation must use its retained ContextServices route",
-        ))
-    }
 }
 /// The scheduler and retained tools belong to the session. Their forwarding
 /// edge back to that same session must therefore be weak, not a second owner.
@@ -1460,10 +1430,6 @@ where
                     summary_instructions: String::new(),
                     summary_prefix: String::new(),
                 };
-                let planner = Arc::new(CompactionPlanner::new(
-                    settings.clone(),
-                    self.config.profiles.clone(),
-                ));
                 let compactor = Compactor::new(
                     settings,
                     self.config.profiles.clone(),
@@ -1642,7 +1608,6 @@ where
                 let catalog_tasks = tasks.clone();
                 let catalog_context = context_services.clone();
                 let catalog_environment = environment.clone();
-                let catalog_planner = planner.clone();
                 let binding = Arc::new(ScopeBindings {
                     link: link.clone(),
                     agents: agents.clone(),
@@ -1707,11 +1672,9 @@ where
                         let web = WebFetchFactory::new(config.web_fetcher.clone(), &definitions)
                             .map_err(child)?;
                         catalog_cells.bind(
-                            CatalogAdapter::new(
-                                catalog::Catalog::new(process, agents, files, services, tasks, web),
-                                catalog_planner.clone(),
-                                user.templates.clone(),
-                            )
+                            CatalogAdapter::new(catalog::Catalog::new(
+                                process, agents, files, services, tasks, web,
+                            ))
                             .map_err(child)?,
                         )
                     }),

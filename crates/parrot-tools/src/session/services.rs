@@ -3,10 +3,7 @@ use parrot_domain::{
         async_ops::{BoxFuture, Cancellation, OperationResult},
         security::AccessSnapshot,
     },
-    values::{
-        context::{ContextSize, ContextSnapshot},
-        progress::ProgressUpdate,
-    },
+    values::progress::ProgressUpdate,
 };
 use std::fmt;
 
@@ -47,15 +44,7 @@ impl fmt::Display for Failure {
 }
 impl std::error::Error for Failure {}
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Compaction {
-    pub reduced: bool,
-    pub context: ContextSnapshot,
-}
-
-/// One retained agent's source operations. The production adapter must own and
-/// join admitted mutations and route inline compaction through the current
-/// invocation, not queue it behind the drain that is awaiting this tool.
+/// One retained agent's source operations. The production adapter owns and joins admitted mutations.
 pub trait SessionServices: Send + Sync {
     type Security: AccessSnapshot + 'static;
     type Selection: Send + Sync + 'static;
@@ -94,18 +83,4 @@ pub trait SessionServices: Send + Sync {
         selection: &'a Self::Selection,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, OperationResult<String, Failure>>;
-
-    fn compact<'a>(
-        &'a self,
-        selection: &'a Self::Selection,
-        target: Option<ContextSize>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<Compaction, Failure>>;
-
-    fn estimate_after_tool_result(
-        &self,
-        selection: &Self::Selection,
-        call_id: &str,
-        rendered_result: &str,
-    ) -> Result<ContextSnapshot, Failure>;
 }

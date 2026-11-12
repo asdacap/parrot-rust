@@ -8,6 +8,7 @@ use std::fmt;
 mod fitting;
 mod planning;
 mod preparation;
+mod request;
 mod scratch;
 pub use fitting::{compact_conversation, fit_compaction, fit_status};
 pub use planning::{CompactionPolicy, group_messages, is_complete};

@@ -40,7 +40,6 @@ mod fixture_support {
         values::{
             activity::{AgentSessionActivitySnapshot, DrainState},
             agent_tasks::{Task, TaskSetResponse, TaskView},
-            context::{ContextSize, ContextSnapshot},
         },
     };
     use parrot_provider::image_generation::{ImageGenerationRequest, ImageGenerationResult};
@@ -69,8 +68,8 @@ mod fixture_support {
             },
         },
         session::{
-            Compaction, Failure, ImageProvider, PermissionReply, PermissionServices,
-            SessionServices, WriteTarget, WriteTargetKind,
+            Failure, ImageProvider, PermissionReply, PermissionServices, SessionServices,
+            WriteTarget, WriteTargetKind,
         },
         tasks_queues::{
             ToolFailure,
@@ -490,9 +489,6 @@ mod fixture_support {
         }
     }
 
-    pub fn context_snapshot() -> ContextSnapshot {
-        ContextSnapshot::new(100, 1000, Some(10), 80)
-    }
     impl SessionServices for Services {
         type Security = Snapshot;
         type Selection = Selection;
@@ -587,40 +583,6 @@ mod fixture_support {
                 );
                 Ok("catalog statistics".into())
             })
-        }
-        fn compact<'a>(
-            &'a self,
-            selection: &'a Selection,
-            target: Option<ContextSize>,
-            cancellation: &'a dyn Cancellation,
-        ) -> BoxFuture<'a, OperationResult<Compaction, Failure>> {
-            Box::pin(async move {
-                cancelled(cancellation)?;
-                self.record(
-                    "compact",
-                    format!("{target:?}"),
-                    None,
-                    Some(selection.turn.profile.maximum_requests),
-                );
-                Ok(Compaction {
-                    reduced: true,
-                    context: context_snapshot(),
-                })
-            })
-        }
-        fn estimate_after_tool_result(
-            &self,
-            selection: &Selection,
-            call_id: &str,
-            rendered_result: &str,
-        ) -> Result<ContextSnapshot, Failure> {
-            self.record(
-                "estimate",
-                format!("{call_id} {rendered_result}"),
-                None,
-                Some(selection.turn.profile.maximum_requests),
-            );
-            Ok(context_snapshot())
         }
     }
     impl ImageProvider for Services {
@@ -1155,7 +1117,7 @@ use fixture_binding::Fixture;
 use fixture_support::{NoCancel, Security};
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation},
-    values::{config::ModelProfiles, tools::ToolCycleImageBudget},
+    values::tools::ToolCycleImageBudget,
 };
 use parrot_provider::{
     catalogs::Model,
@@ -1165,10 +1127,7 @@ use parrot_provider::{
     },
     sessions::{self, Provider},
 };
-use parrot_runtime::{
-    agent_turn::services::TurnProfile, compaction::CompactionSettings,
-    tool_settlement::ToolSnapshot,
-};
+use parrot_runtime::{agent_turn::services::TurnProfile, tool_settlement::ToolSnapshot};
 use std::collections::BTreeMap;
 
 struct PlanningProvider;
@@ -1216,19 +1175,6 @@ fn selected(id: i32) -> TurnSelection<Security> {
         security: Arc::new(Security { id: 71 }),
     }
 }
-fn planner() -> Arc<CompactionPlanner> {
-    Arc::new(CompactionPlanner::new(
-        CompactionSettings {
-            trigger_percent: 80,
-            target_percent: 50,
-            maximum_input_tokens: 0,
-            summary_output_tokens: 100,
-            summary_instructions: "summary".into(),
-            summary_prefix: "summary:".into(),
-        },
-        ModelProfiles::new(&BTreeMap::new()),
-    ))
-}
 
 #[tokio::test]
 async fn all_real_catalog_handles_order_schemas_support_and_aliases_survive_materialization() {
@@ -1240,7 +1186,6 @@ async fn all_real_catalog_handles_order_schemas_support_and_aliases_survive_mate
     let Fixture {
         catalog,
         configuration,
-        templates,
         services,
         artifacts,
         owner,
@@ -1251,7 +1196,7 @@ async fn all_real_catalog_handles_order_schemas_support_and_aliases_survive_mate
         .iter()
         .map(|factory| factory.create())
         .collect::<Vec<_>>();
-    let adapter = CatalogAdapter::new(catalog, planner(), templates).unwrap();
+    let adapter = CatalogAdapter::new(catalog).unwrap();
     let first = adapter.materialize().unwrap();
     let second = adapter.materialize().unwrap();
     assert_eq!(
@@ -1360,7 +1305,7 @@ async fn real_retained_read_receives_captured_security_and_budget_identity() {
         owner,
         ..
     } = fixture;
-    let adapter = CatalogAdapter::new(catalog, planner(), templates.clone()).unwrap();
+    let adapter = CatalogAdapter::new(catalog).unwrap();
     let snapshot = ToolSnapshot::document(adapter.materialize().unwrap()).unwrap();
     let selection = selected(89);
     let call = ToolInvocation::new(
@@ -1429,7 +1374,7 @@ async fn retained_session_uses_immutable_turn_selection_and_boundary_sequence() 
         owner,
         ..
     } = fixture;
-    let adapter = CatalogAdapter::new(catalog, planner(), templates.clone()).unwrap();
+    let adapter = CatalogAdapter::new(catalog).unwrap();
     let snapshot = ToolSnapshot::document(adapter.materialize().unwrap()).unwrap();
     let selection = selected(89);
     let invoke = |name: &str, arguments: &str| {
@@ -1614,7 +1559,7 @@ async fn retained_operation_cancellation_is_not_rendered_as_success() {
         owner,
         ..
     } = Fixture::new("", true, 0);
-    let adapter = CatalogAdapter::new(catalog, planner(), templates.clone()).unwrap();
+    let adapter = CatalogAdapter::new(catalog).unwrap();
     let snapshot = ToolSnapshot::document(adapter.materialize().unwrap()).unwrap();
     let ToolHandle::Ordinary(read) = snapshot.find("read").unwrap() else {
         panic!("read must be ordinary")

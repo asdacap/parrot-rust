@@ -599,12 +599,7 @@ where
             let state = &mut *guard;
             state
                 .context
-                .record_epoch_compaction(
-                    &mut state.conversation,
-                    &mut state.agent_state,
-                    &self.events,
-                    Ok(compacted),
-                )
+                .record_epoch_compaction(&mut state.conversation, &self.events, Ok(compacted))
                 .await
                 .map_err(TurnError::from)
                 .map_err(CoreError::from)

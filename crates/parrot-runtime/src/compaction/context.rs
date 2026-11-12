@@ -244,93 +244,48 @@ impl ContextController {
         let estimates = CompactionEstimates::new(input.selection);
         let errors = NativeErrors::new();
         let templates = self.templates.clone();
-        let (prepared, result) = {
-            let controller = tokio::sync::Mutex::new(&mut *self);
-            let publisher = EpochEventPublisher {
-                controller: &controller,
-                prompt: input.prompt,
-                events: input.events,
-                cancellation,
-                errors: &errors,
-            };
-            let mut states = EpochStates {
-                controller: &controller,
-                conversation: input.conversation,
-                agent_state: input.agent_state,
-                prompt: input.prompt,
-                selection: input.selection,
-                status: input.status,
-                events: input.events,
-                configuration: configuration.clone(),
-                templates,
-                cancellation,
-                errors: &errors,
-            };
-            let provider = CompactionProvider::new(
-                &estimates,
-                input.sessions,
-                ContextObserver(input.events),
-                &errors,
-            );
-            let preparation_provider = EpochProvider {
-                estimates: &estimates,
-                errors: &errors,
-                sessions: input.sessions,
-                events: input.events,
-            };
-            let prepared = parrot_core::compaction::prepare_compaction(
-                &mut states,
-                &preparation_provider,
-                &publisher,
-                input.tools,
-                &configuration,
-            )
-            .await
-            .map_err(|error| errors.restore(error, ContextError::from))?;
-            let result = parrot_core::compaction::compact_conversation(
-                &prepared,
-                input.tools,
-                &configuration,
-                &mut states,
-                &provider,
-                &publisher,
-                parrot_core::CancellationToken::new(cancellation),
-            )
-            .await;
-            let result = match result {
-                Ok(Some(fitted)) => parrot_core::EventPublisher::report_compaction_saving(
-                    &publisher,
-                    parrot_core::CancellationToken::new(cancellation),
-                )
-                .await
-                .map(|()| Some(fitted)),
-                result => result,
-            }
-            .map_err(|error| errors.restore(error, ContextError::from));
-            (prepared, result)
+        let controller = tokio::sync::Mutex::new(self);
+        let publisher = EpochEventPublisher {
+            controller: &controller,
+            prompt: input.prompt,
+            events: input.events,
+            cancellation,
+            errors: &errors,
         };
-        let reduced = result.as_ref().is_ok_and(|fitted| fitted.is_some());
-        let recorded = self
-            .record_epoch_compaction(input.conversation, input.agent_state, input.events, result)
-            .await;
-        let outcome = match recorded {
-            Ok(()) => self
-                .report_epoch_finished(input.events)
-                .await
-                .map(|()| EpochResult {
-                    instructions: prepared.instructions,
-                    reduced,
-                }),
-            Err(error) => Err(error),
+        let mut states = EpochStates {
+            controller: &controller,
+            conversation: input.conversation,
+            agent_state: input.agent_state.clone(),
+            prompt: input.prompt,
+            selection: input.selection,
+            status: input.status,
+            events: input.events,
+            configuration,
+            templates,
+            cancellation,
+            errors: &errors,
         };
-        match outcome {
-            Ok(result) => Ok(result),
-            Err(error) => {
-                self.fail_epoch_compaction(error.to_string(), input.events)
-                    .await?;
-                Err(error)
-            }
-        }
+        let provider = CompactionProvider::new(
+            &estimates,
+            input.sessions,
+            ContextObserver(input.events),
+            &errors,
+        );
+        parrot_core::compact_context(
+            &mut states,
+            input.agent_state,
+            &provider,
+            &publisher,
+            input.tools,
+            parrot_core::CompactionRequest::default(),
+            parrot_core::CancellationToken::new(cancellation),
+        )
+        .await
+        .map(|compacted| EpochResult {
+            instructions: compacted.instructions,
+            reduced: compacted.reduced,
+        })
+        .map_err(|error| errors.restore(error, ContextError::from))
     }
 
     pub(crate) async fn report_epoch_started(
@@ -442,7 +397,6 @@ impl ContextController {
     pub(crate) async fn record_epoch_compaction(
         &mut self,
         conversation: &mut AgentConversation,
-        agent_state: &mut parrot_core::AgentState,
         events: &dyn ContextEvents,
         result: ContextResult<Option<parrot_core::FittedCompaction>>,
     ) -> ContextResult<()> {
@@ -462,7 +416,6 @@ impl ContextController {
                     status,
                 )
                 .await?;
-            agent_state.last_request_statistic.reset();
             conversation.reload().await?;
             if appended {
                 events
@@ -607,7 +560,7 @@ impl parrot_core::EventPublisher for EpochEventPublisher<'_> {
 struct EpochStates<'a> {
     controller: &'a tokio::sync::Mutex<&'a mut ContextController>,
     conversation: &'a mut AgentConversation,
-    agent_state: &'a mut parrot_core::AgentState,
+    agent_state: parrot_core::AgentState,
     prompt: &'a SessionPrompt,
     selection: &'a ResolvedModelSelection,
     status: &'a dyn ContextStatus,
@@ -661,6 +614,22 @@ impl EpochStates<'_> {
 }
 
 impl parrot_core::States for EpochStates<'_> {
+    fn get_agent_state(
+        &self,
+    ) -> BoxFuture<'_, Result<parrot_core::AgentState, parrot_core::Error>> {
+        Box::pin(async move { Ok(self.agent_state.clone()) })
+    }
+
+    fn set_agent_state(
+        &mut self,
+        state: parrot_core::AgentState,
+    ) -> BoxFuture<'_, Result<(), parrot_core::Error>> {
+        Box::pin(async move {
+            self.agent_state = state;
+            Ok(())
+        })
+    }
+
     fn add_conversation_messages(
         &mut self,
         addition: parrot_core::ConversationAddition,
@@ -703,7 +672,7 @@ impl parrot_core::States for EpochStates<'_> {
             self.controller
                 .lock()
                 .await
-                .record_epoch_compaction(self.conversation, self.agent_state, self.events, result)
+                .record_epoch_compaction(self.conversation, self.events, result)
                 .await
                 .map_err(|error| self.capture_error(error))
         })
@@ -849,52 +818,5 @@ impl CompactionObserver for ContextObserver<'_> {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), parrot_provider::sessions::Error>> {
         self.0.observe_progress(progress, cancellation)
-    }
-}
-
-struct EpochProvider<'a> {
-    estimates: &'a CompactionEstimates,
-    errors: &'a NativeErrors<ContextError>,
-    sessions: &'a ProviderSessions,
-    events: &'a dyn ContextEvents,
-}
-
-impl EpochProvider<'_> {
-    fn capture_error(&self, error: impl Into<ContextError>) -> parrot_core::Error {
-        let error = error.into();
-        let diagnostic = describe_context_error(&error);
-        self.errors.capture(error, diagnostic)
-    }
-}
-
-impl parrot_core::Provider for EpochProvider<'_> {
-    fn summarize<'a, 'c>(
-        &'a self,
-        request: parrot_core::ProviderRequest,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<parrot_core::SummaryResponse, parrot_core::Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            let provider = CompactionProvider::new(
-                self.estimates,
-                self.sessions,
-                ContextObserver(self.events),
-                self.errors,
-            );
-            parrot_core::Provider::summarize(&provider, request, cancellation).await
-        })
-    }
-
-    fn estimate_input_tokens(
-        &self,
-        instructions: &str,
-        definitions: &[parrot_core::ToolDefinition],
-        messages: &[parrot_core::Message],
-    ) -> Result<i64, parrot_core::Error> {
-        self.estimates
-            .estimate_input_tokens(instructions, definitions, messages)
-            .map_err(|error| self.capture_error(error))
     }
 }

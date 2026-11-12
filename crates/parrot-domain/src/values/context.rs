@@ -9,25 +9,16 @@ pub struct ContextSize {
 
 impl ContextSize {
     pub fn parse(text: &str) -> Result<Self, ParseContextSizeError> {
-        let text = text.trim();
-        let is_percentage = text.ends_with('%');
-        let thousands = text.ends_with(['k', 'K']);
-        let digits = if is_percentage || thousands {
-            &text[..text.len() - 1]
-        } else {
-            text
-        };
-        if digits.is_empty() || !digits.bytes().all(|digit| digit.is_ascii_digit()) {
-            return Err(ParseContextSizeError);
-        }
-        let parsed: i64 = digits.parse().map_err(|_| ParseContextSizeError)?;
-        if parsed <= 0 || (is_percentage && parsed > 100) || (thousands && parsed > i64::MAX / 1000)
-        {
-            return Err(ParseContextSizeError);
-        }
-        Ok(Self {
-            value: if thousands { parsed * 1000 } else { parsed },
-            is_percentage,
+        let limit = parrot_core::ContextLimit::parse(text).map_err(|_| ParseContextSizeError)?;
+        Ok(match limit {
+            parrot_core::ContextLimit::Tokens(value) => Self {
+                value,
+                is_percentage: false,
+            },
+            parrot_core::ContextLimit::Percentage(value) => Self {
+                value,
+                is_percentage: true,
+            },
         })
     }
 

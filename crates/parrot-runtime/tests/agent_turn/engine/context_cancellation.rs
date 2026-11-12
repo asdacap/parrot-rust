@@ -159,7 +159,6 @@ async fn actual_inline_summary_provider_typed_cancellations_are_interrupted_and_
         let fixture = Fixture::new();
         fixture.seed().await;
         let tools = Arc::new(Tools::with_names(&["compact_context"]));
-        tools.inline_compact.store(true, Ordering::SeqCst);
         let mut summary = Step::complete("not committed");
         summary.completion = Err(error);
         let provider = Scripted::new(vec![tool_step(), summary]);
@@ -202,7 +201,6 @@ async fn actual_context_summary_retry_publication_cancellation_retains_cancel_ki
     let fixture = Fixture::new();
     fixture.seed().await;
     let tools = Arc::new(Tools::with_names(&["compact_context"]));
-    tools.inline_compact.store(true, Ordering::SeqCst);
     let mut summary = Step::complete("must not commit summary");
     summary.events.push_back(sessions::Event::Retry {
         attempt: 1,

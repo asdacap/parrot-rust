@@ -6,17 +6,16 @@ use parrot_domain::{
         tools::Tool,
     },
     values::{
-        context::{ContextSize, ContextSnapshot},
         progress::{ProgressSnapshot, ProgressUpdate},
         tools::ConfiguredToolDefinition,
     },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_tools::session::{
-    Compaction, Failure, FailureKind, Invocation, Kind, Output, SessionServices, SessionTool,
+    Failure, FailureKind, Invocation, Kind, Output, SessionServices, SessionTool,
 };
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::BTreeMap,
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -55,7 +54,6 @@ pub enum Stage {
     Clear,
     Runtime,
     Statistics,
-    Compact,
     Progress,
 }
 
@@ -67,8 +65,6 @@ pub enum Call {
     Progress(ProgressUpdate),
     Runtime(String),
     Statistics(String),
-    Compact(String, Option<ContextSize>),
-    Estimate(String, String, String),
 }
 
 pub struct State {
@@ -79,8 +75,6 @@ pub struct State {
     pub reminder_titles_gate: Option<Arc<tokio::sync::Notify>>,
     pub runtime: String,
     pub statistics: String,
-    pub compaction: Compaction,
-    pub estimates: VecDeque<Result<ContextSnapshot, Failure>>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -92,11 +86,6 @@ impl Default for State {
             reminder_titles_gate: None,
             runtime: String::new(),
             statistics: String::new(),
-            compaction: Compaction {
-                reduced: true,
-                context: snapshot(250, Some(25)),
-            },
-            estimates: VecDeque::new(),
         }
     }
 }
@@ -221,42 +210,6 @@ impl SessionServices for Services {
             Ok(state.statistics.clone())
         })
     }
-
-    fn compact<'a>(
-        &'a self,
-        selection: &'a String,
-        target: Option<ContextSize>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<Compaction, Failure>> {
-        Box::pin(async move {
-            let mut state = self.0.lock().unwrap();
-            state.calls.push(Call::Compact(selection.clone(), target));
-            state.result(Stage::Compact, cancellation)?;
-            Ok(state.compaction.clone())
-        })
-    }
-
-    fn estimate_after_tool_result(
-        &self,
-        selection: &String,
-        call_id: &str,
-        rendered_result: &str,
-    ) -> Result<ContextSnapshot, Failure> {
-        let mut state = self.0.lock().unwrap();
-        state.calls.push(Call::Estimate(
-            selection.clone(),
-            call_id.into(),
-            rendered_result.into(),
-        ));
-        state
-            .estimates
-            .pop_front()
-            .unwrap_or_else(|| Ok(state.compaction.context.clone()))
-    }
-}
-
-pub fn snapshot(tokens: i64, usage: Option<i32>) -> ContextSnapshot {
-    ContextSnapshot::new(tokens, 1000, usage, 80)
 }
 
 pub fn catalog(overrides: &str) -> Arc<PromptTemplateCatalog> {

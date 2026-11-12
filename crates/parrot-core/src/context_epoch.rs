@@ -32,6 +32,7 @@ pub async fn prepare_context_epoch(
             provider,
             publisher,
             definitions,
+            crate::CompactionRequest::default(),
             cancellation,
         )
         .await?;

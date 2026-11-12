@@ -198,6 +198,7 @@ async fn execute_turn<M: ToolResultMetadata>(
                     provider,
                     publisher,
                     definitions,
+                    crate::CompactionRequest::default(),
                     cancellation,
                 )
                 .await?
@@ -268,7 +269,18 @@ async fn execute_turn<M: ToolResultMetadata>(
             )
             .await;
             *state = states.get_agent_state().await?;
-            executed?;
+            if let Some(request) = executed? {
+                context::compact_context(
+                    states,
+                    state,
+                    provider,
+                    publisher,
+                    definitions,
+                    request,
+                    cancellation,
+                )
+                .await?;
+            }
             if flags.final_phase && !state.try_extend_settlement() {
                 return exhaust_budget(states).await;
             }
