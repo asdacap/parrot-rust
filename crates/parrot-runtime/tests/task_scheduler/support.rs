@@ -10,7 +10,9 @@ use parrot_domain::{
     },
     protocol::messages::parrot::{self as protocol, Event},
     values::{
-        agent_state::{ExecutionCheckpoint, TaskResponseReference, TaskResultClaim},
+        agent_state::{
+            ExecutionCheckpoint, TaskForkModeSnapshot, TaskResponseReference, TaskResultClaim,
+        },
         config::ModelProfiles,
     },
 };
@@ -602,7 +604,7 @@ impl Factory {
             .unwrap_or_else(|| {
                 let mut configuration =
                     TaskConfiguration::defaults(prepared.identity.templates.clone());
-                configuration.fork_history_mode = ForkHistoryMode::Empty;
+                configuration.fork_history_mode = TaskForkModeSnapshot::Empty;
                 configuration
             });
         let concurrency = self

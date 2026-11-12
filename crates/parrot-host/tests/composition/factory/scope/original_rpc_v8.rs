@@ -506,7 +506,6 @@ impl Rpc {
                 Arc::new(PublicAddressPolicy),
                 Arc::new(NoExternal),
                 Arc::new(NoExternal),
-                Arc::new(NoExternal),
                 Options::default(),
             )),
             prompts: Vec::new(),

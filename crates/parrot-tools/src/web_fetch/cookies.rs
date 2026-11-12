@@ -1,12 +1,12 @@
-use super::{CookieStore, CookieStoreFactory};
+use super::CookieStore;
 use std::sync::{Arc, Mutex};
 use url::Url;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FetchCookieStoreFactory;
 
-impl CookieStoreFactory for FetchCookieStoreFactory {
-    fn create(&self) -> Arc<dyn CookieStore> {
+impl FetchCookieStoreFactory {
+    pub fn create(&self) -> Arc<dyn CookieStore> {
         Arc::new(FetchCookies(Mutex::new(
             cookie_store::CookieStore::default(),
         )))

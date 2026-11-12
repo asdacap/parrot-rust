@@ -232,7 +232,7 @@ mod fixture {
         }
     }
 
-    fn templates() -> Arc<PromptTemplateCatalog> {
+    pub(super) fn templates() -> Arc<PromptTemplateCatalog> {
         let env = [
             ("HOME", "/tmp/t58/home"),
             ("XDG_CONFIG_HOME", "/tmp/t58/config"),
@@ -391,9 +391,9 @@ mod fixture {
     type WaitTool = AgentTool<ScopedAgentRuntime<Security>, ModelRouter>;
     fn definition(name: &str) -> ConfiguredToolDefinition {
         use parrot_foundation::config::{
-            configuration::source_predefined_content, runtime::read_tool_definitions, yaml,
+            configuration::source_predefined_content, runtime::read_tool_definitions,
         };
-        let root = yaml::parse_root(&source_predefined_content().unwrap()).unwrap();
+        let root = source_predefined_content().unwrap();
         let definitions = read_tool_definitions(&root).unwrap();
         let definition = definitions.get(name).unwrap();
         ConfiguredToolDefinition::new(&definition.description, &definition.parameters_json)
@@ -404,7 +404,7 @@ mod fixture {
             definition("wait"),
             bridge,
             models,
-            None,
+            templates(),
             false,
         )
     }
@@ -500,7 +500,7 @@ mod fixture {
                         agents::questions::AskTool::<_, SharedSecurity<Security>>::new(
                             definition("ask"),
                             bridge.clone(),
-                            None,
+                            templates(),
                         ),
                     ),
                 ),
@@ -510,7 +510,7 @@ mod fixture {
                         agents::questions::ReplyTool::<_, SharedSecurity<Security>>::new(
                             definition("reply"),
                             bridge,
-                            None,
+                            templates(),
                         ),
                     ),
                 ),
@@ -1022,7 +1022,7 @@ mod fixture {
     }
 }
 
-use fixture::{Harness, bounded, done_completion, wait_completion};
+use fixture::{Harness, bounded, done_completion, templates, wait_completion};
 use parrot_domain::contracts::{
     async_ops::OperationError,
     interactions::{AgentAskReply, AgentCommunication, QuestionRequester},
@@ -1383,12 +1383,12 @@ async fn two_agent_asks_guard_completion(promoted_before_completion: bool) {
     let first_tool = AskTool::<_, SharedSecurity<support::Security>>::new(
         ConfiguredToolDefinition::new("ask", "{}"),
         first_child.bridge.clone(),
-        None,
+        templates(),
     );
     let second_tool = AskTool::<_, SharedSecurity<support::Security>>::new(
         ConfiguredToolDefinition::new("ask", "{}"),
         second_child.bridge.clone(),
-        None,
+        templates(),
     );
     let invocation = |header: &str| ToolInvocation {
         arguments_json: format!("{{\"name\":\"parent\",\"message\":\"Continue? {header}\"}}"),
@@ -1473,7 +1473,7 @@ async fn two_agent_asks_guard_completion(promoted_before_completion: bool) {
         let reply = ReplyTool::<_, SharedSecurity<support::Security>>::new(
             ConfiguredToolDefinition::new("reply", "{}"),
             h.built.bridge.clone(),
-            None,
+            templates(),
         );
         for name in ["first", "second"] {
             let request_id = h

@@ -8,7 +8,7 @@ use parrot_tools::agents::input::{ForkSelection, WaitInput};
 use parrot_tools::agents::status::StatusSnapshot;
 use parrot_tools::agents::*;
 
-use super::{CANCELLED, NEVER, Security, context, invocation};
+use super::{CANCELLED, NEVER, Security, context, invocation, templates};
 
 #[derive(Default)]
 pub(super) struct Runtime {
@@ -123,7 +123,14 @@ fn definition() -> ConfiguredToolDefinition {
     ConfiguredToolDefinition::new("configured description", "{\"type\":\"object\"}")
 }
 fn tool(kind: AgentToolKind, runtime: Arc<Runtime>) -> AgentTool<Runtime, Models> {
-    AgentTool::new(kind, definition(), runtime, Arc::new(Models), None, false)
+    AgentTool::new(
+        kind,
+        definition(),
+        runtime,
+        Arc::new(Models),
+        templates(),
+        false,
+    )
 }
 
 #[tokio::test]
@@ -356,19 +363,6 @@ async fn status_keeps_retained_cursor_and_registry_errors() {
     );
 }
 
-struct Templates;
-impl ResultTemplates for Templates {
-    fn render(&self, name: &str, args: &[(&str, &str)]) -> Result<String, AgentToolError> {
-        Ok(format!(
-            "{name}:{}",
-            args.iter()
-                .map(|(key, value)| format!("{key}={value}"))
-                .collect::<Vec<_>>()
-                .join("|")
-        ))
-    }
-}
-
 #[test]
 fn metadata_and_dynamic_send_description_preserve_configured_parameters() {
     let runtime = Arc::new(Runtime::default());
@@ -393,13 +387,14 @@ fn metadata_and_dynamic_send_description_preserve_configured_parameters() {
     }
     let configured = definition();
     assert_eq!(
-        send_definition(configured.clone(), true, &Templates).unwrap(),
+        send_definition(configured.clone(), true, &templates()).unwrap(),
         configured
     );
-    let restricted = send_definition(configured.clone(), false, &Templates).unwrap();
-    assert_eq!(
-        restricted.description,
-        "agent-send-tool.description-without-parent:"
+    let restricted = send_definition(configured.clone(), false, &templates()).unwrap();
+    assert!(
+        restricted
+            .description
+            .contains("Sending to any ancestor is disabled")
     );
     assert_eq!(restricted.parameters_json, configured.parameters_json);
 }
@@ -412,20 +407,20 @@ async fn configured_error_and_interrupt_templates_are_used_without_touching_json
         definition(),
         runtime,
         Arc::new(Models),
-        Some(Arc::new(Templates)),
+        templates(),
         false,
     );
     assert_eq!(
         tool.invoke(invocation("{}"), context(&NEVER))
             .await
             .unwrap(),
-        "tool-result.error:message=Tool arguments require a string 'name'."
+        "error: Tool arguments require a string 'name'."
     );
     assert!(
         tool.invoke(invocation(r#"{"name":"worker"}"#), context(&NEVER))
             .await
             .unwrap()
-            .starts_with("tool-result.text:value=Interrupt requested")
+            .starts_with("Interrupt requested")
     );
 }
 

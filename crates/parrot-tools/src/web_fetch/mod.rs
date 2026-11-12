@@ -10,7 +10,7 @@ pub use cookies::FetchCookieStoreFactory;
 pub use gzip::GzipStreamDecoder;
 pub use policy::{AddressPolicy, PrivateAddressPolicy, PublicAddressPolicy};
 pub use tool::{Invocation, Output, WebFetchTool};
-pub use transport::{CookieStore, CookieStoreFactory, ReqwestTransport, SystemResolver};
+pub use transport::{CookieStore, ReqwestTransport, SystemResolver};
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
 use std::collections::HashMap;
@@ -134,11 +134,7 @@ impl std::error::Error for FetchError {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FetchResult {
-    pub final_address: Url,
-    pub status_code: u16,
-    pub content_type: String,
     pub text: String,
-    pub truncated: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -193,28 +189,20 @@ pub trait TransportSession: Send {
     ) -> BoxFuture<'a, Result<Response, FetchError>>;
 }
 
-/// Supplies streaming gzip decompression; the fetcher bounds decoded, not encoded bytes.
-pub trait GzipDecoder: Send + Sync {
-    fn decode(
-        &self,
-        compressed: Box<dyn ResponseBody>,
-    ) -> Result<Box<dyn ResponseBody>, FetchError>;
-}
-
 pub struct WebFetcher {
     policy: Arc<dyn AddressPolicy>,
     resolver: Arc<dyn Resolver>,
     transport: Arc<dyn Transport>,
-    gzip: Arc<dyn GzipDecoder>,
     options: Options,
 }
 
 impl WebFetcher {
     pub fn production(policy: Arc<dyn AddressPolicy>) -> Self {
-        Self::standard(
+        Self::new(
             policy,
-            Arc::new(GzipStreamDecoder),
-            Arc::new(FetchCookieStoreFactory),
+            Arc::new(SystemResolver),
+            Arc::new(ReqwestTransport),
+            Options::default(),
         )
     }
 
@@ -222,30 +210,14 @@ impl WebFetcher {
         policy: Arc<dyn AddressPolicy>,
         resolver: Arc<dyn Resolver>,
         transport: Arc<dyn Transport>,
-        gzip: Arc<dyn GzipDecoder>,
         options: Options,
     ) -> Self {
         Self {
             policy,
             resolver,
             transport,
-            gzip,
             options,
         }
-    }
-
-    pub fn standard(
-        policy: Arc<dyn AddressPolicy>,
-        gzip: Arc<dyn GzipDecoder>,
-        cookies: Arc<dyn CookieStoreFactory>,
-    ) -> Self {
-        Self::new(
-            policy,
-            Arc::new(SystemResolver),
-            Arc::new(ReqwestTransport::new(cookies)),
-            gzip,
-            Options::default(),
-        )
     }
 
     pub async fn fetch(
@@ -290,7 +262,7 @@ impl WebFetcher {
                 [] => response.body,
                 [encoding] if encoding.eq_ignore_ascii_case("identity") => response.body,
                 [encoding] if encoding.eq_ignore_ascii_case("gzip") => {
-                    self.gzip.decode(response.body)?
+                    GzipStreamDecoder.decode(response.body)?
                 }
                 _ => {
                     return Err(FetchError::rejected(
@@ -298,34 +270,22 @@ impl WebFetcher {
                     ));
                 }
             };
-            let maximum =
-                self.options.max_body_bytes.checked_add(1).ok_or_else(|| {
-                    FetchError::Io(io::Error::other("web fetch body limit overflow"))
-                })?;
-            let mut buffer = vec![0; maximum];
+            let mut buffer = vec![0; self.options.max_body_bytes];
             let mut length = 0;
-            while length < maximum {
+            while length < buffer.len() {
                 let read = body.read(&mut buffer[length..]).await?;
                 if read == 0 {
                     break;
                 }
                 length += read;
             }
-            let truncated = length > self.options.max_body_bytes;
-            let decoded =
-                String::from_utf8_lossy(&buffer[..length.min(self.options.max_body_bytes)]);
+            let decoded = String::from_utf8_lossy(&buffer[..length]);
             let text = if content_type == "text/html" {
                 text::extract_html(&decoded)
             } else {
                 text::strip_controls(&decoded)
             };
-            return Ok(FetchResult {
-                final_address: request.address,
-                status_code: response.status_code,
-                content_type,
-                text,
-                truncated,
-            });
+            return Ok(FetchResult { text });
         }
         unreachable!("unbounded redirect counter")
     }

@@ -5,11 +5,12 @@
 
 use std::fs::File;
 use std::io::{self, Read};
-use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, Clock};
 
+use super::execution::Execution;
 use crate::process::execution::output::Utf8Decoder;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -24,14 +25,6 @@ pub struct MonitorIdentity {
     pub description: String,
     pub owner_agent_session_id: String,
     pub process_id: String,
-}
-
-/// The already-owned execution. Completion must not be detached by an observer.
-pub trait MonitorExecution: Send + Sync {
-    fn stdout_path(&self) -> Option<PathBuf>;
-    fn is_completed(&self) -> bool;
-    fn send_signal(&self, signal: i32) -> io::Result<()>;
-    fn completion(&self) -> BoxFuture<'_, io::Result<i32>>;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -110,13 +103,15 @@ pub trait MonitorSink: Send + Sync {
 
 pub struct ShellProcessMonitor {
     timeout: Duration,
+    clock: Arc<dyn Clock>,
     report: MonitorReport,
 }
 
 impl ShellProcessMonitor {
-    pub fn new(timeout: Duration) -> Self {
+    pub fn new(timeout: Duration, clock: Arc<dyn Clock>) -> Self {
         Self {
             timeout,
+            clock,
             report: MonitorReport {
                 events: 0,
                 reason: MonitorReason::Exited,
@@ -134,36 +129,14 @@ impl ShellProcessMonitor {
     pub async fn observe(
         &mut self,
         identity: &MonitorIdentity,
-        execution: &dyn MonitorExecution,
+        execution: &dyn Execution,
         sink: &dyn MonitorSink,
-        lifetime: &dyn Cancellation,
-    ) {
-        self.observe_with_clock(
-            identity,
-            execution,
-            sink,
-            &parrot_foundation::clock::SystemClock,
-            lifetime,
-        )
-        .await;
-    }
-
-    /// The injected monotonic clock is also used by real file-observer tests;
-    /// no simulated process result is inferred from a clock tick.
-    pub async fn observe_with_clock(
-        &mut self,
-        identity: &MonitorIdentity,
-        execution: &dyn MonitorExecution,
-        sink: &dyn MonitorSink,
-        clock: &dyn Clock,
         lifetime: &dyn Cancellation,
     ) {
         tokio::task::yield_now().await;
-        let observed = self
-            .stream(identity, execution, sink, clock, lifetime)
-            .await;
+        let observed = self.stream(identity, execution, sink, lifetime).await;
         let result = match observed {
-            Ok(()) => execution.completion().await,
+            Ok(()) => execution.wait().await.map(|result| result.exit_code),
             Err(error) => Err(error),
         };
         match result {
@@ -182,11 +155,11 @@ impl ShellProcessMonitor {
     async fn stream(
         &mut self,
         identity: &MonitorIdentity,
-        execution: &dyn MonitorExecution,
+        execution: &dyn Execution,
         sink: &dyn MonitorSink,
-        clock: &dyn Clock,
         lifetime: &dyn Cancellation,
     ) -> io::Result<()> {
+        let clock = Arc::clone(&self.clock);
         let path = execution.stdout_path().ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -302,7 +275,7 @@ fn take_lines(pending: &mut String, all: bool) -> (String, usize) {
     (lines, count)
 }
 
-fn signal(execution: &dyn MonitorExecution, value: i32) {
+fn signal(execution: &dyn Execution, value: i32) {
     // Source suppresses IO, invalid-state and unavailable-platform signal errors:
     // completion is still observed even when a racing exit makes a signal fail.
     let _ = execution.send_signal(value);

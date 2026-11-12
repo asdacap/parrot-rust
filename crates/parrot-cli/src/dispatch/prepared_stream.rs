@@ -45,7 +45,6 @@ pub struct PreparedSessionStream {
     first: Option<wire::Event>,
     replay: Arc<Mutex<SessionReplayContext>>,
     stop: Arc<Signal>,
-    cancellation: Arc<dyn Cancellation>,
     cancelled: BoxFuture<'static, ()>,
 }
 
@@ -54,6 +53,7 @@ impl PreparedSessionStream {
         mut client: WebClient,
         session: &str,
         lifetime: Arc<dyn Cancellation>,
+        preparation: &dyn Cancellation,
     ) -> Result<Self, Status> {
         let (stop, cancellation) = Self::cancellation_scope(lifetime);
         let request = wire::ListenRequest {
@@ -64,6 +64,7 @@ impl PreparedSessionStream {
         let stream = tokio::select! {
             biased;
             _ = cancellation.cancelled() => return Err(Status::cancelled("operation cancelled")),
+            _ = preparation.cancelled() => return Err(Status::cancelled("operation cancelled")),
             result = client.listen(request) => result?.into_inner(),
         };
         Ok(Self::new(stream, None, false, stop, cancellation))
@@ -102,16 +103,6 @@ impl PreparedSessionStream {
         self.replay.clone()
     }
 
-    pub fn cancellation(&self) -> Arc<dyn Cancellation> {
-        self.cancellation.clone()
-    }
-
-    /// Requests cooperative cancellation; the next poll drops the actual stream.
-    /// Use `close` when releasing it synchronously without another poll.
-    pub fn cancel(&self) {
-        self.stop.cancel();
-    }
-
     pub fn close(&mut self) {
         self.stop.cancel();
         self.first = None;
@@ -134,14 +125,12 @@ impl PreparedSessionStream {
         stop: Arc<Signal>,
         cancellation: Arc<dyn Cancellation>,
     ) -> Self {
-        let observed = cancellation.clone();
         Self {
             stream: Some(stream),
             first,
             replay: Arc::new(Mutex::new(SessionReplayContext::new(replaying))),
             stop,
-            cancellation,
-            cancelled: Box::pin(async move { observed.cancelled().await }),
+            cancelled: Box::pin(async move { cancellation.cancelled().await }),
         }
     }
 }

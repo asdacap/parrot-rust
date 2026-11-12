@@ -1,8 +1,9 @@
 //! Browser projection of the source Parrot route map, using lossless messages.
 
-use super::router::{HandlerCancellation, WebSessionRouter};
+use super::router::WebSessionRouter;
 use futures_core::Stream;
 use parrot_domain::protocol::{bindings::parrot::parrot_server::Parrot, messages::parrot as wire};
+use parrot_storage::events::NeverCancelled;
 use std::{pin::Pin, sync::Arc};
 use tonic::{Code, Request, Response, Status};
 
@@ -69,7 +70,7 @@ macro_rules! implement_proxy {
                 let (metadata, extensions, message) = request.into_parts();
                 match self.service.attach_session(Request::from_parts(metadata, extensions, message.clone())).await {
                     Err(error) if error.code() == Code::NotFound => self.router
-                        .attach_remote(message, &HandlerCancellation).await.map(Response::new),
+                        .attach_remote(message, &NeverCancelled).await.map(Response::new),
                     result => result,
                 }
             }

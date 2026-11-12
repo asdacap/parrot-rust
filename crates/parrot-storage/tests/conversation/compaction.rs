@@ -247,7 +247,7 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
         .unwrap()
         .sequence;
     repo.append_status_assembly(
-        event("assembly"),
+        "agent".into(),
         standing(&[("runtime:context-reminder", "h1"), ("other", "h2")]),
         "assembly".into(),
     )
@@ -341,7 +341,7 @@ async fn compaction_projection_failure_rolls_back_snapshot_event_history_and_rem
     let fixture = Fixture::new();
     let repo = fixture.repository();
     repo.append_status_assembly(
-        event("assembly"),
+        "agent".into(),
         standing(&[("runtime:context-reminder", "h1")]),
         "assembly".into(),
     )
@@ -408,7 +408,7 @@ async fn status_standing_belongs_to_its_assembly_message_after_reopen() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
     repo.append_status_assembly(
-        event("assembly"),
+        "agent".into(),
         standing(&[("runtime:context-reminder", "h1")]),
         "rendered warning".into(),
     )
@@ -463,7 +463,7 @@ async fn compaction_removes_the_reminder_standing_even_when_the_assembly_is_reta
     let fixture = Fixture::new();
     let repo = fixture.repository();
     repo.append_status_assembly(
-        event("assembly"),
+        "agent".into(),
         standing(&[("runtime:context-reminder", "h1"), ("other", "h2")]),
         "retained assembly".into(),
     )
@@ -506,7 +506,7 @@ async fn compaction_removes_the_reminder_standing_even_when_the_assembly_is_reta
         Some("h2")
     );
     repo.append_status_assembly(
-        event("next-assembly"),
+        "agent".into(),
         standing(&[("runtime:context-reminder", "h1")]),
         "new cycle".into(),
     )
@@ -531,19 +531,19 @@ async fn compaction_removes_the_reminder_standing_even_when_the_assembly_is_reta
 async fn final_request_messages_and_tool_restoration_roll_back_with_projected_messages() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
-    repo.append_tool_availability_restored_prompt(event("same"), "absent".into())
+    repo.append_phase_prompt("agent".into(), false, "absent".into())
         .await
         .unwrap();
-    repo.append_final_provider_request_prompt(event("same"), "final".into())
+    repo.append_phase_prompt("agent".into(), true, "final".into())
         .await
         .unwrap();
-    repo.append_final_provider_request_prompt(event("same"), "duplicate".into())
+    repo.append_phase_prompt("agent".into(), true, "duplicate".into())
         .await
         .unwrap();
     assert_eq!(count(&repo, "conversation_item").await, 3);
     fail_projection(&repo).await;
     assert!(
-        repo.append_tool_availability_restored_prompt(event("same"), "failed".into())
+        repo.append_phase_prompt("agent".into(), false, "failed".into())
             .await
             .is_err()
     );
@@ -557,10 +557,10 @@ async fn final_request_messages_and_tool_restoration_roll_back_with_projected_me
     );
     assert_eq!(count(&repo, "conversation_item").await, 3);
     resume_projection(&repo).await;
-    repo.append_tool_availability_restored_prompt(event("same"), "restored".into())
+    repo.append_phase_prompt("agent".into(), false, "restored".into())
         .await
         .unwrap();
-    repo.append_system_prompt(event("same"), "system".into())
+    repo.append_system_prompt("agent".into(), "system".into())
         .await
         .unwrap();
     assert_eq!(count(&repo, "conversation_item").await, 5);
@@ -572,7 +572,7 @@ async fn final_request_messages_and_tool_restoration_roll_back_with_projected_me
 async fn final_request_state_survives_later_messages_and_reopen() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
-    repo.append_final_provider_request_prompt(event("final"), "final".into())
+    repo.append_phase_prompt("agent".into(), true, "final".into())
         .await
         .unwrap();
     repo.save_compaction("agent".into(), snapshot("summary", 0))
@@ -586,7 +586,7 @@ async fn final_request_state_survives_later_messages_and_reopen() {
     ] {
         append(&repo, id, role, id).await;
     }
-    repo.append_final_provider_request_prompt(event("duplicate"), "duplicate".into())
+    repo.append_phase_prompt("agent".into(), true, "duplicate".into())
         .await
         .unwrap();
     let messages = repo.conversation("agent".into()).await.unwrap();
@@ -603,11 +603,11 @@ async fn final_request_state_survives_later_messages_and_reopen() {
         messages
     );
     reopened
-        .append_tool_availability_restored_prompt(event("restored"), "restored".into())
+        .append_phase_prompt("agent".into(), false, "restored".into())
         .await
         .unwrap();
     reopened
-        .append_tool_availability_restored_prompt(event("duplicate"), "duplicate".into())
+        .append_phase_prompt("agent".into(), false, "duplicate".into())
         .await
         .unwrap();
     let restored = reopened.conversation("agent".into()).await.unwrap();
@@ -624,7 +624,7 @@ async fn final_request_state_survives_later_messages_and_reopen() {
             .final_phase
     );
     reopened
-        .append_final_provider_request_prompt(event("next-final"), "next final".into())
+        .append_phase_prompt("agent".into(), true, "next final".into())
         .await
         .unwrap();
     assert!(

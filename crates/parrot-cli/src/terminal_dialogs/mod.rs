@@ -7,7 +7,7 @@ pub mod navigation;
 mod terminal;
 
 pub use dialog::{CommitScrollback, EnhancedSlashDialog, LiveInputHost};
-pub use enhanced::{EnhancedChatRequest, EnhancedCli, EnhancedFailure, PreparePrompt};
+pub use enhanced::{EnhancedChatRequest, EnhancedCli, PreparePrompt};
 pub use navigation::{
     ExplicitRemoteTerminalSessionNavigation, LocalTerminalSessionNavigation,
     TerminalSessionController, TerminalSessionNavigation, TerminalSessionTarget,

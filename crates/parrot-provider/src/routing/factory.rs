@@ -11,12 +11,12 @@ use crate::{
     image_generation::ImageTransport,
     responses_websocket::Connector,
     sessions::{
-        Content, Error, Provider,
+        Error, Provider,
         decorators::UsageReportingProvider,
         http::Protocol,
         provider::{
             CatalogDecoderSelection, ChatGptOptions, ChatGptProvider, CompatibleOptions,
-            ImageTokenCalculator, OpenAICompatibleProvider,
+            OpenAICompatibleProvider, OpenAiImageTokens,
         },
     },
 };
@@ -180,7 +180,6 @@ pub fn build_provider(context: ProviderBuildContext<'_>) -> Result<BuiltProvider
             );
             usage_options.allow_insecure_localhost = options.allow_insecure_localhost;
             usage_options.allow_insecure_remote = options.allow_insecure_remote;
-            usage_options.user_agent.clone_from(&options.user_agent);
             let usage_transport = context.transport.clone();
             let compatible: Arc<dyn Provider> =
                 Arc::new(OpenAICompatibleProvider::new_with_images(
@@ -211,18 +210,6 @@ pub fn build_provider(context: ProviderBuildContext<'_>) -> Result<BuiltProvider
         seed,
         implementation,
     })
-}
-
-struct OpenAiImageTokens;
-impl ImageTokenCalculator for OpenAiImageTokens {
-    fn calculate(&self, model: &Model, content: &Content) -> i64 {
-        crate::image_inspection::calculate_content_tokens(
-            &model.id,
-            matches!(content, Content::Image { .. }),
-            content.image_width(),
-            content.image_height(),
-        )
-    }
 }
 
 pub fn read_declared(provider_id: &str, models: &BTreeMap<String, ModelConfig>) -> Vec<Model> {
@@ -268,30 +255,8 @@ fn read_models(
                     },
                     variants,
                 },
-                fields: convert_fields(config.fields.0),
+                fields: ModelMetadataFields(config.fields.0),
             }
         })
         .collect()
-}
-fn convert_fields(bits: u16) -> ModelMetadataFields {
-    let fields = [
-        ModelMetadataFields::NAME,
-        ModelMetadataFields::CONTEXT_WINDOW,
-        ModelMetadataFields::MAX_OUTPUT_TOKENS,
-        ModelMetadataFields::INPUT_PRICE,
-        ModelMetadataFields::CACHED_INPUT_PRICE,
-        ModelMetadataFields::OUTPUT_PRICE,
-        ModelMetadataFields::TOOLS,
-        ModelMetadataFields::REASONING,
-        ModelMetadataFields::OUTPUT,
-        ModelMetadataFields::VARIANTS,
-        ModelMetadataFields::MAX_INPUT_TOKENS,
-    ];
-    fields
-        .into_iter()
-        .enumerate()
-        .filter(|(index, _)| bits & (1 << index) != 0)
-        .fold(ModelMetadataFields::NONE, |mask, (_, field)| {
-            mask.union(field)
-        })
 }

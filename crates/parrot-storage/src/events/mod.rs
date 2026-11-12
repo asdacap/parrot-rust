@@ -20,7 +20,7 @@ use parrot_domain::contracts::storage::{AdmissionError, CommitTicket, Committed}
 use parrot_domain::protocol::messages::parrot::Event;
 use protobuf::Message;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 /// Observes cumulative decoded event counts, including zero for an empty replay.
 /// Counts do not indicate that statistics replay or restoration has completed.
@@ -198,26 +198,5 @@ pub fn read_events_after(
 }
 
 pub(crate) fn timestamp() -> String {
-    let time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("UTC clock before Unix epoch");
-    let seconds = time.as_secs() as i64;
-    let z = seconds.div_euclid(86400) + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let day = z - era * 146097;
-    let year_of_era = (day - day / 1460 + day / 36524 - day / 146096) / 365;
-    let mut year = year_of_era + era * 400;
-    let day_of_year = day - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_index = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
-    let month = month_index + if month_index < 10 { 3 } else { -9 };
-    year += i64::from(month <= 2);
-    let daytime = seconds.rem_euclid(86400);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:07}+00:00",
-        daytime / 3600,
-        daytime % 3600 / 60,
-        daytime % 60,
-        time.subsec_nanos() / 100
-    )
+    crate::diagnostics::format_timestamp(SystemTime::now())
 }

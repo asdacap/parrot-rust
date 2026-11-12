@@ -51,12 +51,11 @@ impl ConversationRepository {
     /// hashes. Appends never rewrite or suppress earlier assemblies.
     pub async fn append_status_assembly(
         &self,
-        published: Event,
+        agent: String,
         standing: StatusStanding,
         content: String,
     ) -> Result<(), EventError> {
-        self.validate(&published.agent_session_id)?;
-        let agent = published.agent_session_id;
+        self.validate(&agent)?;
         let refresh_agent = agent.clone();
         let record = standing_record(&standing)?;
         self.events
@@ -73,11 +72,10 @@ impl ConversationRepository {
     }
     pub async fn append_system_prompt(
         &self,
-        published: Event,
+        agent: String,
         content: String,
     ) -> Result<(), EventError> {
-        self.validate(&published.agent_session_id)?;
-        let agent = published.agent_session_id;
+        self.validate(&agent)?;
         let refresh_agent = agent.clone();
         self.events
             .transaction(move |tx| project_system(tx, &agent, content))
@@ -103,40 +101,20 @@ impl ConversationRepository {
             .await?;
         self.refresh_agent_history(&agent).await
     }
-    pub async fn append_final_provider_request_prompt(
+    pub async fn append_phase_prompt(
         &self,
-        published: Event,
+        agent: String,
+        final_phase: bool,
         content: String,
     ) -> Result<(), EventError> {
-        self.validate(&published.agent_session_id)?;
-        let agent = published.agent_session_id;
+        self.validate(&agent)?;
         let refresh_agent = agent.clone();
         self.events
             .transaction(move |tx| {
                 let item = project_system(tx, &agent, content)?;
                 tx.execute(
-                    "UPDATE conversation_item SET final_phase = 1 WHERE sequence = ?1;",
-                    [item.sequence],
-                )?;
-                Ok(())
-            })
-            .await?;
-        self.refresh_agent_history(&refresh_agent).await
-    }
-    pub async fn append_tool_availability_restored_prompt(
-        &self,
-        published: Event,
-        content: String,
-    ) -> Result<(), EventError> {
-        self.validate(&published.agent_session_id)?;
-        let agent = published.agent_session_id;
-        let refresh_agent = agent.clone();
-        self.events
-            .transaction(move |tx| {
-                let item = project_system(tx, &agent, content)?;
-                tx.execute(
-                    "UPDATE conversation_item SET final_phase = 0 WHERE sequence = ?1;",
-                    [item.sequence],
+                    "UPDATE conversation_item SET final_phase = ?1 WHERE sequence = ?2;",
+                    params![final_phase, item.sequence],
                 )?;
                 Ok(())
             })

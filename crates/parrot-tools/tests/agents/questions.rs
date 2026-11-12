@@ -17,10 +17,10 @@ use parrot_runtime::interactions::{
     BrokerDiagnostic, InteractionDiagnostics, InteractionError, InteractionErrorKind,
     PendingAgentAsk, QuestionBroker,
 };
+use parrot_tools::agents::AgentToolError;
 use parrot_tools::agents::questions::{AskTool, QuestionTool, ReplyTool};
-use parrot_tools::agents::{AgentToolError, ResultTemplates};
 
-use super::{CANCELLED, NEVER, Security, context, invocation};
+use super::{CANCELLED, NEVER, Security, context, invocation, templates};
 
 struct Diagnostics;
 impl InteractionDiagnostics for Diagnostics {
@@ -67,7 +67,7 @@ fn question_tool(broker: Arc<QuestionBroker>) -> Arc<QuestionTool<UserQuestions,
     Arc::new(QuestionTool::new(
         definition(),
         Arc::new(UserQuestions(broker)),
-        None,
+        templates(),
     ))
 }
 async fn wait_pending(broker: &QuestionBroker) {
@@ -360,7 +360,7 @@ async fn ask_blocks_until_reply_settles_immediately_and_preserves_plain_text() {
         routes: BTreeMap::from([("parent", recipient.clone()), ("/root", recipient.clone())]),
     });
     for name in ["parent", "/root"] {
-        let ask: AskTool<_, Security> = AskTool::new(definition(), service.clone(), None);
+        let ask: AskTool<_, Security> = AskTool::new(definition(), service.clone(), templates());
         assert!(ask.enabled_after_interruption());
         assert_eq!(ask.definition(), &definition());
         assert_eq!(
@@ -376,7 +376,7 @@ async fn ask_blocks_until_reply_settles_immediately_and_preserves_plain_text() {
         assert!(!asking.is_finished());
         assert_eq!(request.message, "  Proceed?\nDetails  ");
         let wrong: ReplyTool<_, Security> =
-            ReplyTool::new(definition(), communication(other.clone()), None);
+            ReplyTool::new(definition(), communication(other.clone()), templates());
         assert!(matches!(
             wrong
                 .invoke(
@@ -390,7 +390,7 @@ async fn ask_blocks_until_reply_settles_immediately_and_preserves_plain_text() {
         ));
         assert_eq!(recipient.pending().len(), 1);
         let reply: ReplyTool<_, Security> =
-            ReplyTool::new(definition(), communication(recipient.clone()), None);
+            ReplyTool::new(definition(), communication(recipient.clone()), templates());
         assert!(reply.enabled_after_interruption());
         assert_eq!(
             reply.parallel_safety(&invocation("{}")),
@@ -425,7 +425,7 @@ async fn ask_cycle_and_cancellation_are_propagated_without_fabricating_replies()
             scope: first.clone(),
             routes: BTreeMap::from([("second", second.clone())]),
         }),
-        None,
+        templates(),
     );
     assert_eq!(
         ask.invoke(
@@ -450,7 +450,7 @@ async fn ask_cycle_and_cancellation_are_propagated_without_fabricating_replies()
             scope: second.clone(),
             routes: BTreeMap::from([("first", first)]),
         }),
-        None,
+        templates(),
     );
     let cycle = reverse
         .invoke(
@@ -462,7 +462,7 @@ async fn ask_cycle_and_cancellation_are_propagated_without_fabricating_replies()
         matches!(cycle, Err(OperationError::Failed(AgentToolError::QuestionRejected(ref message))) if message.contains("cycle"))
     );
     let reply: ReplyTool<_, Security> =
-        ReplyTool::new(definition(), communication(second.clone()), None);
+        ReplyTool::new(definition(), communication(second.clone()), templates());
     assert_eq!(
         reply
             .invoke(invocation("not-json"), context(&CANCELLED))
@@ -478,9 +478,10 @@ async fn ask_cycle_and_cancellation_are_propagated_without_fabricating_replies()
 async fn invalid_ask_and_reply_inputs_do_not_reach_the_service() {
     let broker = ask_broker();
     let scope = register(&broker, "agent");
-    let ask: AskTool<_, Security> = AskTool::new(definition(), communication(scope.clone()), None);
+    let ask: AskTool<_, Security> =
+        AskTool::new(definition(), communication(scope.clone()), templates());
     let reply: ReplyTool<_, Security> =
-        ReplyTool::new(definition(), communication(scope.clone()), None);
+        ReplyTool::new(definition(), communication(scope.clone()), templates());
     for arguments in [
         "not-json",
         "[]",
@@ -521,26 +522,13 @@ async fn invalid_ask_and_reply_inputs_do_not_reach_the_service() {
     assert!(scope.pending().is_empty());
 }
 
-struct Formatting;
-impl ResultTemplates for Formatting {
-    fn render(&self, name: &str, arguments: &[(&str, &str)]) -> Result<String, AgentToolError> {
-        Ok(format!(
-            "{name}:{}",
-            arguments
-                .iter()
-                .map(|(key, value)| format!("{key}={value}"))
-                .collect::<Vec<_>>()
-                .join("|")
-        ))
-    }
-}
 #[tokio::test]
 async fn question_uses_selected_result_templates() {
     let broker = broker();
     let tool: Arc<QuestionTool<_, Security>> = Arc::new(QuestionTool::new(
         definition(),
         Arc::new(UserQuestions(broker.clone())),
-        Some(Arc::new(Formatting)),
+        templates(),
     ));
     assert!(tool.enabled_after_interruption());
     assert_eq!(tool.definition(), &definition());
@@ -561,10 +549,7 @@ async fn question_uses_selected_result_templates() {
             },
         )
         .unwrap();
-    assert_eq!(
-        task.await.unwrap().unwrap(),
-        "tool-result.question-answer:question=Pick|answer=yes"
-    );
+    assert_eq!(task.await.unwrap().unwrap(), "Question: Pick\nAnswer: yes");
 }
 
 #[tokio::test(start_paused = true)]
@@ -578,7 +563,7 @@ async fn ask_and_reply_use_selected_result_templates() {
             scope: first,
             routes: BTreeMap::from([("second", second.clone())]),
         }),
-        Some(Arc::new(Formatting)),
+        templates(),
     );
     let asking = tokio::spawn(async move {
         ask.invoke(
@@ -588,11 +573,8 @@ async fn ask_and_reply_use_selected_result_templates() {
         .await
     });
     let request = wait_pending_ask(&second).await;
-    let reply: ReplyTool<_, Security> = ReplyTool::new(
-        definition(),
-        communication(second),
-        Some(Arc::new(Formatting)),
-    );
+    let reply: ReplyTool<_, Security> =
+        ReplyTool::new(definition(), communication(second), templates());
     assert_eq!(
         reply
             .invoke(
@@ -603,19 +585,16 @@ async fn ask_and_reply_use_selected_result_templates() {
             )
             .await
             .unwrap(),
-        format!("tool-result.ask-replied:request_id={}", request.id)
+        format!("Replied to ask {}.", request.id)
     );
-    assert_eq!(
-        asking.await.unwrap().unwrap(),
-        "tool-result.ask-reply:message=yes"
-    );
+    assert_eq!(asking.await.unwrap().unwrap(), "yes");
     let unanswered: AskTool<_, Security> = AskTool::new(
         definition(),
         Arc::new(Communication {
             scope: register(&broker, "third"),
             routes: BTreeMap::from([("fourth", register(&broker, "fourth"))]),
         }),
-        Some(Arc::new(Formatting)),
+        templates(),
     );
     assert_eq!(
         unanswered
@@ -625,6 +604,6 @@ async fn ask_and_reply_use_selected_result_templates() {
             )
             .await
             .unwrap(),
-        "tool-result.ask-timeout:name=fourth"
+        "Ask to fourth timed out without a reply. The recipient was notified; ask again if you still need an answer."
     );
 }

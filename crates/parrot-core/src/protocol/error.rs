@@ -76,13 +76,6 @@ impl Error {
         }
     }
 
-    pub fn prompt_context(message: impl Into<String>) -> Self {
-        Self {
-            detail: Some(ErrorDetail::PromptContext),
-            ..Self::failed(message)
-        }
-    }
-
     pub fn unsupported(operation: &str) -> Self {
         Self {
             code: ErrorCode::InvalidOperation,
@@ -122,7 +115,6 @@ impl std::error::Error for Error {}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ErrorDetail {
     Template,
-    PromptContext,
     Planning(PlanningError),
     Compaction(CompactionFailure),
 }

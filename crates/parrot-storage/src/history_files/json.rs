@@ -147,7 +147,7 @@ pub(crate) fn serialize_metadata(metadata: &super::SessionMeta) -> Result<Vec<u8
     Ok(bytes)
 }
 
-struct DotNetJsonFormatter<F>(F);
+pub(crate) struct DotNetJsonFormatter<F>(pub(crate) F);
 
 macro_rules! delegate_layout {
     ($method:ident $(, $argument:ident: $kind:ty)*) => {

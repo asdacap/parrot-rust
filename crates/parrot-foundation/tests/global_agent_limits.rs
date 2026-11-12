@@ -4,11 +4,10 @@ use parrot_foundation::config::{
     configuration::source_predefined_content,
     node::Node,
     runtime::{AgentLimitsConfig, RuntimeSettings},
-    yaml,
 };
 
 fn root() -> Node {
-    yaml::parse_root(&source_predefined_content().unwrap()).unwrap()
+    source_predefined_content().unwrap()
 }
 
 fn read(root: &Node) -> Result<RuntimeSettings, parrot_foundation::config::ConfigError> {

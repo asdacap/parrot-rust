@@ -10,6 +10,7 @@ mod spawner;
 mod state;
 
 pub use completion::ParentScope;
+pub(crate) use operation::LinkedLifetime;
 pub use operation::{ChildError, ChildResult, Operation};
 pub use policy::{PolicyLineage, SelectionCell};
 pub use ports::*;

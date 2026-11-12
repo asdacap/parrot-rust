@@ -21,13 +21,6 @@ fn parse_delivery(value: &str) -> Result<Delivery, EventError> {
         ))),
     }
 }
-fn input_parts(
-    tx: &Transaction<'_>,
-    id: &str,
-    legacy: &str,
-) -> Result<Vec<ConversationPart>, EventError> {
-    projection::read_input_parts(tx, id, legacy)
-}
 pub fn existing(
     tx: &Transaction<'_>,
     agent: &str,
@@ -50,7 +43,7 @@ pub fn existing(
         Ok(AdmittedInput {
             id: id.clone(),
             message_id: message.into(),
-            parts: input_parts(tx, &id, &content)?,
+            parts: projection::read_input_parts(tx, &id, &content)?,
             delivery: parse_delivery(&delivery)?,
         })
     })
@@ -75,7 +68,7 @@ pub fn pending(
     rows.into_iter()
         .map(|(id, message_id, legacy)| {
             Ok(AdmittedInput {
-                parts: input_parts(tx, &id, &legacy)?,
+                parts: projection::read_input_parts(tx, &id, &legacy)?,
                 id,
                 message_id,
                 delivery,

@@ -3,7 +3,6 @@ use parrot_foundation::config::{
     ConfigError, Result,
     configuration::{Configuration, source_predefined_content},
     templates::{self, TemplateSpec},
-    yaml,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -28,7 +27,7 @@ pub const CONSOLIDATED_IDS: [&str; 2] = [
 ];
 
 fn shipped_specs() -> Result<BTreeMap<String, TemplateSpec>> {
-    let root = yaml::parse_root(&source_predefined_content()?)?;
+    let root = source_predefined_content()?;
     let actual = templates::read_templates(&root, &mut |_| Ok(()))?;
     for spec in actual.values() {
         if spec.engine == "minijinja" {

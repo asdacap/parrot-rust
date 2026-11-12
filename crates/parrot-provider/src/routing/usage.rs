@@ -186,13 +186,13 @@ fn object(raw: &str) -> Result<Object, Error> {
     }
     serde_json::from_str(raw.get()).map_err(|e| Error::Encode(e.to_string()))
 }
-fn string(scope: &Object, name: &str) -> String {
+pub(crate) fn string(scope: &Object, name: &str) -> String {
     scope
         .get(name)
         .and_then(|raw| serde_json::from_str(raw.get()).ok())
         .unwrap_or_default()
 }
-fn number(scope: &Object, name: &str) -> f64 {
+pub(crate) fn number(scope: &Object, name: &str) -> f64 {
     scope
         .get(name)
         .and_then(|raw| {
@@ -245,7 +245,7 @@ fn window(scope: &Object, name: &str) -> Result<Option<UsageWindow>, Error> {
         limit_window_seconds: 0,
     }))
 }
-fn reset_text(date: DateTime<Utc>) -> String {
+pub(crate) fn reset_text(date: DateTime<Utc>) -> String {
     let mut text = date.format("%Y-%m-%dT%H:%M:%S").to_string();
     if date.nanosecond() != 0 {
         text.push_str(&format!(".{:07}", date.nanosecond() / 100));

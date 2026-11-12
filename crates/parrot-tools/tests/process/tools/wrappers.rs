@@ -429,7 +429,6 @@ impl Fixture {
             exec_command_yield_after: Duration::from_millis(
                 configuration.runtime.exec_command_yield_after_ms as u64,
             ),
-            templates,
             monitor_sink: sink.clone(),
         });
         Self {

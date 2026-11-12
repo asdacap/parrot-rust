@@ -294,10 +294,10 @@ async fn synchronous_observation_reads_live_report_flags_not_activity_kind() {
     }
     assert_eq!(
         owner.observe_active(),
-        [ActiveProcessObservation {
+        [ActiveWorkObservation {
             id: "agent/monitor".into(),
             name: "monitor".into(),
-            state: ProcessStatusState::Running,
+            state: ActiveWorkState::Running,
         }]
     );
     let snapshot = owner.observe_snapshot();
@@ -308,10 +308,10 @@ async fn synchronous_observation_reads_live_report_flags_not_activity_kind() {
         .store(true, Ordering::Release);
     assert_eq!(
         owner.observe_active(),
-        [ActiveProcessObservation {
+        [ActiveWorkObservation {
             id: "agent/execution".into(),
             name: "execution".into(),
-            state: ProcessStatusState::Running,
+            state: ActiveWorkState::Running,
         }]
     );
     assert_eq!(owner.observe_snapshot(), snapshot);
@@ -336,7 +336,7 @@ async fn synchronous_observation_keeps_claimed_completion_until_retirement_and_r
     assert!(!old.retired());
     assert!(sink.calls.lock().unwrap().is_empty());
     assert_eq!(owner.observe_snapshot(), before);
-    assert_eq!(owner.observe_active()[0].state, ProcessStatusState::Running);
+    assert_eq!(owner.observe_active()[0].state, ActiveWorkState::Running);
     assert!(!claimed.wait(None, &NeverCancelled).await.unwrap().running);
     assert!(old.retired());
     assert!(owner.observe_active().is_empty());
@@ -365,11 +365,11 @@ async fn synchronous_observation_preserves_ordinal_identity_and_scope_isolation(
         let execution = Arc::new(FakeExecution::default());
         executions.push(execution.clone());
         let claimed = start(&first, Some(name), execution).await;
-        expected.push(ProcessStatus {
+        expected.push(ProcessStatusSnapshot {
             owner_session_id: "scope-1".into(),
             process_id: claimed.process().state.process_id.clone(),
             name: name.into(),
-            state: ProcessStatusState::Running,
+            state: ActiveWorkState::Running,
         });
         claimed.yield_now();
     }

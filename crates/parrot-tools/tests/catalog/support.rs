@@ -33,7 +33,6 @@ use parrot_domain::{
         progress::{ProgressSnapshot, ProgressUpdate},
     },
 };
-use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::image_generation::{ImageGenerationRequest, ImageGenerationResult};
 use parrot_storage::{
     artifacts::{ImageArtifactRepository, ImageArtifactStore},
@@ -855,10 +854,7 @@ impl MonitorSink for Services {
     }
 }
 impl Services {
-    pub fn process_services(
-        &self,
-        templates: Arc<PromptTemplateCatalog>,
-    ) -> Arc<ProcessToolServices<RejectingLauncher>> {
+    pub fn process_services(&self) -> Arc<ProcessToolServices<RejectingLauncher>> {
         let owner = Arc::new(
             ShellProcessOwner::new(
                 "catalog-process-owner",
@@ -884,7 +880,6 @@ impl Services {
             workspace: Arc::new(self.clone()),
             read_only_prefixes: vec!["printf".into()],
             exec_command_yield_after: std::time::Duration::from_secs(10),
-            templates,
             monitor_sink: Arc::new(self.clone()),
         })
     }

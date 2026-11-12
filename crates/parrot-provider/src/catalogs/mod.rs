@@ -28,7 +28,7 @@ use std::fmt;
 /// Values in [`Model`] are always materialized, while this mask preserves their
 /// provenance for source-compatible precedence and explicit zero/false values.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ModelMetadataFields(u16);
+pub struct ModelMetadataFields(pub(crate) u16);
 
 impl ModelMetadataFields {
     pub const NONE: Self = Self(0);

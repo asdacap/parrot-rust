@@ -55,19 +55,9 @@ pub use sections::{
     SecurityRuleDescription, SessionIdentityPromptProvider, TemplateSystemPromptProvider,
 };
 
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
+use parrot_core::NeverCancelled;
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use serde_json::Value;
-
-struct Uncancelled;
-impl Cancellation for Uncancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
 
 fn render(
     catalog: &PromptTemplateCatalog,
@@ -77,6 +67,6 @@ fn render(
     // These source providers render with CancellationToken.None. This token is
     // not a filesystem/security capability and no loader is called here.
     catalog
-        .render(id, arguments, &Uncancelled)
+        .render(id, arguments, &NeverCancelled)
         .map_err(|error| PromptError::Template(error.to_string()))
 }

@@ -99,8 +99,7 @@ use parrot_tools::{
         Failure, FailureKind, PermissionReply, PermissionServices, WriteTarget, WriteTargetKind,
     },
     web_fetch::{
-        FetchError, GzipDecoder, Options, PublicAddressPolicy, Resolver, ResponseBody, Transport,
-        TransportSession, WebFetcher,
+        FetchError, Options, PublicAddressPolicy, Resolver, Transport, TransportSession, WebFetcher,
     },
 };
 
@@ -206,11 +205,6 @@ impl Resolver for DenyExternal {
 impl Transport for DenyExternal {
     fn session(&self) -> Result<Box<dyn TransportSession + '_>, FetchError> {
         Err(FetchError::Io(io::Error::other("fixture never fetches")))
-    }
-}
-impl GzipDecoder for DenyExternal {
-    fn decode(&self, _: Box<dyn ResponseBody>) -> Result<Box<dyn ResponseBody>, FetchError> {
-        Err(FetchError::Io(io::Error::other("fixture never decodes")))
     }
 }
 impl PermissionServices for DenyExternal {
@@ -521,7 +515,6 @@ impl Fixture {
             permission_authority: Arc::new(|_, _| Ok(Arc::new(DenyExternal))),
             web_fetcher: Arc::new(WebFetcher::new(
                 Arc::new(PublicAddressPolicy),
-                Arc::new(DenyExternal),
                 Arc::new(DenyExternal),
                 Arc::new(DenyExternal),
                 Options::default(),

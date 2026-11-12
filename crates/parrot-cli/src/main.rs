@@ -761,7 +761,7 @@ impl Application {
             )
             .run(cancellation)
             .await
-            .map_err(enhanced_failure)
+            .map_err(chat_failure)
         } else {
             BasicCli::new(
                 client,
@@ -784,7 +784,7 @@ impl Application {
             )
             .run(cancellation)
             .await
-            .map_err(basic_failure)
+            .map_err(chat_failure)
         }
     }
 }
@@ -956,24 +956,14 @@ fn slash_failure(failure: parrot_cli::slash_sessions::SlashFailure) -> DispatchE
         other => command_failure(other),
     }
 }
-fn enhanced_failure(failure: parrot_cli::terminal_dialogs::EnhancedFailure) -> DispatchError {
-    use parrot_cli::terminal_dialogs::EnhancedFailure;
+fn chat_failure(failure: parrot_cli::chat_loops::ChatLoopFailure) -> DispatchError {
+    use parrot_cli::chat_loops::ChatLoopFailure;
     match failure {
-        EnhancedFailure::Rpc(status) => DispatchError::Rpc(status),
-        EnhancedFailure::Slash(failure) => slash_failure(failure),
-        EnhancedFailure::Io(failure) => DispatchError::Io(failure),
-        EnhancedFailure::Attachment(failure) => attachment_failure(failure),
-        EnhancedFailure::Navigation(failure) => navigation_failure(failure),
-    }
-}
-fn basic_failure(failure: dispatch::basic_loop::BasicFailure) -> DispatchError {
-    use dispatch::basic_loop::BasicFailure;
-    match failure {
-        BasicFailure::Rpc(status) => DispatchError::Rpc(status),
-        BasicFailure::Slash(failure) => slash_failure(failure),
-        BasicFailure::Io(failure) => DispatchError::Io(failure),
-        BasicFailure::Attachment(failure) => attachment_failure(failure),
-        BasicFailure::Navigation(failure) => navigation_failure(failure),
+        ChatLoopFailure::Rpc(status) => DispatchError::Rpc(status),
+        ChatLoopFailure::Slash(failure) => slash_failure(failure),
+        ChatLoopFailure::Io(failure) => DispatchError::Io(failure),
+        ChatLoopFailure::Attachment(failure) => attachment_failure(failure),
+        ChatLoopFailure::Navigation(failure) => navigation_failure(failure),
     }
 }
 fn attachment_failure(failure: AttachmentError) -> DispatchError {
@@ -1022,30 +1012,14 @@ fn enhanced_terminal_color_enabled() -> bool {
 
 fn terminal_dimensions() -> (isize, isize) {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Ok(size) = rustix::termios::tcgetwinsize(io::stdout())
+        && size.ws_col != 0
+        && size.ws_row != 0
     {
-        #[repr(C)]
-        #[derive(Default)]
-        struct WindowSize {
-            rows: u16,
-            columns: u16,
-            x: u16,
-            y: u16,
-        }
-        unsafe extern "C" {
-            fn ioctl(fd: i32, request: usize, size: *mut WindowSize) -> i32;
-        }
-        #[cfg(target_os = "linux")]
-        const REQUEST: usize = 0x5413;
-        #[cfg(target_os = "macos")]
-        const REQUEST: usize = 0x4008_7468;
-        let mut size = WindowSize::default();
-        // SAFETY: size has libc winsize layout and stdout remains open.
-        if unsafe { ioctl(1, REQUEST, &mut size) } == 0 && size.columns != 0 && size.rows != 0 {
-            return (
-                isize::try_from(size.columns).unwrap_or(80),
-                isize::try_from(size.rows).unwrap_or(24),
-            );
-        }
+        return (
+            isize::try_from(size.ws_col).unwrap_or(80),
+            isize::try_from(size.ws_row).unwrap_or(24),
+        );
     }
     (80, 24)
 }

@@ -1,7 +1,7 @@
 use super::{CompactionPlanner, CompactionSettings, ContextSize, PlanningError, PlanningInput};
 use parrot_core::{
-    CancellationToken, CompactionFailure, CompactionPlan, CompactionProgress, ProviderRequest,
-    SummaryResponse,
+    CancellationToken, CompactionFailure, CompactionPlan, CompactionProgress, NeverCancelled,
+    ProviderRequest, SummaryResponse,
     compaction::{self as core},
 };
 use parrot_domain::{
@@ -99,16 +99,6 @@ pub struct CompactionResult {
     pub watermark: i64,
 }
 
-struct Uncancelled;
-impl Cancellation for Uncancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
-
 /// Executes a planned safe prefix. The caller owns and joins provider-session lifetime
 /// and commits the returned summary/watermark through authoritative history storage.
 #[derive(Clone)]
@@ -124,7 +114,7 @@ impl Compactor {
     ) -> Result<Self, CompactionError> {
         let render = |id| {
             templates
-                .render(id, &[], &Uncancelled)
+                .render(id, &[], &NeverCancelled)
                 .map_err(|error| CompactionError::Template(error.to_string()))
         };
         settings.summary_instructions = render("compaction.summary-instructions")?;
@@ -219,7 +209,6 @@ impl From<CompactionFailure> for CompactionError {
             CompactionFailure::GroupExceedsBudget => {
                 Self::Planning(PlanningError::GroupExceedsBudget)
             }
-            CompactionFailure::TokenOverflow => Self::Planning(PlanningError::TokenOverflow),
             CompactionFailure::InputLimitExceeded
             | CompactionFailure::NoSafeBoundary
             | CompactionFailure::FittedInputLimitExceeded => {
@@ -313,7 +302,6 @@ impl From<parrot_core::Error> for CompactionError {
             Some(ErrorDetail::Planning(error)) => error.into(),
             Some(ErrorDetail::Compaction(error)) => error.into(),
             Some(ErrorDetail::Template) => Self::Template(error.message),
-            Some(ErrorDetail::PromptContext) => Self::InvalidOperation(error.message),
             None if error.kind == ErrorKind::Cancelled => Self::Cancelled,
             None => Self::InvalidOperation(error.message),
         }

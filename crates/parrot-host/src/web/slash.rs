@@ -5,6 +5,7 @@ use super::{
     dialog::{WebSlashDialog, random_id},
     router::{WebClient, WebSessionRouter},
 };
+use crate::composition::agents::CallerSignal;
 use futures_core::Stream;
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation},
@@ -13,13 +14,14 @@ use parrot_domain::{
         messages::{parrot as wire, web},
     },
 };
+use parrot_runtime::agent_turn::lifecycle::Signal;
 use std::{
     collections::HashMap,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
 /// Binds the source CLI SlashCommands.Create and SlashSession to browser dialogs.
@@ -109,7 +111,7 @@ impl ParrotWeb for WebSlashService {
         &self,
         _: Request<web::OpenDefaultSessionRequest>,
     ) -> Result<Response<wire::UserSession>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.router
             .open_default(observation.0.as_ref())
             .await
@@ -148,7 +150,7 @@ impl ParrotWeb for WebSlashService {
             .lock()
             .expect("slash runs lock")
             .insert(run_id.clone(), dialog.clone());
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         let cancellation = observation.0.clone();
         let router = self.router.clone();
         let factory = self.factory.clone();
@@ -277,41 +279,10 @@ impl ParrotWeb for WebSlashService {
     }
 }
 
-struct RpcCancellation(watch::Sender<bool>);
-impl Cancellation for RpcCancellation {
-    fn is_cancelled(&self) -> bool {
-        *self.0.borrow()
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            let mut receiver = self.0.subscribe();
-            loop {
-                if *receiver.borrow_and_update() {
-                    return;
-                }
-                if receiver.changed().await.is_err() {
-                    return;
-                }
-            }
-        })
-    }
-}
-struct Observation(Arc<RpcCancellation>);
-impl Observation {
-    fn new() -> Self {
-        Self(Arc::new(RpcCancellation(watch::channel(false).0)))
-    }
-}
-impl Drop for Observation {
-    fn drop(&mut self) {
-        self.0.0.send_replace(true);
-    }
-}
-
 struct RunGuard {
     id: String,
     runs: Runs,
-    _observation: Observation,
+    _observation: CallerSignal,
 }
 impl Drop for RunGuard {
     fn drop(&mut self) {

@@ -129,8 +129,6 @@ impl SandboxGate {
 pub trait ProcessSandbox: Send + Sync {
     type Policy: Send + Sync;
 
-    fn sandbox_available(&self) -> bool;
-
     fn start_unbound<'a>(
         &'a self,
         request: &'a ProcessStartRequest,
@@ -179,10 +177,6 @@ impl<S: ProcessSandbox> ProcessRunner<S> {
 
     pub fn sandbox_gate(&self) -> &Arc<SandboxGate> {
         &self.gate
-    }
-
-    pub fn sandbox_available(&self) -> bool {
-        self.sandbox.sandbox_available()
     }
 
     /// Materialize policy only after selecting the sandbox once for this start.

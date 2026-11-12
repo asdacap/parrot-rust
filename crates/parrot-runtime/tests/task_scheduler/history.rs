@@ -1,7 +1,10 @@
 use super::{fixture::*, harness::Harness, support::*};
 use parrot_domain::{
     protocol::messages::parrot::Event,
-    values::agent_tasks::{ExecutionStatus::*, Task},
+    values::{
+        agent_state::TaskForkModeSnapshot,
+        agent_tasks::{ExecutionStatus::*, Task},
+    },
 };
 use parrot_runtime::{children::*, task_scheduler::*};
 use parrot_storage::{
@@ -42,7 +45,7 @@ async fn tool(history: &AgentHistoryView, text: &str, call: &str) -> i64 {
     });
     append(history, message).await
 }
-fn configure(h: &Harness, mode: ForkHistoryMode) {
+fn configure(h: &Harness, mode: TaskForkModeSnapshot) {
     let mut configuration = TaskConfiguration::defaults(templates());
     configuration.fork_history_mode = mode;
     *h.factory.configuration.lock().unwrap() = Some(configuration);
@@ -144,9 +147,9 @@ async fn manual_retained_worker_reuses_original_selection_scope_delivery_history
 async fn fork_modes_use_first_declared_dependency_not_completion_order_and_retained_history_never_reforks()
  {
     for mode in [
-        ForkHistoryMode::Dependency,
-        ForkHistoryMode::Parent,
-        ForkHistoryMode::Empty,
+        TaskForkModeSnapshot::Dependency,
+        TaskForkModeSnapshot::Parent,
+        TaskForkModeSnapshot::Empty,
     ] {
         let h = Harness::new();
         configure(&h, mode);
@@ -198,7 +201,7 @@ async fn fork_modes_use_first_declared_dependency_not_completion_order_and_retai
             next.messages
                 .iter()
                 .any(|message| message.content() == "first-transcript"),
-            mode == ForkHistoryMode::Dependency
+            mode == TaskForkModeSnapshot::Dependency
         );
         assert!(
             !next
@@ -210,7 +213,7 @@ async fn fork_modes_use_first_declared_dependency_not_completion_order_and_retai
             next.messages
                 .iter()
                 .any(|message| message.content() == "owner-history-marker"),
-            mode != ForkHistoryMode::Empty
+            mode != TaskForkModeSnapshot::Empty
         );
         assert!(prompt(next).contains("[first] Do first\nResult: first-marker"));
         assert!(prompt(next).contains("[second] Do second\nResult: second-marker"));
@@ -241,7 +244,7 @@ async fn fork_modes_use_first_declared_dependency_not_completion_order_and_retai
 async fn deferred_entry_preserves_original_selection_and_before_invoking_batch_boundary_across_updates()
  {
     let h = Harness::new();
-    configure(&h, ForkHistoryMode::Dependency);
+    configure(&h, TaskForkModeSnapshot::Dependency);
     let root = h.root("owner").await;
     h.histories
         .append(root.history(), "owner-safe-marker")
@@ -312,7 +315,7 @@ async fn deferred_entry_preserves_original_selection_and_before_invoking_batch_b
 async fn explicit_success_of_active_dependency_forks_safe_prefix_not_incomplete_batch_or_following_history()
  {
     let h = Harness::new();
-    configure(&h, ForkHistoryMode::Dependency);
+    configure(&h, TaskForkModeSnapshot::Dependency);
     let root = h.root("owner").await;
     let gate = Gate::new();
     h.provider.script("source", [Reply::held("answer", &gate)]);
@@ -360,7 +363,7 @@ async fn explicit_success_of_active_dependency_forks_safe_prefix_not_incomplete_
 #[tokio::test]
 async fn compacted_original_boundary_fails_deferred_task_without_creating_a_worker() {
     let h = Harness::new();
-    configure(&h, ForkHistoryMode::Dependency);
+    configure(&h, TaskForkModeSnapshot::Dependency);
     let root = h.root("owner").await;
     let launch = tool(root.history(), "owner launch", "launch").await;
     root.history()

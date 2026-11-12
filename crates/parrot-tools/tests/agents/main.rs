@@ -46,6 +46,17 @@ impl Cancellation for Cancel {
 static NEVER: Cancel = Cancel(false);
 static CANCELLED: Cancel = Cancel(true);
 
+fn templates() -> std::sync::Arc<parrot_foundation::template_catalog::PromptTemplateCatalog> {
+    std::sync::Arc::new(
+        parrot_foundation::template_catalog::PromptTemplateCatalog::from_content(
+            "",
+            &std::collections::BTreeMap::from([("HOME".into(), "/synthetic/t58-home".into())]),
+        )
+        .unwrap()
+        .1,
+    )
+}
+
 fn invocation(arguments: &str) -> ToolInvocation {
     ToolInvocation {
         arguments_json: arguments.into(),

@@ -9,9 +9,9 @@ use parrot_domain::contracts::security::{AccessSnapshot, InvocationContext};
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
 use parrot_tools::web_fetch::{
-    AddressPolicy, CookieStore, CookieStoreFactory, FetchError, GzipDecoder, Invocation, Method,
-    Options, PrivateAddressPolicy, PublicAddressPolicy, Request, Resolver, Response, ResponseBody,
-    Transport, TransportSession, WebFetchTool, WebFetcher, normalize_address,
+    AddressPolicy, FetchError, Invocation, Method, Options, PrivateAddressPolicy,
+    PublicAddressPolicy, Request, Resolver, Response, ResponseBody, Transport, TransportSession,
+    WebFetchTool, WebFetcher, normalize_address,
 };
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
@@ -74,49 +74,21 @@ impl Cancellation for CancelSignal {
     }
 }
 
-struct NoCookiesExpected;
-impl CookieStoreFactory for NoCookiesExpected {
-    fn create(&self) -> Arc<dyn CookieStore> {
-        Arc::new(Self)
-    }
-}
-impl CookieStore for NoCookiesExpected {
-    fn request_header(&self, _: &url::Url) -> Option<String> {
-        None
-    }
-    fn store_response(&self, _: &url::Url, cookies: &[String]) {
-        assert!(
-            cookies.is_empty(),
-            "noncookie fixture must not require a cookie backend"
-        );
-    }
-}
-
-struct NoGzipExpected;
-impl GzipDecoder for NoGzipExpected {
-    fn decode(&self, _: Box<dyn ResponseBody>) -> Result<Box<dyn ResponseBody>, FetchError> {
-        panic!("this nongzip test must not invoke a gzip decoder")
-    }
-}
-
 struct BytesBody {
     bytes: Vec<u8>,
     position: usize,
-    reads: Arc<Mutex<Vec<usize>>>,
 }
 impl BytesBody {
     fn new(bytes: &[u8]) -> Self {
         Self {
             bytes: bytes.to_vec(),
             position: 0,
-            reads: Arc::default(),
         }
     }
 }
 impl ResponseBody for BytesBody {
     fn read<'a>(&'a mut self, output: &'a mut [u8]) -> BoxFuture<'a, Result<usize, FetchError>> {
         Box::pin(async move {
-            self.reads.lock().unwrap().push(output.len());
             let count = output.len().min(self.bytes.len() - self.position);
             output[..count].copy_from_slice(&self.bytes[self.position..self.position + count]);
             self.position += count;
@@ -209,13 +181,7 @@ fn fetcher(
     transport: Arc<dyn Transport>,
     options: Options,
 ) -> WebFetcher {
-    WebFetcher::new(
-        policy,
-        resolver,
-        transport,
-        Arc::new(NoGzipExpected),
-        options,
-    )
+    WebFetcher::new(policy, resolver, transport, options)
 }
 fn get(address: &str) -> Request {
     Request {
@@ -413,14 +379,11 @@ async fn resolves_once_filters_deduplicates_orders_and_pins_redirect_addresses()
         .fetch(get("http://Example.COM.:8080/start"), &NeverCancel)
         .await
         .unwrap();
-    assert_eq!(
-        result.final_address.as_str(),
-        "http://example.com.:8080/next"
-    );
     assert_eq!(result.text, "fetched");
     assert_eq!(*resolver.hosts.lock().unwrap(), ["example.com"]);
     let sent = transport.sent.lock().unwrap();
     assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1].0, "http://example.com.:8080/next");
     assert_eq!(sent[0].2, sent[1].2);
     assert_eq!(
         sent[0].2,
@@ -510,26 +473,18 @@ async fn html_plaintext_exact_bounds_and_utf8_controls() {
             "<html><style>secret</style><body><h1>Hello &amp; bye</h1><script>alert(1)</script><p>Text\u{1}</p></body></html>",
             256,
             "Hello & bye\n\nText",
-            false,
         ),
         (
             "text/html",
             "<h1>Title</h1><!-- comment > still comment --><p>A&nbsp; B</p><script>bad</script><div title=\">\">C</div>",
             256,
             "Title\n\nA B\n\nC",
-            false,
         ),
-        ("text/plain", "ab界", 4, "ab", true),
-        (
-            "text/plain",
-            "a\u{1}b\u{fffd}\n\r\t",
-            256,
-            "ab\n\r\t",
-            false,
-        ),
-        ("APPLICATION/JSON; charset=latin1", "{}", 2, "{}", false),
+        ("text/plain", "ab界", 4, "ab"),
+        ("text/plain", "a\u{1}b\u{fffd}\n\r\t", 256, "ab\n\r\t"),
+        ("APPLICATION/JSON; charset=latin1", "{}", 2, "{}"),
     ];
-    for (mime, input, maximum, expected, truncated) in cases {
+    for (mime, input, maximum, expected) in cases {
         let transport = Arc::new(ScriptedTransport::new(vec![response(
             200,
             None,
@@ -551,7 +506,6 @@ async fn html_plaintext_exact_bounds_and_utf8_controls() {
             .await
             .unwrap();
         assert_eq!(result.text, expected);
-        assert_eq!(result.truncated, truncated);
     }
 }
 
@@ -595,42 +549,19 @@ async fn unsupported_mime_and_encodings_reject_without_decoder() {
     }
 }
 
-struct DecodedFixture {
-    calls: AtomicUsize,
-    reads: Arc<Mutex<Vec<usize>>>,
-}
-impl GzipDecoder for DecodedFixture {
-    fn decode(
-        &self,
-        _compressed: Box<dyn ResponseBody>,
-    ) -> Result<Box<dyn ResponseBody>, FetchError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(Box::new(BytesBody {
-            bytes: vec![b'a'; 300],
-            position: 0,
-            reads: self.reads.clone(),
-        }))
-    }
-}
-
 #[tokio::test]
-async fn injected_decoder_output_bound_is_not_a_real_gzip_implementation_claim() {
-    let decoder = Arc::new(DecodedFixture {
-        calls: AtomicUsize::new(0),
-        reads: Arc::default(),
-    });
+async fn uppercase_gzip_encoding_is_decoded_within_output_bound() {
     let transport = Arc::new(ScriptedTransport::new(vec![response(
         200,
         None,
         Some("text/plain"),
         &["GZIP"],
-        b"not-a-real-gzip-fixture",
+        backends::GZIP_512_A,
     )]));
-    let fetcher = WebFetcher::new(
+    let fetcher = fetcher(
         Arc::new(PrivateAddressPolicy),
         Arc::new(FixedResolver::default()),
         transport,
-        decoder.clone(),
         options(),
     );
     let result = fetcher
@@ -638,9 +569,6 @@ async fn injected_decoder_output_bound_is_not_a_real_gzip_implementation_claim()
         .await
         .unwrap();
     assert_eq!(result.text, "a".repeat(256));
-    assert!(result.truncated);
-    assert_eq!(decoder.calls.load(Ordering::SeqCst), 1);
-    assert_eq!(*decoder.reads.lock().unwrap(), [257]);
 }
 
 struct PendingTransport;
@@ -746,15 +674,11 @@ async fn actual_loopback_transport_get_redirect_headers_html_and_head() {
     let fetcher = WebFetcher::new(
         Arc::new(PrivateAddressPolicy),
         resolver.clone(),
-        Arc::new(parrot_tools::web_fetch::ReqwestTransport::new(Arc::new(
-            NoCookiesExpected,
-        ))),
-        Arc::new(NoGzipExpected),
+        Arc::new(parrot_tools::web_fetch::ReqwestTransport),
         options(),
     );
     let address = format!("http://t56.invalid:{port}/start#fragment");
     let result = fetcher.fetch(get(&address), &NeverCancel).await.unwrap();
-    assert_eq!(result.final_address.path(), "/html");
     assert_eq!(result.text, "Hello & bye\n\nText");
     let mut head = get(&format!("http://t56.invalid:{port}/head"));
     head.method = Method::Head;

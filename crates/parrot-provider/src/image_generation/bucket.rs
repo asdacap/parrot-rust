@@ -7,6 +7,7 @@ use crate::{
     sessions::Error,
 };
 use chrono::{DateTime, Datelike, Utc};
+use parrot_core::NeverCancelled;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::{
     sync::{Arc, Mutex},
@@ -92,15 +93,6 @@ fn format_amz_date(time: SystemTime) -> String {
         // AWS requires a four-digit year. An unsupported time returns an empty
         // timestamp, which AwsV4Signer rejects before signing or dispatching.
         .unwrap_or_default()
-}
-struct Never;
-impl Cancellation for Never {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
 }
 struct Work<T: Clone> {
     result: watch::Receiver<Option<Result<T, Error>>>,
@@ -328,7 +320,7 @@ impl S3ImageBucket {
         let mut bytes = Vec::new();
         let mut buffer = [0; 8192];
         loop {
-            let count = response.body.read(&mut buffer, &Never).await?;
+            let count = response.body.read(&mut buffer, &NeverCancelled).await?;
             if count == 0 {
                 break;
             }
@@ -352,7 +344,7 @@ impl S3ImageBucket {
                 request,
                 EMPTY_PAYLOAD_SHA256,
                 Duration::from_secs(30),
-                &Never,
+                &NeverCancelled,
             )
             .await?;
         if response.status == 404 {
@@ -377,7 +369,7 @@ impl S3ImageBucket {
                     request,
                     &sha256(body.as_bytes()),
                     Duration::from_secs(30),
-                    &Never,
+                    &NeverCancelled,
                 )
                 .await?;
             if response.status != 409 {

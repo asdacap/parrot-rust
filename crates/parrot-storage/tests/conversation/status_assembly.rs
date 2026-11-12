@@ -1,6 +1,5 @@
 use super::Fixture;
 use parrot_core::{StatusKey, StatusStanding};
-use parrot_domain::protocol::messages::parrot::Event;
 use parrot_storage::conversation::{ConversationPart, HistoryForkBoundary, HistoryForkSelection};
 
 fn standing(entries: &[(&str, &str)]) -> StatusStanding {
@@ -8,13 +7,6 @@ fn standing(entries: &[(&str, &str)]) -> StatusStanding {
         .iter()
         .map(|(slot, hash)| (StatusKey::new(*slot), (*hash).into()))
         .collect()
-}
-
-fn event() -> Event {
-    Event {
-        agent_session_id: "agent".into(),
-        ..Default::default()
-    }
 }
 
 #[tokio::test]
@@ -30,7 +22,7 @@ async fn first_assembly_stands_and_duplicate_appends_stay_visible() {
     );
     repository
         .append_status_assembly(
-            event(),
+            "agent".into(),
             standing(&[("runtime:selection", "h1")]),
             "first".into(),
         )
@@ -38,7 +30,7 @@ async fn first_assembly_stands_and_duplicate_appends_stay_visible() {
         .unwrap();
     repository
         .append_status_assembly(
-            event(),
+            "agent".into(),
             standing(&[("runtime:selection", "h1")]),
             "second".into(),
         )
@@ -76,7 +68,7 @@ async fn partial_status_text_preserves_unchanged_identities_after_reopen() {
     let repository = fixture.repository();
     repository
         .append_status_assembly(
-            event(),
+            "agent".into(),
             standing(&[("profile", "p1"), ("tasks", ""), ("time", "t1")]),
             "profile\n\ntasks\n\ntime one".into(),
         )
@@ -84,7 +76,7 @@ async fn partial_status_text_preserves_unchanged_identities_after_reopen() {
         .unwrap();
     let updated = standing(&[("profile", "p1"), ("tasks", ""), ("time", "t2")]);
     repository
-        .append_status_assembly(event(), updated.clone(), "time two".into())
+        .append_status_assembly("agent".into(), updated.clone(), "time two".into())
         .await
         .unwrap();
     repository.events().database().close().await.unwrap();
@@ -123,12 +115,12 @@ async fn standing_follows_the_latest_record() {
     let fixture = Fixture::new();
     let repository = fixture.repository();
     repository
-        .append_status_assembly(event(), standing(&[("a", "1")]), "first".into())
+        .append_status_assembly("agent".into(), standing(&[("a", "1")]), "first".into())
         .await
         .unwrap();
     repository
         .append_status_assembly(
-            event(),
+            "agent".into(),
             standing(&[("a", "2"), ("b", "3")]),
             "second".into(),
         )
@@ -146,9 +138,13 @@ async fn concurrent_assemblies_leave_a_coherent_standing_map() {
     let fixture = Fixture::new();
     let repository = fixture.repository();
     let (left, right) = tokio::join!(
-        repository.append_status_assembly(event(), standing(&[("left:slot", "l1")]), "left".into()),
         repository.append_status_assembly(
-            event(),
+            "agent".into(),
+            standing(&[("left:slot", "l1")]),
+            "left".into()
+        ),
+        repository.append_status_assembly(
+            "agent".into(),
             standing(&[("right:slot", "r1")]),
             "right".into()
         ),
@@ -189,7 +185,7 @@ async fn forked_history_carries_the_standing_trail() {
     let repository = fixture.repository();
     repository
         .append_status_assembly(
-            event(),
+            "agent".into(),
             standing(&[("runtime:selection", "h1")]),
             "mode status".into(),
         )
@@ -246,7 +242,7 @@ async fn compaction_retains_the_standing_trail() {
     let repository = fixture.repository();
     repository
         .append_status_assembly(
-            event(),
+            "agent".into(),
             standing(&[("runtime:selection", "h1")]),
             "status".into(),
         )
@@ -277,7 +273,7 @@ async fn mode_updates_do_not_disturb_status_standing() {
     let repository = fixture.repository();
     repository
         .append_status_assembly(
-            event(),
+            "agent".into(),
             standing(&[("runtime:selection", "h1")]),
             "status".into(),
         )

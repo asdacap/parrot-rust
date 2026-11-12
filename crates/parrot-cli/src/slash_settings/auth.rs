@@ -9,6 +9,7 @@ use parrot_foundation::{
 use parrot_storage::diagnostics::{DiagnosticEvent, DiagnosticSeverity, FileDiagnosticLog};
 use tonic::{Code, Status};
 
+use super::{check_cancelled, settings::preset_usage};
 use crate::{
     dispatch::dialog::{DialogOption, SlashDialog, load},
     slash_sessions::{CommandContext, SlashCommand, SlashFailure},
@@ -437,7 +438,7 @@ impl SlashCommand for AuthPresetSetCommand {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
-            check(cancellation)?;
+            check_cancelled(cancellation)?;
             if validate_preset_name(arguments).is_err() {
                 context
                     .dialog
@@ -539,7 +540,7 @@ impl SlashCommand for AuthPresetSelectCommand {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
-            check(cancellation)?;
+            check_cancelled(cancellation)?;
             let result = async {
                 let selected;
                 let arguments = if arguments.trim().is_empty() {
@@ -633,14 +634,6 @@ impl SlashCommand for AuthPresetSelectCommand {
     }
 }
 
-fn preset_usage(command: &str) -> String {
-    format!("usage: {command} <name>; name must be one token without whitespace or '/'")
-}
-fn check(cancellation: &dyn Cancellation) -> Result<(), SlashFailure> {
-    cancellation
-        .check()
-        .map_err(|_| SlashFailure::Rpc(Box::new(Status::cancelled("operation cancelled"))))
-}
 async fn show_auth_failure(
     dialog: &mut dyn SlashDialog,
     result: Result<(), AuthFailure>,

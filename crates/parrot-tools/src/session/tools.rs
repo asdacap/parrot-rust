@@ -1,5 +1,5 @@
 use super::{Compaction, Failure, FailureKind, SessionServices, input};
-use parrot_core::ContextReminderCheckpoint;
+use parrot_core::{ContextReminderCheckpoint, NeverCancelled};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
@@ -62,21 +62,14 @@ pub struct SessionTool<S: SessionServices> {
     kind: Kind,
     definition: ConfiguredToolDefinition,
     services: Arc<S>,
-    templates: Arc<PromptTemplateCatalog>,
 }
 
 impl<S: SessionServices> SessionTool<S> {
-    pub fn new(
-        kind: Kind,
-        definition: ConfiguredToolDefinition,
-        services: Arc<S>,
-        templates: Arc<PromptTemplateCatalog>,
-    ) -> Self {
+    pub fn new(kind: Kind, definition: ConfiguredToolDefinition, services: Arc<S>) -> Self {
         Self {
             kind,
             definition,
             services,
-            templates,
         }
     }
 
@@ -154,20 +147,22 @@ impl<S: SessionServices> SessionTool<S> {
                     .services
                     .compact(selection, target, cancellation)
                     .await?;
-                let mut result = self.render_compaction(reduced, &context)?;
+                let mut result = self.render_compaction(invocation, reduced, &context)?;
                 for _ in 0..8 {
                     let observed = self
                         .services
                         .estimate_after_tool_result(selection, &invocation.call_id, &result)
                         .map_err(OperationError::Failed)?;
-                    let rendered = self.render_compaction(reduced, &observed)?;
+                    let rendered = self.render_compaction(invocation, reduced, &observed)?;
                     context = observed;
                     if rendered == result {
                         return Ok(result.into());
                     }
                     result = rendered;
                 }
-                Ok(self.render_compaction(reduced, &context)?.into())
+                Ok(self
+                    .render_compaction(invocation, reduced, &context)?
+                    .into())
             }
         }
     }
@@ -195,7 +190,7 @@ impl<S: SessionServices> SessionTool<S> {
         } else {
             "progress-tool.already-closed"
         };
-        let text = render(&self.templates, template, &arguments)?;
+        let text = render(&invocation.prompt_templates, template, &arguments)?;
         text_output(invocation, &text)
     }
 
@@ -233,7 +228,7 @@ impl<S: SessionServices> SessionTool<S> {
                 .set_reminder(title, description, cancellation)
                 .await?;
             let text = render(
-                &self.templates,
+                &invocation.prompt_templates,
                 "set-exit-reminder-tool.set",
                 &[
                     ("title", title.to_owned()),
@@ -247,14 +242,14 @@ impl<S: SessionServices> SessionTool<S> {
             }
             if self.services.clear_reminder(title, cancellation).await? {
                 let text = render(
-                    &self.templates,
+                    &invocation.prompt_templates,
                     "clear-exit-reminder-tool.cleared",
                     &[("title", title.to_owned())],
                 )?;
                 text_output(invocation, &text)
             } else {
                 let text = render(
-                    &self.templates,
+                    &invocation.prompt_templates,
                     "clear-exit-reminder-tool.not-found",
                     &[
                         ("title", title.to_owned()),
@@ -286,6 +281,7 @@ impl<S: SessionServices> SessionTool<S> {
 
     fn render_compaction(
         &self,
+        invocation: &Invocation,
         reduced: bool,
         context: &ContextSnapshot,
     ) -> OperationResult<String, Failure> {
@@ -296,7 +292,8 @@ impl<S: SessionServices> SessionTool<S> {
         } else {
             "no-op"
         };
-        self.templates
+        invocation
+            .prompt_templates
             .render(
                 "compact-context-tool.result",
                 &[
@@ -327,7 +324,7 @@ impl<S: SessionServices> SessionTool<S> {
                             .into(),
                     ),
                 ],
-                &RenderCancellation,
+                &NeverCancelled,
             )
             .map_err(|error| match error {
                 OperationError::Cancelled => OperationError::Cancelled,
@@ -367,16 +364,6 @@ impl<S: SessionServices> Tool for SessionTool<S> {
     }
 }
 
-struct RenderCancellation;
-impl Cancellation for RenderCancellation {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
-
 fn render(
     templates: &PromptTemplateCatalog,
     id: &str,
@@ -387,7 +374,7 @@ fn render(
         .map(|(name, value)| ((*name).to_owned(), Value::String(value.clone())))
         .collect::<Vec<_>>();
     templates
-        .render(id, &arguments, &RenderCancellation)
+        .render(id, &arguments, &NeverCancelled)
         .map_err(|error| match error {
             OperationError::Cancelled => OperationError::Cancelled,
             OperationError::Failed(error) => {

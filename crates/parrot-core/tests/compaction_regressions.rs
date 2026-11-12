@@ -39,7 +39,7 @@ fn native_error(step: &str) -> Error {
     Error {
         code: ErrorCode::Http,
         response_body: format!("native response for {step}"),
-        detail: Some(ErrorDetail::Planning(PlanningError::NoOutputCapacity)),
+        detail: Some(ErrorDetail::Planning(PlanningError::NoCompactionCapacity)),
         ..Error::failed(format!("native {step} failure"))
     }
 }

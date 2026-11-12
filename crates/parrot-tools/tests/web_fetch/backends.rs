@@ -2,7 +2,7 @@ use super::*;
 use parrot_tools::web_fetch::{FetchCookieStoreFactory, GzipStreamDecoder, ReqwestTransport};
 
 // node:zlib gzipSync(Buffer.alloc(512, 97), { mtime: 0 }); verified by gunzipSync.
-const GZIP_512_A: &[u8] = &[
+pub(super) const GZIP_512_A: &[u8] = &[
     0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x4b, 0x4c, 0x1c, 0x05, 0x23, 0x19,
     0x00, 0x00, 0x51, 0x70, 0x51, 0xf9, 0x00, 0x02, 0x00, 0x00,
 ];
@@ -19,7 +19,6 @@ async fn real_gzip_expansion_is_limited_to_decoded_body_bytes() {
             &["gzip"],
             GZIP_512_A,
         )])),
-        Arc::new(GzipStreamDecoder),
         options(),
     );
     let result = fetcher
@@ -27,7 +26,6 @@ async fn real_gzip_expansion_is_limited_to_decoded_body_bytes() {
         .await
         .unwrap();
     assert_eq!(result.text, "a".repeat(256));
-    assert!(result.truncated);
 }
 
 #[tokio::test]
@@ -42,7 +40,6 @@ async fn real_gzip_decoder_rejects_malformed_compressed_bytes() {
             &["gzip"],
             b"this is not a gzip stream",
         )])),
-        Arc::new(GzipStreamDecoder),
         options(),
     );
     assert!(matches!(
@@ -88,7 +85,6 @@ async fn real_gzip_decoder_reads_concatenated_members() {
             &["gzip"],
             &compressed,
         )])),
-        Arc::new(GzipStreamDecoder),
         Options {
             max_body_bytes: 2048,
             ..options()
@@ -99,7 +95,6 @@ async fn real_gzip_decoder_reads_concatenated_members() {
         .await
         .unwrap();
     assert_eq!(result.text, "a".repeat(1024));
-    assert!(!result.truncated);
 }
 
 struct PendingGzipBody {
@@ -139,7 +134,6 @@ async fn real_gzip_cancellation_drops_pending_compressed_body() {
                 dropped: dropped.clone(),
             }),
         }])),
-        Arc::new(GzipStreamDecoder),
         options(),
     );
     let cancellation = CancelSignal::default();
@@ -171,8 +165,7 @@ async fn actual_loopback_gzip_uses_real_decoder_and_decoded_limit() {
     let fetcher = WebFetcher::new(
         Arc::new(PrivateAddressPolicy),
         resolver.clone(),
-        Arc::new(ReqwestTransport::new(Arc::new(FetchCookieStoreFactory))),
-        Arc::new(GzipStreamDecoder),
+        Arc::new(ReqwestTransport),
         options(),
     );
     let result = fetcher
@@ -183,7 +176,6 @@ async fn actual_loopback_gzip_uses_real_decoder_and_decoded_limit() {
         .await
         .unwrap();
     assert_eq!(result.text, "a".repeat(256));
-    assert!(result.truncated);
     let requests = serving.join().unwrap();
     assert_eq!(requests.len(), 1);
     assert!(requests[0].starts_with("GET /compressed HTTP/1.1\r\n"));
@@ -212,7 +204,6 @@ async fn production_constructor_supplies_real_backends() {
         .await
         .unwrap();
     assert_eq!(result.text, "a".repeat(512));
-    assert!(!result.truncated);
     assert_eq!(serving.join().unwrap().len(), 1);
 }
 
@@ -252,7 +243,6 @@ async fn decoded_limit_finishes_without_reading_the_gzip_tail() {
                 reads: reads.clone(),
             }),
         }])),
-        Arc::new(GzipStreamDecoder),
         options(),
     );
     let result = fetcher
@@ -260,7 +250,6 @@ async fn decoded_limit_finishes_without_reading_the_gzip_tail() {
         .await
         .unwrap();
     assert_eq!(result.text, "a".repeat(256));
-    assert!(result.truncated);
     assert_eq!(reads.load(Ordering::SeqCst), 1);
 }
 
@@ -461,8 +450,7 @@ async fn actual_loopback_real_cookie_jar_keeps_redirect_cookie_but_not_next_fetc
     let fetcher = WebFetcher::new(
         Arc::new(PrivateAddressPolicy),
         resolver.clone(),
-        Arc::new(ReqwestTransport::new(Arc::new(FetchCookieStoreFactory))),
-        Arc::new(GzipStreamDecoder),
+        Arc::new(ReqwestTransport),
         options(),
     );
     let base = format!("http://fixture.invalid:{port}");
@@ -470,7 +458,6 @@ async fn actual_loopback_real_cookie_jar_keeps_redirect_cookie_but_not_next_fetc
         .fetch(get(&format!("{base}/start")), &NeverCancel)
         .await
         .unwrap();
-    assert_eq!(first.final_address.path(), "/next");
     assert_eq!(first.text, "first");
     assert_eq!(
         fetcher

@@ -35,8 +35,7 @@ fn source_rejects_disjoint_template_fields() {
 }
 
 fn assert_conflict(first: &str, second: &str, path: &str) {
-    let error =
-        yaml::compose(&[("first.yaml", Some(first)), ("second.yaml", Some(second))]).unwrap_err();
+    let error = yaml::compose(&[("first.yaml", first), ("second.yaml", second)]).unwrap_err();
     for expected in [
         "duplicate predefined configuration",
         "first.yaml",

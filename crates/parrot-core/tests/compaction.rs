@@ -72,18 +72,8 @@ fn texts(request: &ProviderRequest) -> Vec<&str> {
 #[test]
 fn compaction_failures_preserve_cancellation_and_native_diagnostic_categories() {
     assert_eq!(
-        Error::from(CompactionFailure::TokenOverflow).code,
-        parrot_core::ErrorCode::Unexpected
-    );
-    assert_eq!(
         Error::from(CompactionFailure::GroupExceedsBudget).code,
         parrot_core::ErrorCode::InvalidOperation
-    );
-    assert_eq!(
-        Error::from(CompactionFailure::TokenOverflow).detail,
-        Some(parrot_core::ErrorDetail::Compaction(
-            CompactionFailure::TokenOverflow
-        ))
     );
     assert_eq!(
         Error::from(CompactionFailure::GroupExceedsBudget).detail,

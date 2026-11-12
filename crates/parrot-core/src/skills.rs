@@ -2,10 +2,7 @@ use crate::{
     CancellationToken, ConfigKey, Content, DerivedContext, Error, PromotedInput, PromptTemplate,
     Skill, SkillContent, SkillReference, States,
 };
-use std::{
-    collections::{BTreeMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashSet, sync::Arc};
 
 const MAXIMUM_SKILL_BYTES: usize = 8 * 1024;
 const MAXIMUM_TURN_BYTES: usize = 1024 * 1024;
@@ -76,15 +73,20 @@ impl SkillPreparation {
             lp.cmp(rp)
                 .then_with(|| left.id.encode_utf16().cmp(right.id.encode_utf16()))
         });
-        let mut templates = BTreeMap::new();
-        for key in [
-            ConfigKey::SkillUnavailableTemplate,
-            ConfigKey::SkillSelectedTemplate,
-            ConfigKey::SkillTooLargeTemplate,
-        ] {
-            templates.insert(key, states.get_config(key).await?.into_prompt_template()?);
-        }
-        let preparation = SkillTemplates(templates);
+        let preparation = SkillTemplates {
+            unavailable: states
+                .get_config(ConfigKey::SkillUnavailableTemplate)
+                .await?
+                .into_prompt_template()?,
+            selected: states
+                .get_config(ConfigKey::SkillSelectedTemplate)
+                .await?
+                .into_prompt_template()?,
+            too_large: states
+                .get_config(ConfigKey::SkillTooLargeTemplate)
+                .await?
+                .into_prompt_template()?,
+        };
         let preparation = &preparation;
         let mut rendering = SkillRendering::new(preparation)?;
         for (skill, _) in selected {
@@ -105,24 +107,21 @@ impl SkillPreparation {
     }
 }
 
-struct SkillTemplates(BTreeMap<ConfigKey, Arc<PromptTemplate>>);
+struct SkillTemplates {
+    unavailable: Arc<PromptTemplate>,
+    selected: Arc<PromptTemplate>,
+    too_large: Arc<PromptTemplate>,
+}
 
-impl SkillTemplates {
-    fn render_template(
-        &self,
-        key: ConfigKey,
-        arguments: &[(String, String)],
-    ) -> Result<String, Error> {
-        let template = self
-            .0
-            .get(&key)
-            .ok_or_else(|| Error::failed("unknown skill template"))?;
-        let arguments = arguments
-            .iter()
-            .map(|(name, value)| (name.clone(), serde_json::Value::String(value.clone())))
-            .collect::<Vec<_>>();
-        template.render(&arguments, CancellationToken::uncancelled())
-    }
+fn render_template(
+    template: &PromptTemplate,
+    arguments: &[(String, String)],
+) -> Result<String, Error> {
+    let arguments = arguments
+        .iter()
+        .map(|(name, value)| (name.clone(), serde_json::Value::String(value.clone())))
+        .collect::<Vec<_>>();
+    template.render(&arguments, CancellationToken::uncancelled())
 }
 
 fn escape(value: &str) -> String {
@@ -143,8 +142,8 @@ fn unavailable(preparation: &SkillTemplates, name: &str, message: &str) -> Resul
         message.push(character);
         units += character.len_utf16();
     }
-    preparation.render_template(
-        ConfigKey::SkillUnavailableTemplate,
+    render_template(
+        &preparation.unavailable,
         &[
             ("name".into(), escape(name)),
             ("message".into(), escape(&message)),
@@ -227,8 +226,8 @@ impl SkillRendering {
         content: &str,
     ) -> Result<(), Error> {
         if content.len() > MAXIMUM_SKILL_BYTES {
-            let value = preparation.render_template(
-                ConfigKey::SkillTooLargeTemplate,
+            let value = render_template(
+                &preparation.too_large,
                 &[
                     ("name".into(), escape(&skill.name)),
                     ("path".into(), escape(&skill.path)),
@@ -238,8 +237,8 @@ impl SkillRendering {
             self.notice(&value);
             return Ok(());
         }
-        let value = preparation.render_template(
-            ConfigKey::SkillSelectedTemplate,
+        let value = render_template(
+            &preparation.selected,
             &[
                 ("name".into(), escape(&skill.name)),
                 ("path".into(), escape(&skill.path)),

@@ -267,7 +267,8 @@ async fn real_history_checkpoint_does_not_serialize_or_revive_the_workflow_owner
         .unwrap();
     assert!(
         history
-            .active_checkpoint_assistant_sequences()
+            .repository()
+            .active_checkpoint_assistant_sequences("main".into())
             .await
             .unwrap()
             .contains(&sequence)
@@ -289,7 +290,8 @@ async fn real_history_checkpoint_does_not_serialize_or_revive_the_workflow_owner
     assert_eq!(fs::read_to_string(paths.plan()).unwrap(), "# Plan");
     assert!(
         history
-            .active_checkpoint_assistant_sequences()
+            .repository()
+            .active_checkpoint_assistant_sequences("main".into())
             .await
             .unwrap()
             .contains(&sequence)

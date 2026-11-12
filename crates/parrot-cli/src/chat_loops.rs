@@ -7,20 +7,83 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+use std::time::Duration;
+use std::{fmt, io};
 
 use parrot_core::Cancellation;
 use parrot_domain::protocol::messages::parrot as wire;
 use parrot_host::web::router::WebClient;
 use parrot_runtime::agent_turn::lifecycle::Signal;
 use tokio::sync::Notify;
-use tonic::Code;
+use tonic::{Code, Status};
 
+use crate::attachments::uploader::AttachmentError;
+use crate::dispatch::basic_render::RenderStreamError;
 use crate::dispatch::prepared_stream::PreparedSessionStream;
 use crate::slash_sessions::{
-    CallbackApplicationExit, SlashCommandRegistry, SlashCommands, SlashFailure, native_call,
+    CallbackApplicationExit, NavigationFailure, SlashCommandRegistry, SlashCommands, SlashFailure,
+    native_call,
 };
 use crate::slash_settings::{AuthServices, SettingsServices};
 use crate::terminal_dialogs::navigation::TerminalSessionController;
+
+#[derive(Debug)]
+pub enum ChatLoopFailure {
+    Rpc(Status),
+    Slash(SlashFailure),
+    Io(io::Error),
+    Attachment(AttachmentError),
+    Navigation(NavigationFailure),
+}
+impl fmt::Display for ChatLoopFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Rpc(error) => error.fmt(f),
+            Self::Slash(error) => error.fmt(f),
+            Self::Io(error) => error.fmt(f),
+            Self::Attachment(error) => error.fmt(f),
+            Self::Navigation(NavigationFailure::Rpc(error)) => error.fmt(f),
+            Self::Navigation(
+                NavigationFailure::Recoverable(message) | NavigationFailure::Other(message),
+            ) => f.write_str(message),
+        }
+    }
+}
+impl std::error::Error for ChatLoopFailure {}
+impl From<Status> for ChatLoopFailure {
+    fn from(error: Status) -> Self {
+        Self::Rpc(error)
+    }
+}
+impl From<SlashFailure> for ChatLoopFailure {
+    fn from(error: SlashFailure) -> Self {
+        Self::Slash(error)
+    }
+}
+impl From<io::Error> for ChatLoopFailure {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+impl From<AttachmentError> for ChatLoopFailure {
+    fn from(error: AttachmentError) -> Self {
+        Self::Attachment(error)
+    }
+}
+impl From<NavigationFailure> for ChatLoopFailure {
+    fn from(error: NavigationFailure) -> Self {
+        Self::Navigation(error)
+    }
+}
+impl From<RenderStreamError> for ChatLoopFailure {
+    fn from(error: RenderStreamError) -> Self {
+        match error {
+            RenderStreamError::Output(error) => Self::Io(error),
+            RenderStreamError::Rpc(error) => Self::Rpc(error),
+            RenderStreamError::Cancelled => Self::Rpc(Status::cancelled("operation cancelled")),
+        }
+    }
+}
 
 /// Last observed remote session identity the loop helpers act on.
 #[derive(Clone)]
@@ -240,6 +303,27 @@ pub(crate) async fn interrupt_loop(
             () = application.cancelled() => return Ok(()),
             () = notified => {}
         }
+    }
+}
+
+/// Reconciles pending interactions on a fixed interval until the application stops.
+pub(crate) async fn reconcile_loop(
+    snapshot: impl Fn() -> SessionSnapshot,
+    application: &Arc<Signal>,
+    interactions: &Mutex<Interactions>,
+    changed: &Notify,
+) -> Result<(), ChatLoopFailure> {
+    let mut interval = tokio::time::interval(Duration::from_millis(250));
+    loop {
+        tokio::select! { biased; () = application.cancelled() => return Ok(()), _ = interval.tick() => () }
+        reconcile_interactions(
+            snapshot(),
+            |generation| generation != snapshot().generation,
+            application,
+            interactions,
+            changed,
+        )
+        .await?;
     }
 }
 

@@ -300,12 +300,7 @@ impl Fixture {
         }
     }
     pub fn tool(&self, kind: Kind) -> SessionTool<Services> {
-        SessionTool::new(
-            kind,
-            definition(),
-            self.services.clone(),
-            self.templates.clone(),
-        )
+        SessionTool::new(kind, definition(), self.services.clone())
     }
     pub async fn invoke(&self, kind: Kind, json: &str) -> OperationResult<Output, Failure> {
         self.invoke_with(kind, json, self.templates.clone(), &Cancel(false))

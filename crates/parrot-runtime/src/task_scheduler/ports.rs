@@ -13,7 +13,8 @@ use parrot_domain::{
     },
     protocol::messages::parrot::{Delivery, Event},
     values::agent_state::{
-        ExecutionCheckpoint, TaskResponseReference, TaskResultClaim, TaskRunnerCheckpoint,
+        ExecutionCheckpoint, TaskForkModeSnapshot, TaskResponseReference, TaskResultClaim,
+        TaskRunnerCheckpoint,
     },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -105,18 +106,11 @@ impl TaskModelRouter for ModelRouter {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum ForkHistoryMode {
-    #[default]
-    Dependency,
-    Parent,
-    Empty,
-}
 #[derive(Clone)]
 pub struct TaskConfiguration {
     pub maximum_attempts: usize,
     pub maximum_response_repairs: usize,
-    pub fork_history_mode: ForkHistoryMode,
+    pub fork_history_mode: TaskForkModeSnapshot,
     pub templates: Arc<PromptTemplateCatalog>,
 }
 impl TaskConfiguration {
@@ -125,7 +119,7 @@ impl TaskConfiguration {
         Self {
             maximum_attempts: 5,
             maximum_response_repairs: 3,
-            fork_history_mode: ForkHistoryMode::Dependency,
+            fork_history_mode: TaskForkModeSnapshot::Dependency,
             templates,
         }
     }
@@ -161,21 +155,6 @@ pub struct SchedulerConfig<S: RestrictableAccessSnapshot + 'static, P: TaskArtif
     pub publisher: Arc<TaskPublisher>,
     pub diagnostics: Arc<dyn TaskDiagnostics>,
     pub lifetime: Arc<dyn Cancellation>,
-}
-
-pub(crate) struct RunCancellation {
-    pub lifetime: Arc<dyn Cancellation>,
-    pub stop: Arc<crate::agent_turn::lifecycle::Signal>,
-}
-impl Cancellation for RunCancellation {
-    fn is_cancelled(&self) -> bool {
-        self.stop.is_cancelled() || self.lifetime.is_cancelled()
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            tokio::select! { _ = self.stop.cancelled() => {}, _ = self.lifetime.cancelled() => {} }
-        })
-    }
 }
 
 pub(crate) fn render(

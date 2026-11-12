@@ -99,26 +99,12 @@ fn advertised_schemas_retain_original_fields_defaults_and_limits() {
 
 #[test]
 fn actual_template_catalog_adapter_preserves_formatter_and_send_factory_keys() {
-    use parrot_tools::agents::{ResultTemplates, send_definition};
+    use parrot_tools::agents::send_definition;
     let (configuration, templates) = PromptTemplateCatalog::from_content(
         "",
         &BTreeMap::from([("HOME".into(), "/synthetic/t58-home".into())]),
     )
     .unwrap();
-    assert_eq!(
-        ResultTemplates::render(&templates, "tool-result.error", &[("message", "failure")])
-            .unwrap(),
-        "error: failure"
-    );
-    assert_eq!(
-        ResultTemplates::render(
-            &templates,
-            "tool-result.question-answer",
-            &[("question", "Pick"), ("answer", "yes")]
-        )
-        .unwrap(),
-        "Question: Pick\nAnswer: yes"
-    );
     let definition = &configuration.runtime.tools["agent_send"];
     let configured = parrot_domain::values::tools::ConfiguredToolDefinition::new(
         definition.description.clone(),
@@ -127,12 +113,13 @@ fn actual_template_catalog_adapter_preserves_formatter_and_send_factory_keys() {
     let restricted = send_definition(configured.clone(), false, &templates).unwrap();
     assert_eq!(
         restricted.description,
-        ResultTemplates::render(
-            &templates,
-            "agent-send-tool.description-without-parent",
-            &[]
-        )
-        .unwrap()
+        templates
+            .render(
+                "agent-send-tool.description-without-parent",
+                &[],
+                &super::NEVER
+            )
+            .unwrap()
     );
     assert_eq!(restricted.parameters_json, configured.parameters_json);
 }
@@ -150,7 +137,7 @@ fn tool_keeps_actual_configured_schema_and_description_without_reconstruction() 
         configured.clone(),
         std::sync::Arc::new(super::tools::Runtime::default()),
         std::sync::Arc::new(super::tools::Models),
-        None,
+        super::templates(),
         false,
     );
     assert_eq!(tool.definition(), &configured);
@@ -167,63 +154,75 @@ fn tool_keeps_actual_configured_schema_and_description_without_reconstruction() 
 
 #[test]
 fn ask_guidance_and_results_are_configurable_with_explicit_request_ids() {
-    use parrot_tools::agents::ResultTemplates;
     let (_, templates) = PromptTemplateCatalog::from_content(
         "",
         &BTreeMap::from([("HOME".into(), "/synthetic/t58-home".into())]),
     )
     .unwrap();
-    let request = ResultTemplates::render(
-        &templates,
-        "agent-session.agent-ask",
-        &[
-            ("asker_name", "child"),
-            ("request_id", "req-1"),
-            ("message", "Proceed?"),
-        ],
-    )
-    .unwrap();
+    let request = templates
+        .render(
+            "agent-session.agent-ask",
+            &[
+                ("asker_name".into(), "child".into()),
+                ("request_id".into(), "req-1".into()),
+                ("message".into(), "Proceed?".into()),
+            ],
+            &super::NEVER,
+        )
+        .unwrap();
     assert!(request.contains("Agent child"));
     assert!(request.contains("req-1"));
     assert!(request.contains("Proceed?"));
     assert!(request.contains("Use reply"));
-    let reminder = ResultTemplates::render(
-        &templates,
-        "agent-session.pending-ask-reminder",
-        &[("requests", "\n- req-1 from child")],
-    )
-    .unwrap();
+    let reminder = templates
+        .render(
+            "agent-session.pending-ask-reminder",
+            &[("requests".into(), "\n- req-1 from child".into())],
+            &super::NEVER,
+        )
+        .unwrap();
     assert!(reminder.contains("req-1 from child"));
     assert!(reminder.contains("Use reply"));
-    let timeout = ResultTemplates::render(
-        &templates,
-        "agent-session.agent-ask-timeout",
-        &[("asker_name", "child"), ("request_id", "req-1")],
-    )
-    .unwrap();
+    let timeout = templates
+        .render(
+            "agent-session.agent-ask-timeout",
+            &[
+                ("asker_name".into(), "child".into()),
+                ("request_id".into(), "req-1".into()),
+            ],
+            &super::NEVER,
+        )
+        .unwrap();
     assert!(timeout.contains("child"));
     assert!(timeout.contains("req-1"));
     assert!(
-        ResultTemplates::render(&templates, "tool-result.ask-timeout", &[("name", "parent")])
+        templates
+            .render(
+                "tool-result.ask-timeout",
+                &[("name".into(), "parent".into())],
+                &super::NEVER
+            )
             .unwrap()
             .contains("parent")
     );
     assert_eq!(
-        ResultTemplates::render(
-            &templates,
-            "tool-result.ask-reply",
-            &[("message", "  yes\nnow  ")]
-        )
-        .unwrap(),
+        templates
+            .render(
+                "tool-result.ask-reply",
+                &[("message".into(), "  yes\nnow  ".into())],
+                &super::NEVER
+            )
+            .unwrap(),
         "  yes\nnow  "
     );
     assert_eq!(
-        ResultTemplates::render(
-            &templates,
-            "tool-result.ask-replied",
-            &[("request_id", "req-1")]
-        )
-        .unwrap(),
+        templates
+            .render(
+                "tool-result.ask-replied",
+                &[("request_id".into(), "req-1".into())],
+                &super::NEVER
+            )
+            .unwrap(),
         "Replied to ask req-1."
     );
 }

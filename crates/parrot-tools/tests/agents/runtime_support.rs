@@ -570,7 +570,7 @@ impl Harness {
             ConfiguredToolDefinition::new("runtime fixture", "{}"),
             self.bridge(owner),
             self.models.clone(),
-            None,
+            super::templates(),
             allow_parent,
         )
     }

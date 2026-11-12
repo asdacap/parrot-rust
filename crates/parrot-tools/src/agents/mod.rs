@@ -7,12 +7,14 @@ pub mod status;
 use std::fmt;
 use std::sync::Arc;
 
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
+use parrot_core::NeverCancelled;
+use parrot_domain::contracts::async_ops::{BoxFuture, OperationError};
 use parrot_domain::contracts::runtime::AgentRuntime;
 use parrot_domain::contracts::security::InvocationContext;
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
 use parrot_foundation::config::json_string;
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
 
 use input::{SendInput, SpawnInput, WaitInput, parse_interrupt_name, parse_status_name};
 use status::{StatusFormatter, StatusSnapshot};
@@ -127,32 +129,6 @@ impl ModelSelector for parrot_provider::routing::aliases::ModelRouter {
     }
 }
 
-/// Bound prompt templates supplied by the selected session; no global catalog.
-pub trait ResultTemplates: Send + Sync {
-    fn render(&self, name: &str, arguments: &[(&str, &str)]) -> Result<String, AgentToolError>;
-}
-
-impl ResultTemplates for parrot_foundation::template_catalog::PromptTemplateCatalog {
-    fn render(&self, name: &str, arguments: &[(&str, &str)]) -> Result<String, AgentToolError> {
-        let arguments: Vec<_> = arguments
-            .iter()
-            .map(|(name, value)| {
-                (
-                    (*name).to_owned(),
-                    serde_json::Value::String((*value).to_owned()),
-                )
-            })
-            .collect();
-        parrot_foundation::template_catalog::PromptTemplateCatalog::render(
-            self,
-            name,
-            &arguments,
-            &Uncancelled,
-        )
-        .map_err(|error| AgentToolError::Service(error.to_string()))
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AgentToolKind {
     Spawn,
@@ -178,7 +154,7 @@ pub struct AgentTool<R, M> {
     definition: ConfiguredToolDefinition,
     runtime: Arc<R>,
     models: Arc<M>,
-    templates: Option<Arc<dyn ResultTemplates>>,
+    templates: Arc<PromptTemplateCatalog>,
     allow_parent: bool,
     status: StatusFormatter,
 }
@@ -188,7 +164,7 @@ impl<R, M> AgentTool<R, M> {
         definition: ConfiguredToolDefinition,
         runtime: Arc<R>,
         models: Arc<M>,
-        templates: Option<Arc<dyn ResultTemplates>>,
+        templates: Arc<PromptTemplateCatalog>,
         allow_parent: bool,
     ) -> Self {
         Self {
@@ -202,19 +178,13 @@ impl<R, M> AgentTool<R, M> {
         }
     }
     fn text(&self, text: &str) -> Result<String, AgentToolError> {
-        render(
-            self.templates.as_deref(),
-            "tool-result.text",
-            &[("value", text)],
-            || text.to_owned(),
-        )
+        render(&self.templates, "tool-result.text", &[("value", text)])
     }
     fn error(&self, message: &str) -> Result<String, AgentToolError> {
         render(
-            self.templates.as_deref(),
+            &self.templates,
             "tool-result.error",
             &[("message", message)],
-            || format!("error: {message}"),
         )
     }
 }
@@ -316,7 +286,7 @@ where
                         Ok(name) => name,
                         Err(error) => return self.error(&error.0).map_err(OperationError::Failed),
                     };
-                    self.runtime.interrupt(NamedRequest { name: name.clone() }, &Uncancelled).await
+                    self.runtime.interrupt(NamedRequest { name: name.clone() }, &NeverCancelled).await
                         .map(|()| format!("Interrupt requested for child agent '{name}'. Its stop is reported through its completion event."))
                         .and_then(|message| self.text(&message).map_err(OperationError::Failed))
                 }
@@ -359,35 +329,32 @@ where
 pub fn send_definition(
     configured: ConfiguredToolDefinition,
     allow_parent: bool,
-    templates: &dyn ResultTemplates,
+    templates: &PromptTemplateCatalog,
 ) -> Result<ConfiguredToolDefinition, AgentToolError> {
     if allow_parent {
         return Ok(configured);
     }
     Ok(ConfiguredToolDefinition {
-        description: templates.render("agent-send-tool.description-without-parent", &[])?,
+        description: render(templates, "agent-send-tool.description-without-parent", &[])?,
         parameters_json: configured.parameters_json,
     })
 }
 
 pub(super) fn render(
-    templates: Option<&dyn ResultTemplates>,
+    templates: &PromptTemplateCatalog,
     key: &str,
     arguments: &[(&str, &str)],
-    fallback: impl FnOnce() -> String,
 ) -> Result<String, AgentToolError> {
-    templates.map_or_else(
-        || Ok(fallback()),
-        |templates| templates.render(key, arguments),
-    )
-}
-
-struct Uncancelled;
-impl Cancellation for Uncancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
+    let arguments: Vec<_> = arguments
+        .iter()
+        .map(|(name, value)| {
+            (
+                (*name).to_owned(),
+                serde_json::Value::String((*value).to_owned()),
+            )
+        })
+        .collect();
+    templates
+        .render(key, &arguments, &NeverCancelled)
+        .map_err(|error| AgentToolError::Service(error.to_string()))
 }

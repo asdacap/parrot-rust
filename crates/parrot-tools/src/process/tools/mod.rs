@@ -66,7 +66,6 @@ pub struct ProcessToolServices<L: CapturedProcessLauncher<Request = CommandReque
     pub workspace: Arc<dyn ProcessWorkspace>,
     pub read_only_prefixes: Vec<String>,
     pub exec_command_yield_after: Duration,
-    pub templates: Arc<PromptTemplateCatalog>,
     pub monitor_sink: Arc<dyn MonitorSink>,
 }
 
@@ -301,9 +300,9 @@ where
                 if reminder {
                     text.push_str("\n\n");
                     text.push_str(&render(
-                        &self.services.templates,
+                        &invocation.prompt_templates,
                         "exec-command.metadata-reminder",
-                        &[("command_length", "300")],
+                        &[("command_length", &NAMED_COMMAND_LENGTH.to_string())],
                     )?);
                 }
                 Ok(ProcessToolResult {
@@ -403,7 +402,7 @@ where
                     .as_ref()
                     .map_or_else(String::new, |path| path.to_string_lossy().into_owned());
                 let text = render(
-                    &self.services.templates,
+                    &invocation.prompt_templates,
                     "monitor.started",
                     &[("name", &yielded.name), ("stderr_path", &stderr)],
                 )?;

@@ -1,5 +1,6 @@
 use super::transport::{ImageHttpRequest, ImageTransport};
 use crate::{
+    anthropic::wire_json::quote,
     http_stream::Endpoint,
     image_inspection::{ImageInspection, image_reference},
     sessions::Error,
@@ -423,31 +424,6 @@ fn decode_base64(text: &str) -> Option<Vec<u8>> {
         }
     }
     Some(result)
-}
-
-// System.Text.Json's default encoder used by ImageGenerationJsonContext.
-fn quote(value: &str) -> String {
-    let mut result = String::from("\"");
-    for character in value.chars() {
-        match character {
-            '\\' => result.push_str("\\\\"),
-            '\n' => result.push_str("\\n"),
-            '\r' => result.push_str("\\r"),
-            '\t' => result.push_str("\\t"),
-            '\u{8}' => result.push_str("\\b"),
-            '\u{c}' => result.push_str("\\f"),
-            ' '..='~' if !matches!(character, '"' | '\'' | '<' | '>' | '&' | '+' | '`') => {
-                result.push(character)
-            }
-            _ => {
-                for unit in character.encode_utf16(&mut [0; 2]) {
-                    write!(result, "\\u{unit:04X}").unwrap();
-                }
-            }
-        }
-    }
-    result.push('"');
-    result
 }
 
 struct Deadline<'a> {

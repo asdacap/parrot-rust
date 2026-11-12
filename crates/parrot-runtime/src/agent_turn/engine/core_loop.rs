@@ -103,7 +103,11 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
             Ok(turn
                 .as_ref()
                 .is_some_and(parrot_core::ConversationTurn::needs_response)
-                || states.has_pending_input().await?)
+                || states
+                    .history
+                    .has_pending_inputs()
+                    .await
+                    .map_err(TurnError::from)?)
         })
     }
 
@@ -281,7 +285,7 @@ mod tests {
             TurnError::Cancelled,
             TurnError::Service("cancelled is only message text".into()),
             TurnError::Provider(sessions::Error::Cancelled),
-            TurnError::Planning(crate::compaction::PlanningError::InputLimitExceeded),
+            TurnError::Planning(crate::compaction::PlanningError::GroupExceedsBudget),
             TurnError::ProviderCall(provider_call::ProviderCallError::Output(
                 std::io::Error::from(std::io::ErrorKind::PermissionDenied),
             )),

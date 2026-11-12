@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use parrot_domain::contracts::{
     filenames::FilenameGenerator,
-    status::{ActiveWorkObservation, ActiveWorkState, ProcessStatusSnapshot, ProcessStatusSource},
+    status::{ActiveWorkObservation, ProcessStatusSnapshot, ProcessStatusSource},
 };
 use parrot_tools::process::{
     execution::filenames::HaikunatorNameGenerator, ownership::owner::ShellProcessOwner,
@@ -24,28 +24,11 @@ impl ScopedProcessStatus {
 
 impl ProcessStatusSource for ScopedProcessStatus {
     fn active(&self) -> Vec<ActiveWorkObservation> {
-        self.owner
-            .observe_active()
-            .into_iter()
-            .map(|process| ActiveWorkObservation {
-                id: process.id,
-                name: process.name,
-                state: ActiveWorkState::Running,
-            })
-            .collect()
+        self.owner.observe_active()
     }
 
     fn snapshot(&self) -> Vec<ProcessStatusSnapshot> {
-        self.owner
-            .observe_snapshot()
-            .into_iter()
-            .map(|process| ProcessStatusSnapshot {
-                owner_session_id: process.owner_session_id,
-                process_id: process.process_id,
-                name: process.name,
-                state: ActiveWorkState::Running,
-            })
-            .collect()
+        self.owner.observe_snapshot()
     }
 }
 

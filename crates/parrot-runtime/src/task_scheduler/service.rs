@@ -4,22 +4,21 @@ mod migration;
 mod receipts;
 
 use super::{
-    ForkHistoryMode, SchedulerConfig, TaskDiagnostic, TaskRunner, TaskSession,
+    SchedulerConfig, TaskDiagnostic, TaskRunner, TaskSession,
     concurrency::{TaskAdmission, TaskConcurrencyOwner},
     has_same_definition,
     notifier::{Notification, TaskNotifier},
-    ports::{
-        CapturedSelection, RunCancellation, TaskRunProgress, TaskWorkerLease, render, state_error,
-    },
+    ports::{CapturedSelection, TaskRunProgress, TaskWorkerLease, render, state_error},
     status_name,
 };
 use crate::{
     agent_turn::{
-        lifecycle::{IncomingActivity, Signal},
+        lifecycle::{Completion, IncomingActivity, Signal},
         services::TurnSelection,
     },
     children::{
-        ChildError, ChildResult, CompletionDelivery, HistorySource, LaunchRequest, Operation, Scope,
+        ChildError, ChildResult, CompletionDelivery, HistorySource, LaunchRequest, LinkedLifetime,
+        Operation, Scope,
     },
 };
 use parrot_domain::{
@@ -73,7 +72,7 @@ struct Entry<S: RestrictableAccessSnapshot + 'static> {
     diagnostic_id: String,
     selection: CapturedSelection,
     boundary: HistoryForkBoundary,
-    fork_mode: ForkHistoryMode,
+    fork_mode: TaskForkModeSnapshot,
     execution: TaskExecution<S>,
 }
 enum TaskExecution<S: RestrictableAccessSnapshot + 'static> {
@@ -95,10 +94,10 @@ struct DedicatedExecution<S: RestrictableAccessSnapshot + 'static> {
     recovered_stop_admission: Option<TaskAdmission>,
 }
 struct Run {
-    cancellation: Arc<RunCancellation>,
+    cancellation: Arc<LinkedLifetime>,
     started: Instant,
     generation_id: String,
-    ready: Arc<Readiness>,
+    ready: Arc<Completion<ChildResult<()>>>,
 }
 struct State<S: RestrictableAccessSnapshot + 'static> {
     migration: TaskGraphMigrationSnapshot,
@@ -119,37 +118,9 @@ struct State<S: RestrictableAccessSnapshot + 'static> {
     in_flight: HashSet<String>,
     stopping: HashSet<String>,
     completion_notification: Option<NotificationCheckpoint>,
-    stop_readiness: HashMap<String, Arc<Readiness>>,
-    reservations: Vec<Arc<Readiness>>,
+    stop_readiness: HashMap<String, Arc<Completion<ChildResult<()>>>>,
+    reservations: Vec<Arc<Completion<ChildResult<()>>>>,
     accepted_calls: Vec<AcceptedTaskCall>,
-}
-#[derive(Default)]
-struct Readiness {
-    signal: Signal,
-    result: Mutex<Option<ChildResult<()>>>,
-}
-impl Readiness {
-    fn finish(&self, result: ChildResult<()>) {
-        let mut saved = self.result.lock().expect("task readiness poisoned");
-        if saved.is_none() {
-            *saved = Some(result);
-            self.signal.cancel();
-        }
-    }
-    fn is_ready(&self) -> bool {
-        self.result
-            .lock()
-            .expect("task readiness poisoned")
-            .is_some()
-    }
-    async fn wait(&self) -> ChildResult<()> {
-        self.signal.cancelled().await;
-        self.result
-            .lock()
-            .expect("task readiness poisoned")
-            .clone()
-            .expect("ready result")
-    }
 }
 #[derive(Default)]
 struct WorkerGate {
@@ -418,11 +389,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                         HistoryForkBoundary::AfterSafeHistoryPrefix
                     }
                 },
-                fork_mode: match entry.fork_mode {
-                    TaskForkModeSnapshot::Dependency => ForkHistoryMode::Dependency,
-                    TaskForkModeSnapshot::Parent => ForkHistoryMode::Parent,
-                    TaskForkModeSnapshot::Empty => ForkHistoryMode::Empty,
-                },
+                fork_mode: entry.fork_mode,
                 execution,
             });
         }
@@ -430,8 +397,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             && saved.tasks.notifications.is_empty()
             && saved.tasks.migration == TaskGraphMigrationSnapshot::Current;
         let stop = Arc::new(Signal::new());
-        let lifetime = Arc::new(RunCancellation {
-            lifetime: config.lifetime.clone(),
+        let lifetime = Arc::new(LinkedLifetime {
+            parent: config.lifetime.clone(),
             stop: stop.clone(),
         });
         let capacity_changes = config.concurrency.subscribe();
@@ -1369,13 +1336,13 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             .as_ref()
             .expect("runner checkpoint");
         let run = Arc::new(Run {
-            cancellation: Arc::new(RunCancellation {
-                lifetime: self.lifetime.clone(),
+            cancellation: Arc::new(LinkedLifetime {
+                parent: self.lifetime.clone(),
                 stop: Arc::new(Signal::new()),
             }),
             started: Instant::now(),
             generation_id: checkpoint.generation_id.clone(),
-            ready: Arc::new(Readiness::default()),
+            ready: Completion::new(),
         });
         let entry = &mut state.entries[index];
         entry.borrow_worker_mut().run = Some(run.clone());
@@ -1385,7 +1352,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 self.clone()
                     .execute(index, run.clone(), previous, admission),
             );
-        state.reservations.retain(|ready| !ready.is_ready());
+        state.reservations.retain(|ready| !ready.is_finished());
         state.reservations.push(run.ready.clone());
         let entry = &mut state.entries[index];
         entry.borrow_worker_mut().last_execution = Some(execution.clone());
@@ -1422,7 +1389,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         let task = entry.task.clone();
         let selection = entry.selection.clone();
         let boundary = entry.boundary.clone();
-        let source = if entry.fork_mode == ForkHistoryMode::Dependency {
+        let source = if entry.fork_mode == TaskForkModeSnapshot::Dependency {
             task.dependencies
                 .first()
                 .and_then(|name| find(state, name))
@@ -1455,11 +1422,13 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                     )?,
                     delivery: CompletionDelivery::RetainedOnly,
                     boundary,
-                    fork: HistoryForkSelection::parse(if fork_mode == ForkHistoryMode::Empty {
-                        ""
-                    } else {
-                        "full"
-                    }),
+                    fork: HistoryForkSelection::parse(
+                        if fork_mode == TaskForkModeSnapshot::Empty {
+                            ""
+                        } else {
+                            "full"
+                        },
+                    ),
                     history_source: source,
                 })
             })?
@@ -2075,8 +2044,8 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 TaskExecution::RetiringLegacy(_)
             );
             let scheduler = self.clone();
-            let ready = Arc::new(Readiness::default());
-            state.reservations.retain(|ready| !ready.is_ready());
+            let ready = Completion::new();
+            state.reservations.retain(|ready| !ready.is_finished());
             state.reservations.push(ready.clone());
             state
                 .stop_readiness
@@ -2550,11 +2519,7 @@ impl<S: RestrictableAccessSnapshot + 'static> Entry<S> {
                     ForkBoundarySnapshot::AfterSafeHistoryPrefix
                 }
             },
-            fork_mode: match self.fork_mode {
-                ForkHistoryMode::Dependency => TaskForkModeSnapshot::Dependency,
-                ForkHistoryMode::Parent => TaskForkModeSnapshot::Parent,
-                ForkHistoryMode::Empty => TaskForkModeSnapshot::Empty,
-            },
+            fork_mode: self.fork_mode,
             execution: match &self.execution {
                 TaskExecution::Unassigned => TaskExecutionSnapshot::Unassigned,
                 TaskExecution::Owner { generation_id } => TaskExecutionSnapshot::Owner {

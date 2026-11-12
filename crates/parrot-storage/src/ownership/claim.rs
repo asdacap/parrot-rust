@@ -1,5 +1,6 @@
 use super::runtime::{fingerprint_host, random_id};
 use super::types::*;
+use crate::history_files::json::DotNetJsonFormatter;
 use parrot_domain::values::identifiers::UserSessionId;
 use sha2::{Digest, Sha256};
 use std::{
@@ -580,63 +581,10 @@ pub fn serialize_owner(record: &OwnerRecord) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     let mut serializer = serde_json::Serializer::with_formatter(
         &mut bytes,
-        OwnerJsonFormatter(serde_json::ser::PrettyFormatter::with_indent(b"  ")),
+        DotNetJsonFormatter(serde_json::ser::PrettyFormatter::with_indent(b"  ")),
     );
     record
         .serialize(&mut serializer)
         .map_err(io::Error::other)?;
     Ok(bytes)
-}
-
-struct OwnerJsonFormatter(serde_json::ser::PrettyFormatter<'static>);
-macro_rules! owner_layout {
-    ($method:ident $(, $argument:ident: $kind:ty)*) => {
-        fn $method<W: ?Sized + io::Write>(&mut self, writer: &mut W $(, $argument: $kind)*) -> io::Result<()> {
-            self.0.$method(writer $(, $argument)*)
-        }
-    };
-}
-impl serde_json::ser::Formatter for OwnerJsonFormatter {
-    owner_layout!(begin_array);
-    owner_layout!(end_array);
-    owner_layout!(begin_array_value, first: bool);
-    owner_layout!(end_array_value);
-    owner_layout!(begin_object);
-    owner_layout!(end_object);
-    owner_layout!(begin_object_key, first: bool);
-    owner_layout!(end_object_key);
-    owner_layout!(begin_object_value);
-    owner_layout!(end_object_value);
-
-    fn write_string_fragment<W: ?Sized + io::Write>(
-        &mut self,
-        writer: &mut W,
-        fragment: &str,
-    ) -> io::Result<()> {
-        for character in fragment.chars() {
-            if (' '..='~').contains(&character)
-                && !matches!(character, '<' | '>' | '&' | '\'' | '+' | '`')
-            {
-                let mut buffer = [0; 4];
-                writer.write_all(character.encode_utf8(&mut buffer).as_bytes())?;
-            } else {
-                for unit in character.encode_utf16(&mut [0; 2]).iter() {
-                    write!(writer, "\\u{unit:04X}")?;
-                }
-            }
-        }
-        Ok(())
-    }
-    fn write_char_escape<W: ?Sized + io::Write>(
-        &mut self,
-        writer: &mut W,
-        escape: serde_json::ser::CharEscape,
-    ) -> io::Result<()> {
-        use serde_json::ser::{CharEscape, CompactFormatter};
-        match escape {
-            CharEscape::Quote => writer.write_all(b"\\u0022"),
-            CharEscape::AsciiControl(character) => write!(writer, "\\u{character:04X}"),
-            _ => CompactFormatter.write_char_escape(writer, escape),
-        }
-    }
 }

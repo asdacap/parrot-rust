@@ -43,7 +43,6 @@ mod fixture_support {
             context::{ContextSize, ContextSnapshot},
         },
     };
-    use parrot_foundation::template_catalog::PromptTemplateCatalog;
     use parrot_provider::image_generation::{ImageGenerationRequest, ImageGenerationResult};
     use parrot_storage::{
         artifacts::{ImageArtifactRepository, ImageArtifactStore},
@@ -891,10 +890,7 @@ mod fixture_support {
         }
     }
     impl Services {
-        pub fn process_services(
-            &self,
-            templates: Arc<PromptTemplateCatalog>,
-        ) -> Arc<ProcessToolServices<RejectingLauncher>> {
+        pub fn process_services(&self) -> Arc<ProcessToolServices<RejectingLauncher>> {
             let owner = Arc::new(
                 ShellProcessOwner::new(
                     "catalog-process-owner",
@@ -920,7 +916,6 @@ mod fixture_support {
                 workspace: Arc::new(self.clone()),
                 read_only_prefixes: vec!["printf".into()],
                 exec_command_yield_after: std::time::Duration::from_secs(10),
-                templates,
                 monitor_sink: Arc::new(self.clone()),
             })
         }
@@ -984,8 +979,8 @@ mod fixture_binding {
         files::WorkspacePaths,
         process::ownership::owner::ShellProcessOwner,
         web_fetch::{
-            self, FetchError, GzipDecoder, Options, Request, Resolver, Response, ResponseBody,
-            Transport, TransportSession, WebFetcher,
+            self, FetchError, Options, Request, Resolver, Response, ResponseBody, Transport,
+            TransportSession, WebFetcher,
         },
     };
 
@@ -1047,12 +1042,6 @@ mod fixture_binding {
             })
         }
     }
-    struct NoGzip;
-    impl GzipDecoder for NoGzip {
-        fn decode(&self, _: Box<dyn ResponseBody>) -> Result<Box<dyn ResponseBody>, FetchError> {
-            panic!("plain catalog fixture is not a production gzip decoder")
-        }
-    }
 
     pub struct Fixture {
         pub catalog: Catalog<Snapshot, Selection>,
@@ -1094,7 +1083,7 @@ mod fixture_binding {
             let definitions = catalog::configured_definitions(&configuration);
             let services = Services::default();
             let shared = Arc::new(services.clone());
-            let process_services = services.process_services(templates.clone());
+            let process_services = services.process_services();
             let owner = process_services.owner.clone();
             let process = catalog::ProcessFactories::new(process_services, &definitions).unwrap();
             let agents = catalog::AgentFactories::new(
@@ -1125,7 +1114,6 @@ mod fixture_binding {
                     images: shared.clone(),
                     permission: shared.clone(),
                     filesystem: shared.clone(),
-                    templates: templates.clone(),
                     agent_depth: depth,
                     interactive: true,
                 },
@@ -1146,7 +1134,6 @@ mod fixture_binding {
                 Arc::new(web_fetch::PublicAddressPolicy),
                 network.clone(),
                 network,
-                Arc::new(NoGzip),
                 Options::default(),
             ));
             let web_factory = catalog::WebFetchFactory::new(fetcher, &definitions).unwrap();

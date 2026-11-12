@@ -2,16 +2,19 @@ use super::*;
 use std::collections::VecDeque;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::PathBuf;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use parrot_domain::contracts::async_ops::Cancelled;
 
+use crate::process::execution::ProcessResult;
+
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Default)]
-struct Lifetime(AtomicBool);
+struct Lifetime(Arc<AtomicBool>);
 impl Cancellation for Lifetime {
     fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
@@ -25,21 +28,42 @@ impl Cancellation for Lifetime {
     }
 }
 
-struct Execution {
+struct ScriptedExecution {
     path: Option<PathBuf>,
-    completed: AtomicBool,
+    completed: Arc<AtomicBool>,
     elapsed: Arc<AtomicU64>,
     signals: Mutex<Vec<(u64, i32)>>,
     exit_code: i32,
     signal_error: bool,
     completion_error: bool,
 }
-impl MonitorExecution for Execution {
+impl Execution for ScriptedExecution {
     fn stdout_path(&self) -> Option<PathBuf> {
         self.path.clone()
     }
     fn is_completed(&self) -> bool {
         self.completed.load(Ordering::SeqCst)
+    }
+    fn is_pseudo_terminal(&self) -> bool {
+        unreachable!("the monitor never inspects the terminal mode")
+    }
+    fn stderr_path(&self) -> Option<PathBuf> {
+        unreachable!("the monitor never reads stderr")
+    }
+    fn read_transcript(&self, _: u64) -> io::Result<(u64, Vec<u16>)> {
+        unreachable!("the monitor reads stdout directly")
+    }
+    fn read_result(&self, _: u64) -> io::Result<(u64, ProcessResult)> {
+        unreachable!("the monitor waits for completion")
+    }
+    fn write_stdin<'a>(&'a self, _: &'a str) -> BoxFuture<'a, io::Result<()>> {
+        unreachable!("the monitor never writes stdin")
+    }
+    fn request_cancel(&self) {
+        unreachable!("the monitor signals instead of cancelling")
+    }
+    fn settle(&self) -> BoxFuture<'_, io::Result<()>> {
+        unreachable!("the owner settles the execution")
     }
     fn send_signal(&self, signal: i32) -> io::Result<()> {
         self.signals
@@ -52,13 +76,19 @@ impl MonitorExecution for Execution {
             Ok(())
         }
     }
-    fn completion(&self) -> BoxFuture<'_, io::Result<i32>> {
+    fn wait(&self) -> BoxFuture<'_, io::Result<ProcessResult>> {
         Box::pin(async move {
             assert!(self.is_completed());
             if self.completion_error {
                 Err(io::Error::other("execution failed"))
             } else {
-                Ok(self.exit_code)
+                Ok(ProcessResult {
+                    exit_code: self.exit_code,
+                    elapsed_milliseconds: 0,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    blob_path: None,
+                })
             }
         })
     }
@@ -144,7 +174,7 @@ impl MonitorSink for Sink {
 
 struct Fixture {
     directory: PathBuf,
-    execution: Execution,
+    execution: ScriptedExecution,
     lifetime: Lifetime,
     identity: MonitorIdentity,
 }
@@ -162,9 +192,9 @@ impl Fixture {
         fs::write(directory.join("stderr"), "hidden\n").unwrap();
         Self {
             directory,
-            execution: Execution {
+            execution: ScriptedExecution {
                 path: Some(path),
-                completed: AtomicBool::new(completed),
+                completed: Arc::new(AtomicBool::new(completed)),
                 elapsed: Arc::new(AtomicU64::new(0)),
                 signals: Mutex::new(Vec::new()),
                 exit_code: 3,
@@ -181,20 +211,17 @@ impl Fixture {
         }
     }
     async fn run(&self, timeout: Duration, steps: Vec<Step>, sink: &Sink) -> ShellProcessMonitor {
-        let clock = ScriptClock {
+        let clock = Arc::new(ScriptClock {
             base: Instant::now(),
-            fixture: self,
+            elapsed: Arc::clone(&self.execution.elapsed),
+            path: self.execution.path.clone(),
+            completed: Arc::clone(&self.execution.completed),
+            cancelled: Arc::clone(&self.lifetime.0),
             steps: Mutex::new(steps.into()),
-        };
-        let mut monitor = ShellProcessMonitor::new(timeout);
+        });
+        let mut monitor = ShellProcessMonitor::new(timeout, clock);
         monitor
-            .observe_with_clock(
-                &self.identity,
-                &self.execution,
-                sink,
-                &clock,
-                &self.lifetime,
-            )
+            .observe(&self.identity, &self.execution, sink, &self.lifetime)
             .await;
         monitor
     }
@@ -221,14 +248,17 @@ impl Step {
         }
     }
 }
-struct ScriptClock<'a> {
+struct ScriptClock {
     base: Instant,
-    fixture: &'a Fixture,
+    elapsed: Arc<AtomicU64>,
+    path: Option<PathBuf>,
+    completed: Arc<AtomicBool>,
+    cancelled: Arc<AtomicBool>,
     steps: Mutex<VecDeque<Step>>,
 }
-impl Clock for ScriptClock<'_> {
+impl Clock for ScriptClock {
     fn now(&self) -> Instant {
-        self.base + Duration::from_millis(self.fixture.execution.elapsed.load(Ordering::SeqCst))
+        self.base + Duration::from_millis(self.elapsed.load(Ordering::SeqCst))
     }
     fn utc_now(&self) -> SystemTime {
         SystemTime::UNIX_EPOCH
@@ -247,24 +277,18 @@ impl Clock for ScriptClock<'_> {
                 .unwrap()
                 .pop_front()
                 .expect("script ended before process completion");
-            self.fixture
-                .execution
-                .elapsed
-                .fetch_add(step.advance_ms, Ordering::SeqCst);
+            self.elapsed.fetch_add(step.advance_ms, Ordering::SeqCst);
             let mut file = OpenOptions::new()
                 .append(true)
-                .open(self.fixture.execution.path.as_ref().unwrap())
+                .open(self.path.as_ref().unwrap())
                 .unwrap();
             file.write_all(&step.append).unwrap();
             file.flush().unwrap();
             if step.complete {
-                self.fixture
-                    .execution
-                    .completed
-                    .store(true, Ordering::SeqCst);
+                self.completed.store(true, Ordering::SeqCst);
             }
             if step.cancel {
-                self.fixture.lifetime.0.store(true, Ordering::SeqCst);
+                self.cancelled.store(true, Ordering::SeqCst);
             }
             lifetime.check()
         })
@@ -291,7 +315,10 @@ fn source_take_lines_preserves_cr_and_only_trims_trailing_lf() {
 async fn actual_file_observer_flushes_completion_and_preserves_event_metadata() {
     let fixture = Fixture::new("a\nb\npartial".as_bytes(), true);
     let sink = Sink::default();
-    let mut monitor = ShellProcessMonitor::new(Duration::from_secs(60));
+    let mut monitor = ShellProcessMonitor::new(
+        Duration::from_secs(60),
+        Arc::new(parrot_foundation::clock::SystemClock),
+    );
     monitor
         .observe(
             &fixture.identity,
@@ -636,34 +663,14 @@ async fn non_pipe_execution_is_failed_not_silently_accepted() {
     assert_eq!(*fixture.execution.signals.lock().unwrap(), [(0, 9)]);
 }
 
-// This is only an adapter: process launch, concurrent drains, completion and
-// settlement are the actual T40 implementation, not a monitor-side substitute.
-struct RealExecution(crate::process::execution::ShellProcessExecution);
-impl MonitorExecution for RealExecution {
-    fn stdout_path(&self) -> Option<PathBuf> {
-        self.0.stdout_path()
-    }
-    fn is_completed(&self) -> bool {
-        self.0.is_completed()
-    }
-    fn send_signal(&self, signal: i32) -> io::Result<()> {
-        self.0.send_signal(signal)
-    }
-    fn completion(&self) -> BoxFuture<'_, io::Result<i32>> {
-        Box::pin(async move { self.0.wait().await.map(|result| result.exit_code) })
-    }
-}
-
-fn real_pipe(fixture: &Fixture, command: &str) -> RealExecution {
+fn real_pipe(fixture: &Fixture, command: &str) -> crate::process::execution::ShellProcessExecution {
     let mut spec = crate::process::execution::LaunchSpec::new("/bin/sh");
     spec.args = vec!["-c".into(), command.into()];
-    RealExecution(
-        crate::process::execution::ShellProcessExecution::start_pipe(
-            &spec,
-            fixture.directory.join("blobs"),
-        )
-        .unwrap(),
+    crate::process::execution::ShellProcessExecution::start_pipe(
+        &spec,
+        fixture.directory.join("blobs"),
     )
+    .unwrap()
 }
 
 #[tokio::test]
@@ -674,14 +681,17 @@ async fn real_t40_stdout_batches_exclude_stderr_and_report_actual_exit() {
         "printf 'a\\nb\\n'; sleep 1; echo c; echo hidden >&2; exit 3",
     );
     let sink = Sink::default();
-    let mut monitor = ShellProcessMonitor::new(Duration::from_millis(300_000));
+    let mut monitor = ShellProcessMonitor::new(
+        Duration::from_millis(300_000),
+        Arc::new(parrot_foundation::clock::SystemClock),
+    );
     tokio::time::timeout(
         Duration::from_secs(10),
         monitor.observe(&fixture.identity, &execution, &sink, &fixture.lifetime),
     )
     .await
     .unwrap();
-    let result = execution.0.wait().await.unwrap();
+    let result = execution.wait().await.unwrap();
     assert_eq!(result.exit_code, 3);
     assert_eq!(result.stdout, "a\nb\nc\n");
     assert_eq!(result.stderr, "hidden\n");
@@ -700,7 +710,7 @@ async fn real_t40_stdout_batches_exclude_stderr_and_report_actual_exit() {
             .unwrap(),
         "Monitor watch (ticks) exited with code 3. Events delivered: 3."
     );
-    execution.0.settle().await.unwrap();
+    execution.settle().await.unwrap();
 }
 
 #[tokio::test]
@@ -709,7 +719,10 @@ async fn real_t40_timeout_signals_and_joins_the_actual_process() {
     fixture.identity.description = "idle".into();
     let execution = real_pipe(&fixture, "while true; do sleep 0.1; done");
     let sink = Sink::default();
-    let mut monitor = ShellProcessMonitor::new(Duration::from_millis(1000));
+    let mut monitor = ShellProcessMonitor::new(
+        Duration::from_millis(1000),
+        Arc::new(parrot_foundation::clock::SystemClock),
+    );
     tokio::time::timeout(
         Duration::from_secs(10),
         monitor.observe(&fixture.identity, &execution, &sink, &fixture.lifetime),
@@ -720,14 +733,14 @@ async fn real_t40_timeout_signals_and_joins_the_actual_process() {
     assert_eq!(monitor.report.events, 0);
     assert_eq!(monitor.report.exit_code, "143");
     assert!(sink.events.lock().unwrap().is_empty());
-    assert!(execution.0.is_completed());
+    assert!(execution.is_completed());
     assert_eq!(monitor.report.timeout_ms, "1000");
     assert_eq!(
         sink.render_completion(&fixture.identity, monitor.report())
             .unwrap(),
         "Monitor watch (idle) reached its 1000ms timeout and was stopped; start it again if you still need the watch. Events delivered: 0."
     );
-    execution.0.settle().await.unwrap();
+    execution.settle().await.unwrap();
 }
 
 #[tokio::test]
@@ -736,7 +749,10 @@ async fn real_t40_flood_batch_is_suppressed_and_actual_process_is_stopped() {
     fixture.identity.description = "flood".into();
     let execution = real_pipe(&fixture, "seq 1 500; while true; do sleep 0.1; done");
     let sink = Sink::default();
-    let mut monitor = ShellProcessMonitor::new(Duration::from_millis(300_000));
+    let mut monitor = ShellProcessMonitor::new(
+        Duration::from_millis(300_000),
+        Arc::new(parrot_foundation::clock::SystemClock),
+    );
     tokio::time::timeout(
         Duration::from_secs(10),
         monitor.observe(&fixture.identity, &execution, &sink, &fixture.lifetime),
@@ -747,7 +763,7 @@ async fn real_t40_flood_batch_is_suppressed_and_actual_process_is_stopped() {
     assert_eq!(monitor.report.events, 0);
     assert_eq!(monitor.report.exit_code, "143");
     assert!(sink.events.lock().unwrap().is_empty());
-    let result = execution.0.wait().await.unwrap();
+    let result = execution.wait().await.unwrap();
     assert_eq!(result.stdout.lines().count(), 500);
     assert_eq!(monitor.report.timeout_ms, "300000");
     assert_eq!(
@@ -755,7 +771,7 @@ async fn real_t40_flood_batch_is_suppressed_and_actual_process_is_stopped() {
             .unwrap(),
         "Monitor watch (flood) produced too many events and was stopped; start it again with a tighter filter. Events delivered: 0."
     );
-    execution.0.settle().await.unwrap();
+    execution.settle().await.unwrap();
 }
 
 #[tokio::test]
@@ -764,14 +780,17 @@ async fn real_t40_external_interrupt_keeps_monitor_reason_exited() {
     fixture.identity.description = "ready".into();
     let execution = real_pipe(&fixture, "echo ready; while true; do sleep 0.1; done");
     let sink = Sink::default();
-    let mut monitor = ShellProcessMonitor::new(Duration::from_millis(300_000));
+    let mut monitor = ShellProcessMonitor::new(
+        Duration::from_millis(300_000),
+        Arc::new(parrot_foundation::clock::SystemClock),
+    );
     tokio::time::timeout(Duration::from_secs(10), async {
         let observe = monitor.observe(&fixture.identity, &execution, &sink, &fixture.lifetime);
         let interrupt = async {
             while sink.events.lock().unwrap().is_empty() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            execution.0.send_signal(15).unwrap();
+            execution.send_signal(15).unwrap();
         };
         tokio::join!(observe, interrupt);
     })
@@ -790,5 +809,5 @@ async fn real_t40_external_interrupt_keeps_monitor_reason_exited() {
             .unwrap(),
         "Monitor watch (ready) exited with code 143. Events delivered: 1."
     );
-    execution.0.settle().await.unwrap();
+    execution.settle().await.unwrap();
 }

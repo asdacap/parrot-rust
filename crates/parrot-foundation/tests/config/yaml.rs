@@ -1,6 +1,6 @@
 use parrot_foundation::config::node::{Kind, Node, Style};
 use parrot_foundation::config::yaml::{
-    compose, merge, parse_documents, parse_root, serialize, validate_replace_tags,
+    compose, compose_with_end, merge, parse_documents, parse_root, serialize, validate_replace_tags,
 };
 
 fn scalar_values(node: &Node) -> Vec<String> {
@@ -133,23 +133,19 @@ fn compose_combines_only_disjoint_leaves_and_preserves_resource_order() {
     let sources = [
         (
             "prompts",
-            Some(
-                "system_prompts: {base: first}\nprompt_templates: {ordinary: {template: '{name}'}}",
-            ),
+            "system_prompts: {base: first}\nprompt_templates: {ordinary: {template: '{name}'}}",
         ),
         (
             "tasks",
-            Some("system_prompts: {tasks: second}\ntools: {task: {description: task}}"),
+            "system_prompts: {tasks: second}\ntools: {task: {description: task}}",
         ),
         (
             "runtime",
-            Some(
-                "empty: {}\ntools: {sample: {parameters: {type: object}}}\nordered: [third, first, second]",
-            ),
+            "empty: {}\ntools: {sample: {parameters: {type: object}}}\nordered: [third, first, second]",
         ),
     ];
-    let text = compose(&sources).unwrap();
-    assert_eq!(text, compose(&sources).unwrap());
+    let text = compose_with_end(&compose(&sources).unwrap());
+    assert_eq!(text, compose_with_end(&compose(&sources).unwrap()));
     assert!(text.ends_with("...\n"));
     let root = parse_root(&text).unwrap();
     assert_eq!(root.as_mapping().unwrap().len(), 5);
@@ -199,7 +195,7 @@ fn compose_combines_only_disjoint_leaves_and_preserves_resource_order() {
         ("arbitrary: scalar", "arbitrary: {}", "arbitrary"),
     ] {
         assert_eq!(
-            compose(&[("first.yaml", Some(first)), ("second.yaml", Some(second))])
+            compose(&[("first.yaml", first), ("second.yaml", second)])
                 .unwrap_err()
                 .to_string(),
             format!(
@@ -211,18 +207,17 @@ fn compose_combines_only_disjoint_leaves_and_preserves_resource_order() {
 
 #[test]
 fn compose_recursively_merges_arbitrary_mappings_in_resource_order() {
-    let text = compose(&[
+    let root = compose(&[
         (
             "first.yaml",
-            Some("arbitrary: {nested: {first: one}, empty: {}}\nprofiles: {first: {prompt: initial}}"),
+            "arbitrary: {nested: {first: one}, empty: {}}\nprofiles: {first: {prompt: initial}}",
         ),
         (
             "second.yaml",
-            Some("arbitrary: {nested: {second: [two, three]}, empty: {child: value}}\nprofiles: {first: {usage: later}, second: {prompt: another}}"),
+            "arbitrary: {nested: {second: [two, three]}, empty: {child: value}}\nprofiles: {first: {usage: later}, second: {prompt: another}}",
         ),
     ])
     .unwrap();
-    let root = parse_root(&text).unwrap();
     assert_eq!(
         scalar_values(&root),
         [
@@ -251,17 +246,19 @@ fn compose_recursively_merges_arbitrary_mappings_in_resource_order() {
 
 #[test]
 fn compose_merges_disjoint_section_fields_and_duplicate_empty_mappings() {
-    let text = compose(&[
-        (
-            "first.yaml",
-            Some("prompt_templates: {shared: {template: first}, empty: {}}\ntools: {empty: {}}"),
-        ),
-        (
-            "second.yaml",
-            Some("prompt_templates: {shared: {allowed_arguments: []}, empty: {}}\ntools: {empty: {}}"),
-        ),
-    ])
-    .unwrap();
+    let text = compose_with_end(
+        &compose(&[
+            (
+                "first.yaml",
+                "prompt_templates: {shared: {template: first}, empty: {}}\ntools: {empty: {}}",
+            ),
+            (
+                "second.yaml",
+                "prompt_templates: {shared: {allowed_arguments: []}, empty: {}}\ntools: {empty: {}}",
+            ),
+        ])
+        .unwrap(),
+    );
     assert_eq!(
         text,
         "prompt_templates: {shared: {template: first, allowed_arguments: []}, empty: {}}\ntools: {empty: {}}\n...\n"
@@ -273,7 +270,7 @@ fn compose_leaves_section_schema_validation_to_configuration() {
     for section in ["prompt_templates", "system_prompts", "tools"] {
         let content = format!("{section}: []");
         assert_eq!(
-            compose(&[("source.yaml", Some(&content))]).unwrap(),
+            compose_with_end(&compose(&[("source.yaml", &content)]).unwrap()),
             format!("{content}\n...\n")
         );
     }
@@ -305,16 +302,12 @@ fn compose_invalid_sources_report_resource_and_reason() {
         ),
     ] {
         assert_eq!(
-            compose(&[("invalid.yaml", Some(content))])
+            compose(&[("invalid.yaml", content)])
                 .unwrap_err()
                 .to_string(),
             format!("invalid.yaml: {reason}")
         );
     }
-    assert_eq!(
-        compose(&[("missing.yaml", None)]).unwrap_err().to_string(),
-        "predefined configuration resource \"missing.yaml\" was not embedded in this build"
-    );
 }
 
 #[test]

@@ -208,10 +208,14 @@ async fn live_stream_requests_no_replay_and_never_enters_it() {
         false,
     )
     .await;
-    let mut stream =
-        PreparedSessionStream::open_live(fixture.client(), "selected", Arc::new(Signal::new()))
-            .await
-            .unwrap();
+    let mut stream = PreparedSessionStream::open_live(
+        fixture.client(),
+        "selected",
+        Arc::new(Signal::new()),
+        &Signal::new(),
+    )
+    .await
+    .unwrap();
     assert!(!stream.replay_context().lock().unwrap().is_replaying());
     assert_eq!(stream.next().await.unwrap().unwrap().id, "live");
     assert!(!stream.replay_context().lock().unwrap().is_replaying());
@@ -258,7 +262,6 @@ async fn lifetime_cancellation_closes_buffered_stream_and_actual_pending_read() 
     .unwrap();
     lifetime.cancel();
     assert!(stream.next().await.is_none());
-    assert!(stream.cancellation().is_cancelled());
     stream.close();
     fixture.close().await;
 }

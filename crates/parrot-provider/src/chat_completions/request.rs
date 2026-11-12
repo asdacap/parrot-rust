@@ -1,4 +1,4 @@
-use crate::wire::encode_base64;
+use crate::image_inspection::image_reference;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 
@@ -181,7 +181,12 @@ fn write_message(
                 body.push('}');
             } else {
                 body.push_str("{\"type\":\"image_url\",\"image_url\":{\"url\":");
-                quoted(body, &image_reference(part)?)?;
+                quoted(
+                    body,
+                    &image_reference(Some(part.image_url()), part.media_type(), || {
+                        part.read_image()
+                    })?,
+                )?;
                 body.push_str("}}");
             }
         }
@@ -264,16 +269,6 @@ fn role_name(role: MessageRole) -> &'static str {
         MessageRole::Tool => "tool",
         MessageRole::User => "user",
     }
-}
-fn image_reference(content: &impl ContentView) -> Result<String, RequestError> {
-    if !content.image_url().is_empty() {
-        return Ok(content.image_url().to_owned());
-    }
-    Ok(format!(
-        "data:{};base64,{}",
-        content.media_type(),
-        encode_base64(&content.read_image()?)
-    ))
 }
 fn wrap_system_update(text: &str) -> String {
     let escaped = text

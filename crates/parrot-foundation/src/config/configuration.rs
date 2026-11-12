@@ -33,23 +33,15 @@ const RESOURCES: [(&str, &str); 4] = [
     ),
 ];
 
-pub fn source_predefined_content() -> Result<String> {
-    yaml::compose(
-        &RESOURCES
-            .iter()
-            .map(|(name, text)| (*name, Some(*text)))
-            .collect::<Vec<_>>(),
-    )
+pub fn source_predefined_content() -> Result<Node> {
+    yaml::compose(&RESOURCES)
 }
 
-pub fn predefined_content() -> Result<String> {
-    let mut sources: Vec<_> = RESOURCES
-        .iter()
-        .map(|(name, text)| (*name, Some(*text)))
-        .collect();
+pub fn predefined_content() -> Result<Node> {
+    let mut sources = RESOURCES.to_vec();
     sources.push((
         "approved/parrotrust.yaml",
-        Some("legacy_path_read_fallback: true\n"),
+        "legacy_path_read_fallback: true\n",
     ));
     yaml::compose(&sources)
 }
@@ -89,7 +81,7 @@ impl Configuration {
     {
         let user_root = yaml::parse_root(content)?;
         yaml::validate_replace_tags(&user_root)?;
-        let mut root = yaml::parse_root(&predefined_content()?)?;
+        let mut root = predefined_content()?;
         yaml::merge(&mut root, &user_root)?;
         // Source validates profiles before constructing the template catalog and settings.
         runtime::validate_profiles(&root, environment)?;
@@ -332,7 +324,7 @@ impl Configuration {
     }
 
     pub fn reload_model_configuration(&self) -> Result<ModelConfigurationSnapshot> {
-        let mut root = yaml::parse_root(&predefined_content()?)?;
+        let mut root = predefined_content()?;
         let user = self.user_root()?;
         yaml::validate_replace_tags(&user)?;
         yaml::merge(&mut root, &user)?;
@@ -511,7 +503,7 @@ fn write_predefined(path: &Path) -> Result<()> {
             std::process::id(),
             NEXT_TEMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
-        std::fs::write(&temporary, predefined_content()?)?;
+        std::fs::write(&temporary, yaml::compose_with_end(&predefined_content()?))?;
         std::fs::rename(temporary, path)?;
         Ok(())
     };

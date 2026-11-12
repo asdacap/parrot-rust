@@ -429,15 +429,10 @@ struct SessionContext {
     workspace: ProjectWorkspace,
 }
 
-struct AgentState {
-    raw_policy: ProductionPolicy,
-    approvals: Vec<ProductionWriteTarget>,
-}
-
 #[derive(Default)]
 struct MaterializerState {
     sessions: Vec<SessionContext>,
-    agents: HashMap<PathBuf, AgentState>,
+    agents: HashMap<PathBuf, Vec<ProductionWriteTarget>>,
 }
 
 #[derive(Default)]
@@ -530,15 +525,14 @@ impl ProductionPolicyMaterializer {
                 "The current security policy belongs to a different agent.",
             ));
         }
-        let agent = state
+        let retained_approvals = state
             .agents
             .get(scratch.root())
             .ok_or_else(|| denied("The agent policy has not been materialized."))?;
         for target in targets {
             target.validate()?;
         }
-        let mut approvals = agent
-            .approvals
+        let mut approvals = retained_approvals
             .iter()
             .filter(|target| target.validate().is_ok())
             .cloned()
@@ -550,13 +544,7 @@ impl ProductionPolicyMaterializer {
             }
         }
         let snapshot = Arc::new(raw.for_agent(&workspace, &root, scratch, approvals.clone())?);
-        state.agents.insert(
-            scratch.root().to_path_buf(),
-            AgentState {
-                raw_policy: raw,
-                approvals,
-            },
-        );
+        state.agents.insert(scratch.root().to_path_buf(), approvals);
         Ok(snapshot)
     }
 }
@@ -574,16 +562,12 @@ impl RetainedModePolicyMaterializer<ProductionPolicy> for ProductionPolicyMateri
                 .map_err(|_| denied("Policy materializer is unavailable."))?;
             let (workspace, root, raw) =
                 Self::resolve_for_agent(&state, raw_profile, selected_scratch)?;
-            let agent = state
+            let approvals = state
                 .agents
                 .entry(selected_scratch.root().to_path_buf())
-                .or_insert_with(|| AgentState {
-                    raw_policy: raw.clone(),
-                    approvals: Vec::new(),
-                });
-            agent.raw_policy = raw.clone();
-            agent.approvals.retain(|target| target.validate().is_ok());
-            raw.for_agent(&workspace, &root, selected_scratch, agent.approvals.clone())
+                .or_default();
+            approvals.retain(|target| target.validate().is_ok());
+            raw.for_agent(&workspace, &root, selected_scratch, approvals.clone())
         };
         capture()
             .map(Arc::new)

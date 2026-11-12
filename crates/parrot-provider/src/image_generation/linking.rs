@@ -9,6 +9,7 @@ use crate::{
         retry::{Failure, is_context_length_exceeded, is_engine_overloaded, is_usage_limit},
     },
 };
+use parrot_core::NeverCancelled;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::{
     collections::{HashMap, HashSet},
@@ -126,15 +127,6 @@ impl Session for LinkSession {
         self.inner.close()
     }
 }
-struct Never;
-impl Cancellation for Never {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
 impl State {
     fn upload(&self, path: &str, media_type: &str) -> Upload {
         let mut links = self.links.lock().unwrap();
@@ -147,12 +139,12 @@ impl State {
         let path = path.to_owned();
         let media_type = media_type.to_owned();
         let mut work: BoxFuture<'static, Result<String, Error>> = Box::pin(async move {
-            bucket.prepare(&Never).await?;
+            bucket.prepare(&NeverCancelled).await?;
             let bytes = tokio::task::spawn_blocking(move || std::fs::read(path))
                 .await
                 .map_err(|e| Error::Io(e.to_string()))?
                 .map_err(|e| Error::Io(e.to_string()))?;
-            bucket.put_image(bytes, media_type, &Never).await
+            bucket.put_image(bytes, media_type, &NeverCancelled).await
         });
         match work
             .as_mut()

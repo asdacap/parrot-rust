@@ -15,7 +15,7 @@ pub use request::WebSocketRequest;
 pub use session::{HeaderSource, HttpEvents, HttpFallback, Session, SessionCall, SessionEvent};
 pub use socket::{
     ConnectedSocket, Connector, FrameKind, Headers, ReceivedFrame, Socket, SocketState,
-    WebSocketClient, has_authority,
+    WebSocketClient,
 };
 pub use transport::{
     DEFAULT_IDLE_TIMEOUT, Exchange, ExchangeStats, FRAME_BYTES, MAXIMUM_MESSAGE_BYTES, REUSE_LIMIT,

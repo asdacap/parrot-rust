@@ -43,16 +43,6 @@ async fn cached_host_is_reauthorized_before_every_redirect() {
     assert_eq!(transport.sent.lock().unwrap().len(), 1);
 }
 
-struct FailingDecoder;
-impl GzipDecoder for FailingDecoder {
-    fn decode(&self, _: Box<dyn ResponseBody>) -> Result<Box<dyn ResponseBody>, FetchError> {
-        Err(FetchError::Io(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "decoder fixture failure",
-        )))
-    }
-}
-
 #[tokio::test]
 async fn decoder_failure_propagates_as_io_not_a_web_tool_error() {
     let transport = Arc::new(ScriptedTransport::new(vec![response(
@@ -60,13 +50,12 @@ async fn decoder_failure_propagates_as_io_not_a_web_tool_error() {
         None,
         Some("text/plain"),
         &["gzip"],
-        b"fixture",
+        b"this is not a gzip stream",
     )]));
     let fetcher = Arc::new(WebFetcher::new(
         Arc::new(PrivateAddressPolicy),
         Arc::new(FixedResolver::default()),
         transport,
-        Arc::new(FailingDecoder),
         options(),
     ));
     let tool = WebFetchTool::<NoFilesystemAccess, ()>::new(
@@ -87,39 +76,32 @@ async fn decoder_failure_propagates_as_io_not_a_web_tool_error() {
     );
 }
 
-struct PendingDecodedBody(Arc<AtomicBool>);
-impl Drop for PendingDecodedBody {
+struct PendingCompressedBody(Arc<AtomicBool>);
+impl Drop for PendingCompressedBody {
     fn drop(&mut self) {
         self.0.store(true, Ordering::SeqCst);
     }
 }
-impl ResponseBody for PendingDecodedBody {
+impl ResponseBody for PendingCompressedBody {
     fn read<'a>(&'a mut self, _: &'a mut [u8]) -> BoxFuture<'a, Result<usize, FetchError>> {
         Box::pin(std::future::pending())
-    }
-}
-struct PendingDecoder(Arc<AtomicBool>);
-impl GzipDecoder for PendingDecoder {
-    fn decode(&self, _: Box<dyn ResponseBody>) -> Result<Box<dyn ResponseBody>, FetchError> {
-        Ok(Box::new(PendingDecodedBody(self.0.clone())))
     }
 }
 
 #[tokio::test]
 async fn cancellation_while_waiting_for_decoded_bytes_drops_owned_response() {
     let dropped = Arc::new(AtomicBool::new(false));
-    let transport = Arc::new(ScriptedTransport::new(vec![response(
-        200,
-        None,
-        Some("text/plain"),
-        &["gzip"],
-        b"fixture",
-    )]));
+    let transport = Arc::new(ScriptedTransport::new(vec![Response {
+        status_code: 200,
+        location: None,
+        content_type: Some("text/plain".to_owned()),
+        content_encodings: vec!["gzip".to_owned()],
+        body: Box::new(PendingCompressedBody(dropped.clone())),
+    }]));
     let fetcher = WebFetcher::new(
         Arc::new(PrivateAddressPolicy),
         Arc::new(FixedResolver::default()),
         transport,
-        Arc::new(PendingDecoder(dropped.clone())),
         options(),
     );
     let cancellation = CancelSignal::default();

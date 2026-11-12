@@ -131,7 +131,7 @@ pub(super) fn agent_tool(
             .clone(),
         root.get_service().unwrap(),
         fixture.router.clone(),
-        Some(fixture.user().templates.clone()),
+        fixture.user().templates.clone(),
         true,
     )
 }

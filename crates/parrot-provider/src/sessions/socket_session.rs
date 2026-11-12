@@ -2,12 +2,13 @@
 use super::diagnostics::{CallTrace, RequestTrace, TraceOutcome};
 use super::{Error, Event, EventStream, Request, Session};
 use crate::responses_websocket::{self, HttpFallback, WebSocketError, WebSocketRequest};
+use crate::routing::auth::OwnedCancellation;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::sync::{
     Arc, Mutex as StdMutex, Weak,
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicU64, Ordering},
 };
-use tokio::sync::{Mutex, Notify, mpsc, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 /// The exact prepared T27 request and provider-owned HTTP fallback for one call.
 pub struct ResponsePrepared {
@@ -22,42 +23,12 @@ pub trait ResponseCallFactory: Send + Sync {
     ) -> Result<ResponsePrepared, Error>;
 }
 
-#[derive(Default)]
-struct Stop {
-    cancelled: AtomicBool,
-    notify: Notify,
-}
-impl Stop {
-    fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
-        self.notify.notify_waiters();
-    }
-}
-impl Cancellation for Stop {
-    fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            loop {
-                let notified = self.notify.notified();
-                tokio::pin!(notified);
-                notified.as_mut().enable();
-                if self.is_cancelled() {
-                    return;
-                }
-                notified.await;
-            }
-        })
-    }
-}
-
 type PullResult = Result<Option<Event>, Error>;
 struct Pull {
     reply: oneshot::Sender<PullResult>,
 }
 struct Actor {
-    stop: Stop,
+    stop: OwnedCancellation,
     pulls: mpsc::UnboundedSender<Pull>,
     task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -210,7 +181,7 @@ impl ResponseStream {
         let request = self.request.take().expect("unstarted call request");
         let (pulls, receiver) = mpsc::unbounded_channel();
         let actor = Arc::new(Actor {
-            stop: Stop::default(),
+            stop: OwnedCancellation::new(false),
             pulls,
             task: Mutex::new(None),
         });

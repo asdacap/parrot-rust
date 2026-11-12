@@ -93,11 +93,6 @@ pub trait States: Send + Sync {
     fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.get_last_turn")) })
     }
-    /// Reports whether durable input is pending without reserving, promoting,
-    /// or materializing its content.
-    fn has_pending_input(&self) -> BoxFuture<'_, Result<bool, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.has_pending_input")) })
-    }
     /// Promotes all currently pending steers, or one queued input when permitted,
     /// preserving atomic native admission and returning the promoted content explicitly.
     /// Returns commit receipts without adding messages, publishing, or preparing prompts.

@@ -103,7 +103,7 @@ where
                 // Source AppendSystemPrompt projects the prompt, but does not
                 // record this notice. Its fanout is retained, not storage replay.
                 self.history
-                    .append_system_prompt(event.clone(), feedback.message.clone())
+                    .append_system_prompt(feedback.message.clone())
                     .await?;
                 cancellation.check().map_err(|_| TurnError::Cancelled)?;
                 self.broker.publish_retained(&event);

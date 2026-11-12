@@ -97,60 +97,41 @@ pub fn read_conversation_item(
         provider_content,
     )
 }
-fn read_selected(
-    tx: &Transaction<'_>,
-    agent: &str,
-    watermark: i64,
-    tail: bool,
-) -> Result<Vec<ConversationItem>, EventError> {
-    let sql = if tail {
-        "SELECT item.sequence, item.origin, item.role, item.tool_call_id, item.final_phase, item.provider_id, item.provider_content FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.kind <> 'compaction' AND item.sequence > ?2 AND NOT EXISTS (SELECT 1 FROM conversation_item AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.compaction_status_sequence = item.sequence) ORDER BY item.sequence;"
-    } else {
-        "SELECT sequence, origin, role, tool_call_id, final_phase, provider_id, provider_content FROM conversation_item WHERE agent_session = ?1 AND kind <> 'compaction' AND sequence > ?2 ORDER BY sequence;"
-    };
-    let mut read = tx.prepare(sql)?;
-    let mut rows = read.query(params![agent, watermark])?;
-    let mut items = Vec::new();
-    while let Some(row) = rows.next()? {
-        items.push(read_message(
-            tx,
-            row.get(0)?,
-            &row.get::<_, String>(1)?,
-            &row.get::<_, String>(2)?,
-            row.get(3)?,
-            row.get(4)?,
-            ProviderContent {
-                provider_id: row.get(5)?,
-                content: row.get(6)?,
-            },
-        )?);
-    }
-    Ok(items)
-}
 pub fn read_conversation(
     tx: &Transaction<'_>,
     agent: &str,
     watermark: i64,
 ) -> Result<Vec<ConversationItem>, EventError> {
-    read_selected(tx, agent, watermark, false)
+    Ok(read_durable_tail(tx, agent, watermark, true)?
+        .into_iter()
+        .map(|history| history.item)
+        .collect())
 }
 pub fn read_compaction_tail(
     tx: &Transaction<'_>,
     agent: &str,
     watermark: i64,
 ) -> Result<Vec<ConversationItem>, EventError> {
-    read_selected(tx, agent, watermark, true)
+    Ok(read_durable_tail(tx, agent, watermark, false)?
+        .into_iter()
+        .map(|history| history.item)
+        .collect())
 }
 
-fn read_durable_tail(
+pub(super) fn read_durable_tail(
     tx: &Transaction<'_>,
     agent: &str,
     watermark: i64,
+    include_compaction_statuses: bool,
 ) -> Result<Vec<ConversationHistoryItem>, EventError> {
     let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM conversation_item AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.compaction_status_sequence = item.sequence), item.final_phase, item.provider_id, item.provider_content, item.tool_owner_sequence FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.kind <> 'compaction' AND item.sequence > ?2 ORDER BY item.sequence;")?;
     let mut rows = read.query(params![agent, watermark])?;
     let mut items = Vec::new();
     while let Some(row) = rows.next()? {
+        let is_compaction_status = row.get(4)?;
+        if is_compaction_status && !include_compaction_statuses {
+            continue;
+        }
         let sequence = row.get(0)?;
         items.push(ConversationHistoryItem {
             item: read_message(
@@ -166,7 +147,7 @@ fn read_durable_tail(
                 },
             )?,
             tool_owner_sequence: row.get(8)?,
-            is_compaction_status: row.get(4)?,
+            is_compaction_status,
         });
     }
     Ok(items)
@@ -199,7 +180,7 @@ impl ConversationRepository {
         after: i64,
     ) -> Result<Vec<ConversationHistoryItem>, EventError> {
         self.events
-            .transaction(move |tx| read_durable_tail(tx, &agent, after))
+            .transaction(move |tx| read_durable_tail(tx, &agent, after, true))
             .await
     }
 

@@ -174,10 +174,6 @@ impl LinuxBubblewrapSandbox {
         self
     }
 
-    pub fn sandbox_available(&self) -> bool {
-        self.executable.is_some()
-    }
-
     /// Pipe launch; the executor must retain its spawning OS thread until exit.
     pub fn pipe_launch(
         &self,
@@ -226,10 +222,6 @@ pub struct UnavailableProcessSandbox;
 pub struct UnsandboxedProcessSandbox;
 
 impl UnsandboxedProcessSandbox {
-    pub fn sandbox_available(&self) -> bool {
-        true
-    }
-
     pub fn pipe_launch(
         &self,
         command: &str,

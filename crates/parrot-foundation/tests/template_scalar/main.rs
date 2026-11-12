@@ -89,7 +89,7 @@ fn scalar_values_are_inserted_once_and_unicode_multiline_is_unchanged() {
 }
 
 fn merged_template_fields(user_yaml: &str, id: &str) -> Node {
-    let mut root = yaml::parse_root(&source_predefined_content().unwrap()).unwrap();
+    let mut root = source_predefined_content().unwrap();
     let user = yaml::parse_root(user_yaml).unwrap();
     yaml::merge(&mut root, &user).unwrap();
     root.get("prompt_templates")

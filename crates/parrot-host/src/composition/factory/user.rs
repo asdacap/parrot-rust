@@ -1,6 +1,7 @@
 //! User-session ownership over the retained storage lease and runtime registry.
-use super::super::protocol::{
-    self, HostedSession, HostedSessionFactory, RpcCode, RpcError, SessionEventStream,
+use super::super::{
+    agents::CallerSignal,
+    protocol::{self, HostedSession, HostedSessionFactory, RpcCode, RpcError, SessionEventStream},
 };
 use parrot_domain::{
     contracts::{
@@ -521,12 +522,6 @@ impl Cancellation for ObservationCancellation {
         Box::pin(async move {
             tokio::select! { _ = self.observer.cancelled() => {}, _ = self.lifetime.cancelled() => {} }
         })
-    }
-}
-struct CancelObservation(Arc<Signal>);
-impl Drop for CancelObservation {
-    fn drop(&mut self) {
-        self.0.cancel();
     }
 }
 
@@ -1130,7 +1125,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 observer: signal.clone(),
                 lifetime: self.services.lifetime.clone(),
             });
-            let _guard = CancelObservation(signal);
+            let _guard = CallerSignal(signal);
             let observer = self.owned_mutation(move |core| operation(core, linked));
             tokio::select! { biased; result = observer => result, _ = cancellation.cancelled() => Err(RpcError::cancelled()) }
         })
@@ -1266,7 +1261,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             .map_err(internal)?;
         Ok(())
     }
-    fn update_model(&self, model: ResolvedModelSelection) -> ConfigurationResult<()> {
+    fn update_model(&self, model: ResolvedModelSelection) -> protocol::Result<()> {
         {
             let mut main = self.main.lock().expect("user main poisoned");
             let selection = self
@@ -1276,25 +1271,13 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                     model.clone(),
                     self.materializer.as_ref(),
                 )
-                .map_err(|e| {
-                    CoordinatorError::Provider(parrot_provider::sessions::Error::InvalidOperation(
-                        e.to_string(),
-                    ))
-                })?;
+                .map_err(internal)?;
             main.session
                 .backend()
                 .update_selection(selection)
-                .map_err(|e| {
-                    CoordinatorError::Provider(parrot_provider::sessions::Error::InvalidOperation(
-                        e.to_string(),
-                    ))
-                })?;
+                .map_err(internal)?;
             main.model = model;
-            self.publish_metadata(&main.model).map_err(|e| {
-                CoordinatorError::Provider(parrot_provider::sessions::Error::InvalidOperation(
-                    e.to_string(),
-                ))
-            })
+            self.publish_metadata(&main.model)
         }
     }
     async fn publish(&self, mut event: wire::Event) -> protocol::Result<()> {
@@ -1885,7 +1868,7 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
     fn update_selection(&self, model: ResolvedModelSelection) -> ConfigurationResult<()> {
         self.core
             .mutations
-            .synchronous(|| self.core.update_model(model).map_err(internal))
+            .synchronous(|| self.core.update_model(model))
             .map_err(|error| {
                 CoordinatorError::Provider(parrot_provider::sessions::Error::InvalidOperation(
                     error.to_string(),

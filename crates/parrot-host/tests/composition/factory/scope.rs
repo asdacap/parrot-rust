@@ -106,8 +106,7 @@ use parrot_tools::{
     task_artifacts::TaskArtifactParserAdapter,
     tasks_queues::ToolInvocation,
     web_fetch::{
-        FetchError, GzipDecoder, Options, PublicAddressPolicy, Resolver, ResponseBody, Transport,
-        TransportSession, WebFetcher,
+        FetchError, Options, PublicAddressPolicy, Resolver, Transport, TransportSession, WebFetcher,
     },
 };
 use serde_json::{Value, json};
@@ -436,13 +435,6 @@ impl Transport for NoExternal {
     fn session(&self) -> Result<Box<dyn TransportSession + '_>, FetchError> {
         Err(FetchError::Io(io::Error::other(
             "synthetic fixture does not fetch",
-        )))
-    }
-}
-impl GzipDecoder for NoExternal {
-    fn decode(&self, _: Box<dyn ResponseBody>) -> Result<Box<dyn ResponseBody>, FetchError> {
-        Err(FetchError::Io(io::Error::other(
-            "synthetic fixture does not decode",
         )))
     }
 }
@@ -883,7 +875,6 @@ impl Fixture {
             }),
             web_fetcher: Arc::new(WebFetcher::new(
                 Arc::new(PublicAddressPolicy),
-                Arc::new(NoExternal),
                 Arc::new(NoExternal),
                 Arc::new(NoExternal),
                 Options::default(),

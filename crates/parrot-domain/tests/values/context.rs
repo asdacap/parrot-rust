@@ -1,6 +1,4 @@
-use parrot_domain::values::context::{
-    ContextCompactionPolicy, ContextSize, ContextSnapshot, TokenEstimator,
-};
+use parrot_domain::values::context::{ContextSize, ContextSnapshot, TokenEstimator};
 
 #[test]
 fn parses_and_round_trips_sizes() {
@@ -47,106 +45,6 @@ fn rejects_invalid_sizes() {
 }
 
 #[test]
-fn resolves_window_percentages_caps_and_legacy_defaults() {
-    for (limit, target, window, input, expected_trigger, expected_target) in [
-        (None, None, 1_000, 800, Some(720), Some(240)),
-        (Some("20%"), None, 1_000, 800, Some(200), Some(60)),
-        (Some("100k"), None, 1_000, 800, Some(800), Some(240)),
-        (Some("100"), Some("20%"), 1_000, 800, Some(100), Some(200)),
-        (Some("100"), Some("100k"), 1_000, 800, Some(100), Some(800)),
-        (Some("100"), None, 0, 800, Some(100), Some(30)),
-        (Some("20%"), None, 0, 800, None, None),
-        (None, Some("20%"), 0, 800, Some(720), None),
-        (None, None, 0, 0, None, None),
-        (
-            Some("9223372036854775807"),
-            None,
-            0,
-            0,
-            Some(i64::MAX),
-            Some(2_767_011_611_056_432_742),
-        ),
-    ] {
-        let limit = limit.map(|text| ContextSize::parse(text).unwrap());
-        let target = target.map(|text| ContextSize::parse(text).unwrap());
-        let policy = ContextCompactionPolicy::resolve(
-            limit.as_ref(),
-            target.as_ref(),
-            window,
-            input,
-            90,
-            30,
-            None,
-        );
-        assert_eq!(policy.trigger_tokens, expected_trigger);
-        assert_eq!(policy.target_tokens, expected_target);
-    }
-}
-
-#[test]
-fn output_reservation_clamps_only_the_trigger_after_resolving_targets() {
-    for (limit, target, safe_limit, trigger, expected_trigger, expected_target) in [
-        (None, None, Some(140_220), 95, Some(140_220), Some(90_000)),
-        (
-            Some("180k"),
-            None,
-            Some(140_220),
-            95,
-            Some(140_220),
-            Some(90_000),
-        ),
-        (
-            Some("100k"),
-            None,
-            Some(140_220),
-            95,
-            Some(100_000),
-            Some(50_000),
-        ),
-        (
-            Some("95%"),
-            None,
-            Some(140_220),
-            95,
-            Some(140_220),
-            Some(85_500),
-        ),
-        (
-            Some("180k"),
-            Some("160k"),
-            Some(140_220),
-            95,
-            Some(140_220),
-            Some(160_000),
-        ),
-        (None, None, Some(140_220), 50, Some(90_000), Some(90_000)),
-        (None, None, Some(0), 95, Some(0), Some(90_000)),
-        (None, None, None, 95, Some(171_000), Some(90_000)),
-    ] {
-        let limit = limit.map(|text| ContextSize::parse(text).unwrap());
-        let target = target.map(|text| ContextSize::parse(text).unwrap());
-        let policy = ContextCompactionPolicy::resolve(
-            limit.as_ref(),
-            target.as_ref(),
-            180_000,
-            180_000,
-            trigger,
-            50,
-            safe_limit,
-        );
-        assert_eq!(policy.trigger_tokens, expected_trigger);
-        assert_eq!(policy.target_tokens, expected_target);
-        let mut snapshot = ContextSnapshot::new(expected_trigger.unwrap(), 180_000, None, trigger);
-        snapshot.trigger_tokens = policy.trigger_tokens;
-        assert!(!snapshot.exceeds_trigger());
-        assert!(snapshot.exceeds_compaction_trigger(expected_trigger.unwrap() + 1));
-    }
-    let unknown = ContextCompactionPolicy::resolve(None, None, 0, 0, 95, 50, None);
-    assert_eq!(unknown.trigger_tokens, None);
-    assert_eq!(unknown.target_tokens, None);
-}
-
-#[test]
 fn counts_o200k_base_ordinary_text() {
     for (text, expected) in [
         (String::new(), 0),
@@ -179,19 +77,6 @@ fn resolves_percentages_at_window_boundaries() {
     assert_eq!(full.resolve_tokens(0), None);
     assert_eq!(full.resolve_tokens(i32::MIN), None);
     assert_eq!(ContextSize::parse("1%").unwrap().resolve_tokens(1), Some(0));
-}
-
-#[test]
-fn scales_maximum_trigger_without_intermediate_overflow() {
-    let limit = ContextSize::parse("9223372036854775807").unwrap();
-    let full = ContextCompactionPolicy::resolve(Some(&limit), None, 0, 0, 90, 100, None);
-    assert_eq!(full.trigger_tokens, Some(i64::MAX));
-    assert_eq!(full.target_tokens, Some(i64::MAX));
-    let zero = ContextCompactionPolicy::resolve(Some(&limit), None, 0, 0, 90, 0, None);
-    assert_eq!(zero.target_tokens, Some(0));
-    let legacy = ContextCompactionPolicy::resolve(None, None, 0, i32::MAX, 100, 100, None);
-    assert_eq!(legacy.trigger_tokens, Some(i64::from(i32::MAX)));
-    assert_eq!(legacy.target_tokens, Some(i64::from(i32::MAX)));
 }
 
 #[test]

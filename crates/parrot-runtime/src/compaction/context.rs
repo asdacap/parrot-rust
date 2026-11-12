@@ -7,7 +7,7 @@ use super::{
     PlanningError,
 };
 use crate::prompt_context::{PromptError, SessionPrompt};
-use parrot_core::ContextConfiguration as CoreContextConfiguration;
+use parrot_core::{ContextConfiguration as CoreContextConfiguration, NeverCancelled};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
@@ -241,7 +241,6 @@ impl ContextController {
             .compactor
             .planner()
             .capture_compaction_configuration(input.selection, target);
-        let definitions: Vec<parrot_core::ToolDefinition> = input.tools.to_vec();
         let estimates = CompactionEstimates::new(input.selection);
         let errors = NativeErrors::new();
         let templates = self.templates.clone();
@@ -284,14 +283,14 @@ impl ContextController {
                 &mut states,
                 &preparation_provider,
                 &publisher,
-                &definitions,
+                input.tools,
                 &configuration,
             )
             .await
             .map_err(|error| errors.restore(error, ContextError::from))?;
             let result = parrot_core::compaction::compact_conversation(
                 &prepared,
-                &definitions,
+                input.tools,
                 &configuration,
                 &mut states,
                 &provider,
@@ -328,7 +327,7 @@ impl ContextController {
     ) -> ContextResult<()> {
         let mut started = self.event()?;
         started.set_compaction_started(CompactionStarted::new());
-        events.emit(started, &Uncancelled).await
+        events.emit(started, &NeverCancelled).await
     }
 
     pub(crate) async fn report_epoch_finished(
@@ -337,7 +336,7 @@ impl ContextController {
     ) -> ContextResult<()> {
         let mut finished = self.event()?;
         finished.set_compaction_finished(CompactionFinished::new());
-        events.emit(finished, &Uncancelled).await
+        events.emit(finished, &NeverCancelled).await
     }
 
     pub(crate) async fn record_epoch_compaction(
@@ -361,7 +360,7 @@ impl ContextController {
             message,
             ..CompactionFailed::new()
         });
-        events.emit(failed, &Uncancelled).await
+        events.emit(failed, &NeverCancelled).await
     }
 
     pub(crate) fn borrow_blobs(
@@ -462,7 +461,7 @@ impl ContextController {
             if appended {
                 input
                     .events
-                    .publish_committed(Committed::after_commit(published), &Uncancelled)
+                    .publish_committed(Committed::after_commit(published), &NeverCancelled)
                     .await?;
             }
         }
@@ -627,9 +626,6 @@ impl From<parrot_core::Error> for ContextError {
             Some(parrot_core::ErrorDetail::Template) => {
                 Self::Prompt(PromptError::Template(error.message))
             }
-            Some(parrot_core::ErrorDetail::PromptContext) => {
-                Self::Prompt(PromptError::Context(error.message))
-            }
             None if error.kind == parrot_core::ErrorKind::Cancelled => Self::Cancelled,
             None if error.code == parrot_core::ErrorCode::InvalidOperation => {
                 Self::InvalidOperation(error.message)
@@ -688,7 +684,6 @@ impl parrot_core::States for EpochStates<'_> {
         result: Result<Option<parrot_core::FittedCompaction>, parrot_core::Error>,
     ) -> BoxFuture<'a, Result<String, parrot_core::Error>> {
         Box::pin(async move {
-            let definitions = definitions.to_vec();
             let result = result.map_err(|error| self.errors.restore(error, ContextError::from));
             self.controller
                 .lock()
@@ -696,7 +691,7 @@ impl parrot_core::States for EpochStates<'_> {
                 .record_epoch_compaction(
                     &mut EpochInput {
                         selection: self.selection,
-                        tools: &definitions,
+                        tools: definitions,
                         conversation: self.conversation,
                         agent_state: self.agent_state,
                         prompt: self.prompt,
@@ -854,15 +849,6 @@ impl CompactionObserver for ContextObserver<'_> {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), parrot_provider::sessions::Error>> {
         self.0.observe_progress(progress, cancellation)
-    }
-}
-struct Uncancelled;
-impl Cancellation for Uncancelled {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
     }
 }
 

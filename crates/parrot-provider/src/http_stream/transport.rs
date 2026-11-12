@@ -2,6 +2,7 @@ use super::{
     BoundedStream, ByteStream, Endpoint, HttpError, HttpFailure, IdleTimeoutStream,
     MAX_ERROR_BYTES, MAX_STREAM_BYTES, ProviderHttpClient, ResponseByteCounter,
 };
+use crate::anthropic::wire_json::selected_json_string;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use serde_json::value::RawValue;
 use std::{collections::BTreeMap, time::Duration};
@@ -365,17 +366,19 @@ fn extract_error(body: &str) -> Result<(String, String, String), HttpError> {
         serde_json::from_str::<BTreeMap<String, Box<RawValue>>>(value.get()).ok()
     });
     let scope = nested.as_ref().unwrap_or(&root);
-    let string = |name: &str| {
-        scope.get(name).map_or_else(
-            || Ok(String::new()),
-            |value| selected_json_string(value.get()),
-        )
+    let string = |name: &str| match scope.get(name).map(|value| value.get()) {
+        Some(value) if value.starts_with('"') => {
+            selected_json_string(value).map_err(HttpError::InvalidJsonString)
+        }
+        _ => Ok(String::new()),
     };
     // The source extracts these fields in order. Unused JSON strings are opaque;
     // only a selected string can raise the native malformed UTF-16 failure.
     let error_type = string("type")?;
     let code = match scope.get("code").map(|raw| raw.get()) {
-        Some(value) if value.starts_with('"') => selected_json_string(value)?,
+        Some(value) if value.starts_with('"') => {
+            selected_json_string(value).map_err(HttpError::InvalidJsonString)?
+        }
         Some(value)
             if value == "true"
                 || value == "false"
@@ -387,46 +390,6 @@ fn extract_error(body: &str) -> Result<(String, String, String), HttpError> {
         _ => String::new(),
     };
     Ok((error_type, code, sanitize(&string("message")?, 1024)))
-}
-
-fn selected_json_string(raw: &str) -> Result<String, HttpError> {
-    if !raw.starts_with('"') {
-        return Ok(String::new());
-    }
-    let bytes = raw.as_bytes();
-    let mut index = 1;
-    while index + 1 < bytes.len() {
-        if bytes[index] != b'\\' {
-            index += 1;
-            continue;
-        }
-        if bytes[index + 1] != b'u' {
-            index += 2;
-            continue;
-        }
-        let unit =
-            u16::from_str_radix(&raw[index + 2..index + 6], 16).expect("validated JSON escape");
-        index += 6;
-        if (0xd800..=0xdbff).contains(&unit) {
-            let low = bytes
-                .get(index..index + 2)
-                .filter(|escape| *escape == b"\\u")
-                .and_then(|_| raw.get(index + 2..index + 6))
-                .and_then(|digits| u16::from_str_radix(digits, 16).ok());
-            if !low.is_some_and(|unit| (0xdc00..=0xdfff).contains(&unit)) {
-                return Err(HttpError::InvalidJsonString(
-                    "Cannot read incomplete UTF-16 JSON text as string with missing low surrogate."
-                        .into(),
-                ));
-            }
-            index += 6;
-        } else if (0xdc00..=0xdfff).contains(&unit) {
-            return Err(HttpError::InvalidJsonString(format!(
-                "Cannot read invalid UTF-16 JSON text as string. Invalid surrogate value: '0x{unit:04X}'."
-            )));
-        }
-    }
-    Ok(serde_json::from_str(raw).expect("validated JSON string with paired surrogates"))
 }
 
 fn sanitize(value: &str, limit: usize) -> String {

@@ -215,20 +215,19 @@ pub fn read_effective_conversation_groups(
     } else {
         None
     };
-    let items =
-        reads::read_compaction_tail(tx, agent, snapshot.as_ref().map_or(0, |s| s.watermark))?;
-    let mut owners = BTreeMap::new();
-    let mut read = tx.prepare("SELECT tool_owner_sequence, sequence FROM conversation_item WHERE agent_session = ?1 AND tool_owner_sequence IS NOT NULL;")?;
-    for row in read.query_map([agent], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
-    })? {
-        let (owner, child) = row?;
-        owners.insert(child, owner);
-    }
-    let by_sequence: BTreeMap<_, _> = items.iter().map(|item| (item.sequence, item)).collect();
+    let items = reads::read_durable_tail(
+        tx,
+        agent,
+        snapshot.as_ref().map_or(0, |s| s.watermark),
+        false,
+    )?;
+    let by_sequence: BTreeMap<_, _> = items
+        .iter()
+        .map(|history| (history.item.sequence, &history.item))
+        .collect();
     let members: Vec<HistoryGroupMember> = items
         .iter()
-        .map(|item| store_group_member(item, owners.get(&item.sequence).copied()))
+        .map(|history| store_group_member(&history.item, history.tool_owner_sequence))
         .collect();
     let member_by_sequence: BTreeMap<i64, HistoryGroupMember> = members
         .iter()
@@ -281,7 +280,7 @@ fn store_group_member(
     }
 }
 
-pub fn select_safe_history_prefix(groups: &[ConversationGroup]) -> &[ConversationGroup] {
+fn select_safe_history_prefix(groups: &[ConversationGroup]) -> &[ConversationGroup] {
     let mut length = groups.iter().take_while(|group| group.is_complete).count();
     if length == groups.len() {
         return groups;

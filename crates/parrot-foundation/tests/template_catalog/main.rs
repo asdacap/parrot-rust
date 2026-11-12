@@ -522,9 +522,12 @@ fn m9_explicit_scriban_is_path_specific_manual_migration_without_rewriting_user_
     assert_eq!(std::fs::read_to_string(&path).unwrap(), new);
     assert_eq!(
         std::fs::read_to_string(&predefined).unwrap(),
-        parrot_foundation::config::configuration::predefined_content().unwrap()
+        parrot_foundation::config::yaml::compose_with_end(
+            &parrot_foundation::config::configuration::predefined_content().unwrap()
+        )
     );
-    let active = source_predefined_content().unwrap();
+    let active =
+        parrot_foundation::config::yaml::compose_with_end(&source_predefined_content().unwrap());
     assert!(active.contains("engine: minijinja"));
     assert!(!active.contains("engine: scriban"));
     std::fs::remove_dir_all(directory).unwrap();

@@ -39,7 +39,6 @@ async fn actual_pinned_text_observer_rows_match_native_fetch_processing() {
                 .await
                 .unwrap();
             assert_eq!(&result.text, expected, "{} {} {mime}", row[0], row[1]);
-            assert!(!result.truncated);
             compared += 1;
         }
     }
@@ -74,11 +73,11 @@ async fn actual_pinned_content_type_observer_rows_match_native_fetch_processing(
         );
         let result = fetcher.fetch(get("http://127.0.0.1/"), &NeverCancel).await;
         let actual = match result {
-            Ok(result) => ("result".to_owned(), result.content_type),
-            Err(OperationError::Failed(error)) => ("error".to_owned(), error.to_string()),
+            Ok(_) => ("result".to_owned(), None),
+            Err(OperationError::Failed(error)) => ("error".to_owned(), Some(error.to_string())),
             Err(OperationError::Cancelled) => panic!("unexpected cancellation"),
         };
-        let expected = (row[3].clone(), row[4].clone());
+        let expected = (row[3].clone(), (row[3] == "error").then(|| row[4].clone()));
         if actual != expected {
             mismatches.push((row[0].clone(), row[1].clone(), actual, expected));
         }

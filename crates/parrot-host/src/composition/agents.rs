@@ -478,7 +478,7 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentAskTemplates for ScopedAgentR
     }
 }
 
-struct CallerSignal(Arc<Signal>);
+pub(crate) struct CallerSignal(pub(crate) Arc<Signal>);
 impl Drop for CallerSignal {
     fn drop(&mut self) {
         self.0.cancel();

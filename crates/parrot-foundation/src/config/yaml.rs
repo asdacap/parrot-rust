@@ -400,15 +400,10 @@ fn compose_mapping(
     Ok(())
 }
 
-pub fn compose(sources: &[(&str, Option<&str>)]) -> Result<String> {
+pub fn compose(sources: &[(&str, &str)]) -> Result<Node> {
     let mut combined = Vec::new();
     let mut owners = BTreeMap::new();
     for (name, content) in sources {
-        let content = content.ok_or_else(|| {
-            ConfigError::invalid_data(format!(
-                "predefined configuration resource \"{name}\" was not embedded in this build"
-            ))
-        })?;
         let documents = parse_documents(content).map_err(|_| {
             ConfigError::invalid_data(format!("{name}: invalid predefined configuration YAML"))
         })?;
@@ -427,7 +422,7 @@ pub fn compose(sources: &[(&str, Option<&str>)]) -> Result<String> {
             &mut owners,
         )?;
     }
-    Ok(compose_with_end(&Node::mapping(combined)))
+    Ok(Node::mapping(combined))
 }
 
 fn spaces(indent: usize) -> String {

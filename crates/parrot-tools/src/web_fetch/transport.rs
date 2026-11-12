@@ -1,6 +1,6 @@
 use super::{
-    FetchError, Method, Options, Request, Resolver, Response, ResponseBody, Transport,
-    TransportSession,
+    FetchCookieStoreFactory, FetchError, Method, Options, Request, Resolver, Response,
+    ResponseBody, Transport, TransportSession,
 };
 use parrot_domain::contracts::async_ops::BoxFuture;
 use reqwest::header::{
@@ -31,25 +31,12 @@ pub trait CookieStore: Send + Sync {
     fn store_response(&self, address: &Url, set_cookie: &[String]);
 }
 
-/// Creates a fresh, unshared-across-fetches cookie container.
-pub trait CookieStoreFactory: Send + Sync {
-    fn create(&self) -> Arc<dyn CookieStore>;
-}
-
-pub struct ReqwestTransport {
-    cookies: Arc<dyn CookieStoreFactory>,
-}
-
-impl ReqwestTransport {
-    pub fn new(cookies: Arc<dyn CookieStoreFactory>) -> Self {
-        Self { cookies }
-    }
-}
+pub struct ReqwestTransport;
 
 impl Transport for ReqwestTransport {
     fn session(&self) -> Result<Box<dyn TransportSession + '_>, FetchError> {
         Ok(Box::new(ReqwestSession {
-            cookies: self.cookies.create(),
+            cookies: FetchCookieStoreFactory.create(),
         }))
     }
 }

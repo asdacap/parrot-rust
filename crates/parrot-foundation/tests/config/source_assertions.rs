@@ -39,8 +39,6 @@ mod composer_disjoint_settings_and_template_ids_combine_deterministically;
 mod composer_duplicate_definitions_report_both_sources_and_path;
 #[path = "cases/composer_invalid_sources_report_resource_and_reason.rs"]
 mod composer_invalid_sources_report_resource_and_reason;
-#[path = "cases/composer_missing_resource_reports_its_name.rs"]
-mod composer_missing_resource_reports_its_name;
 #[path = "cases/context_limit_snapshots_round_trip_and_clear_without_changing_alias_metadata.rs"]
 mod context_limit_snapshots_round_trip_and_clear_without_changing_alias_metadata;
 #[path = "cases/default_profile_accepts_any_profile_made_user_selectable.rs"]

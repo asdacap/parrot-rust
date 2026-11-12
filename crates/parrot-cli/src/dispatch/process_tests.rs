@@ -203,11 +203,11 @@ fn enhanced_terminal_color_honors_no_color_existence() {
 #[test]
 fn root_preserves_explicit_rpc_io_and_cancellation_failure_categories() {
     let status = Status::permission_denied("native detail");
-    let failure = enhanced_failure(parrot_cli::terminal_dialogs::EnhancedFailure::Rpc(status));
+    let failure = chat_failure(parrot_cli::chat_loops::ChatLoopFailure::Rpc(status));
     assert!(
         matches!(failure, DispatchError::Rpc(ref status) if status.code() == tonic::Code::PermissionDenied && status.message() == "native detail")
     );
-    let failure = basic_failure(dispatch::basic_loop::BasicFailure::Slash(
+    let failure = chat_failure(parrot_cli::chat_loops::ChatLoopFailure::Slash(
         parrot_cli::slash_sessions::SlashFailure::Rpc(Box::new(Status::cancelled(
             "remote cancelled",
         ))),

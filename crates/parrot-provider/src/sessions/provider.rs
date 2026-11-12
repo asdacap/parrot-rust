@@ -58,6 +58,17 @@ impl ImageTokenCalculator for FallbackImageTokenCalculator {
         crate::image_inspection::FALLBACK_IMAGE_TOKENS
     }
 }
+pub(crate) struct OpenAiImageTokens;
+impl ImageTokenCalculator for OpenAiImageTokens {
+    fn calculate(&self, model: &Model, content: &super::Content) -> i64 {
+        crate::image_inspection::calculate_content_tokens(
+            &model.id,
+            matches!(content, super::Content::Image { .. }),
+            content.image_width(),
+            content.image_height(),
+        )
+    }
+}
 pub type CatalogDecoder = fn(&str, &str) -> Result<Vec<Model>, CatalogError>;
 
 pub enum CatalogDecoderSelection {
@@ -165,7 +176,7 @@ struct Core {
     defaults: Vec<Model>,
     external: Vec<Model>,
     decoder: CatalogDecoderSelection,
-    image_token_calculator: Option<Arc<dyn ImageTokenCalculator>>,
+    image_token_calculator: Arc<dyn ImageTokenCalculator>,
 }
 impl Core {
     fn prepare(&self, mut request: Request) -> Request {
@@ -316,19 +327,6 @@ impl Core {
             Authentication::ApiKey { source, .. } => source.has_credential(cancellation).await,
             Authentication::OAuth(source) => source.has_credential(cancellation).await,
         }
-    }
-    fn calculate_image_tokens(&self, model: &Model, content: &super::Content) -> i64 {
-        self.image_token_calculator.as_ref().map_or_else(
-            || {
-                crate::image_inspection::calculate_content_tokens(
-                    &model.id,
-                    matches!(content, super::Content::Image { .. }),
-                    content.image_width(),
-                    content.image_height(),
-                )
-            },
-            |calculator| calculator.calculate(model, content),
-        )
     }
     fn seed_models(&self) -> Vec<Model> {
         catalogs::merge_models(None, &self.declared, &self.defaults, &self.external)
@@ -509,7 +507,7 @@ impl OpenAICompatibleProvider {
                 defaults: options.model_defaults,
                 external: options.external_models,
                 decoder: options.decoder,
-                image_token_calculator: Some(options.image_token_calculator),
+                image_token_calculator: options.image_token_calculator,
             }),
         })
     }
@@ -531,7 +529,9 @@ impl OpenAICompatibleProvider {
         ));
         Ok(provider)
     }
-    pub fn generate_image<'a>(
+}
+impl Provider for OpenAICompatibleProvider {
+    fn generate_image<'a>(
         &'a self,
         request: ImageGenerationRequest,
         cancellation: &'a dyn Cancellation,
@@ -545,29 +545,11 @@ impl OpenAICompatibleProvider {
             }),
         }
     }
-    pub async fn has_credential(&self, cancellation: &dyn Cancellation) -> Result<bool, Error> {
-        self.core.has_credential(cancellation).await
-    }
-    pub fn seed_models(&self) -> Vec<Model> {
-        self.core.seed_models()
-    }
-    pub async fn list_models(&self, cancellation: &dyn Cancellation) -> Result<Vec<Model>, Error> {
-        self.core.list_models(cancellation).await
-    }
-}
-impl Provider for OpenAICompatibleProvider {
-    fn generate_image<'a>(
-        &'a self,
-        request: ImageGenerationRequest,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<ImageGenerationResult, Error>> {
-        Self::generate_image(self, request, cancellation)
-    }
     fn has_credential<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<bool, Error>> {
-        Box::pin(Self::has_credential(self, cancellation))
+        Box::pin(self.core.has_credential(cancellation))
     }
     fn seed_models(&self) -> Vec<Model> {
         self.core.seed_models()
@@ -579,7 +561,7 @@ impl Provider for OpenAICompatibleProvider {
         Box::pin(self.core.list_models(cancellation))
     }
     fn calculate_image_tokens(&self, model: &Model, content: &super::Content) -> i64 {
-        self.core.calculate_image_tokens(model, content)
+        self.core.image_token_calculator.calculate(model, content)
     }
 
     fn id(&self) -> &str {
@@ -628,7 +610,7 @@ impl ChatGptProvider {
             defaults: options.model_defaults,
             external: options.external_models,
             decoder: CatalogDecoderSelection::Legacy(decode_chatgpt_models),
-            image_token_calculator: None,
+            image_token_calculator: Arc::new(OpenAiImageTokens),
         });
         let usage_reporter = Arc::new(ChatGptUsageReporter { core: core.clone() });
         Ok(Self {
@@ -654,7 +636,9 @@ impl ChatGptProvider {
         ));
         Ok(provider)
     }
-    pub fn generate_image<'a>(
+}
+impl Provider for ChatGptProvider {
+    fn generate_image<'a>(
         &'a self,
         request: ImageGenerationRequest,
         cancellation: &'a dyn Cancellation,
@@ -668,29 +652,11 @@ impl ChatGptProvider {
             }),
         }
     }
-    pub async fn has_credential(&self, cancellation: &dyn Cancellation) -> Result<bool, Error> {
-        self.core.has_credential(cancellation).await
-    }
-    pub fn seed_models(&self) -> Vec<Model> {
-        self.core.seed_models()
-    }
-    pub async fn list_models(&self, cancellation: &dyn Cancellation) -> Result<Vec<Model>, Error> {
-        self.core.list_models(cancellation).await
-    }
-}
-impl Provider for ChatGptProvider {
-    fn generate_image<'a>(
-        &'a self,
-        request: ImageGenerationRequest,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<ImageGenerationResult, Error>> {
-        Self::generate_image(self, request, cancellation)
-    }
     fn has_credential<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<bool, Error>> {
-        Box::pin(Self::has_credential(self, cancellation))
+        Box::pin(self.core.has_credential(cancellation))
     }
     fn seed_models(&self) -> Vec<Model> {
         self.core.seed_models()
@@ -702,7 +668,7 @@ impl Provider for ChatGptProvider {
         Box::pin(self.core.list_models(cancellation))
     }
     fn calculate_image_tokens(&self, model: &Model, content: &super::Content) -> i64 {
-        self.core.calculate_image_tokens(model, content)
+        self.core.image_token_calculator.calculate(model, content)
     }
     fn usage_reporter(&self) -> Option<Arc<dyn super::decorators::UsageReporter>> {
         Some(self.usage_reporter.clone())
@@ -839,7 +805,7 @@ fn lazy_http(
 }
 
 fn decode_chatgpt_models(provider_id: &str, body: &str) -> Result<Vec<Model>, CatalogError> {
-    use catalogs::{ModelCapabilities, ModelMetadataFields as Fields, ModelVariant};
+    use catalogs::{ModelCapabilities, ModelMetadataFields as Fields, from_efforts};
     use serde_json::value::RawValue;
     use std::collections::HashMap;
     type Object = HashMap<String, Box<RawValue>>;
@@ -916,10 +882,7 @@ fn decode_chatgpt_models(provider_id: &str, body: &str) -> Result<Vec<Model>, Ca
             tools: true,
             reasoning: !efforts.is_empty(),
             output: vec!["text".into()],
-            variants: efforts
-                .into_iter()
-                .map(|e| ModelVariant::new(&e, &e))
-                .collect(),
+            variants: from_efforts(&efforts, ""),
         };
         models.push(model);
     }
@@ -958,16 +921,13 @@ impl super::decorators::UsageReporter for ChatGptUsageReporter {
 }
 fn decode_usage(body: &str) -> Result<super::decorators::SubscriptionUsage, Error> {
     use super::decorators::{SubscriptionUsage, UsageCredits, UsageWindow};
+    use crate::routing::usage::{number, reset_text, string};
+    use chrono::{DateTime, Datelike};
     use serde_json::value::RawValue;
     use std::collections::HashMap;
     type Object = HashMap<String, Box<RawValue>>;
     fn object(raw: &str) -> Result<Object, Error> {
         serde_json::from_str(raw).map_err(|e| Error::Provider(e.to_string()))
-    }
-    fn string(value: Option<&RawValue>) -> String {
-        value
-            .and_then(|v| serde_json::from_str::<String>(v.get()).ok())
-            .unwrap_or_default()
     }
     fn window(scope: &Object, name: &str) -> Result<Option<UsageWindow>, Error> {
         let Some(raw) = scope
@@ -983,25 +943,20 @@ fn decode_usage(body: &str) -> Result<super::decorators::SubscriptionUsage, Erro
                 .and_then(|v| v.get().parse::<i64>().ok())
                 .unwrap_or(0)
         };
-        let percent = window
-            .get("used_percent")
-            .and_then(|v| {
-                v.get().parse::<f64>().ok().or_else(|| {
-                    serde_json::from_str::<String>(v.get())
-                        .ok()
-                        .and_then(|v| v.trim().parse().ok())
-                })
-            })
-            .unwrap_or(0.0);
+        let reset_at = DateTime::from_timestamp(integer("reset_at"), 0)
+            .filter(|date| (1..=9999).contains(&date.year()))
+            .ok_or_else(|| {
+                Error::Provider("usage reset_at is outside DateTimeOffset range".into())
+            })?;
         Ok(Some(UsageWindow {
-            used_percent: percent,
-            reset_at: unix_date(integer("reset_at"))?,
+            used_percent: number(&window, "used_percent"),
+            reset_at: reset_text(reset_at),
             limit_window_seconds: integer("limit_window_seconds"),
         }))
     }
     let root = object(body)?;
     let mut result = SubscriptionUsage {
-        plan_type: string(root.get("plan_type").map(Box::as_ref)),
+        plan_type: string(&root, "plan_type"),
         ..Default::default()
     };
     if let Some(raw) = root
@@ -1028,30 +983,4 @@ fn decode_usage(body: &str) -> Result<super::decorators::SubscriptionUsage, Erro
         });
     }
     Ok(result)
-}
-// Gregorian conversion of the source's DateTimeOffset.FromUnixTimeSeconds value.
-fn unix_date(seconds: i64) -> Result<String, Error> {
-    if !(-62_135_596_800..=253_402_300_799).contains(&seconds) {
-        return Err(Error::Provider(
-            "usage reset_at is outside DateTimeOffset range".into(),
-        ));
-    }
-    let days = seconds.div_euclid(86_400);
-    let time = seconds.rem_euclid(86_400);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let year = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = mp + if mp < 10 { 3 } else { -9 };
-    let year = year + i64::from(month <= 2);
-    Ok(format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}+00:00",
-        time / 3600,
-        time / 60 % 60,
-        time % 60
-    ))
 }

@@ -1,7 +1,8 @@
 //! Native gRPC projection of the transport-independent Parrot service.
 
-use crate::composition::protocol::{
-    ParrotService, RpcCode, RpcError, SessionEventStream, UploadStream,
+use crate::composition::{
+    agents::CallerSignal,
+    protocol::{ParrotService, RpcCode, RpcError, SessionEventStream, UploadStream},
 };
 use futures_core::Stream;
 use parrot_domain::{
@@ -11,11 +12,11 @@ use parrot_domain::{
         messages::parrot as wire,
     },
 };
+use parrot_runtime::agent_turn::lifecycle::Signal;
 use parrot_storage::diagnostics::{
     DiagnosticEvent, DiagnosticFailure, DiagnosticSeverity, FailureKind, FileDiagnosticLog,
 };
 use std::{pin::Pin, sync::Arc};
-use tokio::sync::watch;
 use tonic::{Request, Response, Status};
 
 /// Borrows the composition owner's service. Transport disposal never closes it.
@@ -57,41 +58,6 @@ fn handler_status(diagnostics: &FileDiagnosticLog, method: &str, error: RpcError
         diagnostics.write(&event);
     }
     status(error)
-}
-
-struct RpcCancellation(watch::Sender<bool>);
-impl Cancellation for RpcCancellation {
-    fn is_cancelled(&self) -> bool {
-        *self.0.borrow()
-    }
-
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            let mut receiver = self.0.subscribe();
-            loop {
-                if *receiver.borrow_and_update() {
-                    return;
-                }
-                if receiver.changed().await.is_err() {
-                    return;
-                }
-            }
-        })
-    }
-}
-
-/// The RPC owns cancellation observation, not work already admitted by a session.
-/// Tonic drops a handler future/response stream on disconnect or deadline expiry.
-struct Observation(Arc<RpcCancellation>);
-impl Observation {
-    fn new() -> Self {
-        Self(Arc::new(RpcCancellation(watch::channel(false).0)))
-    }
-}
-impl Drop for Observation {
-    fn drop(&mut self) {
-        self.0.0.send_replace(true);
-    }
 }
 
 fn status(error: RpcError) -> Status {
@@ -137,7 +103,7 @@ impl UploadStream for IncomingUpload {
 
 type EventStream = Pin<Box<dyn Stream<Item = Result<wire::Event, Status>> + Send + 'static>>;
 
-fn event_stream(source: Box<dyn SessionEventStream>, observation: Observation) -> EventStream {
+fn event_stream(source: Box<dyn SessionEventStream>, observation: CallerSignal) -> EventStream {
     Box::pin(futures_util::stream::unfold(
         (Some(source), observation),
         |(mut source, observation)| async move {
@@ -162,7 +128,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::ListModelsRequest>,
     ) -> Result<Response<wire::ListModelsResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .list_models(&request.into_inner(), observation.0.as_ref())
             .await
@@ -193,7 +159,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::ListProviderModelAliasDefaultsRequest>,
     ) -> Result<Response<wire::ListProviderModelAliasDefaultsResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .list_provider_model_alias_defaults(&request.into_inner(), observation.0.as_ref())
             .await
@@ -205,7 +171,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::ApplyProviderModelAliasDefaultsRequest>,
     ) -> Result<Response<wire::ApplyProviderModelAliasDefaultsResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .apply_provider_model_alias_defaults(&request.into_inner(), observation.0.as_ref())
             .await
@@ -217,7 +183,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::SetModelPresetRequest>,
     ) -> Result<Response<wire::SetModelPresetResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .set_model_preset(&request.into_inner(), observation.0.as_ref())
             .map(Response::new)
@@ -228,7 +194,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::SelectModelPresetRequest>,
     ) -> Result<Response<wire::SelectModelPresetResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .select_model_preset(&request.into_inner(), observation.0.as_ref())
             .map(Response::new)
@@ -239,7 +205,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::ListModelPresetsRequest>,
     ) -> Result<Response<wire::ListModelPresetsResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .list_model_presets(&request.into_inner(), observation.0.as_ref())
             .map(Response::new)
@@ -259,7 +225,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::ListSkillsRequest>,
     ) -> Result<Response<wire::ListSkillsResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .list_skills(&request.into_inner(), observation.0.as_ref())
             .await
@@ -271,7 +237,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::ConfigureSkillRequest>,
     ) -> Result<Response<wire::ConfigureSkillResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .configure_skill(&request.into_inner(), observation.0.as_ref())
             .await
@@ -293,7 +259,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::CreateSessionRequest>,
     ) -> Result<Response<wire::UserSession>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .create_session(&request.into_inner(), observation.0.clone())
             .await
@@ -305,7 +271,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::ResumeSessionRequest>,
     ) -> Result<Response<wire::UserSession>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .resume_session(&request.into_inner(), observation.0.clone())
             .await
@@ -317,7 +283,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::AttachSessionRequest>,
     ) -> Result<Response<wire::UserSession>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .attach_session(&request.into_inner(), observation.0.as_ref())
             .map(Response::new)
@@ -339,7 +305,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::SetGoalRequest>,
     ) -> Result<Response<wire::SetGoalResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .set_goal(&request.into_inner(), observation.0.clone())
             .await
@@ -361,7 +327,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::SendMessageRequest>,
     ) -> Result<Response<wire::SendMessageResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .send_message(&request.into_inner(), observation.0.clone())
             .await
@@ -373,7 +339,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<tonic::Streaming<wire::AttachmentUploadFrame>>,
     ) -> Result<Response<wire::AttachmentUploadResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         let mut stream = IncomingUpload {
             stream: request.into_inner(),
             failure: None,
@@ -393,7 +359,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::InterruptRequest>,
     ) -> Result<Response<wire::InterruptResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .interrupt(&request.into_inner(), observation.0.clone())
             .await
@@ -405,7 +371,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::CompactRequest>,
     ) -> Result<Response<wire::CompactResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .compact(&request.into_inner(), observation.0.clone())
             .await
@@ -417,7 +383,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::SetContextLimitRequest>,
     ) -> Result<Response<wire::SetContextLimitResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .set_context_limit(&request.into_inner(), observation.0.as_ref())
             .map(Response::new)
@@ -428,7 +394,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::SandboxEnableRequest>,
     ) -> Result<Response<wire::SandboxEnableResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .sandbox_enable(&request.into_inner(), observation.0.as_ref())
             .map(Response::new)
@@ -439,7 +405,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::SessionStatusRequest>,
     ) -> Result<Response<wire::SessionStatusResponse>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         self.service
             .session_status(&request.into_inner(), observation.0.as_ref())
             .await
@@ -505,7 +471,7 @@ impl Parrot for GrpcService {
         &self,
         request: Request<wire::ListenRequest>,
     ) -> Result<Response<Self::ListenStream>, Status> {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         let source = self
             .service
             .listen(&request.into_inner(), observation.0.clone())
@@ -522,7 +488,7 @@ mod tests {
 
     #[tokio::test]
     async fn observation_drop_cancels_retained_observer_without_lost_wakeup() {
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         let cancellation = observation.0.clone();
         let notified = cancellation.cancelled();
         drop(observation);
@@ -570,7 +536,7 @@ mod tests {
             .into(),
             dropped: dropped.clone(),
         };
-        let mut stream = event_stream(Box::new(source), Observation::new());
+        let mut stream = event_stream(Box::new(source), CallerSignal(Arc::new(Signal::new())));
         let error = stream.next().await.unwrap().unwrap_err();
         assert_eq!(error.code(), tonic::Code::Unavailable);
         assert_eq!(error.message(), "subscription failed");
@@ -604,7 +570,7 @@ mod tests {
             .into(),
             dropped: dropped.clone(),
         };
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         let cancellation = observation.0.clone();
         let mut stream = event_stream(Box::new(source), observation);
         assert_eq!(
@@ -632,7 +598,7 @@ mod tests {
                 values: Default::default(),
                 dropped: dropped.clone(),
             };
-            let observation = Observation::new();
+            let observation = CallerSignal(Arc::new(Signal::new()));
             let cancellation = observation.0.clone();
             let mut stream = event_stream(Box::new(source), observation);
             if pending_read {
@@ -678,7 +644,7 @@ mod tests {
             ),
             failure: None,
         };
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         assert_eq!(
             upload
                 .next(observation.0.as_ref())
@@ -727,7 +693,7 @@ mod tests {
             ),
             failure: None,
         };
-        let observation = Observation::new();
+        let observation = CallerSignal(Arc::new(Signal::new()));
         let error = upload.next(observation.0.as_ref()).await.unwrap_err();
         let outward = upload.failure.unwrap_or_else(|| status(error));
         assert_eq!(outward.code(), tonic::Code::DataLoss);

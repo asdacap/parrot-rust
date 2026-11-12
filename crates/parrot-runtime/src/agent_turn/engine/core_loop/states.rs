@@ -509,19 +509,6 @@ where
             Ok(Some(parrot_core::ConversationTurn { messages, result }))
         })
     }
-    fn has_pending_input(&self) -> BoxFuture<'_, Result<bool, CoreError>> {
-        adapt_operation(async move {
-            let Some(input) = self.history.peek_pending_input().await? else {
-                return Ok(false);
-            };
-            match input.delivery {
-                protocol::Delivery::DELIVERY_STEER | protocol::Delivery::DELIVERY_QUEUE => Ok(true),
-                protocol::Delivery::DELIVERY_UNSPECIFIED => Err(TurnError::Service(
-                    "pending input delivery is unspecified".into(),
-                )),
-            }
-        })
-    }
     fn promote_pending_inputs(
         &mut self,
         admission: parrot_core::InputAdmission,
@@ -529,42 +516,23 @@ where
         adapt_operation(async move {
             let agent = self.history.agent_session_id().to_owned();
             let ids = self.event_id.clone();
-            let mut promotions = self
-                .history
-                .promote_steers(move |input| {
-                    let mut event = Event {
-                        id: ids(),
-                        agent_session_id: agent.clone(),
-                        ..Event::new()
-                    };
-                    event.set_input_promoted(protocol::InputPromoted {
-                        input_id: input.id.clone(),
-                        message_id: input.message_id.clone(),
-                        ..Default::default()
-                    });
-                    Ok(event)
-                })
-                .await?;
+            let compose = move |input: &parrot_storage::events::AdmittedInput| {
+                let mut event = Event {
+                    id: ids(),
+                    agent_session_id: agent.clone(),
+                    ..Event::new()
+                };
+                event.set_input_promoted(protocol::InputPromoted {
+                    input_id: input.id.clone(),
+                    message_id: input.message_id.clone(),
+                    ..Default::default()
+                });
+                Ok(event)
+            };
+            let mut promotions = self.history.promote_steers(compose.clone()).await?;
             if promotions.is_empty() && admission == parrot_core::InputAdmission::SteersOrNextQueued
             {
-                let agent = self.history.agent_session_id().to_owned();
-                let ids = self.event_id.clone();
-                promotions = self
-                    .history
-                    .promote_next_queue(move |input| {
-                        let mut event = Event {
-                            id: ids(),
-                            agent_session_id: agent.clone(),
-                            ..Event::new()
-                        };
-                        event.set_input_promoted(protocol::InputPromoted {
-                            input_id: input.id.clone(),
-                            message_id: input.message_id.clone(),
-                            ..Default::default()
-                        });
-                        Ok(event)
-                    })
-                    .await?;
+                promotions = self.history.promote_next_queue(compose).await?;
             }
             let mut inputs = Vec::with_capacity(promotions.len());
             for promotion in promotions {
@@ -641,14 +609,9 @@ where
         result: Result<Option<parrot_core::FittedCompaction>, CoreError>,
     ) -> BoxFuture<'a, Result<String, CoreError>> {
         Box::pin(async move {
-            let definitions: Vec<sessions::Tool> = definitions.to_vec();
-
             let mut guard = self.state.lock().await;
             let state = &mut *guard;
-            let compacted = match result {
-                Ok(compacted) => compacted,
-                Err(error) => return Err(error),
-            };
+            let compacted = result?;
             let selection = self.binding.capture_selection().map_err(CoreError::from)?;
             let status = state
                 .request_status
@@ -659,7 +622,7 @@ where
                 .record_epoch_compaction(
                     &mut EpochInput {
                         selection: &selection.model,
-                        tools: &definitions,
+                        tools: definitions,
                         conversation: &mut state.conversation,
                         agent_state: &mut state.agent_state,
                         prompt: self.prompt,

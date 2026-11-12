@@ -6,6 +6,9 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Instant;
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
+use parrot_domain::contracts::status::{
+    ActiveWorkObservation, ActiveWorkState, ProcessStatusSnapshot,
+};
 use parrot_domain::values::identifiers::Identifier;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -36,26 +39,6 @@ pub struct ProcessStart {
     pub description: String,
     pub origin_tool_call_id: String,
     pub agent: ProcessAgent,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ProcessStatusState {
-    Running,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ActiveProcessObservation {
-    pub id: String,
-    pub name: String,
-    pub state: ProcessStatusState,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ProcessStatus {
-    pub owner_session_id: String,
-    pub process_id: String,
-    pub name: String,
-    pub state: ProcessStatusState,
 }
 
 #[derive(Default)]
@@ -246,31 +229,31 @@ impl ShellProcessOwner {
         process.claim()
     }
 
-    pub fn observe_active(&self) -> Vec<ActiveProcessObservation> {
+    pub fn observe_active(&self) -> Vec<ActiveWorkObservation> {
         let processes: Vec<_> = self.processes.lock().unwrap().values().cloned().collect();
         let mut active: Vec<_> = processes
             .iter()
             .filter(|process| !process.retired() && process.blocks_turn())
-            .map(|process| ActiveProcessObservation {
+            .map(|process| ActiveWorkObservation {
                 id: format!("{}/{}", self.session_id, process.name()),
                 name: process.name().into(),
-                state: ProcessStatusState::Running,
+                state: ActiveWorkState::Running,
             })
             .collect();
         active.sort_by(|left, right| ordinal(&left.id, &right.id));
         active
     }
 
-    pub fn observe_snapshot(&self) -> Vec<ProcessStatus> {
+    pub fn observe_snapshot(&self) -> Vec<ProcessStatusSnapshot> {
         let processes: Vec<_> = self.processes.lock().unwrap().values().cloned().collect();
         let mut snapshot: Vec<_> = processes
             .iter()
             .filter(|process| !process.retired())
-            .map(|process| ProcessStatus {
+            .map(|process| ProcessStatusSnapshot {
                 owner_session_id: self.session_id.clone(),
                 process_id: process.state.process_id.clone(),
                 name: process.name().into(),
-                state: ProcessStatusState::Running,
+                state: ActiveWorkState::Running,
             })
             .collect();
         snapshot.sort_by(|left, right| ordinal(&left.process_id, &right.process_id));

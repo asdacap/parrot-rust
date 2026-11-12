@@ -1,5 +1,5 @@
 use super::WebSocketError;
-use crate::responses::PreparedResponsesRequest;
+use crate::responses::{PreparedResponsesRequest, json::source_quote};
 use serde_json::value::RawValue;
 use std::collections::HashMap;
 
@@ -47,7 +47,10 @@ impl WebSocketRequest {
             }
         }
         if !previous.is_empty() {
-            fields.push(format!("\"previous_response_id\":{}", quote(previous)));
+            fields.push(format!(
+                "\"previous_response_id\":{}",
+                source_quote(previous)
+            ));
         }
         fields.push(format!(
             "\"input\":[{}]",
@@ -73,38 +76,9 @@ impl WebSocketRequest {
         if !turn.is_empty() {
             fields.push(format!(
                 "\"client_metadata\":{{\"x-codex-turn-state\":{}}}",
-                quote(turn)
+                source_quote(turn)
             ));
         }
         format!("{{{}}}", fields.join(",")).into_bytes()
     }
-}
-
-fn quote(value: &str) -> String {
-    let mut out = String::from("\"");
-    for character in value.chars() {
-        match character {
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{8}' => out.push_str("\\b"),
-            '\u{c}' => out.push_str("\\f"),
-            character
-                if character.is_ascii()
-                    && character >= ' '
-                    && !matches!(character, '"' | '<' | '>' | '&' | '\'') =>
-            {
-                out.push(character)
-            }
-            character => {
-                use std::fmt::Write;
-                for unit in character.encode_utf16(&mut [0; 2]) {
-                    write!(out, "\\u{unit:04X}").expect("String write");
-                }
-            }
-        }
-    }
-    out.push('"');
-    out
 }

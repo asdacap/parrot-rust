@@ -819,11 +819,7 @@ mod unix_fs {
         Ok(File::from(descriptor))
     }
 
-    fn bytes(
-        file: &mut File,
-        limit: Option<usize>,
-        cancellation: &dyn Cancellation,
-    ) -> Result<Vec<u8>> {
+    fn bytes(file: &mut File, cancellation: &dyn Cancellation) -> Result<Vec<u8>> {
         let mut result = Vec::new();
         let mut buffer = [0u8; 8192];
         loop {
@@ -831,12 +827,6 @@ mod unix_fs {
             let count = file.read(&mut buffer).map_err(io)?;
             if count == 0 {
                 break;
-            }
-            if limit.is_some_and(|limit| result.len().saturating_add(count) > limit) {
-                return Err(failed(
-                    FileReadErrorKind::TooLarge,
-                    "The file exceeds the permitted byte limit.",
-                ));
             }
             result.extend_from_slice(&buffer[..count]);
         }
@@ -1037,7 +1027,7 @@ mod unix_fs {
         let (physical, status) = validate(file.as_fd(), path, LinkPolicy::RejectLinks, Some(path))?;
         regular(&status)?;
         authorize_write(snapshot, path, &physical)?;
-        let bytes = bytes(&mut file, None, cancellation)?;
+        let bytes = bytes(&mut file, cancellation)?;
         validate(file.as_fd(), path, LinkPolicy::RejectLinks, Some(path))?;
         Ok(bytes)
     }

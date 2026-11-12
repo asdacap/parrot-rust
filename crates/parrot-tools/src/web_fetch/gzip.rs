@@ -1,4 +1,4 @@
-use super::{FetchError, GzipDecoder, ResponseBody};
+use super::{FetchError, ResponseBody};
 use async_compression::tokio::bufread::GzipDecoder as Decoder;
 use parrot_domain::contracts::async_ops::BoxFuture;
 use std::io;
@@ -9,8 +9,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, BufReader, ReadBuf};
 #[derive(Clone, Copy, Debug, Default)]
 pub struct GzipStreamDecoder;
 
-impl GzipDecoder for GzipStreamDecoder {
-    fn decode(
+impl GzipStreamDecoder {
+    pub fn decode(
         &self,
         compressed: Box<dyn ResponseBody>,
     ) -> Result<Box<dyn ResponseBody>, FetchError> {

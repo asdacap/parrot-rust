@@ -443,7 +443,7 @@ fn should_escape(character: char) -> bool {
         )
 }
 
-fn format_timestamp(time: SystemTime) -> String {
+pub(crate) fn format_timestamp(time: SystemTime) -> String {
     let since_epoch = time.duration_since(UNIX_EPOCH).unwrap_or_default();
     let seconds = since_epoch.as_secs() as i64;
     let days = seconds.div_euclid(86_400);

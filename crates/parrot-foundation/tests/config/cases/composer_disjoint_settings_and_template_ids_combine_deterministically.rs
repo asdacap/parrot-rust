@@ -21,25 +21,22 @@ fn source_assertions() {
     let sources = [
         (
             "prompts",
-            Some(
-                "system_prompts:\n  base: |-\n    First {literal}\n    Second line\nprompt_templates:\n  ordinary:\n    template: >-\n      Hello\n      {name}\n    allowed_arguments: [name]\n",
-            ),
+            "system_prompts:\n  base: |-\n    First {literal}\n    Second line\nprompt_templates:\n  ordinary:\n    template: >-\n      Hello\n      {name}\n    allowed_arguments: [name]\n",
         ),
         (
             "tasks",
-            Some(
-                "system_prompts:\n  agent-tasks: Task guidance\ntools:\n  task-tool:\n    description: Task tool\nagent_tasks:\n  maximum_attempts: 2\nprompt_templates:\n  agent-task.custom:\n    template: '{result}'\n",
-            ),
+            "system_prompts:\n  agent-tasks: Task guidance\ntools:\n  task-tool:\n    description: Task tool\nagent_tasks:\n  maximum_attempts: 2\nprompt_templates:\n  agent-task.custom:\n    template: '{result}'\n",
         ),
         (
             "runtime",
-            Some(
-                "empty: {}\ntools:\n  sample:\n    parameters:\n      type: object\n      properties:\n        items:\n          type: array\n          items:\n            type: string\n      required: [items]\nordered: [third, first, second]\n",
-            ),
+            "empty: {}\ntools:\n  sample:\n    parameters:\n      type: object\n      properties:\n        items:\n          type: array\n          items:\n            type: string\n      required: [items]\nordered: [third, first, second]\n",
         ),
     ];
-    let content = yaml::compose(&sources).unwrap();
-    assert_eq!(content, yaml::compose(&sources).unwrap());
+    let content = yaml::compose_with_end(&yaml::compose(&sources).unwrap());
+    assert_eq!(
+        content,
+        yaml::compose_with_end(&yaml::compose(&sources).unwrap())
+    );
     let documents = yaml::parse_documents(&content).unwrap();
     assert_eq!(documents.len(), 1);
     let root = &documents[0];

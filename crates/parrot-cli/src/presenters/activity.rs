@@ -979,10 +979,6 @@ impl RawActivityView {
         ) {
             self.flush_reasoning_row_into(&mut commits);
         }
-        if matches!(published.payload.as_ref(),Some(Payload::ToolSnapshot(snapshot)) if snapshot.kind=="queue")
-        {
-            return self.update(commits, None);
-        }
         let root_before = self.hierarchy.root_session_id().map(str::to_owned);
         self.hierarchy.observe(published);
         if root_before.as_deref() != self.hierarchy.root_session_id()

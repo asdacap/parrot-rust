@@ -17,8 +17,8 @@ use parrot_tools::{
     files::WorkspacePaths,
     process::ownership::owner::ShellProcessOwner,
     web_fetch::{
-        self, FetchError, GzipDecoder, Options, Request, Resolver, Response, ResponseBody,
-        Transport, TransportSession, WebFetcher,
+        self, FetchError, Options, Request, Resolver, Response, ResponseBody, Transport,
+        TransportSession, WebFetcher,
     },
 };
 
@@ -77,12 +77,6 @@ impl ResponseBody for BytesBody {
         })
     }
 }
-struct NoGzip;
-impl GzipDecoder for NoGzip {
-    fn decode(&self, _: Box<dyn ResponseBody>) -> Result<Box<dyn ResponseBody>, FetchError> {
-        panic!("plain catalog fixture is not a production gzip decoder")
-    }
-}
 
 pub struct Fixture {
     pub catalog: Catalog<Snapshot, Selection>,
@@ -124,7 +118,7 @@ impl Fixture {
         let definitions = catalog::configured_definitions(&configuration);
         let services = Services::default();
         let shared = Arc::new(services.clone());
-        let process_services = services.process_services(templates.clone());
+        let process_services = services.process_services();
         let owner = process_services.owner.clone();
         let process = catalog::ProcessFactories::new(process_services, &definitions).unwrap();
         let agents = catalog::AgentFactories::new(
@@ -155,7 +149,6 @@ impl Fixture {
                 images: shared.clone(),
                 permission: shared.clone(),
                 filesystem: shared.clone(),
-                templates: templates.clone(),
                 agent_depth: depth,
                 interactive: true,
             },
@@ -176,7 +169,6 @@ impl Fixture {
             Arc::new(web_fetch::PublicAddressPolicy),
             network.clone(),
             network,
-            Arc::new(NoGzip),
             Options::default(),
         ));
         let web_factory = catalog::WebFetchFactory::new(fetcher, &definitions).unwrap();

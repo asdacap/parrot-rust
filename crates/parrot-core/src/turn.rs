@@ -210,31 +210,18 @@ async fn execute_turn<M: ToolResultMetadata>(
             prepared.estimated_input_tokens,
             response.input_tokens,
         );
-        if response.finish_reason == FinishReason::Length && !response.tool_calls.is_empty() {
-            let content =
-                rendering::render_template(states, ConfigKey::TruncatedToolCallTemplate, &[])
-                    .await?;
-            states
-                .add_conversation_messages(ConversationAddition {
-                    messages: vec![Message::text(Role::System, &content)],
-                    persistence: ConversationPersistence::Append {
-                        origin: ConversationOrigin::System,
-                        event: ConversationEvent::Retry {
-                            reason: content,
-                            attempt,
-                        },
-                    },
-                })
-                .await?;
-            continue;
-        }
-        if response
-            .tool_calls
-            .iter()
-            .any(|call| serde_json::from_str::<serde_json::Value>(&call.arguments_json).is_err())
-        {
-            let content =
-                rendering::render_template(states, ConfigKey::InvalidToolCallTemplate, &[]).await?;
+        let retry_template =
+            if response.finish_reason == FinishReason::Length && !response.tool_calls.is_empty() {
+                Some(ConfigKey::TruncatedToolCallTemplate)
+            } else if response.tool_calls.iter().any(|call| {
+                serde_json::from_str::<serde_json::Value>(&call.arguments_json).is_err()
+            }) {
+                Some(ConfigKey::InvalidToolCallTemplate)
+            } else {
+                None
+            };
+        if let Some(key) = retry_template {
+            let content = rendering::render_template(states, key, &[]).await?;
             states
                 .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::text(Role::System, &content)],

@@ -95,8 +95,7 @@ fn full_load_requires_and_propagates_every_template_validator_call() {
         error.0,
         format!("{}: injected validator rejection", calls[0])
     );
-    let root =
-        yaml::parse_root(&config::configuration::source_predefined_content().unwrap()).unwrap();
+    let root = config::configuration::source_predefined_content().unwrap();
     let mut expected = BTreeMap::new();
     templates::read_templates(&root, &mut |spec| {
         expected.insert(spec.path.clone(), spec.clone());

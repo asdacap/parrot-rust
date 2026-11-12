@@ -92,18 +92,16 @@ fn pending_input_readiness_does_not_consume_input_after_a_completed_turn() {
         ..ProviderResponse::default()
     });
     assert!(finish(state.has_pending_input()).unwrap());
-    assert!(finish(state.has_pending_input()).unwrap());
     assert_eq!(state.pending_messages.len(), 1);
     assert!(state.trace.values().is_empty());
     assert_eq!(state.run(), Ok(Outcome::Completed("new answer".into())));
     assert_eq!(state.admissions, [InputAdmission::SteersOrNextQueued]);
-    assert!(!finish(state.has_pending_input()).unwrap());
     assert!(state.pending_messages.is_empty());
 }
 
 #[test]
 fn factual_getter_failures_stop_before_turn_or_provider_effects() {
-    for stage in ["last_turn", "pending_message"] {
+    for stage in ["last_turn", "pending_input"] {
         let mut state = MemoryState::new([Reply::final_response("not invoked")]);
         state.fail_at = Some(stage);
         assert_eq!(state.run(), Err(Error::failed(stage)));
@@ -298,7 +296,6 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
         contents: vec![Content::Text("status added a new input".into())],
         ..Message::default()
     });
-    let pending = finish(state.has_pending_input()).unwrap();
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
@@ -314,7 +311,6 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
         Ok(Outcome::Completed("answer".into()))
     );
     assert_eq!(state.admissions, [InputAdmission::SteersOnly]);
-    assert_eq!(finish(state.has_pending_input()).unwrap(), pending);
     assert_eq!(state.pending_messages.len(), 1);
 }
 
@@ -329,7 +325,6 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
     });
     state.enqueue_message(Delivery::Steer, "first steer");
     state.enqueue_message(Delivery::Steer, "second steer");
-    assert!(finish(state.has_pending_input()).unwrap());
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 

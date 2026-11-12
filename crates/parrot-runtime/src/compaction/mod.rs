@@ -18,6 +18,6 @@ mod planning;
 pub use parrot_core::PlanningError;
 pub use parrot_domain::values::{
     accounting::RetainedAgentBudget,
-    context::{ContextCompactionPolicy, ContextSize, ContextSnapshot, TokenEstimator},
+    context::{ContextSize, ContextSnapshot, TokenEstimator},
 };
 pub use planning::{CompactionGroup, CompactionPlanner, CompactionSettings, PlanningInput};

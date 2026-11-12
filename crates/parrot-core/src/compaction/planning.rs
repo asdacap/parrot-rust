@@ -1,17 +1,13 @@
 use crate::{
     CompactionConfiguration, CompactionGroup, CompactionHistoryGroup, CompactionInput,
-    CompactionPlan, ContextLimit, Error, ErrorCode, ErrorDetail, Message, PlanningError, Provider,
-    Role, ToolDefinition,
+    CompactionPlan, ContextLimit, Error, ErrorCode, ErrorDetail, Message, PlanningError, Role,
+    ToolDefinition,
 };
 use std::fmt;
 
 impl fmt::Display for PlanningError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::InputLimitExceeded => "The conversation exceeds the selected model input limit.",
-            Self::NoOutputCapacity => {
-                "The conversation leaves no output capacity in the selected model context window."
-            }
             Self::NoCompactionCapacity => {
                 "The selected model leaves no room for a compaction request."
             }
@@ -169,24 +165,6 @@ impl CompactionPlan {
             model: configuration.model.clone(),
             reasoning: configuration.reasoning.clone(),
         }))
-    }
-
-    pub fn select_spill_groups(&self, provider: &dyn Provider) -> Result<Vec<usize>, Error> {
-        let mut spill_groups = Vec::new();
-        for (index, group) in self.groups[..self.keep_group_from].iter().enumerate() {
-            if provider.estimate_input_tokens(
-                "",
-                &[],
-                &self.compose_summary_messages("", &group.messages),
-            )? > self.input_budget
-            {
-                if !group.can_spill() {
-                    return Err(PlanningError::GroupExceedsBudget.into());
-                }
-                spill_groups.push(index);
-            }
-        }
-        Ok(spill_groups)
     }
 }
 

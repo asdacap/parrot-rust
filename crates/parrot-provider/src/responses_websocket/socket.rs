@@ -4,34 +4,6 @@ use std::{sync::Arc, time::Duration};
 
 pub type Headers = Vec<(String, String)>;
 
-pub fn has_authority(endpoint: &str, authority: &str) -> bool {
-    let Some((scheme, remainder)) = endpoint.trim().split_once(':') else {
-        return false;
-    };
-    let scheme = match scheme.to_ascii_lowercase().as_str() {
-        "wss" => "https".to_owned(),
-        "ws" => "http".to_owned(),
-        _ => scheme.to_owned(),
-    };
-    let Ok(endpoint) = crate::http_stream::Endpoint::parse(&format!("{scheme}:{remainder}")) else {
-        return false;
-    };
-    fn ordinal_fold(character: char) -> char {
-        let mut upper = character.to_uppercase();
-        let first = upper.next().unwrap_or(character);
-        if upper.next().is_none() {
-            first
-        } else {
-            character
-        }
-    }
-    endpoint
-        .authority()
-        .chars()
-        .map(ordinal_fold)
-        .eq(authority.chars().map(ordinal_fold))
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SocketState {
     Connecting,

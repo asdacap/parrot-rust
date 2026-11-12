@@ -9,21 +9,22 @@ use parrot_domain::contracts::interactions::{
 use parrot_domain::contracts::security::{AccessSnapshot, InvocationContext};
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
 
 use super::input::{AskInput, ReplyInput, parse_questions};
-use super::{AgentSelection, AgentToolError, ResultTemplates, ToolInvocation, render};
+use super::{AgentSelection, AgentToolError, ToolInvocation, render};
 
 pub struct QuestionTool<Q, S> {
     definition: ConfiguredToolDefinition,
     requester: Arc<Q>,
-    templates: Option<Arc<dyn ResultTemplates>>,
+    templates: Arc<PromptTemplateCatalog>,
     security: PhantomData<fn() -> S>,
 }
 impl<Q, S> QuestionTool<Q, S> {
     pub fn new(
         definition: ConfiguredToolDefinition,
         requester: Arc<Q>,
-        templates: Option<Arc<dyn ResultTemplates>>,
+        templates: Arc<PromptTemplateCatalog>,
     ) -> Self {
         Self {
             definition,
@@ -62,7 +63,7 @@ where
         Box::pin(async move {
             let wire = match parse_questions(&invocation.arguments_json) {
                 Ok(wire) => wire,
-                Err(error) => return error_result(self.templates.as_deref(), &error.0),
+                Err(error) => return error_result(&self.templates, &error.0),
             };
             let questions: Vec<_> = wire
                 .into_iter()
@@ -91,10 +92,9 @@ where
                 .await
             {
                 Ok(reply) if reply.kind == QuestionReplyKind::UserAway => render(
-                    self.templates.as_deref(),
+                    &self.templates,
                     "tool-result.text",
                     &[("value", "The user is away.")],
-                    || "The user is away.".into(),
                 )
                 .map_err(OperationError::Failed),
                 Ok(reply) => questions
@@ -102,17 +102,16 @@ where
                     .zip(&reply.answers)
                     .map(|(question, answer)| {
                         render(
-                            self.templates.as_deref(),
+                            &self.templates,
                             "tool-result.question-answer",
                             &[("question", &question.prompt), ("answer", answer)],
-                            || format!("Question: {}\nAnswer: {answer}", question.prompt),
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()
                     .map(|answers| answers.join("\n\n"))
                     .map_err(OperationError::Failed),
                 Err(OperationError::Failed(error)) if caught(&error) => {
-                    error_result(self.templates.as_deref(), &error.to_string())
+                    error_result(&self.templates, &error.to_string())
                 }
                 Err(error) => Err(error),
             }
@@ -123,14 +122,14 @@ where
 pub struct AskTool<A, S> {
     definition: ConfiguredToolDefinition,
     communication: Arc<A>,
-    templates: Option<Arc<dyn ResultTemplates>>,
+    templates: Arc<PromptTemplateCatalog>,
     security: PhantomData<fn() -> S>,
 }
 impl<A, S> AskTool<A, S> {
     pub fn new(
         definition: ConfiguredToolDefinition,
         communication: Arc<A>,
-        templates: Option<Arc<dyn ResultTemplates>>,
+        templates: Arc<PromptTemplateCatalog>,
     ) -> Self {
         Self {
             definition,
@@ -169,7 +168,7 @@ where
         Box::pin(async move {
             let input = match AskInput::parse(&invocation.arguments_json) {
                 Ok(input) => input,
-                Err(error) => return error_result(self.templates.as_deref(), &error.0),
+                Err(error) => return error_result(&self.templates, &error.0),
             };
             match self
                 .communication
@@ -177,16 +176,14 @@ where
                 .await?
             {
                 AgentAskReply::Replied(message) => render(
-                    self.templates.as_deref(),
+                    &self.templates,
                     "tool-result.ask-reply",
                     &[("message", &message)],
-                    || message.clone(),
                 ),
                 AgentAskReply::TimedOut => render(
-                    self.templates.as_deref(),
+                    &self.templates,
                     "tool-result.ask-timeout",
                     &[("name", &input.name)],
-                    || format!("Ask to {} timed out without a reply.", input.name),
                 ),
             }
             .map_err(OperationError::Failed)
@@ -197,14 +194,14 @@ where
 pub struct ReplyTool<A, S> {
     definition: ConfiguredToolDefinition,
     communication: Arc<A>,
-    templates: Option<Arc<dyn ResultTemplates>>,
+    templates: Arc<PromptTemplateCatalog>,
     security: PhantomData<fn() -> S>,
 }
 impl<A, S> ReplyTool<A, S> {
     pub fn new(
         definition: ConfiguredToolDefinition,
         communication: Arc<A>,
-        templates: Option<Arc<dyn ResultTemplates>>,
+        templates: Arc<PromptTemplateCatalog>,
     ) -> Self {
         Self {
             definition,
@@ -247,16 +244,15 @@ where
                 .map_err(|_| OperationError::Cancelled)?;
             let input = match ReplyInput::parse(&invocation.arguments_json) {
                 Ok(input) => input,
-                Err(error) => return error_result(self.templates.as_deref(), &error.0),
+                Err(error) => return error_result(&self.templates, &error.0),
             };
             self.communication
                 .reply(&input.request_id, input.message)
                 .map_err(OperationError::Failed)?;
             render(
-                self.templates.as_deref(),
+                &self.templates,
                 "tool-result.ask-replied",
                 &[("request_id", &input.request_id)],
-                || format!("Replied to ask {}.", input.request_id),
             )
             .map_err(OperationError::Failed)
         })
@@ -272,14 +268,8 @@ fn caught(error: &AgentToolError) -> bool {
     )
 }
 fn error_result(
-    templates: Option<&dyn ResultTemplates>,
+    templates: &PromptTemplateCatalog,
     message: &str,
 ) -> Result<String, OperationError<AgentToolError>> {
-    render(
-        templates,
-        "tool-result.error",
-        &[("message", message)],
-        || format!("error: {message}"),
-    )
-    .map_err(OperationError::Failed)
+    render(templates, "tool-result.error", &[("message", message)]).map_err(OperationError::Failed)
 }

@@ -248,8 +248,7 @@ impl ImageArtifactStore {
                 "The image dimensions or frame count exceed the supported limits.",
             ));
         }
-        let digest = Sha256::digest(bytes);
-        let hash = lower_hex(&digest);
+        let hash = format!("{:x}", Sha256::digest(bytes));
         let metadata = ImageArtifactMetadata {
             artifact_id: hash.clone(),
             sha256: hash,
@@ -322,14 +321,4 @@ fn validate_label(label: &str, parameter_name: &str) -> Result<()> {
         )));
     }
     Ok(())
-}
-
-fn lower_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut result = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        result.push(HEX[(byte >> 4) as usize] as char);
-        result.push(HEX[(byte & 15) as usize] as char);
-    }
-    result
 }

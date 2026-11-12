@@ -4,18 +4,16 @@
 //! delivery, configured templates and blob persistence remain injected services.
 
 use std::io;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
+use parrot_foundation::clock::SystemClock;
 
 use super::execution::Execution;
 use super::inventory::{ActiveShellProcessState, ActivityKind};
 use super::managed::ProcessReport;
-use super::monitor::{
-    MonitorExecution, MonitorIdentity, MonitorReport, MonitorSink, ShellProcessMonitor,
-};
+use super::monitor::{MonitorIdentity, MonitorReport, MonitorSink, ShellProcessMonitor};
 
 pub struct MonitorProcessReport {
     timeout: Duration,
@@ -28,7 +26,11 @@ impl MonitorProcessReport {
         Self {
             timeout,
             sink,
-            report: Mutex::new(ShellProcessMonitor::new(timeout).report().clone()),
+            report: Mutex::new(
+                ShellProcessMonitor::new(timeout, Arc::new(SystemClock))
+                    .report()
+                    .clone(),
+            ),
         }
     }
 }
@@ -39,26 +41,6 @@ fn identity(state: &ActiveShellProcessState) -> MonitorIdentity {
         description: state.description.clone(),
         owner_agent_session_id: state.owner_agent_session_id.clone(),
         process_id: state.process_id.clone(),
-    }
-}
-
-struct ObservedExecution(Arc<dyn Execution>);
-
-impl MonitorExecution for ObservedExecution {
-    fn stdout_path(&self) -> Option<PathBuf> {
-        self.0.stdout_path()
-    }
-
-    fn is_completed(&self) -> bool {
-        self.0.is_completed()
-    }
-
-    fn send_signal(&self, signal: i32) -> io::Result<()> {
-        self.0.send_signal(signal)
-    }
-
-    fn completion(&self) -> BoxFuture<'_, io::Result<i32>> {
-        Box::pin(async move { self.0.wait().await.map(|result| result.exit_code) })
     }
 }
 
@@ -78,11 +60,11 @@ impl ProcessReport for MonitorProcessReport {
         lifetime: &'a dyn Cancellation,
     ) -> BoxFuture<'a, io::Result<()>> {
         Box::pin(async move {
-            let mut monitor = ShellProcessMonitor::new(self.timeout);
+            let mut monitor = ShellProcessMonitor::new(self.timeout, Arc::new(SystemClock));
             monitor
                 .observe(
                     &identity(state),
-                    &ObservedExecution(execution),
+                    execution.as_ref(),
                     self.sink.as_ref(),
                     lifetime,
                 )

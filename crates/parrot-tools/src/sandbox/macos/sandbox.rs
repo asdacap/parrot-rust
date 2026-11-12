@@ -52,18 +52,10 @@ impl MacSeatbeltSandbox {
             executable: Some(canonical),
         })
     }
-
-    pub fn sandbox_available(&self) -> bool {
-        self.executable.is_some()
-    }
 }
 
 impl ProcessSandbox for MacSeatbeltSandbox {
     type Policy = SeatbeltPolicySnapshot;
-
-    fn sandbox_available(&self) -> bool {
-        MacSeatbeltSandbox::sandbox_available(self)
-    }
 
     fn start_unbound<'a>(
         &'a self,

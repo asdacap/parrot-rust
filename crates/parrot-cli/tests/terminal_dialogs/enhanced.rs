@@ -1110,7 +1110,7 @@ async fn cancellation_during_selected_first_event_preparation_joins_both_streams
     })
     .await;
     assert!(
-        matches!(result, Err(parrot_cli::terminal_dialogs::EnhancedFailure::Rpc(status)) if status.code() == Code::Cancelled)
+        matches!(result, Err(parrot_cli::chat_loops::ChatLoopFailure::Rpc(status)) if status.code() == Code::Cancelled)
     );
     assert!(terminal.restored.load(Ordering::Acquire));
     rpc.wait(|state| {
@@ -2087,10 +2087,10 @@ async fn real_pty_raw_input_output_resize_interrupt_and_stream_failure_restore_t
         .await;
         match ending {
             "stream-failure" => assert!(
-                matches!(result, Err(parrot_cli::terminal_dialogs::EnhancedFailure::Rpc(status)) if status.code() == Code::Unavailable && status.message() == "real PTY stream failure")
+                matches!(result, Err(parrot_cli::chat_loops::ChatLoopFailure::Rpc(status)) if status.code() == Code::Unavailable && status.message() == "real PTY stream failure")
             ),
             "cooperative-cancellation" => assert!(
-                matches!(result, Err(parrot_cli::terminal_dialogs::EnhancedFailure::Rpc(status)) if status.code() == Code::Cancelled)
+                matches!(result, Err(parrot_cli::chat_loops::ChatLoopFailure::Rpc(status)) if status.code() == Code::Cancelled)
             ),
             "eof" => assert_eq!(result.unwrap(), 0),
             _ => unreachable!(),

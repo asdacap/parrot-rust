@@ -61,7 +61,6 @@ async fn enabled_unavailable_runner_does_not_start_or_provision_queue() {
     let directory = Directory::new();
     let request = directory.request("printf should-not-run");
     let runner = ProcessRunner::new(UnavailableProcessSandbox, Arc::new(SandboxGate::new(true)));
-    assert!(!runner.sandbox_available());
     let error = runner
         .start_with_policy(&request, || Ok(()))
         .await
@@ -88,8 +87,6 @@ async fn explicit_gate_off_start_forwards_environment_and_cwd() {
     assert!(result.stderr.is_empty());
     assert!(directory.0.join("agent/queues").is_dir());
     assert!(!directory.0.join("queue").exists());
-    // Availability remains about the configured sandbox, not the escape hatch.
-    assert!(!runner.sandbox_available());
     gate.set_enabled(true);
     assert_eq!(
         runner

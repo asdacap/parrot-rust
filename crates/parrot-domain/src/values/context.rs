@@ -84,40 +84,6 @@ impl fmt::Display for ParseContextSizeError {
 
 impl std::error::Error for ParseContextSizeError {}
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextCompactionPolicy {
-    pub trigger_tokens: Option<i64>,
-    pub target_tokens: Option<i64>,
-}
-
-impl ContextCompactionPolicy {
-    pub fn resolve(
-        context_limit: Option<&ContextSize>,
-        target_context_size: Option<&ContextSize>,
-        context_window: i32,
-        input_limit: i32,
-        trigger_percent: i32,
-        target_percent: i32,
-        output_reserved_input_limit: Option<i64>,
-    ) -> Self {
-        let context_limit = context_limit.map(Into::into);
-        let target_context_size = target_context_size.map(Into::into);
-        let policy = parrot_core::compaction::CompactionPolicy::resolve(
-            context_limit.as_ref(),
-            target_context_size.as_ref(),
-            context_window,
-            input_limit,
-            trigger_percent,
-            target_percent,
-            output_reserved_input_limit,
-        );
-        Self {
-            trigger_tokens: policy.trigger_tokens,
-            target_tokens: policy.target_tokens,
-        }
-    }
-}
-
 pub use parrot_core::ContextSnapshot;
 
 pub struct TokenEstimator;

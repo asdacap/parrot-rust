@@ -29,7 +29,6 @@ impl fmt::Display for CompactionFailure {
             Self::GroupExceedsBudget => {
                 "A complete conversation group exceeds the compaction input budget."
             }
-            Self::TokenOverflow => "Token estimate overflow.",
             Self::InputLimitExceeded | Self::FittedInputLimitExceeded => {
                 "The compacted conversation exceeds the selected model input limit."
             }
@@ -49,13 +48,8 @@ impl From<CompactionFailure> for Error {
             return Self::cancelled();
         }
         let message = failure.to_string();
-        let code = if failure == CompactionFailure::TokenOverflow {
-            ErrorCode::Unexpected
-        } else {
-            ErrorCode::InvalidOperation
-        };
         Self {
-            code,
+            code: ErrorCode::InvalidOperation,
             detail: Some(ErrorDetail::Compaction(failure)),
             ..Self::failed(message)
         }

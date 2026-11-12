@@ -1,7 +1,7 @@
-use parrot_tools::process::execution::{LaunchSpec, ProcessSandbox};
+use parrot_tools::process::execution::LaunchSpec;
 use parrot_tools::sandbox::linux::{
     LinuxAccessRule, LinuxBubblewrapSandbox, LinuxSandboxPolicy, ReadOnlyExecCommandClassifier,
-    UnavailableProcessSandbox, UnsandboxedProcessSandbox,
+    UnsandboxedProcessSandbox,
 };
 use std::ffi::OsString;
 use std::fs;
@@ -169,7 +169,6 @@ fn masks_existing_types_and_preserves_later_exceptions_and_owned_parents() {
 #[test]
 fn unavailable_is_not_the_explicit_unconfined_adapter() {
     let unavailable = LinuxBubblewrapSandbox::new(Path::new(""), true).unwrap();
-    assert!(!unavailable.sandbox_available());
     assert_eq!(
         unavailable
             .pipe_launch(&LinuxSandboxPolicy::default(), "true", Path::new("/"), &[])
@@ -177,8 +176,6 @@ fn unavailable_is_not_the_explicit_unconfined_adapter() {
             .kind(),
         std::io::ErrorKind::Unsupported
     );
-    assert!(!UnavailableProcessSandbox.sandbox_available());
-    assert!(UnsandboxedProcessSandbox.sandbox_available());
     let launch = UnsandboxedProcessSandbox.pipe_launch(
         "printf '%s' \"$T38\"; exit 19",
         Path::new("/"),

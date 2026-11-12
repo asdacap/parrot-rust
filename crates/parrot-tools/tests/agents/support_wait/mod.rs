@@ -486,7 +486,7 @@ fn wait_tool(bridge: Arc<WaitBridge>) -> WaitTool {
         definition(),
         bridge,
         Arc::new(Models),
-        None,
+        templates(),
         false,
     )
 }

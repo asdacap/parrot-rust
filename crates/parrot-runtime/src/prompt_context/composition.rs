@@ -35,8 +35,6 @@ impl From<parrot_core::Error> for PromptError {
     fn from(error: parrot_core::Error) -> Self {
         if error.kind == parrot_core::ErrorKind::Cancelled {
             Self::Cancelled
-        } else if error.detail == Some(parrot_core::ErrorDetail::PromptContext) {
-            Self::Context(error.message)
         } else {
             Self::Template(error.message)
         }

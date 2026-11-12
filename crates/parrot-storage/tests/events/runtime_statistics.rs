@@ -54,9 +54,12 @@ async fn runtime_statistics_progress_observes_loading_only_during_initialization
     let counts = Arc::new(Mutex::new(Vec::new()));
     let observed = counts.clone();
     let statistics = repository
-        .get_runtime_statistics_with_progress(Some(Arc::new(move |count| {
-            observed.lock().unwrap().push(count);
-        })))
+        .restore_runtime_statistics(
+            "root".into(),
+            Some(Arc::new(move |count| {
+                observed.lock().unwrap().push(count);
+            })),
+        )
         .await
         .unwrap();
     assert_eq!(*counts.lock().unwrap(), [1, 2]);
@@ -66,9 +69,12 @@ async fn runtime_statistics_progress_observes_loading_only_during_initialization
     );
     let cached = repository
         .clone()
-        .get_runtime_statistics_with_progress(Some(Arc::new(|_| {
-            panic!("cached statistics must not replay events")
-        })))
+        .restore_runtime_statistics(
+            "root".into(),
+            Some(Arc::new(|_| {
+                panic!("cached statistics must not replay events")
+            })),
+        )
         .await
         .unwrap();
     let without_observer = repository.get_runtime_statistics().await.unwrap();
@@ -309,9 +315,12 @@ async fn runtime_restoration_accepts_descendant_usage_before_any_root_facts() {
     assert_eq!(child.capture().own.totals.input_tokens, 17);
     assert_eq!(repository.replay().await.unwrap(), [fact]);
     let cached = repository
-        .get_runtime_statistics_with_progress(Some(Arc::new(|_| {
-            panic!("cached statistics must not replay events")
-        })))
+        .restore_runtime_statistics(
+            "root".into(),
+            Some(Arc::new(|_| {
+                panic!("cached statistics must not replay events")
+            })),
+        )
         .await
         .unwrap();
     assert!(Arc::ptr_eq(&statistics, &cached));

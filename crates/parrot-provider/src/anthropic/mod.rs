@@ -9,7 +9,7 @@ mod provider;
 mod raw_object;
 mod replay;
 mod view;
-mod wire_json;
+pub(crate) mod wire_json;
 
 pub use encoder::{EncodeError, PreparedRequest, encode};
 pub use parser::{AnthropicEvent, AnthropicParser, CompletedMessage, ParserError, ToolCall};

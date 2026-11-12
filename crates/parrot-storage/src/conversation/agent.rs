@@ -179,7 +179,7 @@ impl AgentHistoryView {
         }
         Ok(promoted)
     }
-    /// Reads one pending input without promoting it or materializing its parts.
+    /// Reads one pending input without promoting it.
     pub async fn peek_pending_input(&self) -> Result<Option<AdmittedInput>, EventError> {
         self.repository
             .events
@@ -216,21 +216,6 @@ impl AgentHistoryView {
     pub async fn conversation(&self) -> Result<Vec<ConversationItem>, EventError> {
         self.repository.conversation(self.agent.clone()).await
     }
-    pub async fn conversation_after(
-        &self,
-        watermark: i64,
-    ) -> Result<Vec<ConversationItem>, EventError> {
-        self.repository
-            .conversation_after(self.agent.clone(), watermark)
-            .await
-    }
-    pub async fn active_checkpoint_assistant_sequences(
-        &self,
-    ) -> Result<std::collections::BTreeSet<i64>, EventError> {
-        self.repository
-            .active_checkpoint_assistant_sequences(self.agent.clone())
-            .await
-    }
     pub async fn compaction_history(&self) -> Result<Option<CompactionContext>, EventError> {
         self.repository.compaction_history(self.agent.clone()).await
     }
@@ -252,20 +237,17 @@ impl AgentHistoryView {
     }
     pub async fn append_status_assembly(
         &self,
-        event: Event,
         standing: StatusStanding,
         content: String,
     ) -> Result<(), EventError> {
         self.repository
-            .append_status_assembly(event, standing, content)
+            .append_status_assembly(self.agent.clone(), standing, content)
             .await
     }
-    pub async fn append_system_prompt(
-        &self,
-        event: Event,
-        content: String,
-    ) -> Result<(), EventError> {
-        self.repository.append_system_prompt(event, content).await
+    pub async fn append_system_prompt(&self, content: String) -> Result<(), EventError> {
+        self.repository
+            .append_system_prompt(self.agent.clone(), content)
+            .await
     }
     pub async fn append_retained_reminder(
         &self,
@@ -277,22 +259,13 @@ impl AgentHistoryView {
             .append_retained_reminder(event, assistant, reminder)
             .await
     }
-    pub async fn append_final_provider_request_prompt(
+    pub async fn append_phase_prompt(
         &self,
-        event: Event,
+        final_phase: bool,
         content: String,
     ) -> Result<(), EventError> {
         self.repository
-            .append_final_provider_request_prompt(event, content)
-            .await
-    }
-    pub async fn append_tool_availability_restored_prompt(
-        &self,
-        event: Event,
-        content: String,
-    ) -> Result<(), EventError> {
-        self.repository
-            .append_tool_availability_restored_prompt(event, content)
+            .append_phase_prompt(self.agent.clone(), final_phase, content)
             .await
     }
     pub async fn find_request_usage(

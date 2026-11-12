@@ -86,7 +86,6 @@ pub enum SummaryResponse {
 pub enum CompactionFailure {
     Cancelled,
     GroupExceedsBudget,
-    TokenOverflow,
     InputLimitExceeded,
     FittedInputLimitExceeded,
     NoSafeBoundary,
@@ -95,8 +94,6 @@ pub enum CompactionFailure {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlanningError {
-    InputLimitExceeded,
-    NoOutputCapacity,
     NoCompactionCapacity,
     GroupExceedsBudget,
     TokenOverflow,

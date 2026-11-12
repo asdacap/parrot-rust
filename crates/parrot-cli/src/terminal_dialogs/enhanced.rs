@@ -23,8 +23,8 @@ use tonic::{Code, Status};
 use crate::{
     attachments::uploader::AttachmentError,
     chat_loops::{
-        Binding, Interaction, Interactions, SessionSnapshot, application_exit, interrupt_loop,
-        reconcile_interactions, stop_binding, terminal_commands,
+        Binding, ChatLoopFailure, Interaction, Interactions, SessionSnapshot, application_exit,
+        interrupt_loop, reconcile_loop, stop_binding, terminal_commands,
     },
     dispatch::{
         dialog::SlashDialog,
@@ -69,7 +69,6 @@ mod tests;
 const PUBLISH_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 30);
 const EVENT_BATCH_SIZE: usize = 32;
 const SUBMIT_DELAY: Duration = Duration::from_millis(100);
-const RECONCILIATION_INTERVAL: Duration = Duration::from_millis(250);
 const PROMPT: &str = "❯ ";
 
 pub struct EnhancedChatRequest {
@@ -95,53 +94,6 @@ pub type PreparePrompt = Arc<
         + Send
         + Sync,
 >;
-
-#[derive(Debug)]
-pub enum EnhancedFailure {
-    Rpc(Status),
-    Slash(SlashFailure),
-    Io(io::Error),
-    Attachment(AttachmentError),
-    Navigation(NavigationFailure),
-}
-
-impl fmt::Display for EnhancedFailure {
-    fn fmt(&self, output: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Rpc(error) => error.fmt(output),
-            Self::Slash(error) => error.fmt(output),
-            Self::Io(error) => error.fmt(output),
-            Self::Attachment(error) => error.fmt(output),
-            Self::Navigation(error) => write!(output, "{error:?}"),
-        }
-    }
-}
-impl std::error::Error for EnhancedFailure {}
-impl From<Status> for EnhancedFailure {
-    fn from(error: Status) -> Self {
-        Self::Rpc(error)
-    }
-}
-impl From<SlashFailure> for EnhancedFailure {
-    fn from(error: SlashFailure) -> Self {
-        Self::Slash(error)
-    }
-}
-impl From<io::Error> for EnhancedFailure {
-    fn from(error: io::Error) -> Self {
-        Self::Io(error)
-    }
-}
-impl From<AttachmentError> for EnhancedFailure {
-    fn from(error: AttachmentError) -> Self {
-        Self::Attachment(error)
-    }
-}
-impl From<NavigationFailure> for EnhancedFailure {
-    fn from(error: NavigationFailure) -> Self {
-        Self::Navigation(error)
-    }
-}
 
 pub struct EnhancedCli {
     client: WebClient,
@@ -178,7 +130,7 @@ impl EnhancedCli {
         }
     }
 
-    pub async fn run(mut self, cancellation: &dyn Cancellation) -> Result<i32, EnhancedFailure> {
+    pub async fn run(mut self, cancellation: &dyn Cancellation) -> Result<i32, ChatLoopFailure> {
         check(cancellation)?;
         let exit_on_completion = !self.request.prompt.is_empty();
         let supplied = self.request.initial_session.is_some();
@@ -217,11 +169,13 @@ impl EnhancedCli {
             )
             .await?
         } else {
-            tokio::select! {
-                biased;
-                () = cancellation.cancelled() => return Err(Status::cancelled("operation cancelled").into()),
-                stream = PreparedSessionStream::open_live(self.client.clone(), &initial.id, binding_stop.clone()) => stream?,
-            }
+            PreparedSessionStream::open_live(
+                self.client.clone(),
+                &initial.id,
+                binding_stop.clone(),
+                cancellation,
+            )
+            .await?
         };
         let (live_rows, inline_diff, prefixes) = {
             let configuration = self
@@ -358,7 +312,12 @@ impl EnhancedCli {
                 show_loaded_banner,
             );
             let render_loop = shared.render_loop();
-            let reconcile = shared.reconcile_loop();
+            let reconcile = reconcile_loop(
+                || shared.snapshot(),
+                &shared.lifetime,
+                &shared.interactions,
+                &shared.changed,
+            );
             let ticks = shared.tick_loop();
             let interrupting = shared.interrupt_loop();
             tokio::pin!(input_loop, render_loop, reconcile, ticks, interrupting);
@@ -448,7 +407,7 @@ impl EnhancedInput {
         initial: wire::UserSession,
         exit_on_completion: bool,
         show_loaded_banner: bool,
-    ) -> Result<i32, EnhancedFailure> {
+    ) -> Result<i32, ChatLoopFailure> {
         let c = shared.lifetime.as_ref();
         let host: Arc<dyn LiveInputHost> = Arc::new(EnhancedLiveInputHost {
             input: shared.input.clone(),
@@ -472,7 +431,7 @@ impl EnhancedInput {
                     shared
                         .apply_presenter(|presenter| presenter.commit(item))
                         .map_err(|error| match error {
-                            EnhancedFailure::Rpc(status) => status,
+                            ChatLoopFailure::Rpc(status) => status,
                             error => Status::unknown(error.to_string()),
                         })
                 })
@@ -832,7 +791,7 @@ impl EnhancedInput {
         editor: &mut IncrementalEditor,
         entered: &str,
         c: &dyn Cancellation,
-    ) -> Result<(), EnhancedFailure> {
+    ) -> Result<(), ChatLoopFailure> {
         let snapshot = shared.snapshot();
         let mut diagnostics = Vec::new();
         let prepared = (self.prepare)(
@@ -882,7 +841,7 @@ fn accept_completion(
     slash: &SlashCommandCompletion,
     skills: &SkillCompletion,
     editor: &mut IncrementalEditor,
-) -> Result<(), EnhancedFailure> {
+) -> Result<(), ChatLoopFailure> {
     if let Some(accepted) = slash.accept(&editor.prompt().text) {
         editor.replace_text(&accepted);
     } else {
@@ -899,7 +858,7 @@ fn draw_prompt(
     skills: &mut SkillCompletion,
     editor: &IncrementalEditor,
     commands: &crate::slash_sessions::SlashCommandRegistry,
-) -> Result<(), EnhancedFailure> {
+) -> Result<(), ChatLoopFailure> {
     slash.refresh(&editor.prompt().text, commands);
     skills.refresh(&editor.prompt());
     let mut items: Vec<Arc<dyn LiveBufferItem>> = Vec::new();
@@ -1143,7 +1102,7 @@ impl EnhancedSession {
         action: impl FnOnce(
             &mut EnhancedSessionPresenter,
         ) -> crate::presenters::PresenterResult<PresentationUpdate>,
-    ) -> Result<(), EnhancedFailure> {
+    ) -> Result<(), ChatLoopFailure> {
         let update = {
             let mut presenter = self
                 .presenter
@@ -1153,7 +1112,7 @@ impl EnhancedSession {
         };
         self.apply(update)
     }
-    fn apply(&self, update: PresentationUpdate) -> Result<(), EnhancedFailure> {
+    fn apply(&self, update: PresentationUpdate) -> Result<(), ChatLoopFailure> {
         self.apply_effects(&update);
         self.frame.apply(update)?;
         self.live_dirty.store(false, Ordering::Release);
@@ -1164,7 +1123,7 @@ impl EnhancedSession {
         action: impl FnOnce(
             &mut EnhancedSessionPresenter,
         ) -> crate::presenters::PresenterResult<PresentationUpdate>,
-    ) -> Result<(), EnhancedFailure> {
+    ) -> Result<(), ChatLoopFailure> {
         let update = {
             let mut presenter = self
                 .presenter
@@ -1182,7 +1141,7 @@ impl EnhancedSession {
         self.live_dirty.store(!published, Ordering::Release);
         Ok(())
     }
-    fn publish(&self) -> Result<(), EnhancedFailure> {
+    fn publish(&self) -> Result<(), ChatLoopFailure> {
         if self.live_dirty.load(Ordering::Acquire) {
             self.apply_presenter(|presenter| {
                 Ok(PresentationUpdate {
@@ -1252,7 +1211,7 @@ impl EnhancedSession {
             }
         }
     }
-    async fn render_loop(&self) -> Result<(), EnhancedFailure> {
+    async fn render_loop(&self) -> Result<(), ChatLoopFailure> {
         let mut processed = 0;
         loop {
             let mut binding = self.binding.lock().await;
@@ -1295,7 +1254,7 @@ impl EnhancedSession {
             }
         }
     }
-    async fn tick_loop(&self) -> Result<(), EnhancedFailure> {
+    async fn tick_loop(&self) -> Result<(), ChatLoopFailure> {
         let mut interval = tokio::time::interval(SPINNER_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut publication = tokio::time::interval(PUBLISH_INTERVAL);
@@ -1318,7 +1277,7 @@ impl EnhancedSession {
             }
         }
     }
-    async fn interrupt_loop(&self) -> Result<(), EnhancedFailure> {
+    async fn interrupt_loop(&self) -> Result<(), ChatLoopFailure> {
         interrupt_loop(
             || self.snapshot(),
             &self.lifetime,
@@ -1326,22 +1285,7 @@ impl EnhancedSession {
             &self.interrupted,
         )
         .await
-        .map_err(EnhancedFailure::from)
-    }
-    async fn reconcile_loop(&self) -> Result<(), EnhancedFailure> {
-        let mut interval = tokio::time::interval(RECONCILIATION_INTERVAL);
-        loop {
-            tokio::select! { biased; () = self.lifetime.cancelled() => return Ok(()), _ = interval.tick() => {} }
-            let snapshot = self.snapshot();
-            reconcile_interactions(
-                snapshot,
-                |generation| generation != self.snapshot().generation,
-                &self.lifetime,
-                &self.interactions,
-                &self.changed,
-            )
-            .await?;
-        }
+        .map_err(ChatLoopFailure::from)
     }
 }
 
@@ -1441,17 +1385,17 @@ fn check(c: &dyn Cancellation) -> Result<(), Status> {
 fn io_status(error: io::Error) -> Status {
     Status::unknown(error.to_string())
 }
-fn presenter_error(error: impl fmt::Display) -> EnhancedFailure {
-    EnhancedFailure::Io(io::Error::other(error.to_string()))
+fn presenter_error(error: impl fmt::Display) -> ChatLoopFailure {
+    ChatLoopFailure::Io(io::Error::other(error.to_string()))
 }
-fn as_slash(error: EnhancedFailure) -> SlashFailure {
+fn as_slash(error: ChatLoopFailure) -> SlashFailure {
     match error {
-        EnhancedFailure::Rpc(status) => SlashFailure::Rpc(Box::new(status)),
-        EnhancedFailure::Slash(error) => error,
+        ChatLoopFailure::Rpc(status) => SlashFailure::Rpc(Box::new(status)),
+        ChatLoopFailure::Slash(error) => error,
         error => SlashFailure::Command(error.to_string()),
     }
 }
-fn is_cancelled(error: &EnhancedFailure) -> bool {
-    matches!(error, EnhancedFailure::Rpc(status) if status.code() == Code::Cancelled)
-        || matches!(error, EnhancedFailure::Slash(SlashFailure::Rpc(status)) if status.code() == Code::Cancelled)
+fn is_cancelled(error: &ChatLoopFailure) -> bool {
+    matches!(error, ChatLoopFailure::Rpc(status) if status.code() == Code::Cancelled)
+        || matches!(error, ChatLoopFailure::Slash(SlashFailure::Rpc(status)) if status.code() == Code::Cancelled)
 }

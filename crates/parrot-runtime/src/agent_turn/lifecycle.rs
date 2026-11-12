@@ -267,12 +267,12 @@ impl Cancellation for LinkedCancellation {
     }
 }
 
-struct Completion<T> {
+pub(crate) struct Completion<T> {
     value: Mutex<Option<T>>,
     changed: Notify,
 }
 impl<T: Clone> Completion<T> {
-    fn new() -> Arc<Self> {
+    pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
             value: Mutex::new(None),
             changed: Notify::new(),
@@ -284,17 +284,17 @@ impl<T: Clone> Completion<T> {
             changed: Notify::new(),
         })
     }
-    fn finish(&self, value: T) {
+    pub(crate) fn finish(&self, value: T) {
         let mut current = self.value.lock().expect("completion poisoned");
         if current.is_none() {
             *current = Some(value);
             self.changed.notify_waiters();
         }
     }
-    fn is_finished(&self) -> bool {
+    pub(crate) fn is_finished(&self) -> bool {
         self.value.lock().expect("completion poisoned").is_some()
     }
-    async fn wait(&self) -> T {
+    pub(crate) async fn wait(&self) -> T {
         loop {
             let notified = self.changed.notified();
             tokio::pin!(notified);

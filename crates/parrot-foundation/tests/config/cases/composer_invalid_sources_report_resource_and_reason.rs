@@ -32,7 +32,7 @@ fn source_rejects_sequence_sections() {
 }
 
 fn assert_invalid_source(content: &str, reason: &str) {
-    let error = yaml::compose(&[("invalid.yaml", Some(content))])
+    let error = yaml::compose(&[("invalid.yaml", content)])
         .unwrap_err()
         .to_string();
     assert!(error.contains("invalid.yaml"));

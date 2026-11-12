@@ -75,25 +75,16 @@ impl ContextSnapshot {
                     as i32
             }
         });
-        let trigger_tokens = match &configuration.context_limit {
-            Some(limit) => {
-                let tokens = limit.resolve_tokens(context_limit);
-                if input_limit > 0 {
-                    tokens.map(|tokens| tokens.min(i64::from(input_limit)))
-                } else {
-                    tokens
-                }
-            }
-            None => (input_limit > 0)
-                .then(|| i64::from(input_limit) * i64::from(configuration.trigger_percent) / 100),
-        };
-        let trigger_tokens = match (
-            trigger_tokens,
+        let trigger_tokens = crate::compaction::CompactionPolicy::resolve(
+            configuration.context_limit.as_ref(),
+            None,
+            context_limit,
+            input_limit,
+            configuration.trigger_percent,
+            0,
             configuration.model.calculate_output_reserved_input_limit(),
-        ) {
-            (Some(trigger), Some(safe_input_limit)) => Some(trigger.min(safe_input_limit)),
-            (trigger, _) => trigger,
-        };
+        )
+        .trigger_tokens;
         let mut trigger_percent = configuration.trigger_percent;
         if configuration.context_limit.is_some()
             && context_limit > 0

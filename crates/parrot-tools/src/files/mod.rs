@@ -11,8 +11,9 @@ mod workspace;
 
 use std::{fmt, sync::Arc};
 
+use parrot_core::NeverCancelled;
 use parrot_domain::{
-    contracts::async_ops::{Cancellation, OperationError, OperationResult},
+    contracts::async_ops::{OperationError, OperationResult},
     values::tools::ToolCycleImageBudget,
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -50,7 +51,7 @@ impl ImageBudget {
                 .map(|(key, value)| ((*key).into(), Value::String(value.clone())))
                 .collect::<Vec<_>>();
             self.templates
-                .render(id, &arguments, &SynchronousFormatting)
+                .render(id, &arguments, &NeverCancelled)
                 .map_err(|error| match error {
                     OperationError::Cancelled => OperationError::Cancelled,
                     OperationError::Failed(error) => {
@@ -120,18 +121,6 @@ impl fmt::Display for FileToolError {
 
 impl std::error::Error for FileToolError {}
 
-// Source IPromptTemplateCatalog.Render uses CancellationToken.None; tool I/O
-// still observes invocation cancellation independently of synchronous formatting.
-struct SynchronousFormatting;
-impl Cancellation for SynchronousFormatting {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> parrot_domain::contracts::async_ops::BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
-
 struct Formatter<'a> {
     invocation: &'a FileToolInvocation,
 }
@@ -147,7 +136,7 @@ impl<'a> Formatter<'a> {
             .render(
                 id,
                 &[(key.into(), Value::String(value.into()))],
-                &SynchronousFormatting,
+                &NeverCancelled,
             )
             .map_err(|error| match error {
                 OperationError::Cancelled => OperationError::Cancelled,

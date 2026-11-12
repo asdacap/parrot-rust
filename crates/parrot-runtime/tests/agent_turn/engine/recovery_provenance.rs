@@ -65,14 +65,7 @@ impl Fixture {
 
     async fn append_recovery_metadata(&self) {
         self.history
-            .append_system_prompt(
-                Event {
-                    id: id(),
-                    agent_session_id: "agent".into(),
-                    ..Default::default()
-                },
-                "status-only metadata".into(),
-            )
+            .append_system_prompt("status-only metadata".into())
             .await
             .unwrap();
     }

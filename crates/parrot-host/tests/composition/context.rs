@@ -91,7 +91,6 @@ fn bridge() -> Bridge {
         session::Kind::CompactContext,
         ConfiguredToolDefinition::new("Compact current context", r#"{"type":"object"}"#),
         services,
-        templates(),
     ));
     let planner = Arc::new(CompactionPlanner::new(
         CompactionSettings {
@@ -485,7 +484,6 @@ fn status_bridge_with_prompt(prompt_probe: Option<Arc<SessionPrompt>>) -> Status
         session::Kind::Status,
         ConfiguredToolDefinition::new("Observe runtime status", r#"{"type":"object"}"#),
         services,
-        templates(),
     ));
     let planner = Arc::new(CompactionPlanner::new(
         CompactionSettings {

@@ -24,6 +24,7 @@ use parrot_domain::{
     protocol::messages::parrot::{Delivery, Event, InputSource},
     values::{
         activity::AgentSessionActivity,
+        agent_state::TaskForkModeSnapshot,
         config::ModelProfiles,
         context::{ContextSize, ContextSnapshot},
         identifiers::Identifier,
@@ -84,8 +85,7 @@ use parrot_runtime::{
         SystemPromptProvider, TemplateSystemPromptProvider,
     },
     task_scheduler::{
-        ForkHistoryMode, SchedulerConfig, TaskConfiguration, TaskDiagnostic, TaskDiagnostics,
-        TaskSession,
+        SchedulerConfig, TaskConfiguration, TaskDiagnostic, TaskDiagnostics, TaskSession,
     },
     tool_settlement::{SharedSecurity, ToolExecutionConfig, ToolFactory, ToolInventory},
 };
@@ -96,7 +96,6 @@ use parrot_storage::{
     progress::FileProgressStore,
 };
 use parrot_tools::{
-    agents::ResultTemplates,
     catalog::{
         self, AgentFactories, AgentServices, FileFactories, ProcessFactories, SessionBindings,
         SessionFactories, TaskQueueFactories, TaskQueueServices, WebFetchFactory,
@@ -581,22 +580,22 @@ impl ScopeLifetime for ProcessWork {
 }
 struct ScopedMonitor<S: RestrictableAccessSnapshot + 'static> {
     link: Arc<ScopeLink<S>>,
-    blobs: Arc<ToolOutputBlobStore>,
     templates: Arc<PromptTemplateCatalog>,
     log: Arc<ScopeLog<S>>,
 }
 impl<S: RestrictableAccessSnapshot + 'static> MonitorSink for ScopedMonitor<S> {
     fn render_event(&self, identity: &MonitorIdentity, lines: &str) -> io::Result<String> {
-        ResultTemplates::render(
-            self.templates.as_ref(),
-            "monitor.event",
-            &[
-                ("name", &identity.name),
-                ("description", &identity.description),
-                ("lines", lines),
-            ],
-        )
-        .map_err(io::Error::other)
+        self.templates
+            .render(
+                "monitor.event",
+                &[
+                    ("name".into(), identity.name.as_str().into()),
+                    ("description".into(), identity.description.as_str().into()),
+                    ("lines".into(), lines.into()),
+                ],
+                &NeverCancelled,
+            )
+            .map_err(io::Error::other)
     }
     fn persist_event<'a>(
         &'a self,
@@ -604,7 +603,8 @@ impl<S: RestrictableAccessSnapshot + 'static> MonitorSink for ScopedMonitor<S> {
         lifetime: &'a dyn Cancellation,
     ) -> BoxFuture<'a, io::Result<String>> {
         Box::pin(async move {
-            self.blobs
+            self.link
+                .blobs
                 .persist(&text, lifetime)
                 .map_err(io::Error::other)
         })
@@ -648,20 +648,21 @@ impl<S: RestrictableAccessSnapshot + 'static> MonitorSink for ScopedMonitor<S> {
         identity: &MonitorIdentity,
         report: &MonitorReport,
     ) -> io::Result<String> {
-        ResultTemplates::render(
-            self.templates.as_ref(),
-            "monitor.ended",
-            &[
-                ("name", &identity.name),
-                ("description", &identity.description),
-                ("events", &report.events.to_string()),
-                ("reason", report.reason.as_str()),
-                ("exit_code", &report.exit_code),
-                ("error", &report.error),
-                ("timeout_ms", &report.timeout_ms),
-            ],
-        )
-        .map_err(io::Error::other)
+        self.templates
+            .render(
+                "monitor.ended",
+                &[
+                    ("name".into(), identity.name.as_str().into()),
+                    ("description".into(), identity.description.as_str().into()),
+                    ("events".into(), report.events.to_string().into()),
+                    ("reason".into(), report.reason.as_str().into()),
+                    ("exit_code".into(), report.exit_code.as_str().into()),
+                    ("error".into(), report.error.as_str().into()),
+                    ("timeout_ms".into(), report.timeout_ms.as_str().into()),
+                ],
+                &NeverCancelled,
+            )
+            .map_err(io::Error::other)
     }
 }
 
@@ -1352,9 +1353,11 @@ where
                             )
                             .map_err(child)?,
                             fork_history_mode: match task_config.fork_history_mode {
-                                AgentTaskForkHistoryMode::Dependency => ForkHistoryMode::Dependency,
-                                AgentTaskForkHistoryMode::Parent => ForkHistoryMode::Parent,
-                                AgentTaskForkHistoryMode::Empty => ForkHistoryMode::Empty,
+                                AgentTaskForkHistoryMode::Dependency => {
+                                    TaskForkModeSnapshot::Dependency
+                                }
+                                AgentTaskForkHistoryMode::Parent => TaskForkModeSnapshot::Parent,
+                                AgentTaskForkHistoryMode::Empty => TaskForkModeSnapshot::Empty,
                             },
                             templates: self.user.templates.clone(),
                         },
@@ -1629,10 +1632,8 @@ where
                             .runtime
                             .exec_command_yield_after_ms as u64,
                     ),
-                    templates: self.user.templates.clone(),
                     monitor_sink: Arc::new(ScopedMonitor {
                         link: link.clone(),
-                        blobs: blobs.clone(),
                         templates: self.user.templates.clone(),
                         log: log.clone(),
                     }),
@@ -1692,7 +1693,6 @@ where
                                 images: Arc::new(ScopedImages::<S>(std::marker::PhantomData)),
                                 permission: permission.clone(),
                                 filesystem: Arc::new(config.filesystem.clone()),
-                                templates: user.templates.clone(),
                                 agent_depth: scope.identity().session.depth,
                                 interactive,
                             },

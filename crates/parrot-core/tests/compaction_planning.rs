@@ -1,7 +1,7 @@
 use parrot_core::{
     CompactionConfiguration, CompactionGroup, CompactionInput, CompactionPlan, Content,
     ContextConfiguration, ContextLimit, ContextModel, Error, ErrorCode, ErrorDetail, ErrorKind,
-    Message, PlanningError, Provider, Role, ToolCall, ToolDefinition,
+    Message, PlanningError, Role, ToolCall,
     compaction::{CompactionPolicy, group_messages, is_complete},
 };
 
@@ -46,33 +46,6 @@ fn configuration() -> CompactionConfiguration {
         reasoning: None,
         summary_instructions: "summarize".into(),
         summary_prefix: "summary: ".into(),
-    }
-}
-
-fn estimate(messages: &[Message]) -> Result<i64, Error> {
-    messages
-        .iter()
-        .flat_map(|message| &message.contents)
-        .try_fold(0_i64, |total, content| {
-            let Content::Text(text) = content else {
-                panic!("these planning inputs contain only text")
-            };
-            total
-                .checked_add(text.parse::<i64>().unwrap_or(text.len() as i64))
-                .ok_or_else(|| planning_error(PlanningError::TokenOverflow))
-        })
-}
-
-struct PlanningProvider;
-
-impl Provider for PlanningProvider {
-    fn estimate_input_tokens(
-        &self,
-        _: &str,
-        _: &[ToolDefinition],
-        messages: &[Message],
-    ) -> Result<i64, Error> {
-        estimate(messages)
     }
 }
 
@@ -260,42 +233,13 @@ fn selection_preserves_plan_boundaries() {
 }
 
 #[test]
-fn pure_spill_selection_uses_profile_capacity_and_requires_complete_tool_groups() {
-    let call = ToolCall {
-        id: "call".into(),
-        name: "tool".into(),
-        arguments_json: "{}".into(),
-    };
-    let mut assistant = message(0);
-    assistant.role = Role::Assistant;
-    assistant.tool_calls = vec![call];
-    let mut tool = message(30);
-    tool.role = Role::Tool;
-    tool.tool_call_id = "call".into();
-    let messages = vec![assistant, tool, message(1)];
-    let input = CompactionInput {
-        groups: group_messages(&messages),
-        messages,
-        ..input(&[])
-    };
+fn selection_uses_profile_capacity() {
     let mut configuration = configuration();
     configuration.profile_maximum_input_tokens = Some(10);
-    let mut plan = CompactionPlan::select_for_target(&input, &[], &configuration, Some(100))
+    let plan = CompactionPlan::select_for_target(&input(&[1, 2]), &[], &configuration, Some(100))
         .unwrap()
         .unwrap();
-    assert_eq!(plan.select_spill_groups(&PlanningProvider).unwrap(), [0]);
-    assert_eq!(plan.groups[0].messages, input.groups[0].messages);
-    plan.groups[0].is_complete = false;
-    assert_eq!(
-        plan.select_spill_groups(&PlanningProvider),
-        Err(planning_error(PlanningError::GroupExceedsBudget))
-    );
-    plan.groups[0].is_complete = true;
-    plan.groups[0].messages[0].role = Role::User;
-    assert_eq!(
-        plan.select_spill_groups(&PlanningProvider),
-        Err(planning_error(PlanningError::GroupExceedsBudget))
-    );
+    assert_eq!(plan.input_budget, 10);
 }
 
 #[test]

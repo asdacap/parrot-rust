@@ -921,7 +921,7 @@ pub async fn run_flow(
     stopping: Arc<Signal>,
     end_input: EndInput,
     scenario: impl std::future::Future<Output = ()>,
-) -> Result<i32, parrot_cli::terminal_dialogs::EnhancedFailure> {
+) -> Result<i32, parrot_cli::chat_loops::ChatLoopFailure> {
     let joined = Signal::new();
     let running = async {
         let result = cli.run(stopping.as_ref()).await;

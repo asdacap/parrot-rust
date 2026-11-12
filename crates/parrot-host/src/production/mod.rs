@@ -126,11 +126,8 @@ impl ProductionReadContext {
                 ProductionFilesystem::new(workspace).map_err(internal)?,
             )),
             modes: Arc::new(
-                ModeRegistry::new(
-                    profiles.modes(configuration)?,
-                    &configuration.runtime.default_profile,
-                )
-                .map_err(internal)?,
+                ModeRegistry::new(profiles.modes()?, &configuration.runtime.default_profile)
+                    .map_err(internal)?,
             ),
         })
     }
@@ -196,7 +193,7 @@ impl ProductionHost {
         let profiles = Arc::new(ProductionProfiles::new(&config.configuration)?);
         let modes = Arc::new(
             ModeRegistry::new(
-                profiles.modes(&config.configuration)?,
+                profiles.modes()?,
                 &config.configuration.runtime.default_profile,
             )
             .map_err(internal)?,
@@ -746,10 +743,7 @@ impl ProductionProfiles {
                 .collect(),
         })
     }
-    fn modes(
-        &self,
-        _: &Configuration,
-    ) -> protocol::Result<Vec<MaterializedModeProfile<ProductionPolicy>>> {
+    fn modes(&self) -> protocol::Result<Vec<MaterializedModeProfile<ProductionPolicy>>> {
         self.profiles
             .iter()
             .map(|(id, (config, security))| {

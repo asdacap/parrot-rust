@@ -77,7 +77,8 @@ async fn nested_graph_is_owned_by_child_and_receives_dependency_history_only_whe
     let h = Harness::new();
     let mut configuration =
         parrot_runtime::task_scheduler::TaskConfiguration::defaults(templates());
-    configuration.fork_history_mode = parrot_runtime::task_scheduler::ForkHistoryMode::Dependency;
+    configuration.fork_history_mode =
+        parrot_domain::values::agent_state::TaskForkModeSnapshot::Dependency;
     *h.factory.configuration.lock().unwrap() = Some(configuration);
     let root = h.root("owner").await;
     let parent_gate = Gate::new();

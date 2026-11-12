@@ -51,10 +51,6 @@ impl LinuxBubblewrapSandbox {
 impl ProcessSandbox for LinuxBubblewrapSandbox {
     type Policy = LinuxSandboxPolicy;
 
-    fn sandbox_available(&self) -> bool {
-        LinuxBubblewrapSandbox::sandbox_available(self)
-    }
-
     fn start_unbound<'a>(
         &'a self,
         request: &'a ProcessStartRequest,
@@ -69,10 +65,6 @@ impl ProcessSandbox for LinuxBubblewrapSandbox {
 
 impl ProcessSandbox for UnsandboxedProcessSandbox {
     type Policy = ();
-
-    fn sandbox_available(&self) -> bool {
-        UnsandboxedProcessSandbox::sandbox_available(self)
-    }
 
     fn start_unbound<'a>(
         &'a self,
@@ -99,10 +91,6 @@ impl ProcessSandbox for UnsandboxedProcessSandbox {
 
 impl ProcessSandbox for UnavailableProcessSandbox {
     type Policy = ();
-
-    fn sandbox_available(&self) -> bool {
-        false
-    }
 
     fn start_unbound<'a>(
         &'a self,

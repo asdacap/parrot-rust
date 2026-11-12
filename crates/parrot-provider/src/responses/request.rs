@@ -3,7 +3,7 @@ use super::view::{
     ResponsesContentKind, ResponsesContentView, ResponsesMessageView, ResponsesRequestView,
     ResponsesRole, ResponsesToolCallView, ResponsesToolDefinitionView,
 };
-use crate::wire::encode_base64;
+use crate::image_inspection::image_reference;
 use serde_json::value::RawValue;
 use std::io;
 
@@ -158,14 +158,10 @@ fn add_message<M: ResponsesMessageView>(
     for part in message.contents() {
         match part.kind() {
             ResponsesContentKind::Image => {
-                let reference = if part.image_url().is_empty() {
-                    image_reference(
-                        part.read_image().map_err(ResponsesPrepareError::ImageIo)?,
-                        part.image_media_type(),
-                    )
-                } else {
-                    part.image_url().to_owned()
-                };
+                let reference =
+                    image_reference(Some(part.image_url()), part.image_media_type(), || {
+                        part.read_image().map_err(ResponsesPrepareError::ImageIo)
+                    })?;
                 content.push(object(vec![
                     ("type", quote("input_image")),
                     ("image_url", quote(&reference)),
@@ -201,10 +197,6 @@ fn add_message<M: ResponsesMessageView>(
         ]));
     }
     Ok(())
-}
-
-fn image_reference(bytes: Vec<u8>, media_type: &str) -> String {
-    format!("data:{media_type};base64,{}", encode_base64(&bytes))
 }
 
 fn replayable_output(raw: &str) -> Option<Vec<String>> {

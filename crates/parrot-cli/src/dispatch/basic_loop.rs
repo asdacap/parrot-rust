@@ -2,7 +2,6 @@
 //! stdin descriptor and construction Runtime until `run` and all its joins end.
 
 use std::{
-    fmt,
     io::{self, Write},
     sync::{
         Arc, Mutex,
@@ -24,8 +23,8 @@ use tonic::{Code, Status};
 use crate::{
     attachments::uploader::AttachmentError,
     chat_loops::{
-        Binding, Interaction, Interactions, SessionSnapshot, application_exit, interrupt_loop,
-        reconcile_interactions, stop_binding, terminal_commands,
+        Binding, ChatLoopFailure, Interaction, Interactions, SessionSnapshot, application_exit,
+        interrupt_loop, reconcile_loop, stop_binding, terminal_commands,
     },
     slash_sessions::{
         CallbackSessionBinding, CommandContext, NavigationFailure, PollingSlashActivity,
@@ -63,64 +62,6 @@ pub struct BasicChatRequest {
     pub navigation: Option<Arc<dyn TerminalSessionNavigation>>,
 }
 
-#[derive(Debug)]
-pub enum BasicFailure {
-    Rpc(Status),
-    Slash(SlashFailure),
-    Io(io::Error),
-    Attachment(AttachmentError),
-    Navigation(NavigationFailure),
-}
-impl fmt::Display for BasicFailure {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Rpc(error) => error.fmt(f),
-            Self::Slash(error) => error.fmt(f),
-            Self::Io(error) => error.fmt(f),
-            Self::Attachment(error) => error.fmt(f),
-            Self::Navigation(NavigationFailure::Rpc(error)) => error.fmt(f),
-            Self::Navigation(
-                NavigationFailure::Recoverable(message) | NavigationFailure::Other(message),
-            ) => f.write_str(message),
-        }
-    }
-}
-impl std::error::Error for BasicFailure {}
-impl From<Status> for BasicFailure {
-    fn from(error: Status) -> Self {
-        Self::Rpc(error)
-    }
-}
-impl From<SlashFailure> for BasicFailure {
-    fn from(error: SlashFailure) -> Self {
-        Self::Slash(error)
-    }
-}
-impl From<io::Error> for BasicFailure {
-    fn from(error: io::Error) -> Self {
-        Self::Io(error)
-    }
-}
-impl From<AttachmentError> for BasicFailure {
-    fn from(error: AttachmentError) -> Self {
-        Self::Attachment(error)
-    }
-}
-impl From<NavigationFailure> for BasicFailure {
-    fn from(error: NavigationFailure) -> Self {
-        Self::Navigation(error)
-    }
-}
-impl From<RenderStreamError> for BasicFailure {
-    fn from(error: RenderStreamError) -> Self {
-        match error {
-            RenderStreamError::Output(error) => Self::Io(error),
-            RenderStreamError::Rpc(error) => Self::Rpc(error),
-            RenderStreamError::Cancelled => Self::Rpc(Status::cancelled("operation cancelled")),
-        }
-    }
-}
-
 /// A borrowed, sole-reader descriptor. Native reads use poll(0) and an async
 /// cancellation-aware delay, not Tokio stdin's uncancellable blocking worker.
 /// No task or thread is created, so cancellation settles in the polling future.
@@ -136,67 +77,52 @@ impl NativeLineInput {
 #[cfg(unix)]
 mod native_input {
     use super::*;
-    #[repr(C)]
-    struct PollDescriptor {
-        descriptor: i32,
-        events: i16,
-        returned: i16,
-    }
-    unsafe extern "C" {
-        fn poll(descriptors: *mut PollDescriptor, count: usize, timeout: i32) -> i32;
-        fn read(descriptor: i32, bytes: *mut std::ffi::c_void, count: usize) -> isize;
-        fn isatty(descriptor: i32) -> i32;
-    }
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+    use rustix::fd::BorrowedFd;
     impl DialogInput for NativeLineInput {
         fn read_byte<'a>(
             &'a mut self,
             c: &'a dyn Cancellation,
         ) -> BoxFuture<'a, io::Result<Option<u8>>> {
             Box::pin(async move {
+                // SAFETY: this adapter is the sole reader and its caller retains
+                // the descriptor throughout.
+                let fd = unsafe { BorrowedFd::borrow_raw(self.descriptor) };
                 loop {
                     c.check()
                         .map_err(|error| io::Error::new(io::ErrorKind::Interrupted, error))?;
-                    let mut descriptor = PollDescriptor {
-                        descriptor: self.descriptor,
-                        events: 1,
-                        returned: 0,
-                    };
-                    // SAFETY: one initialized pollfd; timeout zero cannot block.
-                    let ready = unsafe { poll(&mut descriptor, 1, 0) };
-                    match ready.cmp(&0) {
-                        std::cmp::Ordering::Less => {
-                            let error = io::Error::last_os_error();
+                    let mut descriptors = [PollFd::from_borrowed_fd(fd, PollFlags::IN)];
+                    match poll(&mut descriptors, Some(&Timespec::default())) {
+                        Err(error) => {
+                            let error = io::Error::from(error);
                             if error.kind() != io::ErrorKind::Interrupted {
                                 return Err(error);
                             }
                         }
-                        std::cmp::Ordering::Equal => {}
-                        std::cmp::Ordering::Greater => {
-                            if descriptor.returned & 0x20 != 0 {
+                        Ok(0) => {}
+                        Ok(_) => {
+                            let returned = descriptors[0].revents();
+                            if returned.contains(PollFlags::NVAL) {
                                 return Err(io::Error::new(
                                     io::ErrorKind::InvalidInput,
                                     "invalid input descriptor",
                                 ));
                             }
-                            if descriptor.returned & (1 | 8 | 0x10) != 0 {
-                                let mut byte = 0;
-                                // SAFETY: poll reported input/EOF; this adapter is the sole
-                                // reader and its caller retains the descriptor throughout.
-                                let count = unsafe {
-                                    read(self.descriptor, (&mut byte as *mut u8).cast(), 1)
-                                };
-                                if count > 0 {
-                                    return Ok(Some(byte));
-                                }
-                                if count == 0 {
-                                    return Ok(None);
-                                }
-                                let error = io::Error::last_os_error();
-                                if !matches!(
-                                    error.kind(),
-                                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
-                                ) {
-                                    return Err(error);
+                            if returned.intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP)
+                            {
+                                let mut byte = [0];
+                                match rustix::io::read(fd, &mut byte) {
+                                    Ok(0) => return Ok(None),
+                                    Ok(_) => return Ok(Some(byte[0])),
+                                    Err(error) => {
+                                        let error = io::Error::from(error);
+                                        if !matches!(
+                                            error.kind(),
+                                            io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                                        ) {
+                                            return Err(error);
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -211,7 +137,7 @@ mod native_input {
         }
         fn secret_lease(&mut self) -> io::Result<Option<crate::terminal_input::RawTerminal>> {
             // SAFETY: isatty validates the borrowed descriptor without consuming it.
-            if unsafe { isatty(self.descriptor) } != 1 {
+            if !rustix::termios::isatty(unsafe { BorrowedFd::borrow_raw(self.descriptor) }) {
                 return Ok(None);
             }
             crate::terminal_input::RawTerminal::open(self.descriptor)?
@@ -305,7 +231,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         }
     }
 
-    pub async fn run(mut self, cancellation: &dyn Cancellation) -> Result<i32, BasicFailure> {
+    pub async fn run(mut self, cancellation: &dyn Cancellation) -> Result<i32, ChatLoopFailure> {
         let application = Arc::new(Signal::new());
         let running = self.run_inner(application.clone());
         tokio::pin!(running);
@@ -321,7 +247,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         }
     }
 
-    async fn run_inner(&mut self, application: Arc<Signal>) -> Result<i32, BasicFailure> {
+    async fn run_inner(&mut self, application: Arc<Signal>) -> Result<i32, ChatLoopFailure> {
         check(application.as_ref())?;
         let mut prompt = self.request.prompt.clone();
         if prompt.is_empty() && self.request.input_redirected {
@@ -379,11 +305,15 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         session: &wire::UserSession,
         prompt: &str,
         application: Arc<Signal>,
-    ) -> Result<i32, BasicFailure> {
+    ) -> Result<i32, ChatLoopFailure> {
         writeln!(self.output, "{prompt}")?;
-        let mut stream =
-            PreparedSessionStream::open_live(self.client.clone(), &session.id, application.clone())
-                .await?;
+        let mut stream = PreparedSessionStream::open_live(
+            self.client.clone(),
+            &session.id,
+            application.clone(),
+            application.as_ref(),
+        )
+        .await?;
         let Some(message) = (self.prepare)(
             self.client.clone(),
             &session.id,
@@ -398,8 +328,8 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             return Ok(EXIT_FAILURE);
         };
         native_call(self.client.send_message(message), application.as_ref()).await?;
-        let mut jsonl =
-            super::jsonl_log::JsonlEventLog::create(&self.jsonl_log).map_err(BasicFailure::Io)?;
+        let mut jsonl = super::jsonl_log::JsonlEventLog::create(&self.jsonl_log)
+            .map_err(ChatLoopFailure::Io)?;
         let completed = render_turn(
             &mut stream,
             &mut self.output,
@@ -425,7 +355,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         initial: wire::UserSession,
         application: Arc<Signal>,
         replay: bool,
-    ) -> Result<i32, BasicFailure> {
+    ) -> Result<i32, ChatLoopFailure> {
         let stop = Arc::new(Signal::new());
         let stream = if replay {
             PreparedSessionStream::open(
@@ -436,8 +366,13 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             )
             .await?
         } else {
-            PreparedSessionStream::open_live(self.client.clone(), &initial.id, application.clone())
-                .await?
+            PreparedSessionStream::open_live(
+                self.client.clone(),
+                &initial.id,
+                application.clone(),
+                application.as_ref(),
+            )
+            .await?
         };
         let replay_context = stream.replay_context();
         let shared = Arc::new(BasicSession {
@@ -487,7 +422,12 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         let interrupts = self.interrupts.clone();
         let input_loop = self.input_loop(shared.clone(), controller.clone());
         let rendering = shared.render_loop();
-        let reconciling = shared.reconcile_loop();
+        let reconciling = reconcile_loop(
+            || shared.snapshot(),
+            &shared.application,
+            &shared.interactions,
+            &shared.changed,
+        );
         let interrupting = shared.interrupt_loop();
         tokio::pin!(input_loop, rendering, reconciling, interrupting);
         let mut input_result = None;
@@ -538,7 +478,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         &mut self,
         shared: Arc<BasicSession>,
         controller: Arc<TerminalSessionController>,
-    ) -> Result<i32, BasicFailure> {
+    ) -> Result<i32, ChatLoopFailure> {
         let c = shared.application.as_ref();
         // Moving the reader out is unnecessary: the dialog borrows it through
         // the one input adapter, shared only by this input/interaction future.
@@ -805,7 +745,7 @@ impl BasicSession {
         self.interrupted.notify_one();
         true
     }
-    async fn interrupt_loop(&self) -> Result<(), BasicFailure> {
+    async fn interrupt_loop(&self) -> Result<(), ChatLoopFailure> {
         interrupt_loop(
             || self.snapshot(),
             &self.application,
@@ -813,9 +753,9 @@ impl BasicSession {
             &self.interrupted,
         )
         .await
-        .map_err(BasicFailure::from)
+        .map_err(ChatLoopFailure::from)
     }
-    async fn render_loop(&self) -> Result<(), BasicFailure> {
+    async fn render_loop(&self) -> Result<(), ChatLoopFailure> {
         let mut renderer = BasicRenderer::new();
         let mut plan = None;
         let mut generation = self.snapshot().generation;
@@ -915,21 +855,6 @@ impl BasicSession {
             }
         }
     }
-    async fn reconcile_loop(&self) -> Result<(), BasicFailure> {
-        let mut interval = tokio::time::interval(Duration::from_millis(250));
-        loop {
-            tokio::select! { biased; () = self.application.cancelled() => return Ok(()), _ = interval.tick() => () }
-            let snapshot = self.snapshot();
-            reconcile_interactions(
-                snapshot,
-                |generation| generation != self.snapshot().generation,
-                &self.application,
-                &self.interactions,
-                &self.changed,
-            )
-            .await?;
-        }
-    }
     async fn replace_stream(
         &self,
         session: wire::UserSession,
@@ -944,11 +869,13 @@ impl BasicSession {
             PreparedSessionStream::open(client.clone(), &session.id, self.application.clone(), c)
                 .await?
         } else {
-            tokio::select! {
-                biased;
-                () = c.cancelled() => return Err(Status::cancelled("operation cancelled").into()),
-                result = PreparedSessionStream::open_live(client.clone(), &session.id, self.application.clone()) => result?,
-            }
+            PreparedSessionStream::open_live(
+                client.clone(),
+                &session.id,
+                self.application.clone(),
+                c,
+            )
+            .await?
         };
         check(c)?;
         stop_binding(&self.binding_stop);
@@ -1038,12 +965,12 @@ fn check(c: &dyn Cancellation) -> Result<(), Status> {
     c.check()
         .map_err(|error| Status::cancelled(error.to_string()))
 }
-fn is_cancelled(error: &BasicFailure) -> bool {
+fn is_cancelled(error: &ChatLoopFailure) -> bool {
     match error {
-        BasicFailure::Rpc(status) => status.code() == Code::Cancelled,
-        BasicFailure::Slash(SlashFailure::Rpc(status)) => status.code() == Code::Cancelled,
-        BasicFailure::Io(error) => error.kind() == io::ErrorKind::Interrupted,
-        BasicFailure::Attachment(AttachmentError::Cancelled) => true,
+        ChatLoopFailure::Rpc(status) => status.code() == Code::Cancelled,
+        ChatLoopFailure::Slash(SlashFailure::Rpc(status)) => status.code() == Code::Cancelled,
+        ChatLoopFailure::Io(error) => error.kind() == io::ErrorKind::Interrupted,
+        ChatLoopFailure::Attachment(AttachmentError::Cancelled) => true,
         _ => false,
     }
 }
@@ -1058,7 +985,7 @@ async fn complete_basic_plan(
     output: &mut (dyn Write + Send),
     busy: &AtomicBool,
     c: &dyn Cancellation,
-) -> Result<bool, BasicFailure> {
+) -> Result<bool, ChatLoopFailure> {
     let Some(definition) = completed.dialog.as_ref() else {
         return Ok(false);
     };
@@ -1535,10 +1462,14 @@ mod tests {
                 let client = owner.client().unwrap().clone();
                 let application = Arc::new(Signal::new());
                 let stop = Arc::new(Signal::new());
-                let stream =
-                    PreparedSessionStream::open_live(client.clone(), SESSION, application.clone())
-                        .await
-                        .unwrap();
+                let stream = PreparedSessionStream::open_live(
+                    client.clone(),
+                    SESSION,
+                    application.clone(),
+                    application.as_ref(),
+                )
+                .await
+                .unwrap();
                 let shared = Arc::new(BasicSession {
                     binding: tokio::sync::Mutex::new(Binding {
                         stream,
@@ -2027,15 +1958,23 @@ mod tests {
         {
             let mut fixture = Fixture::open().await;
             let outcome = tokio::time::timeout(Duration::from_secs(5), async {
-                tokio::join!(fixture.shared.reconcile_loop(), async {
-                    fixture.wait_for_second_call().await;
-                    let preserved = fixture.kept_state();
-                    let live = !fixture.shared.application.is_cancelled();
-                    fixture.discovery.release_second.cancel();
-                    fixture.wait_for_recovery().await;
-                    fixture.shared.application.cancel();
-                    (preserved, live)
-                })
+                tokio::join!(
+                    reconcile_loop(
+                        || fixture.shared.snapshot(),
+                        &fixture.shared.application,
+                        &fixture.shared.interactions,
+                        &fixture.shared.changed,
+                    ),
+                    async {
+                        fixture.wait_for_second_call().await;
+                        let preserved = fixture.kept_state();
+                        let live = !fixture.shared.application.is_cancelled();
+                        fixture.discovery.release_second.cancel();
+                        fixture.wait_for_recovery().await;
+                        fixture.shared.application.cancel();
+                        (preserved, live)
+                    }
+                )
             })
             .await;
             fixture.close().await;
@@ -2065,12 +2004,20 @@ mod tests {
         async fn question_discovery_lifetime_cancellation_joins_blocked_native_rpc() {
             let mut fixture = Fixture::open().await;
             let outcome = tokio::time::timeout(Duration::from_secs(5), async {
-                tokio::join!(fixture.shared.reconcile_loop(), async {
-                    fixture.wait_for_second_call().await;
-                    let preserved = fixture.kept_state();
-                    fixture.shared.application.cancel();
-                    preserved
-                })
+                tokio::join!(
+                    reconcile_loop(
+                        || fixture.shared.snapshot(),
+                        &fixture.shared.application,
+                        &fixture.shared.interactions,
+                        &fixture.shared.changed,
+                    ),
+                    async {
+                        fixture.wait_for_second_call().await;
+                        let preserved = fixture.kept_state();
+                        fixture.shared.application.cancel();
+                        preserved
+                    }
+                )
             })
             .await;
             fixture.close().await;

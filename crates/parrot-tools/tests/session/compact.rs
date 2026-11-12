@@ -185,16 +185,7 @@ async fn injected_compaction_template_is_used_directly_with_all_source_arguments
     }
     let expected = "custom compacted|True|987|4321|10|73|555|17";
     assert_eq!(
-        text(
-            fixture
-                .invoke_with(
-                    Kind::CompactContext,
-                    "{}",
-                    formatter_catalog(),
-                    &Cancel(false)
-                )
-                .await
-        ),
+        text(fixture.invoke(Kind::CompactContext, "{}").await),
         expected
     );
     assert_eq!(

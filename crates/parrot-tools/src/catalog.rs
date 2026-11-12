@@ -20,7 +20,6 @@ use parrot_storage::artifacts::{ImageArtifactMetadata, ImageArtifactRepository};
 use crate::{
     agents::{
         self, AgentSelection, AgentTool, AgentToolError, AgentToolKind, ModelSelector,
-        ResultTemplates,
         questions::{AskTool, QuestionTool, ReplyTool},
     },
     files::{
@@ -493,7 +492,7 @@ pub struct AgentServices<R, M, Q, A> {
     /// False when the user session cannot prompt its user. Tools that wait on a
     /// user answer are then omitted from the catalog instead of blocking.
     pub interactive: bool,
-    pub templates: Arc<dyn ResultTemplates>,
+    pub templates: Arc<PromptTemplateCatalog>,
     pub allow_parent: bool,
 }
 impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactories<S, T> {
@@ -532,7 +531,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
                 configured = agents::send_definition(
                     configured,
                     services.allow_parent,
-                    services.templates.as_ref(),
+                    &services.templates,
                 )?;
             }
             Ok(bind(
@@ -544,7 +543,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
                     configured,
                     services.runtime.clone(),
                     services.models.clone(),
-                    Some(services.templates.clone()),
+                    services.templates.clone(),
                     services.allow_parent,
                 ),
                 agent,
@@ -558,7 +557,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
                 QuestionTool::<_, S>::new(
                     definition("question")?,
                     services.questions,
-                    Some(services.templates.clone()),
+                    services.templates.clone(),
                 ),
                 agent,
             ),
@@ -569,7 +568,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
                 AskTool::<_, S>::new(
                     definition("ask")?,
                     services.communication.clone(),
-                    Some(services.templates.clone()),
+                    services.templates.clone(),
                 ),
                 agent,
             ),
@@ -580,7 +579,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
                 ReplyTool::<_, S>::new(
                     definition("reply")?,
                     services.communication,
-                    Some(services.templates.clone()),
+                    services.templates.clone(),
                 ),
                 agent,
             ),
@@ -608,7 +607,6 @@ pub struct SessionBindings<C, I, P, F> {
     pub images: Arc<I>,
     pub permission: Arc<P>,
     pub filesystem: Arc<F>,
-    pub templates: Arc<PromptTemplateCatalog>,
     pub agent_depth: i32,
     /// False when the user session cannot prompt its user. A write-permission
     /// request would be rejected before it reached anyone, so the tool is omitted.
@@ -634,7 +632,6 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> Sess
                     kind,
                     definitions.describe(kind.name())?.clone(),
                     services.control.clone(),
-                    services.templates.clone(),
                 ),
                 scoped,
             ))

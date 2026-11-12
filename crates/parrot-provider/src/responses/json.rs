@@ -42,7 +42,7 @@ pub(super) fn source_compact(raw: &str) -> Result<String, serde_json::Error> {
     Ok(result)
 }
 
-pub(super) fn source_quote(value: &str) -> String {
+pub(crate) fn source_quote(value: &str) -> String {
     let mut result = String::with_capacity(value.len() + 2);
     result.push('"');
     for character in value.chars() {

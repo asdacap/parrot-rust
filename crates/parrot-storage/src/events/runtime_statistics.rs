@@ -9,15 +9,7 @@ impl EventRepository {
     /// Shared by repository clones. The coordinator's synchronous append callback
     /// is used by record_usage below on a blocking-pool thread, never the executor.
     pub async fn get_runtime_statistics(&self) -> Result<Arc<UserSessionStatistics>, EventError> {
-        self.get_runtime_statistics_with_progress(None).await
-    }
-
-    /// Observes event loading only when initializing the shared coordinator.
-    pub async fn get_runtime_statistics_with_progress(
-        &self,
-        progress: Option<EventLoadProgress>,
-    ) -> Result<Arc<UserSessionStatistics>, EventError> {
-        self.load_runtime_statistics(HashMap::new(), progress).await
+        self.load_runtime_statistics(HashMap::new(), None).await
     }
 
     /// Restores the shared coordinator with canonical root ancestry before any root facts exist.

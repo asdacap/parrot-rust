@@ -735,6 +735,14 @@ impl MemoryState {
     fn step(&mut self, name: &'static str) -> Result<(), Error> {
         self.trace.step(name, self.fail_at)
     }
+    fn has_pending_input(&self) -> BoxFuture<'_, Result<bool, Error>> {
+        Box::pin(async move {
+            if self.fail_at == Some("pending_input") {
+                self.trace.step("pending_input", self.fail_at)?;
+            }
+            Ok(!self.pending_messages.is_empty())
+        })
+    }
     fn capture_options(&self) -> TurnOptions {
         TurnOptions {
             maximum_requests: self.maximum,
@@ -1113,14 +1121,6 @@ impl States for MemoryState {
             Ok(self.last_turn.clone())
         })
     }
-    fn has_pending_input(&self) -> BoxFuture<'_, Result<bool, Error>> {
-        Box::pin(async move {
-            if self.fail_at == Some("pending_message") {
-                self.trace.step("pending_message", self.fail_at)?;
-            }
-            Ok(!self.pending_messages.is_empty())
-        })
-    }
     fn promote_pending_inputs(
         &mut self,
         admission: InputAdmission,
@@ -1133,7 +1133,7 @@ impl States for MemoryState {
             while let Some(index) = self
                 .pending_messages
                 .iter()
-                .position(|(message, _)| *message == Delivery::Steer)
+                .position(|(delivery, _)| *delivery == Delivery::Steer)
             {
                 promoted.push(self.pending_messages.remove(index).unwrap());
             }

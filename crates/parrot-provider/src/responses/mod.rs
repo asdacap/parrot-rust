@@ -3,7 +3,7 @@
 //! This module owns Responses-specific request/history conversion and stream
 //! state. Caller values enter through borrowed views; outputs are owning
 //! Responses events and replay content, not duplicate shared neutral DTOs.
-mod json;
+pub(crate) mod json;
 mod request;
 mod stream;
 mod view;

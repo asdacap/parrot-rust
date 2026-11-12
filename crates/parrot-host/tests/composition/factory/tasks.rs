@@ -28,7 +28,9 @@ use parrot_domain::{
         tools::Tool,
     },
     values::{
-        agent_state::{AgentStateSnapshot, AgentStateUpdate, TaskCallReceipt},
+        agent_state::{
+            AgentStateSnapshot, AgentStateUpdate, TaskCallReceipt, TaskForkModeSnapshot,
+        },
         agent_tasks::ExecutionStatus,
         tools::{ConfiguredToolDefinition, ToolDefinitionCatalog},
     },
@@ -37,7 +39,7 @@ use parrot_host::composition::factory::tasks::ScopedTaskController;
 use parrot_runtime::{
     agent_turn::{lifecycle::Signal, services::TurnSelection},
     children::ScopedSession,
-    task_scheduler::{ForkHistoryMode, SchedulerConfig, TaskConfiguration},
+    task_scheduler::{SchedulerConfig, TaskConfiguration},
 };
 use parrot_storage::{
     artifacts::output_blobs::{MAXIMUM_INLINE_BYTES, ToolOutputBlobStore},
@@ -95,7 +97,7 @@ impl AgentStateStore for SealingState {
 async fn root_with_controller(
     h: &Harness,
     owner: &str,
-    mode: ForkHistoryMode,
+    mode: TaskForkModeSnapshot,
 ) -> (
     Arc<parrot_runtime::children::Scope<Security>>,
     Arc<Controller>,
@@ -276,9 +278,9 @@ impl AuthorizedReadService for Reader {
 
 fn definitions() -> ToolDefinitionCatalog {
     use parrot_foundation::config::{
-        configuration::source_predefined_content, runtime::read_tool_definitions, yaml,
+        configuration::source_predefined_content, runtime::read_tool_definitions,
     };
-    let root = yaml::parse_root(&source_predefined_content().unwrap()).unwrap();
+    let root = source_predefined_content().unwrap();
     ToolDefinitionCatalog::new(
         &read_tool_definitions(&root)
             .unwrap()
@@ -353,7 +355,7 @@ async fn state(controller: &Controller) -> Vec<parrot_domain::values::agent_task
 #[tokio::test]
 async fn actual_tool_parser_scheduler_and_runner_preserve_captured_model_and_details() {
     let h = Harness::new();
-    let (root, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    let (root, controller) = root_with_controller(&h, "owner", TaskForkModeSnapshot::Empty).await;
     occupy_self(&root, &controller).await;
     let set = tool(TaskToolKind::Set, &controller, Arc::new(Reader::default()));
     let selected = support::selection(&h.provider, "second", "root-mode", 0x3f);
@@ -420,7 +422,7 @@ async fn actual_child_history_fork_stops_before_the_invoking_tool_batch() {
     use parrot_domain::protocol::messages::parrot::Event;
     use parrot_storage::conversation::{ConversationMessage, MessageRole, ToolCall};
     let h = Harness::new();
-    let (root, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Parent).await;
+    let (root, controller) = root_with_controller(&h, "owner", TaskForkModeSnapshot::Parent).await;
     occupy_self(&root, &controller).await;
     let history = &h.factory.get("owner").history;
     h.histories.append(history, "safe-prefix").await;
@@ -490,7 +492,7 @@ async fn actual_child_history_fork_stops_before_the_invoking_tool_batch() {
 #[tokio::test]
 async fn artifact_loading_uses_only_the_injected_reader_and_preserves_invocation_security() {
     let h = Harness::new();
-    let (_, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    let (_, controller) = root_with_controller(&h, "owner", TaskForkModeSnapshot::Empty).await;
     let mut task = declaration("already-done");
     task["state"] = "succeeded".into();
     task["result"] = "recorded".into();
@@ -546,7 +548,7 @@ async fn artifact_loading_uses_only_the_injected_reader_and_preserves_invocation
 #[tokio::test]
 async fn canceled_update_and_invalid_merged_graph_do_not_mutate_the_actual_scheduler() {
     let h = Harness::new();
-    let (_, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    let (_, controller) = root_with_controller(&h, "owner", TaskForkModeSnapshot::Empty).await;
     let set = tool(TaskToolKind::Set, &controller, Arc::new(Reader::default()));
     let cancellation = Signal::new();
     cancellation.cancel();
@@ -585,7 +587,7 @@ async fn canceled_update_and_invalid_merged_graph_do_not_mutate_the_actual_sched
 async fn admitted_update_survives_observer_cancellation_and_real_get_waits_for_spawn_tail() {
     use std::{future::Future, task::Poll};
     let h = Harness::new();
-    let (_, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    let (_, controller) = root_with_controller(&h, "owner", TaskForkModeSnapshot::Empty).await;
     let construction = support::Gate::new();
     let provider = support::Gate::new();
     *h.factory.construction.lock().unwrap() = Some(construction.clone());
@@ -656,7 +658,7 @@ async fn update_observer_cancellation_remains_live_during_accepted_response_seal
     use std::{future::Future, task::Poll};
 
     let h = Harness::new();
-    let (root, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    let (root, controller) = root_with_controller(&h, "owner", TaskForkModeSnapshot::Empty).await;
     let seal = support::Gate::new();
     *root
         .get_service::<SealingState>()
@@ -765,7 +767,7 @@ async fn update_observer_cancellation_remains_live_during_accepted_response_seal
 #[tokio::test]
 async fn settled_scheduler_failure_reaches_real_tool_without_admitting_work() {
     let h = Harness::new();
-    let (_, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    let (_, controller) = root_with_controller(&h, "owner", TaskForkModeSnapshot::Empty).await;
     bounded(controller.scheduler().settle().join())
         .await
         .unwrap();
@@ -792,7 +794,7 @@ async fn settled_scheduler_failure_reaches_real_tool_without_admitting_work() {
 #[tokio::test]
 async fn actual_scoped_notifier_spills_exact_bytes_and_wakes_only_its_owning_session() {
     let h = Harness::new();
-    let (_, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    let (_, controller) = root_with_controller(&h, "owner", TaskForkModeSnapshot::Empty).await;
     h.root("unrelated").await;
     let set = tool(TaskToolKind::Set, &controller, Arc::new(Reader::default()));
     let tasks: Vec<_> = (0..900)
@@ -879,7 +881,7 @@ async fn actual_scoped_notifier_spills_exact_bytes_and_wakes_only_its_owning_ses
 #[tokio::test]
 async fn actual_bridge_returns_actionable_self_work_and_registered_dedicated_assignment() {
     let h = Harness::new();
-    let (_, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    let (_, controller) = root_with_controller(&h, "owner", TaskForkModeSnapshot::Empty).await;
     let provider = support::Gate::new();
     h.provider.script(
         "self",
@@ -964,7 +966,7 @@ async fn actual_bridge_replays_exact_response_without_reading_changed_or_removed
     use parrot_storage::conversation::HistoryForkBoundary;
 
     let h = Harness::new();
-    let (_, controller) = root_with_controller(&h, "owner", ForkHistoryMode::Empty).await;
+    let (_, controller) = root_with_controller(&h, "owner", TaskForkModeSnapshot::Empty).await;
     let path = h.histories.path.join("accepted-tasks.json");
     let mut task = declaration("artifact-owner");
     task["payload"] = "Implement the original artifact instruction".into();

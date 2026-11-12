@@ -195,15 +195,3 @@ impl TurnActivity {
         }
     }
 }
-
-/// A dropped generated handler future owns cancellation of its native call.
-/// No independent task or runtime outlives that observation.
-pub(crate) struct HandlerCancellation;
-impl Cancellation for HandlerCancellation {
-    fn is_cancelled(&self) -> bool {
-        false
-    }
-    fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::pending())
-    }
-}
