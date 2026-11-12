@@ -82,7 +82,6 @@ struct State {
     conversation: AgentConversation,
     tool_conversation: ToolConversation,
     context: ContextController,
-    request_status: Option<Arc<dyn crate::compaction::ContextStatus>>,
 }
 
 /// A real storage/provider backend. No service has a success default, and no
@@ -188,7 +187,6 @@ where
                 conversation,
                 tool_conversation,
                 context: config.context,
-                request_status: None,
             }),
             notices,
             execution_activity: std::sync::Mutex::new(None),
