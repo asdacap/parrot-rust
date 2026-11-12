@@ -59,22 +59,18 @@ pub struct Message {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConversationTurn {
     pub messages: Vec<Message>,
-    /// Present only when the non-system tail is a no-tool assistant response,
-    /// including a retained candidate; it does not prove durable turn closure.
-    pub result: Option<Message>,
 }
 
 impl ConversationTurn {
     pub fn needs_response(&self) -> bool {
-        self.result.is_none()
-            && matches!(
-                self.messages
-                    .iter()
-                    .rev()
-                    .find(|message| message.role != Role::System)
-                    .map(|message| message.role),
-                Some(Role::User | Role::Tool)
-            )
+        matches!(
+            self.messages
+                .iter()
+                .rev()
+                .find(|message| message.role != Role::System)
+                .map(|message| message.role),
+            Some(Role::User | Role::Tool)
+        )
     }
 }
 

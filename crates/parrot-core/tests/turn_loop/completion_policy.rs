@@ -140,7 +140,11 @@ fn every_blocker_list_retains_the_exact_candidate_and_forces_continuation() {
         assert_eq!(state.completion_blocker_feedback[0].candidate, candidate);
         let turn = state.last_turn.as_ref().unwrap();
         assert_eq!(
-            turn.result.as_ref().unwrap().provider_content,
+            turn.messages
+                .iter()
+                .find(|message| message.role == Role::Assistant)
+                .unwrap()
+                .provider_content,
             candidate.provider_content
         );
         assert_eq!(turn.messages.last().unwrap().role, Role::System);
@@ -226,7 +230,7 @@ fn blocker_snapshots_restart_budget_and_close_only_after_the_list_clears() {
         ]
     );
     assert_eq!(
-        turn.result.as_ref().unwrap().contents,
+        turn.messages.last().unwrap().contents,
         [Content::Text("accepted answer".into())]
     );
 }
@@ -259,7 +263,7 @@ fn feedback_recording_errors_stop_before_applying_context_or_restarting_budget()
     let turn = state.last_turn.as_ref().unwrap();
     assert_eq!(turn.messages.len(), 1);
     assert_eq!(turn.messages[0].role, Role::User);
-    assert!(turn.result.is_none());
+    assert!(turn.needs_response());
     assert_eq!(
         state
             .trace

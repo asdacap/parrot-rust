@@ -431,23 +431,7 @@ where
     fn get_last_turn(
         &self,
     ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationTurn>, CoreError>> {
-        adapt_operation(async move {
-            let state = self.state.lock().await;
-            let Some(turn) = state.conversation.read_last_turn_messages() else {
-                return Ok(None);
-            };
-            let messages: Vec<parrot_core::Message> =
-                turn.iter().map(provider_message).map(Into::into).collect();
-            let result = messages
-                .iter()
-                .rev()
-                .find(|message| message.role != parrot_core::Role::System)
-                .filter(|message| {
-                    message.role == parrot_core::Role::Assistant && message.tool_calls.is_empty()
-                })
-                .cloned();
-            Ok(Some(parrot_core::ConversationTurn { messages, result }))
-        })
+        adapt_operation(async move { Ok(self.state.lock().await.read_last_turn()) })
     }
     fn promote_pending_inputs(
         &mut self,

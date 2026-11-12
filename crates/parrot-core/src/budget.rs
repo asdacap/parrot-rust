@@ -18,7 +18,7 @@ impl AgentState {
         self.provider_requests = 0;
     }
 
-    /// Resets invocation state without discarding the model token calibration.
+    /// Resets invocation state without discarding the last request statistics.
     pub fn restart(&mut self) {
         let calibration = std::mem::take(&mut self.last_request_statistic);
         *self = Self::new(self.disable_max_turns);

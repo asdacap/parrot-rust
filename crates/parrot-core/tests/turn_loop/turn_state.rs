@@ -6,6 +6,11 @@ fn no_turn_and_completed_turns_without_pending_input_do_not_invoke_the_provider(
     empty.pending_messages.clear();
     assert_eq!(empty.run(), Ok(Outcome::Completed(String::new())));
     assert!(empty.trace.values().is_empty());
+    empty.last_turn = Some(ConversationTurn {
+        messages: Vec::new(),
+    });
+    assert_eq!(empty.run(), Ok(Outcome::Completed(String::new())));
+    assert!(empty.trace.values().is_empty());
 
     let mut completed = MemoryState::new([]);
     completed.pending_messages.clear();
@@ -20,7 +25,7 @@ fn no_turn_and_completed_turns_without_pending_input_do_not_invoke_the_provider(
         ..Message::default()
     });
     let before = finish(completed.get_last_turn()).unwrap().unwrap();
-    assert_eq!(before.result.as_ref().unwrap().role, Role::Assistant);
+    assert!(!before.needs_response());
     assert_eq!(completed.run(), Ok(Outcome::Completed(String::new())));
     assert_eq!(finish(completed.get_last_turn()).unwrap(), Some(before));
     assert!(completed.trace.values().is_empty());
@@ -28,7 +33,7 @@ fn no_turn_and_completed_turns_without_pending_input_do_not_invoke_the_provider(
 }
 
 #[test]
-fn a_missing_result_without_a_user_or_tool_tail_does_not_start_execution() {
+fn a_turn_without_a_user_or_tool_tail_does_not_start_execution() {
     for message in [
         Message {
             role: Role::System,
@@ -48,7 +53,12 @@ fn a_missing_result_without_a_user_or_tool_tail_does_not_start_execution() {
         let mut state = MemoryState::new([]);
         state.pending_messages.clear();
         state.append_turn_message(message);
-        assert!(state.last_turn.as_ref().unwrap().result.is_none());
+        state.append_turn_message(Message {
+            role: Role::System,
+            contents: vec![Content::Text("trailing system context".into())],
+            ..Message::default()
+        });
+        assert!(!state.last_turn.as_ref().unwrap().needs_response());
         assert_eq!(state.run(), Ok(Outcome::Completed(String::new())));
         assert!(state.trace.values().is_empty());
         assert!(state.provider.requests.lock().unwrap().is_empty());
@@ -347,7 +357,7 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
         turn.messages[0].contents,
         [Content::Text("second steer".into())]
     );
-    assert_eq!(turn.result.as_ref().unwrap().role, Role::Assistant);
+    assert!(!turn.needs_response());
 }
 
 #[test]
@@ -534,7 +544,7 @@ fn provider_errors_write_the_consumed_request_budget_back_to_states() {
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
     assert!(state.budget.admit(1).is_none());
     assert!(state.recorded_tools.is_empty());
-    assert!(state.last_turn.as_ref().unwrap().result.is_none());
+    assert!(state.last_turn.as_ref().unwrap().needs_response());
 }
 
 #[test]

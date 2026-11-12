@@ -31,7 +31,7 @@ pub trait States: Send + Sync {
     /// Reads typed configuration without rendering prompts or deciding request policy.
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>>;
     /// Reads the consolidated agent state that survives across turns, including
-    /// the durable final-phase marker, standing status hashes, token calibration, and provider-request budget.
+    /// the durable final-phase marker, standing status hashes, last request statistics, and provider-request budget.
     /// Core resets the request count at turn start but retains settlement extensions from earlier turns.
     fn get_agent_state(&self) -> BoxFuture<'_, Result<AgentState, Error>> {
         Box::pin(async { Err(Error::unsupported("States.get_agent_state")) })

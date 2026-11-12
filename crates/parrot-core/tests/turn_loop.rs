@@ -761,16 +761,8 @@ impl MemoryState {
         }
         let turn = self.last_turn.get_or_insert_with(|| ConversationTurn {
             messages: Vec::new(),
-            result: None,
         });
         turn.messages.push(message);
-        turn.result = turn
-            .messages
-            .iter()
-            .rev()
-            .find(|message| message.role != Role::System)
-            .filter(|message| message.role == Role::Assistant && message.tool_calls.is_empty())
-            .cloned();
     }
     fn append_response(&mut self, response: &ProviderResponse) {
         self.append_turn_message(Message {
