@@ -134,7 +134,11 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
         false
     }
     fn has_ready_turn(&mut self) -> BoxFuture<'_, Result<bool, Error>> {
-        Box::pin(async move { self.states.has_ready_turn().await })
+        Box::pin(async move {
+            let turn = self.states.get_last_turn().await?;
+            Ok(turn.as_ref().is_some_and(ConversationTurn::needs_response)
+                || self.states.peek_pending_input_header().await?.is_some())
+        })
     }
     fn run_turn<'a>(
         &'a mut self,

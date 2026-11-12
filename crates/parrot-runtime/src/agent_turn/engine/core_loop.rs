@@ -100,15 +100,18 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
     fn has_ready_turn(&mut self) -> BoxFuture<'_, Result<bool, CoreError>> {
         Box::pin(async move {
             let binding = TurnBinding::new();
-            RuntimeStates::bind(
+            let states = RuntimeStates::bind(
                 self.backend,
                 &binding,
                 self.cancellation,
                 self.work,
                 &mut self.agent_state,
-            )
-            .has_ready_turn()
-            .await
+            );
+            let turn = states.get_last_turn().await?;
+            Ok(turn
+                .as_ref()
+                .is_some_and(parrot_core::ConversationTurn::needs_response)
+                || states.peek_pending_input_header().await?.is_some())
         })
     }
 
