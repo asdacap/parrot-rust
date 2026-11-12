@@ -82,9 +82,8 @@ fn raw_and_calibrated_triggers_compact_and_use_returned_epoch() {
         state.request().estimated_input_tokens = 100;
         if calibrated {
             state
-                .request()
-                .context
-                .calibration
+                .budget
+                .token_calibration
                 .observe_usage("memory/model", 0, 950);
         }
         state.request().estimate_script.push_back(0);
@@ -97,8 +96,7 @@ fn raw_and_calibrated_triggers_compact_and_use_returned_epoch() {
             contents: vec![Content::Text("compacted history".into())],
             ..Message::default()
         }];
-        let mut compacted_state = state.request().context.clone();
-        compacted_state.calibration.reset();
+        let compacted_state = state.request().context.clone();
         state.compaction_plan = Some(compaction_support::plan(&["original", "retained"]));
         state.summary_provider =
             compaction_support::Provider::new([parrot_core::SummaryResponse::Summary(
@@ -147,14 +145,17 @@ fn separate_context_reads_use_compaction_configuration_and_calibration() {
         .maximum_output_tokens = 100;
     state.request().estimated_input_tokens = 100;
     state
-        .request()
-        .context
-        .calibration
+        .budget
+        .token_calibration
         .observe_usage("memory/model", 0, 950);
     let mut compacted = state.request().context.clone();
     compacted.configuration.model.context_window = 2000;
     compacted.configuration.model.maximum_output_tokens = 200;
-    compacted.calibration.reset();
+    state.compaction_plan = Some(compaction_support::plan(&["original", "retained"]));
+    state.summary_provider =
+        compaction_support::Provider::new([parrot_core::SummaryResponse::Summary(
+            "summary".into(),
+        )]);
     state.compactions.push_back(CompactedContext {
         instructions: "compacted instructions".into(),
         messages: vec![Message {
@@ -286,12 +287,7 @@ fn model_output_limit_above_fallback_reaches_provider_request() {
 
 #[test]
 fn context_primitive_failures_stop_at_the_effect_without_invoking_provider_or_tools() {
-    for stage in [
-        "context_configuration",
-        "token_calibration",
-        "estimate",
-        "final_request",
-    ] {
+    for stage in ["context_configuration", "estimate", "final_request"] {
         let mut state = MemoryState::new([Reply::final_response("not invoked")]);
         if stage == "final_request" {
             state.maximum = 1;
@@ -331,5 +327,71 @@ fn retry_messages_use_configured_template_overrides() {
         assert!(requests[1].messages.iter().any(|message| {
             message.role == Role::System && message.contents == [Content::Text(content.into())]
         }));
+    }
+}
+
+#[test]
+fn completed_usage_calibrates_later_turns_and_completion_blocker_restarts() {
+    let mut response = match Reply::final_response("candidate") {
+        Reply::Response(response) => response,
+        _ => unreachable!(),
+    };
+    response.input_tokens = 350;
+    let mut state = MemoryState::new([
+        Reply::Response(response),
+        Reply::final_response("first answer"),
+        Reply::final_response("second answer"),
+    ]);
+    state.request().estimated_input_tokens = 100;
+    state
+        .prompts()
+        .exit_blockers
+        .push_back(vec!["finish the task".into()]);
+
+    assert_eq!(state.run(), Ok(Outcome::Completed("first answer".into())));
+    assert_eq!(
+        state
+            .budget
+            .token_calibration
+            .estimate_input_tokens("memory/model", 200),
+        450
+    );
+    state.enqueue_message(Delivery::Queue, "another question");
+    assert_eq!(state.run(), Ok(Outcome::Completed("second answer".into())));
+    assert_eq!(
+        state
+            .budget
+            .token_calibration
+            .estimate_input_tokens("memory/model", 200),
+        450
+    );
+    assert_eq!(
+        state
+            .budget
+            .token_calibration
+            .estimate_input_tokens("other/model", 200),
+        200
+    );
+}
+
+#[test]
+fn discarded_tool_responses_still_record_provider_usage() {
+    for reply in [Reply::truncated("cut"), Reply::invalid("invalid")] {
+        let Reply::Response(mut response) = reply else {
+            unreachable!()
+        };
+        response.input_tokens = 350;
+        let mut state =
+            MemoryState::new([Reply::Response(response), Reply::final_response("answer")]);
+        state.request().estimated_input_tokens = 100;
+
+        assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+        assert_eq!(
+            state
+                .budget
+                .token_calibration
+                .estimate_input_tokens("memory/model", 200),
+            450
+        );
     }
 }

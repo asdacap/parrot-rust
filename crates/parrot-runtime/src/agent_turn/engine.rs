@@ -81,6 +81,7 @@ pub struct RuntimeConfig<S: AccessSnapshot + 'static> {
 }
 
 struct State {
+    agent_state: parrot_core::AgentState,
     conversation: AgentConversation,
     tool_conversation: ToolConversation,
     context: ContextController,
@@ -105,10 +106,10 @@ impl ProviderUsage for State {
                 .request_accounting
                 .as_ref()
                 .ok_or_else(|| EventError::Invalid("request accounting is unavailable".into()))?;
-            self.context.budget_mut().observe_usage(
+            self.agent_state.token_calibration.observe_usage(
                 &accounting.selected.selector(),
                 accounting.estimated_input_tokens,
-                completed,
+                completed.input_tokens,
             );
             self.usage
                 .record_request(&accounting.selected, request.reasoning.as_ref(), completed)
@@ -121,7 +122,6 @@ impl ProviderUsage for State {
 /// concrete filesystem/security implementation is constructed by the drain.
 pub struct RuntimeBackend<S: AccessSnapshot + 'static> {
     identity: SessionIdentity,
-    agent_limits: AgentLimitsConfig,
     history: AgentHistoryView,
     broker: Arc<EventBroker>,
     publisher: Arc<Publisher>,
@@ -190,9 +190,9 @@ where
                 .render("agent-session.interrupted-result", &[], &NeverCancelled)
                 .map_err(|error| TurnError::Service(error.to_string()))?,
         };
+        let agent_state = parrot_core::AgentState::new(config.agent_limits.disable_max_turns);
         Ok(Arc::new(Self {
             identity: config.identity,
-            agent_limits: config.agent_limits,
             history: config.history,
             broker: config.broker,
             publisher: config.publisher,
@@ -217,6 +217,7 @@ where
             materialized_tools: std::sync::Mutex::new(None),
             compactor: config.context.compactor().clone(),
             state: Mutex::new(State {
+                agent_state,
                 conversation,
                 tool_conversation,
                 context: config.context,
@@ -297,6 +298,7 @@ where
                     selection: &selection.model,
                     tools: &definitions,
                     conversation: &mut state.conversation,
+                    agent_state: &mut state.agent_state,
                     prompt: &self.prompt,
                     sessions: &self.sessions,
                     status: status.as_ref(),

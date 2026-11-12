@@ -6,8 +6,8 @@ use parrot_core::{
     FinishReason, InputAdmission, Message, Outcome, PendingMessage, PromotedInput, PromptTemplate,
     Provider, ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent,
     SkillMention, SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding,
-    TokenCalibration, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest,
-    ToolResult, ToolStatus, Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult,
+    ToolStatus, Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -463,7 +463,6 @@ struct InputEstimate {
 #[derive(Clone)]
 struct MemoryContext {
     configuration: ContextConfiguration,
-    calibration: TokenCalibration,
 }
 
 struct CompactedContext {
@@ -568,7 +567,6 @@ impl MemoryState {
                     trigger_percent: 90,
                     context_limit: None,
                 },
-                calibration: TokenCalibration::default(),
             },
             instructions: "core request".into(),
             messages: Vec::new(),
@@ -799,7 +797,9 @@ impl MemoryState {
     ) -> Result<Outcome, Error> {
         *self.compaction.lock().unwrap() =
             MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
+        let calibration = std::mem::take(&mut self.budget.token_calibration);
         self.budget = AgentState::new(self.unlimited);
+        self.budget.token_calibration = calibration;
         let source = self.cancellation.clone();
         finish(run(
             self,
@@ -810,7 +810,9 @@ impl MemoryState {
     }
     fn run_with_compaction(&mut self, compaction: &mut MemoryCompaction) -> Result<Outcome, Error> {
         std::mem::swap(&mut *self.compaction.lock().unwrap(), compaction);
+        let calibration = std::mem::take(&mut self.budget.token_calibration);
         self.budget = AgentState::new(self.unlimited);
+        self.budget.token_calibration = calibration;
         let tools = self.tools.clone();
         let provider = self.provider.clone();
         let result = finish(run(
@@ -1197,12 +1199,6 @@ impl States for MemoryState {
                 .clone())
         })
     }
-    fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>> {
-        Box::pin(async move {
-            self.trace.step("token_calibration", self.fail_at)?;
-            Ok(self.request().context.calibration.clone())
-        })
-    }
     fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {
         Box::pin(async move {
             self.trace.step("messages", self.fail_at)?;
@@ -1276,6 +1272,7 @@ impl States for MemoryState {
                     .map(|result| result.map(|fitted| fitted.result)),
             );
             if let Some(fitted) = result? {
+                self.budget.token_calibration.reset();
                 self.fitted_statuses.push(fitted.status);
             }
             if let Some(compacted) = self.compactions.pop_front() {
@@ -1306,11 +1303,9 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "render",
             "messages",
             "context_configuration",
-            "token_calibration",
             "estimate",
             "messages",
             "context_configuration",
-            "token_calibration",
             "estimate",
             "invoke",
             "record_tools",
@@ -1326,11 +1321,9 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "render",
             "messages",
             "context_configuration",
-            "token_calibration",
             "estimate",
             "messages",
             "context_configuration",
-            "token_calibration",
             "estimate",
             "invoke",
             "exit_blockers",

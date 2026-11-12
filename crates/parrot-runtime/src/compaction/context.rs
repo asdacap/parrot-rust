@@ -4,7 +4,7 @@ use super::execution::{
 };
 use super::{
     CompactionError, CompactionObserver, CompactionResult, Compactor, ContextSize, ContextSnapshot,
-    PlanningError, ProviderTokenBudget,
+    PlanningError,
 };
 use crate::prompt_context::{PromptError, SessionPrompt};
 use parrot_core::ContextConfiguration as CoreContextConfiguration;
@@ -137,6 +137,7 @@ pub struct EpochInput<'a> {
     pub selection: &'a ResolvedModelSelection,
     pub tools: &'a [Tool],
     pub conversation: &'a mut AgentConversation,
+    pub agent_state: &'a mut parrot_core::AgentState,
     pub prompt: &'a SessionPrompt,
     pub sessions: &'a ProviderSessions,
     pub status: &'a dyn ContextStatus,
@@ -158,7 +159,6 @@ pub struct ContextController {
     history: AgentHistoryView,
     blobs: parrot_storage::artifacts::compaction::CompactionGroupBlobStore,
     templates: Arc<PromptTemplateCatalog>,
-    budget: ProviderTokenBudget,
 }
 impl ContextController {
     pub fn new(
@@ -172,19 +172,11 @@ impl ContextController {
             history,
             blobs,
             templates,
-            budget: ProviderTokenBudget::default(),
         }
     }
     pub fn compactor(&self) -> &Compactor {
         &self.compactor
     }
-    pub fn budget(&self) -> &ProviderTokenBudget {
-        &self.budget
-    }
-    pub fn budget_mut(&mut self) -> &mut ProviderTokenBudget {
-        &mut self.budget
-    }
-
     pub(crate) fn capture_context_configuration(
         &self,
         selection: &ResolvedModelSelection,
@@ -265,6 +257,7 @@ impl ContextController {
             let mut states = EpochStates {
                 controller: &controller,
                 conversation: input.conversation,
+                agent_state: input.agent_state,
                 prompt: input.prompt,
                 selection: input.selection,
                 status: input.status,
@@ -444,7 +437,7 @@ impl ContextController {
                 )
                 .await?;
             reduced = true;
-            self.budget.reset();
+            input.agent_state.token_calibration.reset();
             input.conversation.reload().await?;
             if appended {
                 input
@@ -577,6 +570,7 @@ impl parrot_core::EventPublisher for EpochEventPublisher<'_> {
 struct EpochStates<'a> {
     controller: &'a tokio::sync::Mutex<&'a mut ContextController>,
     conversation: &'a mut AgentConversation,
+    agent_state: &'a mut parrot_core::AgentState,
     prompt: &'a SessionPrompt,
     selection: &'a ResolvedModelSelection,
     status: &'a dyn ContextStatus,
@@ -681,12 +675,6 @@ impl parrot_core::States for EpochStates<'_> {
         })
     }
 
-    fn read_token_calibration(
-        &self,
-    ) -> BoxFuture<'_, Result<parrot_core::TokenCalibration, parrot_core::Error>> {
-        Box::pin(async move { Ok(self.controller.lock().await.budget.capture_state()) })
-    }
-
     fn finalize_compaction<'a>(
         &'a mut self,
         instructions: &'a str,
@@ -704,6 +692,7 @@ impl parrot_core::States for EpochStates<'_> {
                         selection: self.selection,
                         tools: &definitions,
                         conversation: self.conversation,
+                        agent_state: self.agent_state,
                         prompt: self.prompt,
                         sessions: self.sessions,
                         status: self.status,
@@ -801,6 +790,7 @@ fn reborrow<'a>(input: &'a mut EpochInput<'_>) -> EpochInput<'a> {
         selection: input.selection,
         tools: input.tools,
         conversation: &mut *input.conversation,
+        agent_state: &mut *input.agent_state,
         prompt: input.prompt,
         sessions: input.sessions,
         status: input.status,

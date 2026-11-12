@@ -155,24 +155,44 @@ async fn execute_turn<M: ToolResultMetadata>(
             &catalog.normal
         };
         steer_status(states, provider, definitions, cancellation).await?;
-        let request = context::prepare_request(
+        if flags.final_phase {
+            let content =
+                rendering::render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
+            add_phase_prompt(states, &content, true).await?;
+        }
+        let prepared = context::prepare_request(
             states,
+            state,
             provider,
             publisher,
             definitions,
-            flags,
             &options,
             cancellation,
         )
         .await?;
         let attempt = state.count_request();
-        let response = match provider.invoke(request, cancellation).await {
+        states.set_agent_state(state.clone()).await?;
+        let invoked = provider.invoke(prepared.request, cancellation).await;
+        if !invoked
+            .as_ref()
+            .is_ok_and(|response| response.input_tokens > 0)
+        {
+            state.token_calibration = states.get_agent_state().await?.token_calibration;
+        }
+        let response = match invoked {
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
                 compacted_oversized = true;
-                if !context::compact_context(states, provider, publisher, definitions, cancellation)
-                    .await?
-                    .reduced
+                if !context::compact_context(
+                    states,
+                    state,
+                    provider,
+                    publisher,
+                    definitions,
+                    cancellation,
+                )
+                .await?
+                .reduced
                 {
                     return Err(error);
                 }
@@ -181,6 +201,11 @@ async fn execute_turn<M: ToolResultMetadata>(
             Err(error) => return Err(error),
         };
         compacted_oversized = false;
+        state.token_calibration.observe_usage(
+            &prepared.model_selector,
+            prepared.estimated_input_tokens,
+            response.input_tokens,
+        );
         if response.finish_reason == FinishReason::Length && !response.tool_calls.is_empty() {
             let content =
                 rendering::render_template(states, ConfigKey::TruncatedToolCallTemplate, &[])
@@ -241,7 +266,8 @@ async fn execute_turn<M: ToolResultMetadata>(
             let receipt = ToolCallReceipt {
                 assistant_sequence: recorded.sequence,
             };
-            execute_tools(
+            states.set_agent_state(state.clone()).await?;
+            let executed = execute_tools(
                 states,
                 tools,
                 response.tool_calls.clone(),
@@ -249,7 +275,9 @@ async fn execute_turn<M: ToolResultMetadata>(
                 flags,
                 cancellation,
             )
-            .await?;
+            .await;
+            *state = states.get_agent_state().await?;
+            executed?;
             if flags.final_phase && !state.try_extend_settlement() {
                 return exhaust_budget(states).await;
             }

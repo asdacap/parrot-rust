@@ -1,8 +1,7 @@
 use super::*;
 use parrot_core::{
     ContextSnapshot as CoreContextSnapshot, Error as CoreError, ErrorKind, ProviderRequest,
-    ProviderResponse, States as CoreStates, TokenCalibration, ToolCatalog, ToolDefinition,
-    TurnOptions,
+    ProviderResponse, States as CoreStates, ToolCatalog, ToolDefinition, TurnOptions,
 };
 
 mod conversation;
@@ -88,7 +87,6 @@ struct CoreLoopLifecycle<'a, S: AccessSnapshot + 'static> {
     backend: &'a RuntimeBackend<S>,
     cancellation: &'a dyn Cancellation,
     work: &'a dyn DrainWork,
-    agent_state: parrot_core::AgentState,
     failed_key: Option<TurnKey>,
 }
 
@@ -100,15 +98,9 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
     fn has_ready_turn(&mut self) -> BoxFuture<'_, Result<bool, CoreError>> {
         Box::pin(async move {
             let binding = TurnBinding::new();
-            RuntimeStates::bind(
-                self.backend,
-                &binding,
-                self.cancellation,
-                self.work,
-                &mut self.agent_state,
-            )
-            .has_ready_turn()
-            .await
+            RuntimeStates::bind(self.backend, &binding, self.cancellation, self.work)
+                .has_ready_turn()
+                .await
         })
     }
 
@@ -120,13 +112,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
             let cancellation: &dyn Cancellation = &cancellation;
             let binding = TurnBinding::new();
             let backend = self.backend;
-            let mut states = RuntimeStates::bind(
-                backend,
-                &binding,
-                self.cancellation,
-                self.work,
-                &mut self.agent_state,
-            );
+            let mut states = RuntimeStates::bind(backend, &binding, self.cancellation, self.work);
             let tool_events = ContextEmitter::new(
                 &backend.history,
                 backend.publisher.as_ref(),
@@ -225,6 +211,7 @@ where
     let initialized = {
         let mut guard = backend.state.lock().await;
         let state = &mut *guard;
+        state.agent_state.restart();
         state.request_status = None;
         state.request_accounting = None;
         state.tool_conversation.reset_pending();
@@ -240,7 +227,6 @@ where
         backend,
         cancellation,
         work,
-        agent_state: parrot_core::AgentState::new(backend.agent_limits.disable_max_turns),
         failed_key: None,
     };
     let outcome = parrot_core::run(
@@ -272,9 +258,7 @@ where
     S: AccessSnapshot + 'static,
 {
     let binding = TurnBinding::new();
-    let mut agent_state = parrot_core::AgentState::new(backend.agent_limits.disable_max_turns);
-    let mut states =
-        RuntimeStates::bind(backend, &binding, &NeverCancelled, work, &mut agent_state);
+    let mut states = RuntimeStates::bind(backend, &binding, &NeverCancelled, work);
     if let Some(message) = parrot_core::interrupt_turn(&mut states, &key.start_event_id)
         .await
         .map_err(TurnError::Core)?

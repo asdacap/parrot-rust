@@ -6,6 +6,7 @@ pub(super) struct BorrowedContextResources {
     pub snapshot: ToolSnapshot<Security>,
     pub selection: TurnSelection<Security>,
     pub conversation: AgentConversation,
+    pub agent_state: parrot_core::AgentState,
     pub context: ContextController,
     pub prompt: SessionPrompt,
     pub sessions: sessions::ProviderSessions,
@@ -21,6 +22,7 @@ impl BorrowedContextResources {
             conversation: AgentConversation::new(fixture.history.clone())
                 .await
                 .unwrap(),
+            agent_state: parrot_core::AgentState::new(false),
             context: fixture.controller(),
             prompt: SessionPrompt::new(Box::new(Prompt)),
             sessions: sessions::ProviderSessions::new(),

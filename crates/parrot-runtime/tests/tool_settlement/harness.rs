@@ -149,6 +149,7 @@ impl Harness {
             .unwrap(),
         );
         let runtime_state = tokio::sync::Mutex::new(State {
+            agent_state: parrot_core::AgentState::new(false),
             conversation: fixture.conversation().await,
             tool_conversation:
                 parrot_runtime::agent_turn::tool_conversation::ToolConversation::new(

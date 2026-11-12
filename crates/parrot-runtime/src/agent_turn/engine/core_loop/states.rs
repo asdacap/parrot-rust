@@ -26,7 +26,6 @@ pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) cancellation: &'a dyn Cancellation,
     pub(super) work: &'a dyn DrainWork,
     pub(super) persistence_key: Option<TurnKey>,
-    pub(super) agent_state: &'a mut parrot_core::AgentState,
 }
 
 impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
@@ -35,7 +34,6 @@ impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
         binding: &'a TurnBinding<S>,
         cancellation: &'a dyn Cancellation,
         work: &'a dyn DrainWork,
-        agent_state: &'a mut parrot_core::AgentState,
     ) -> Self {
         Self {
             history: &backend.history,
@@ -62,7 +60,6 @@ impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
             cancellation,
             work,
             persistence_key: None,
-            agent_state,
         }
     }
 }
@@ -258,8 +255,8 @@ where
         })
     }
     fn get_agent_state(&self) -> BoxFuture<'_, Result<parrot_core::AgentState, CoreError>> {
-        let mut state = self.agent_state.clone();
         adapt_operation(async move {
+            let mut state = self.state.lock().await.agent_state.clone();
             state.final_phase = self
                 .history
                 .read_final_phase()
@@ -281,7 +278,7 @@ where
         state: parrot_core::AgentState,
     ) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
-            *self.agent_state = state;
+            self.state.lock().await.agent_state = state;
             Ok(())
         })
     }
@@ -621,12 +618,6 @@ where
                 .map_err(TurnError::from)
         })
     }
-    fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, CoreError>> {
-        adapt_operation(async move {
-            let state = self.state.lock().await;
-            Ok(state.context.budget().capture_state())
-        })
-    }
     fn read_provider_messages(
         &self,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, CoreError>> {
@@ -703,6 +694,7 @@ where
                         selection: &selection.model,
                         tools: &definitions,
                         conversation: &mut state.conversation,
+                        agent_state: &mut state.agent_state,
                         prompt: self.prompt,
                         sessions: self.sessions,
                         status: status.as_ref(),

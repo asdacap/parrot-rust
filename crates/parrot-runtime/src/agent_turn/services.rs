@@ -67,6 +67,7 @@ pub trait SelectionSource<S: AccessSnapshot>: Send + Sync {
 pub struct TurnResources<'a> {
     pub history: &'a AgentHistoryView,
     pub conversation: &'a mut parrot_storage::conversation::AgentConversation,
+    pub agent_state: &'a mut parrot_core::AgentState,
     pub context: &'a mut ContextController,
     pub prompt: &'a crate::prompt_context::SessionPrompt,
     pub sessions: &'a sessions::ProviderSessions,

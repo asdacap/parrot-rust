@@ -30,6 +30,7 @@ async fn committed_status_publication_requires_true_success_not_duplicate_or_sql
                     selection: &selection,
                     tools: &[],
                     conversation: &mut conversation,
+                    agent_state: &mut parrot_core::AgentState::new(false),
                     prompt: &prompt.prompt,
                     sessions: &sessions,
                     status: status.as_ref(),

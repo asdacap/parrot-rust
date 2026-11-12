@@ -577,7 +577,7 @@ fn budget_read_failures_stop_before_turn_effects_and_do_not_attempt_writeback() 
 }
 
 #[test]
-fn budget_writeback_failures_take_precedence_after_successful_and_failed_requests() {
+fn state_write_failures_stop_before_provider_invocation_and_take_precedence() {
     for reply in [
         Reply::final_response("answer"),
         Reply::Failed("provider failed"),
@@ -600,7 +600,6 @@ fn budget_writeback_failures_take_precedence_after_successful_and_failed_request
             )),
             Err(error)
         );
-        assert_eq!(state.budget_writes, 1);
-        assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
+        assert!(state.provider.requests.lock().unwrap().is_empty());
     }
 }

@@ -96,6 +96,7 @@ where
             let resources = TurnResources {
                 history: self.history,
                 conversation: &mut state.conversation,
+                agent_state: &mut state.agent_state,
                 context: &mut state.context,
                 prompt: self.prompt,
                 sessions: self.sessions,
@@ -236,6 +237,7 @@ fn reborrow<'a>(resources: &'a mut TurnResources<'_>) -> TurnResources<'a> {
     TurnResources {
         history: resources.history,
         conversation: resources.conversation,
+        agent_state: resources.agent_state,
         context: resources.context,
         prompt: resources.prompt,
         sessions: resources.sessions,

@@ -598,6 +598,7 @@ impl BorrowedTool<Security> for FixtureTool {
                             selection: &context.selection.model,
                             tools: &[],
                             conversation: resources.conversation,
+                            agent_state: resources.agent_state,
                             prompt: resources.prompt,
                             sessions: resources.sessions,
                             status: resources.status,

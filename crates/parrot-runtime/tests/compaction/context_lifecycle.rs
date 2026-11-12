@@ -36,6 +36,7 @@ async fn provider_template_failure_retains_native_prompt_error_and_terminal_publ
                 selection: &selection,
                 tools: &[],
                 conversation: &mut conversation,
+                agent_state: &mut parrot_core::AgentState::new(false),
                 prompt: &prompt,
                 sessions: &sessions,
                 status: &status,
@@ -488,14 +489,10 @@ async fn provider_failure_keeps_snapshot_absent_budget_calibration_and_top_level
         let status = Status::default();
         let events = Events::new(history.clone());
         let mut controller = fixture.controller(history.clone(), 90);
-        controller.budget_mut().observe_usage(
-            "scripted/model",
-            100,
-            &Completion {
-                input_tokens: 1000,
-                ..Completion::default()
-            },
-        );
+        prompt
+            .agent_state
+            .token_calibration
+            .observe_usage("scripted/model", 100, 1000);
         let error = controller
             .compact(
                 input(
@@ -516,8 +513,9 @@ async fn provider_failure_keeps_snapshot_absent_budget_calibration_and_top_level
             if wrapped { "" } else { "private-response-body" }
         );
         assert_eq!(
-            controller
-                .budget()
+            prompt
+                .agent_state
+                .token_calibration
                 .estimate_input_tokens("scripted/model", 100),
             1000
         );

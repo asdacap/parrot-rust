@@ -1,5 +1,4 @@
 //! Provider budgets, causal summary execution and awaited durable context epochs.
-mod budget;
 mod execution;
 pub use execution::{
     CompactionError, CompactionObserver, CompactionResources, CompactionResult, Compactor,
@@ -16,7 +15,6 @@ pub(crate) use conversation::materialize_message;
 pub use parrot_core::{StatusKey, StatusOffer, StatusOffering, StatusStanding};
 mod planning;
 
-pub use budget::ProviderTokenBudget;
 pub use parrot_core::PlanningError;
 pub use parrot_domain::values::{
     accounting::RetainedAgentBudget,

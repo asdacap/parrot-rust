@@ -253,6 +253,7 @@ async fn retained_result_fixedpoint_matches_actual_controller_history_estimate()
             resources: TurnResources {
                 history: &fixture.history,
                 conversation: &mut harness.conversation,
+                agent_state: &mut harness.agent_state,
                 context: &mut harness.context,
                 prompt: &harness.prompt,
                 sessions: &harness.sessions,
@@ -638,6 +639,7 @@ async fn retained_status_observes_current_borrowed_history_tools_and_epoch_witho
                 resources: TurnResources {
                     history: &fixture.history,
                     conversation: &mut harness.conversation,
+                    agent_state: &mut harness.agent_state,
                     context: &mut harness.context,
                     prompt: &prompt,
                     sessions: &harness.sessions,
@@ -657,6 +659,7 @@ async fn retained_status_observes_current_borrowed_history_tools_and_epoch_witho
                     selection: &harness.selection.model,
                     tools: &definitions,
                     conversation: &mut harness.conversation,
+                    agent_state: &mut harness.agent_state,
                     prompt: &prompt,
                     sessions: &harness.sessions,
                     status: &Status,
@@ -707,6 +710,7 @@ async fn retained_status_precancel_does_not_estimate_and_external_selection_has_
                 resources: TurnResources {
                     history: &fixture.history,
                     conversation: &mut harness.conversation,
+                    agent_state: &mut harness.agent_state,
                     context: &mut harness.context,
                     prompt: &harness.prompt,
                     sessions: &harness.sessions,
@@ -785,6 +789,7 @@ async fn retained_compact_preserves_live_prompt_cancellation_after_successful_co
             resources: TurnResources {
                 history: &fixture.history,
                 conversation: &mut harness.conversation,
+                agent_state: &mut harness.agent_state,
                 context: &mut harness.context,
                 prompt: &prompt,
                 sessions: &harness.sessions,

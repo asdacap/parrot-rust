@@ -6,6 +6,7 @@ impl AgentState {
     pub fn new(disable_max_turns: bool) -> Self {
         Self {
             final_phase: false,
+            token_calibration: crate::TokenCalibration::default(),
             standing_statuses: crate::StatusStanding::default(),
             disable_max_turns,
             provider_requests: 0,
@@ -17,8 +18,11 @@ impl AgentState {
         self.provider_requests = 0;
     }
 
+    /// Resets invocation state without discarding the model token calibration.
     pub fn restart(&mut self) {
+        let calibration = std::mem::take(&mut self.token_calibration);
         *self = Self::new(self.disable_max_turns);
+        self.token_calibration = calibration;
     }
 
     pub fn admit(&mut self, maximum: i32) -> Option<TurnFlags> {

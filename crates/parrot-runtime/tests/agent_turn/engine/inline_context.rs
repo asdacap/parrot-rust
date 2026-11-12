@@ -16,8 +16,10 @@ async fn tool_execution_borrows_actual_controller_and_compacted_state_reaches_ne
     let tools = Arc::new(Tools::with_names(&["compact_context"]));
     tools.inline_compact.store(true, Ordering::SeqCst);
     let trace = tools.trace.clone();
+    let mut calibrated_tool = tool();
+    calibrated_tool.completion.as_mut().unwrap().input_tokens = 90_000;
     let provider = Scripted::new(vec![
-        tool(),
+        calibrated_tool,
         Step::complete("inline durable summary"),
         Step::complete("answer using inline summary"),
     ]);
@@ -144,6 +146,51 @@ async fn interrupt_joins_actual_inline_compaction_cancellation_without_self_queu
         events
             .iter()
             .filter(|event| event.has_compaction_failed())
+            .count(),
+        1
+    );
+    runtime.close().await;
+}
+
+#[tokio::test]
+async fn provider_calibration_survives_separate_drains_and_triggers_compaction() {
+    let fixture = Fixture::new();
+    fixture.seed().await;
+    let mut first = Step::complete("first answer");
+    first.completion.as_mut().unwrap().input_tokens = 90_000;
+    let provider = Scripted::new(vec![
+        first,
+        Step::complete("summary after calibrated usage"),
+        Step::complete("second answer"),
+    ]);
+    let runtime = fixture
+        .runtime(
+            provider.clone(),
+            Arc::new(Tools::default()),
+            vec![],
+            Arc::new(Signal::new()),
+            0,
+        )
+        .await;
+    let first = runtime
+        .send("first question", protocol::Delivery::DELIVERY_STEER)
+        .await;
+    assert_eq!(
+        bounded(first.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    let second = runtime
+        .send("second question", protocol::Delivery::DELIVERY_STEER)
+        .await;
+    let completed = bounded(second.execution.join()).await.unwrap();
+    assert_eq!(completed.status, ExecutionStatus::Succeeded);
+    assert_eq!(provider.requests.lock().unwrap().len(), 3);
+    assert_eq!(
+        fixture
+            .events()
+            .await
+            .iter()
+            .filter(|event| event.has_compaction_finished())
             .count(),
         1
     );

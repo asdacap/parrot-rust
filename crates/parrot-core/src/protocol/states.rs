@@ -1,5 +1,5 @@
 use super::config::{ConfigKey, ConfigValue};
-use super::context::{ContextSnapshot, TokenCalibration};
+use super::context::ContextSnapshot;
 use super::conversation::{ConversationHistoryItem, ConversationSummary};
 use super::message::{ConversationTurn, InputAdmission, Message, PendingMessage, PromotedInput};
 use super::skill::{Skill, SkillContent, SkillReference};
@@ -32,11 +32,12 @@ pub trait States: Send + Sync {
     /// Reads typed configuration without rendering prompts or deciding request policy.
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>>;
     /// Reads the consolidated agent state that survives across turns, including
-    /// the durable final-phase marker, standing status hashes, and provider-request budget.
+    /// the durable final-phase marker, standing status hashes, token calibration, and provider-request budget.
     /// Core resets the request count at turn start but retains settlement extensions from earlier turns.
     fn get_agent_state(&self) -> BoxFuture<'_, Result<AgentState, Error>> {
         Box::pin(async { Err(Error::unsupported("States.get_agent_state")) })
     }
+    /// Saves current core state before provider, tool, and compaction effects can update it.
     /// Saves the updated agent state after the turn returns, even on error.
     /// Retains settlement extensions for subsequent turns in the same invocation.
     fn set_agent_state(&mut self, _state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
@@ -124,10 +125,6 @@ pub trait States: Send + Sync {
         _skill: &'a Skill,
     ) -> BoxFuture<'a, Result<SkillContent, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_skill_content")) })
-    }
-    /// Reads the current token calibration without choosing context or output limits.
-    fn read_token_calibration(&self) -> BoxFuture<'_, Result<TokenCalibration, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_token_calibration")) })
     }
     /// Reads the current provider-visible conversation after context preparation.
     fn read_provider_messages(&self) -> BoxFuture<'_, Result<Vec<Message>, Error>> {

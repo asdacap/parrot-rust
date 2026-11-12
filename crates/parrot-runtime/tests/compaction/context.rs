@@ -361,6 +361,7 @@ impl EventStream for ScriptStream {
     }
 }
 struct EpochPrompt {
+    agent_state: parrot_core::AgentState,
     prompt: SessionPrompt,
     sampled: Arc<AtomicUsize>,
 }
@@ -368,6 +369,7 @@ impl Default for EpochPrompt {
     fn default() -> Self {
         let sampled = Arc::new(AtomicUsize::new(0));
         Self {
+            agent_state: parrot_core::AgentState::new(false),
             prompt: SessionPrompt::new(Box::new(EpochProduct {
                 sampled: sampled.clone(),
                 sampling: false,
@@ -550,6 +552,7 @@ fn input<'a>(
         selection,
         tools: &[],
         conversation,
+        agent_state: &mut prompt.agent_state,
         prompt: &prompt.prompt,
         sessions,
         status,
@@ -799,6 +802,10 @@ async fn terminal_publication_failure_reports_failed_after_durable_snapshot() {
     let status = Status::default();
     let events = Events::new(history.clone());
     events.fail_finished.store(true, Ordering::Relaxed);
+    prompt
+        .agent_state
+        .token_calibration
+        .observe_usage("scripted/model", 100, 1000);
     let mut controller = fixture.controller(history.clone(), 90);
     let error = controller
         .compact(
@@ -817,6 +824,13 @@ async fn terminal_publication_failure_reports_failed_after_durable_snapshot() {
         .unwrap_err();
     assert!(matches!(&error, ContextError::Operation(_)));
     assert_eq!(error.to_string(), "finish publication failed");
+    assert_eq!(
+        prompt
+            .agent_state
+            .token_calibration
+            .estimate_input_tokens("scripted/model", 100),
+        100
+    );
     assert!(
         fixture
             .repository

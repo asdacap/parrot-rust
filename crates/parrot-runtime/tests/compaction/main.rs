@@ -1,3 +1,4 @@
+use parrot_core::{ContextModel, OutputTokenError, TokenCalibration};
 mod context;
 mod execution;
 
@@ -14,7 +15,7 @@ use parrot_provider::{
         },
         registry::{ProviderModel, ProviderRegistry},
     },
-    sessions::{Completion, Content, Error, Message, Provider, Session, Tool, ToolCall},
+    sessions::{Content, Error, Message, Provider, Session, Tool, ToolCall},
 };
 use parrot_runtime::compaction::*;
 use std::{
@@ -118,13 +119,6 @@ fn call(id: &str) -> ToolCall {
         arguments_json: "{}".into(),
     }
 }
-fn completion(input_tokens: i32) -> Completion {
-    Completion {
-        input_tokens,
-        output_tokens: 200,
-        ..Completion::default()
-    }
-}
 
 #[test]
 fn original_calibration_rows_and_saturation() {
@@ -135,8 +129,8 @@ fn original_calibration_rows_and_saturation() {
         (1000, 500, 1200, 1200),
         (1000, 1500, i64::MAX, i64::MAX),
     ] {
-        let mut budget = ProviderTokenBudget::default();
-        budget.observe_usage("provider/model", previous, &completion(actual));
+        let mut budget = TokenCalibration::default();
+        budget.observe_usage("provider/model", previous, actual);
         assert_eq!(
             budget.estimate_input_tokens("provider/model", current),
             expected
@@ -146,18 +140,18 @@ fn original_calibration_rows_and_saturation() {
 #[test]
 fn original_missing_usage_switch_and_reset() {
     for missing in [0, -1] {
-        let mut budget = ProviderTokenBudget::default();
-        budget.observe_usage("provider/model", 1000, &completion(missing));
+        let mut budget = TokenCalibration::default();
+        budget.observe_usage("provider/model", 1000, missing);
         assert_eq!(budget.estimate_input_tokens("provider/model", 1200), 1200);
-        budget.observe_usage("provider/model", 1000, &completion(1500));
-        budget.observe_usage("provider/model", 1200, &completion(missing));
+        budget.observe_usage("provider/model", 1000, 1500);
+        budget.observe_usage("provider/model", 1200, missing);
         assert_eq!(budget.estimate_input_tokens("provider/model", 1400), 1900);
     }
-    let mut budget = ProviderTokenBudget::default();
+    let mut budget = TokenCalibration::default();
     assert_eq!(budget.estimate_input_tokens("provider/model", -1), 0);
-    budget.observe_usage("provider/model", 1000, &completion(1500));
+    budget.observe_usage("provider/model", 1000, 1500);
     assert_eq!(budget.estimate_input_tokens("other/model", 1200), 1200);
-    budget.observe_usage("other/model", 1200, &completion(2000));
+    budget.observe_usage("other/model", 1200, 2000);
     assert_eq!(budget.estimate_input_tokens("provider/model", 1400), 1400);
     assert_eq!(budget.estimate_input_tokens("other/model", 1400), 2200);
     budget.reset();
@@ -179,10 +173,14 @@ fn original_output_budget_rows() {
         selected.model.max_output_tokens = output;
         selected.model.max_input_tokens = input;
         assert_eq!(
-            ProviderTokenBudget::default().calculate_maximum_output_tokens(
-                "provider/model",
-                estimate,
-                &selected.model
+            TokenCalibration::default().calculate_maximum_output_tokens(
+                &ContextModel {
+                    canonical_model: "provider/model".into(),
+                    context_window: selected.model.context_window,
+                    maximum_input_tokens: selected.model.max_input_tokens,
+                    maximum_output_tokens: selected.model.max_output_tokens,
+                },
+                estimate
             ),
             Ok(expected)
         );
@@ -190,8 +188,8 @@ fn original_output_budget_rows() {
 }
 #[test]
 fn original_actual_usage_five_percent_rows() {
-    let mut budget = ProviderTokenBudget::default();
-    budget.observe_usage("provider/model", 120000, &completion(147776));
+    let mut budget = TokenCalibration::default();
+    budget.observe_usage("provider/model", 120000, 147776);
     let mut selected = model(180000);
     selected.model.max_output_tokens = 0;
     for (estimate, expected_input, expected_output) in
@@ -202,7 +200,15 @@ fn original_actual_usage_five_percent_rows() {
             expected_input
         );
         let output = budget
-            .calculate_maximum_output_tokens("provider/model", estimate, &selected.model)
+            .calculate_maximum_output_tokens(
+                &ContextModel {
+                    canonical_model: "provider/model".into(),
+                    context_window: selected.model.context_window,
+                    maximum_input_tokens: selected.model.max_input_tokens,
+                    maximum_output_tokens: selected.model.max_output_tokens,
+                },
+                estimate,
+            )
             .unwrap();
         assert_eq!(output, expected_output);
         assert!(expected_input + i64::from(output) + (expected_input + 19) / 20 <= 180000);
@@ -226,16 +232,31 @@ fn compaction_boundaries_preserve_full_requested_output_and_request_headroom() {
             .estimate_selected_context(&select(&selected), "", &[], &[])
             .unwrap();
         let trigger = snapshot.trigger_tokens.unwrap();
-        let budget = ProviderTokenBudget::default();
+        let budget = TokenCalibration::default();
         let requested = if output > 0 { output } else { 32 * 1024 };
         assert_eq!(
-            budget.calculate_maximum_output_tokens("provider/model", trigger, &selected.model),
+            budget.calculate_maximum_output_tokens(
+                &ContextModel {
+                    canonical_model: "provider/model".into(),
+                    context_window: selected.model.context_window,
+                    maximum_input_tokens: selected.model.max_input_tokens,
+                    maximum_output_tokens: selected.model.max_output_tokens,
+                },
+                trigger
+            ),
             Ok(requested)
         );
-        let above =
-            budget.calculate_maximum_output_tokens("provider/model", trigger + 1, &selected.model);
+        let above = budget.calculate_maximum_output_tokens(
+            &ContextModel {
+                canonical_model: "provider/model".into(),
+                context_window: selected.model.context_window,
+                maximum_input_tokens: selected.model.max_input_tokens,
+                maximum_output_tokens: selected.model.max_output_tokens,
+            },
+            trigger + 1,
+        );
         if output == 1 {
-            assert_eq!(above, Err(PlanningError::NoOutputCapacity));
+            assert_eq!(above, Err(OutputTokenError::NoOutputCapacity));
         } else {
             assert!(above.unwrap() < requested);
         }
@@ -247,21 +268,29 @@ fn compaction_boundaries_preserve_full_requested_output_and_request_headroom() {
 #[test]
 fn original_exhausted_capacity_rows_exact_messages() {
     for (context, input, actual, expected) in [
-        (2000, 1400, 1500, PlanningError::InputLimitExceeded),
-        (0, 1400, 1500, PlanningError::InputLimitExceeded),
-        (1500, 0, 1500, PlanningError::NoOutputCapacity),
-        (1575, 0, 1500, PlanningError::NoOutputCapacity),
-        (1000, 0, 1500, PlanningError::NoOutputCapacity),
+        (2000, 1400, 1500, OutputTokenError::InputLimitExceeded),
+        (0, 1400, 1500, OutputTokenError::InputLimitExceeded),
+        (1500, 0, 1500, OutputTokenError::NoOutputCapacity),
+        (1575, 0, 1500, OutputTokenError::NoOutputCapacity),
+        (1000, 0, 1500, OutputTokenError::NoOutputCapacity),
     ] {
         let mut selected = model(context);
         selected.model.max_input_tokens = input;
-        let mut budget = ProviderTokenBudget::default();
-        budget.observe_usage("provider/model", 1000, &completion(actual));
+        let mut budget = TokenCalibration::default();
+        budget.observe_usage("provider/model", 1000, actual);
         assert_eq!(
-            budget.calculate_maximum_output_tokens("provider/model", 1000, &selected.model),
+            budget.calculate_maximum_output_tokens(
+                &ContextModel {
+                    canonical_model: "provider/model".into(),
+                    context_window: selected.model.context_window,
+                    maximum_input_tokens: selected.model.max_input_tokens,
+                    maximum_output_tokens: selected.model.max_output_tokens,
+                },
+                1000
+            ),
             Err(expected)
         );
-        let message = if expected == PlanningError::InputLimitExceeded {
+        let message = if expected == OutputTokenError::InputLimitExceeded {
             "The conversation exceeds the selected model input limit."
         } else {
             "The conversation leaves no output capacity in the selected model context window."

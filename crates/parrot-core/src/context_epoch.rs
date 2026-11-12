@@ -1,6 +1,6 @@
 use crate::{
-    CancellationToken, ConfigKey, ContextSnapshot, Error, EventPublisher, Provider, States,
-    ToolDefinition, context::compact_context,
+    AgentState, CancellationToken, ConfigKey, ContextSnapshot, Error, EventPublisher, Provider,
+    States, ToolDefinition, context::compact_context,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -11,6 +11,7 @@ pub struct PreparedContext {
 
 pub async fn prepare_context_epoch(
     states: &mut dyn States,
+    state: &mut AgentState,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
@@ -25,13 +26,22 @@ pub async fn prepare_context_epoch(
         .get_config(ConfigKey::Context)
         .await?
         .into_context()?;
-    let calibration = states.read_token_calibration().await?;
     let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
     let mut context = ContextSnapshot::estimate(estimate, &configuration);
     let mut reduced = false;
-    if context.requires_compaction(&calibration, &configuration.model.canonical_model) {
-        let compacted =
-            compact_context(states, provider, publisher, definitions, cancellation).await?;
+    if context.requires_compaction(
+        &state.token_calibration,
+        &configuration.model.canonical_model,
+    ) {
+        let compacted = compact_context(
+            states,
+            state,
+            provider,
+            publisher,
+            definitions,
+            cancellation,
+        )
+        .await?;
         instructions = compacted.instructions;
         reduced = compacted.reduced;
         messages = states.read_provider_messages().await?;
