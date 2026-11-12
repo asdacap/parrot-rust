@@ -76,21 +76,7 @@ pub struct TurnResources<'a> {
     pub usage: &'a super::usage::SessionUsageRecorder,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CompletionBlockerFeedbackKind {
-    PendingAsks,
-    ActiveWork,
-    ExitReminders,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CompletionBlockerFeedback {
-    pub kind: CompletionBlockerFeedbackKind,
-    pub message: String,
-    pub candidate: Option<parrot_core::ProviderResponse>,
-}
-
-/// Observes native completion context and records one message from a core-selected batch.
+/// Observes native completion context on demand.
 pub trait CompletionStateSource: Send + Sync {
     /// Reads context for pending asks without deciding whether the turn may finish.
     fn get_pending_ask_reminder<'a>(
@@ -107,12 +93,6 @@ pub trait CompletionStateSource: Send + Sync {
         &'a self,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Option<String>, TurnError>>;
-    /// Records one message, retaining the batch candidate only on its first recording.
-    fn record_completion_blocker_feedback<'a>(
-        &'a self,
-        feedback: &'a CompletionBlockerFeedback,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>>;
 }
 
 /// Exposes agent-local skill records and authorized content without preparing prompts.

@@ -3,15 +3,12 @@
 use super::*;
 use parrot_domain::values::accounting::AgentUsageTotals;
 use parrot_provider::catalogs::ModelMetadataFields;
-use parrot_storage::conversation::ConversationOrigin;
 
 #[derive(Clone)]
 struct ReminderBindings {
     reminders: Arc<ExitReminders<RuntimePublisher>>,
-    publisher: Arc<Publisher>,
 }
 struct ReminderCompletion {
-    history: AgentHistoryView,
     bindings: Mutex<Option<ReminderBindings>>,
     calls: AtomicUsize,
 }
@@ -42,33 +39,6 @@ impl CompletionStateSource for ReminderCompletion {
                 .map_err(|error| TurnError::Service(error.to_string()))
         })
     }
-    fn record_completion_blocker_feedback<'a>(
-        &'a self,
-        feedback: &'a CompletionBlockerFeedback,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async move {
-            assert_eq!(feedback.kind, CompletionBlockerFeedbackKind::ExitReminders);
-            assert!(feedback.candidate.is_some());
-            let publisher = self.bindings.lock().unwrap().clone().unwrap().publisher;
-            let mut event = Event::new();
-            event.id = id();
-            event.agent_session_id = "agent".into();
-            event.set_agent_notice(protocol::AgentNotice {
-                kind: "exit_reminder".into(),
-                notice: feedback.message.clone(),
-                ..Default::default()
-            });
-            self.history
-                .append_message(event.clone(), None, ConversationOrigin::Model)
-                .await?;
-            publisher
-                .publish_committed(&Committed::after_commit(event), cancellation)
-                .await
-                .map_err(TurnError::Publication)?;
-            Ok(())
-        })
-    }
 }
 
 #[tokio::test]
@@ -82,7 +52,6 @@ async fn a003_completion_observes_shared_reminder_changed_after_construction_wit
     second.gate = Some(second_gate.clone());
     let provider = Scripted::new(vec![first, second]);
     let callback = Arc::new(ReminderCompletion {
-        history: fixture.history.clone(),
         bindings: Mutex::new(None),
         calls: AtomicUsize::new(0),
     });
@@ -97,7 +66,6 @@ async fn a003_completion_observes_shared_reminder_changed_after_construction_wit
         .await;
     *callback.bindings.lock().unwrap() = Some(ReminderBindings {
         reminders: runtime.session.backend().reminders().clone(),
-        publisher: runtime.publisher.clone(),
     });
     let sent = runtime
         .send("question", protocol::Delivery::DELIVERY_STEER)
@@ -120,7 +88,8 @@ async fn a003_completion_observes_shared_reminder_changed_after_construction_wit
     assert_eq!(
         events
             .iter()
-            .filter(|event| event.has_agent_notice() && event.agent_notice().kind == "exit_reminder")
+            .filter(|event| event.has_agent_notice()
+                && event.agent_notice().kind == "completion_blocker")
             .count(),
         1
     );

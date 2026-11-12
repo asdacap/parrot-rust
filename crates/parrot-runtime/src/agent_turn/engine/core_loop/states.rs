@@ -133,24 +133,34 @@ where
                 }
                 ConversationPersistence::CompletionBlockerFeedback(feedback) => {
                     let mut candidate = Some(feedback.candidate);
-                    let sources = std::mem::take(
-                        &mut *self
-                            .binding
-                            .exit_blocker_sources
-                            .lock()
-                            .expect("completion sources poisoned"),
-                    );
-                    for ((source, kind), message) in sources.into_iter().zip(feedback.messages) {
-                        source
-                            .record_completion_blocker_feedback(
-                                &CompletionBlockerFeedback {
-                                    kind,
+                    for message in feedback.messages {
+                        let event = render_event(
+                            self.events.event(),
+                            parrot_core::ConversationEvent::Notice {
+                                kind: "completion_blocker".into(),
+                                notice: "Completion blocker injected".into(),
+                            },
+                        );
+                        if let Some(candidate) = candidate.take() {
+                            self.history
+                                .append_retained_reminder(
+                                    event.clone(),
+                                    render_record(
+                                        &parrot_core::Message::from_response(&candidate),
+                                        ConversationOrigin::Model,
+                                    )?,
                                     message,
-                                    candidate: candidate.take(),
-                                },
-                                cancellation,
-                            )
-                            .await?;
+                                )
+                                .await?;
+                            self.publisher
+                                .publish_committed(&Committed::after_commit(event), cancellation)
+                                .await
+                                .map_err(TurnError::Publication)?;
+                        } else {
+                            self.history.append_system_prompt(message).await?;
+                            cancellation.check().map_err(|_| TurnError::Cancelled)?;
+                            self.events.broker.publish_retained(&event);
+                        }
                     }
                 }
                 ConversationPersistence::CloseTurn {
@@ -376,12 +386,6 @@ where
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, CoreError>> {
         adapt_operation(async move {
             let _guard = self.state.lock().await;
-            self.binding
-                .exit_blocker_sources
-                .lock()
-                .expect("completion sources poisoned")
-                .clear();
-            let mut sources = Vec::new();
             self.work
                 .join_mutations()
                 .await
@@ -390,26 +394,18 @@ where
             for source in self.completion_sources {
                 if let Some(reminder) = source.get_pending_ask_reminder(self.cancellation).await? {
                     blockers.push(reminder);
-                    sources.push((source.clone(), CompletionBlockerFeedbackKind::PendingAsks));
                 }
             }
             for source in self.completion_sources {
                 if let Some(reminder) = source.get_active_work_reminder(self.cancellation).await? {
                     blockers.push(reminder);
-                    sources.push((source.clone(), CompletionBlockerFeedbackKind::ActiveWork));
                 }
             }
             for source in self.completion_sources {
                 if let Some(reminder) = source.get_exit_reminder(self.cancellation).await? {
                     blockers.push(reminder);
-                    sources.push((source.clone(), CompletionBlockerFeedbackKind::ExitReminders));
                 }
             }
-            *self
-                .binding
-                .exit_blocker_sources
-                .lock()
-                .expect("completion sources poisoned") = sources;
             Ok(blockers)
         })
     }

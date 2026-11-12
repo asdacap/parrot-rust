@@ -23,13 +23,6 @@ impl CompletionStateSource for CancelBeforeClose {
             Ok(None)
         })
     }
-    fn record_completion_blocker_feedback<'a>(
-        &'a self,
-        feedback: &'a CompletionBlockerFeedback,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async move { panic!("this source has no reminder to record: {feedback:?}") })
-    }
 }
 #[tokio::test]
 async fn cancellation_before_terminal_admission_closes_same_turn_as_interrupted_using_cleanup_token()
@@ -238,13 +231,6 @@ impl CompletionStateSource for CheckReminder {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(None)
         })
-    }
-    fn record_completion_blocker_feedback<'a>(
-        &'a self,
-        feedback: &'a CompletionBlockerFeedback,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async move { panic!("this source has no reminder to record: {feedback:?}") })
     }
 }
 #[tokio::test]

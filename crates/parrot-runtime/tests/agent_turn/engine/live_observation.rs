@@ -152,31 +152,18 @@ impl CompletionStateSource for RetryOnce {
         Box::pin(async move {
             Ok(self
                 .0
-                .load(Ordering::SeqCst)
-                .then(|| "in-memory-only retry instructions".into()))
-        })
-    }
-    fn record_completion_blocker_feedback<'a>(
-        &'a self,
-        feedback: &'a CompletionBlockerFeedback,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), TurnError>> {
-        Box::pin(async move {
-            assert_eq!(feedback.kind, CompletionBlockerFeedbackKind::ExitReminders);
-            assert_eq!(feedback.message, "in-memory-only retry instructions");
-            assert!(feedback.candidate.is_some());
-            assert!(self.0.swap(false, Ordering::SeqCst));
-            Ok(())
+                .swap(false, Ordering::SeqCst)
+                .then(|| "retry instructions".into()))
         })
     }
 }
 #[tokio::test]
-async fn live_context_includes_retry_messages_not_yet_in_sqlite() {
+async fn live_context_includes_persisted_retry_messages() {
     let fixture = Fixture::new();
     let gate = Gate::new();
     let mut second = Step::complete("final");
     second.gate = Some(gate.clone());
-    let provider = Scripted::new(vec![Step::complete("uncommitted candidate"), second]);
+    let provider = Scripted::new(vec![Step::complete("retry candidate"), second]);
     let runtime = fixture
         .runtime(
             provider.clone(),
@@ -198,27 +185,37 @@ async fn live_context_includes_retry_messages_not_yet_in_sqlite() {
         request
             .messages
             .iter()
-            .any(|m| m.content() == "uncommitted candidate")
+            .any(|m| m.content() == "retry candidate")
     );
     assert!(
         request
             .messages
             .iter()
-            .any(|m| m.content() == "in-memory-only retry instructions")
+            .any(|m| m.content() == "retry instructions")
     );
     let durable = fixture.conversation().await.messages();
-    assert!(
-        !durable
+    assert_eq!(
+        durable
             .iter()
-            .any(|m| m.content() == "uncommitted candidate"
-                || m.content() == "in-memory-only retry instructions")
+            .filter(|message| message.role == MessageRole::Assistant
+                && message.content() == "retry candidate")
+            .count(),
+        1
+    );
+    assert_eq!(
+        durable
+            .iter()
+            .filter(|message| message.role == MessageRole::System
+                && message.content() == "retry instructions")
+            .count(),
+        1
     );
     assert_eq!(
         observed.context.estimated_tokens,
         estimate(&fixture, &observed.selection, &request).estimated_tokens
     );
     let mut stale = request.clone();
-    stale.messages = durable.iter().map(provider_message).collect();
+    stale.messages = provider.requests.lock().unwrap()[0].messages.clone();
     assert_ne!(
         observed.context.estimated_tokens,
         estimate(&fixture, &observed.selection, &stale).estimated_tokens
