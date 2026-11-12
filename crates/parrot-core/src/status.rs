@@ -97,7 +97,7 @@ pub async fn steer_status(
     let tokens = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
     let context = ContextSnapshot::estimate(tokens, &configuration);
     let offering = states.read_status_offering(context).await?;
-    let mut standing = states.read_standing_statuses().await?;
+    let mut standing = states.get_agent_state().await?.standing_statuses;
     if !status_steering_needed(&offering, &standing) {
         return Ok(());
     }

@@ -62,6 +62,8 @@ pub struct TurnOptions {
 pub struct AgentState {
     /// Durable final-phase marker read without changing the conversation.
     pub final_phase: bool,
+    /// Per-slot hashes recorded by the latest persisted status assembly.
+    pub standing_statuses: crate::StatusStanding,
     /// Per-invocation setting that turns off the provider-request limit entirely.
     pub(crate) disable_max_turns: bool,
     /// Provider requests counted during the current turn. Not a token budget.

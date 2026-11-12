@@ -676,20 +676,6 @@ impl parrot_core::States for EpochStates<'_> {
         })
     }
 
-    fn read_standing_statuses(
-        &self,
-    ) -> BoxFuture<'_, Result<parrot_core::StatusStanding, parrot_core::Error>> {
-        Box::pin(async move {
-            let controller = self.controller.lock().await;
-            controller
-                .history
-                .standing_statuses()
-                .await
-                .map_err(|error| self.capture_error(error))
-                .map(|standing| standing.unwrap_or_default())
-        })
-    }
-
     fn read_provider_messages(
         &self,
     ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, parrot_core::Error>> {

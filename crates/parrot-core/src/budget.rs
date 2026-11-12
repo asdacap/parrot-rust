@@ -6,6 +6,7 @@ impl AgentState {
     pub fn new(disable_max_turns: bool) -> Self {
         Self {
             final_phase: false,
+            standing_statuses: crate::StatusStanding::default(),
             disable_max_turns,
             provider_requests: 0,
             settlement_extensions: 0,

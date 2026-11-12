@@ -264,6 +264,12 @@ where
                 .read_final_phase()
                 .await
                 .map_err(TurnError::from)?;
+            state.standing_statuses = self
+                .history
+                .standing_statuses()
+                .await
+                .map_err(TurnError::from)?
+                .unwrap_or_default();
             Ok(state)
         })
     }
@@ -423,18 +429,6 @@ where
                 .await
                 .map_err(TurnError::Context)?;
             Ok(slots)
-        })
-    }
-    fn read_standing_statuses(
-        &self,
-    ) -> BoxFuture<'_, Result<parrot_core::StatusStanding, CoreError>> {
-        adapt_operation(async move {
-            Ok(self
-                .history
-                .standing_statuses()
-                .await
-                .map_err(TurnError::from)?
-                .unwrap_or_default())
         })
     }
     fn write_to_scratch<'a, 'c>(

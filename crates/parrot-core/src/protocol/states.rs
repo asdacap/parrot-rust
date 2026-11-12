@@ -29,18 +29,11 @@ pub trait States: Send + Sync {
     ) -> BoxFuture<'_, Result<crate::StatusOffering, Error>> {
         Box::pin(async { Ok(crate::StatusOffering::default()) })
     }
-    /// Reads the per-slot hashes recorded by the latest persisted status assembly.
-    /// Defaults to empty standing state, which would steer the initial assembly.
-    /// A states side that never appends will also never offer, so both defaults
-    /// keep steering inert until the adapter opts in.
-    fn read_standing_statuses(&self) -> BoxFuture<'_, Result<crate::StatusStanding, Error>> {
-        Box::pin(async { Ok(crate::StatusStanding::default()) })
-    }
     /// Reads typed configuration without rendering prompts or deciding request policy.
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>>;
     /// Reads the consolidated agent state that survives across turns, including
-    /// the durable final-phase marker and the provider-request budget. Core resets
-    /// the request count at turn start but retains settlement extensions from earlier turns.
+    /// the durable final-phase marker, standing status hashes, and provider-request budget.
+    /// Core resets the request count at turn start but retains settlement extensions from earlier turns.
     fn get_agent_state(&self) -> BoxFuture<'_, Result<AgentState, Error>> {
         Box::pin(async { Err(Error::unsupported("States.get_agent_state")) })
     }

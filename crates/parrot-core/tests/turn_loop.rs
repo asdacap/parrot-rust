@@ -819,9 +819,6 @@ impl States for MemoryState {
         }
         Box::pin(async move { finish(self.compaction.lock().unwrap().status.offering(context)) })
     }
-    fn read_standing_statuses(&self) -> BoxFuture<'_, Result<StatusStanding, Error>> {
-        Box::pin(async { Ok(self.status_standing.clone()) })
-    }
     fn add_conversation_messages(
         &mut self,
         addition: ConversationAddition,
@@ -1000,6 +997,7 @@ impl States for MemoryState {
             }
             let mut state = self.budget.clone();
             state.final_phase = false;
+            state.standing_statuses = self.status_standing.clone();
             Ok(state)
         })
     }
