@@ -84,73 +84,49 @@ impl From<TurnError> for CoreError {
     }
 }
 
-pub(super) async fn run<S>(
-    backend: &RuntimeBackend<S>,
-    cancellation: &dyn Cancellation,
-    work: &dyn DrainWork,
-) -> (Result<Execution, TurnError>, Option<TurnKey>)
-where
-    S: AccessSnapshot + 'static,
-{
-    let initialized = {
-        let mut guard = backend.state.lock().await;
-        let state = &mut *guard;
-        state.request_status = None;
-        state.request_accounting = None;
-        state.tool_conversation.reset_pending();
-        state
-            .tool_conversation
-            .restore_results(&mut state.conversation)
-            .await
-    };
-    if let Err(error) = initialized {
-        return (Err(error), None);
-    }
-    let mut agent_state = parrot_core::AgentState::new(backend.agent_limits.disable_max_turns);
-    let mut failed_key = None;
-    let outcome: Result<parrot_core::Outcome, CoreError> = async {
-        let mut answer = String::new();
-        loop {
-            if work.has_scheduled() {
-                return Ok(parrot_core::Outcome::Completed(answer));
-            }
-            let binding = TurnBinding::new();
-            let mut states = RuntimeStates {
-                history: &backend.history,
-                sessions: &backend.sessions,
-                activity: backend.activity.as_ref(),
-                state: &backend.state,
-                prompt: &backend.prompt,
-                skills: backend.skills.as_ref(),
-                status: backend.status.as_ref(),
-                completion_sources: &backend.completion_sources,
-                templates: &backend.templates,
-                publisher: backend.publisher.as_ref(),
-                usage: &backend.usage,
-                compactor: &backend.compactor,
-                event_id: &backend.event_id,
-                events: ContextEmitter::new(
-                    &backend.history,
-                    backend.publisher.as_ref(),
-                    &backend.broker,
-                    backend.event_id.as_ref(),
-                ),
-                binding: &binding,
-                cancellation,
-                work,
-                persistence_key: None,
-                agent_state: &mut agent_state,
-            };
-            if cancellation.is_cancelled() {
-                return Err(CoreError::cancelled());
-            }
-            let turn = states.get_last_turn().await?;
-            if !turn.as_ref().is_some_and(|turn| turn.needs_response())
-                && states.peek_pending_input_header().await?.is_none()
-            {
-                return Ok(parrot_core::Outcome::Completed(answer));
-            }
+struct CoreLoopLifecycle<'a, S: AccessSnapshot + 'static> {
+    backend: &'a RuntimeBackend<S>,
+    cancellation: &'a dyn Cancellation,
+    work: &'a dyn DrainWork,
+    agent_state: parrot_core::AgentState,
+    failed_key: Option<TurnKey>,
+}
 
+impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecycle<'_, S> {
+    fn has_scheduled_work(&self) -> bool {
+        self.work.has_scheduled()
+    }
+
+    fn has_ready_turn(&mut self) -> BoxFuture<'_, Result<bool, CoreError>> {
+        Box::pin(async move {
+            let binding = TurnBinding::new();
+            RuntimeStates::bind(
+                self.backend,
+                &binding,
+                self.cancellation,
+                self.work,
+                &mut self.agent_state,
+            )
+            .has_ready_turn()
+            .await
+        })
+    }
+
+    fn run_turn<'a>(
+        &'a mut self,
+        cancellation: parrot_core::CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<parrot_core::Outcome, CoreError>> {
+        Box::pin(async move {
+            let cancellation: &dyn Cancellation = &cancellation;
+            let binding = TurnBinding::new();
+            let backend = self.backend;
+            let mut states = RuntimeStates::bind(
+                backend,
+                &binding,
+                self.cancellation,
+                self.work,
+                &mut self.agent_state,
+            );
             let tool_events = ContextEmitter::new(
                 &backend.history,
                 backend.publisher.as_ref(),
@@ -259,23 +235,59 @@ where
                             .turn_finished(&key.start_event_id, "completed", None);
                     }
                     backend.activity.assistant_message(&completed);
-                    answer = completed;
+                    Ok(parrot_core::Outcome::Completed(completed))
                 }
                 Ok(parrot_core::Outcome::BudgetExhausted) => {
-                    failed_key = states.persistence_key;
+                    self.failed_key = states.persistence_key.clone();
                     backend
                         .fail(backend.notices.runaway.clone(), String::new())
                         .await?;
-                    return Ok(parrot_core::Outcome::BudgetExhausted);
+                    Ok(parrot_core::Outcome::BudgetExhausted)
                 }
                 Err(error) => {
-                    failed_key = states.persistence_key;
-                    return Err(error);
+                    self.failed_key = states.persistence_key.clone();
+                    Err(error)
                 }
             }
-        }
+        })
     }
+}
+
+pub(super) async fn run<S>(
+    backend: &RuntimeBackend<S>,
+    cancellation: &dyn Cancellation,
+    work: &dyn DrainWork,
+) -> (Result<Execution, TurnError>, Option<TurnKey>)
+where
+    S: AccessSnapshot + 'static,
+{
+    let initialized = {
+        let mut guard = backend.state.lock().await;
+        let state = &mut *guard;
+        state.request_status = None;
+        state.request_accounting = None;
+        state.tool_conversation.reset_pending();
+        state
+            .tool_conversation
+            .restore_results(&mut state.conversation)
+            .await
+    };
+    if let Err(error) = initialized {
+        return (Err(error), None);
+    }
+    let mut lifecycle = CoreLoopLifecycle {
+        backend,
+        cancellation,
+        work,
+        agent_state: parrot_core::AgentState::new(backend.agent_limits.disable_max_turns),
+        failed_key: None,
+    };
+    let outcome = parrot_core::run(
+        &mut lifecycle,
+        parrot_core::CancellationToken::new(cancellation),
+    )
     .await;
+    let failed_key = lifecycle.failed_key.take();
     {
         let mut state = backend.state.lock().await;
         state.request_status = None;
@@ -302,32 +314,8 @@ where
 {
     let binding = TurnBinding::new();
     let mut agent_state = parrot_core::AgentState::new(backend.agent_limits.disable_max_turns);
-    let mut states = RuntimeStates {
-        history: &backend.history,
-        sessions: &backend.sessions,
-        activity: backend.activity.as_ref(),
-        state: &backend.state,
-        prompt: &backend.prompt,
-        skills: backend.skills.as_ref(),
-        status: backend.status.as_ref(),
-        completion_sources: &backend.completion_sources,
-        templates: &backend.templates,
-        publisher: backend.publisher.as_ref(),
-        usage: &backend.usage,
-        compactor: &backend.compactor,
-        event_id: &backend.event_id,
-        events: ContextEmitter::new(
-            &backend.history,
-            backend.publisher.as_ref(),
-            &backend.broker,
-            backend.event_id.as_ref(),
-        ),
-        binding: &binding,
-        cancellation: &NeverCancelled,
-        work,
-        persistence_key: None,
-        agent_state: &mut agent_state,
-    };
+    let mut states =
+        RuntimeStates::bind(backend, &binding, &NeverCancelled, work, &mut agent_state);
     states.persistence_key = Some(key.clone());
     if let Some(message) = parrot_core::interrupt_turn(&mut states)
         .await
