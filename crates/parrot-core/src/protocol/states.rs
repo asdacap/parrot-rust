@@ -1,7 +1,7 @@
 use super::config::{ConfigKey, ConfigValue};
 use super::context::ContextSnapshot;
 use super::conversation::ConversationState;
-use super::message::{ConversationTurn, InputAdmission, PendingMessage, PromotedInput};
+use super::message::{ConversationTurn, InputAdmission, PromotedInput};
 use super::skill::{Skill, SkillContent, SkillReference};
 use super::tool::ToolDefinition;
 use super::turn::AgentState;
@@ -93,10 +93,10 @@ pub trait States: Send + Sync {
     fn get_last_turn(&self) -> BoxFuture<'_, Result<Option<ConversationTurn>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.get_last_turn")) })
     }
-    /// Peeks at the next durable pending input header without reserving, promoting,
+    /// Reports whether durable input is pending without reserving, promoting,
     /// or materializing its content.
-    fn peek_pending_input_header(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.peek_pending_input_header")) })
+    fn has_pending_input(&self) -> BoxFuture<'_, Result<bool, Error>> {
+        Box::pin(async { Err(Error::unsupported("States.has_pending_input")) })
     }
     /// Promotes all currently pending steers, or one queued input when permitted,
     /// preserving atomic native admission and returning the promoted content explicitly.

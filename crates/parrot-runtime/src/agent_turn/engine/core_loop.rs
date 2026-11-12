@@ -103,7 +103,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
             Ok(turn
                 .as_ref()
                 .is_some_and(parrot_core::ConversationTurn::needs_response)
-                || states.peek_pending_input_header().await?.is_some())
+                || states.has_pending_input().await?)
         })
     }
 

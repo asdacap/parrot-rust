@@ -3,12 +3,6 @@ use crate::{
     States, ToolDefinition, context::compact_context,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PreparedContext {
-    pub instructions: String,
-    pub reduced: bool,
-}
-
 pub async fn prepare_context_epoch(
     states: &mut dyn States,
     state: &mut AgentState,
@@ -16,7 +10,7 @@ pub async fn prepare_context_epoch(
     publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
     cancellation: CancellationToken<'_>,
-) -> Result<PreparedContext, Error> {
+) -> Result<String, Error> {
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
@@ -28,7 +22,6 @@ pub async fn prepare_context_epoch(
         .into_context()?;
     let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
     let mut context = ContextSnapshot::estimate(estimate, &configuration);
-    let mut reduced = false;
     if context.requires_compaction(
         &state.last_request_statistic,
         &configuration.model.canonical_model,
@@ -43,7 +36,6 @@ pub async fn prepare_context_epoch(
         )
         .await?;
         instructions = compacted.instructions;
-        reduced = compacted.reduced;
         messages = states.read_conversation_state().await?.messages;
         configuration = states
             .get_config(ConfigKey::Context)
@@ -53,8 +45,5 @@ pub async fn prepare_context_epoch(
         context = ContextSnapshot::estimate(estimate, &configuration);
         context.ensure_input_fits()?;
     }
-    Ok(PreparedContext {
-        instructions,
-        reduced,
-    })
+    Ok(instructions)
 }

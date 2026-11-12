@@ -31,8 +31,8 @@ pub use conversation::{ConversationHistoryItem, ConversationState, ConversationS
 pub use error::{Error, ErrorCode, ErrorDetail, ErrorKind};
 pub use event::EventPublisher;
 pub use message::{
-    Content, ConversationTurn, Delivery, FinishReason, InputAdmission, Message, PendingMessage,
-    PromotedInput, ProviderRequest, ProviderResponse, Reasoning, Role,
+    Content, ConversationTurn, FinishReason, InputAdmission, Message, PromotedInput,
+    ProviderRequest, ProviderResponse, Reasoning, Role,
 };
 pub use provider::{Provider, Tools};
 pub use skill::{DerivedContext, Skill, SkillContent, SkillReference};

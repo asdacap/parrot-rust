@@ -85,24 +85,19 @@ fn visible_user_and_tool_results_require_a_response_without_pending_input() {
 }
 
 #[test]
-fn pending_message_is_a_stable_peek_and_admits_input_after_a_completed_turn() {
+fn pending_input_readiness_does_not_consume_input_after_a_completed_turn() {
     let mut state = MemoryState::new([Reply::final_response("new answer")]);
     state.append_response(&ProviderResponse {
         assistant_text: "old answer".into(),
         ..ProviderResponse::default()
     });
-    let pending = finish(state.peek_pending_input_header()).unwrap().unwrap();
-    assert_eq!(pending.delivery, Delivery::Queue);
-    assert!(!pending.input_id.is_empty());
-    assert!(!pending.message_id.is_empty());
-    assert_eq!(
-        finish(state.peek_pending_input_header()).unwrap(),
-        Some(pending)
-    );
+    assert!(finish(state.has_pending_input()).unwrap());
+    assert!(finish(state.has_pending_input()).unwrap());
     assert_eq!(state.pending_messages.len(), 1);
     assert!(state.trace.values().is_empty());
     assert_eq!(state.run(), Ok(Outcome::Completed("new answer".into())));
     assert_eq!(state.admissions, [InputAdmission::SteersOrNextQueued]);
+    assert!(!finish(state.has_pending_input()).unwrap());
     assert!(state.pending_messages.is_empty());
 }
 
@@ -303,7 +298,7 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
         contents: vec![Content::Text("status added a new input".into())],
         ..Message::default()
     });
-    let pending = finish(state.peek_pending_input_header()).unwrap();
+    let pending = finish(state.has_pending_input()).unwrap();
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
@@ -319,7 +314,7 @@ fn admission_uses_actual_turn_facts_after_native_preparation() {
         Ok(Outcome::Completed("answer".into()))
     );
     assert_eq!(state.admissions, [InputAdmission::SteersOnly]);
-    assert_eq!(finish(state.peek_pending_input_header()).unwrap(), pending);
+    assert_eq!(finish(state.has_pending_input()).unwrap(), pending);
     assert_eq!(state.pending_messages.len(), 1);
 }
 
@@ -334,8 +329,7 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
     });
     state.enqueue_message(Delivery::Steer, "first steer");
     state.enqueue_message(Delivery::Steer, "second steer");
-    let steer = finish(state.peek_pending_input_header()).unwrap().unwrap();
-    assert_eq!(steer.delivery, Delivery::Steer);
+    assert!(finish(state.has_pending_input()).unwrap());
     let tools = state.tools.clone();
     let provider = state.provider.clone();
 
@@ -352,7 +346,7 @@ fn steer_admission_is_batched_without_consuming_queued_input_mid_turn() {
     );
     assert_eq!(state.admissions, [InputAdmission::SteersOnly]);
     assert_eq!(state.pending_messages.len(), 1);
-    assert_eq!(state.pending_messages[0].0.delivery, Delivery::Queue);
+    assert_eq!(state.pending_messages[0].0, Delivery::Queue);
     let turn = state.last_turn.as_ref().unwrap();
     assert_eq!(
         turn.messages[0].contents,
@@ -385,19 +379,13 @@ fn promotion_returns_exact_multimodal_input_without_request_preparation() {
         provider_content: " { \"opaque\" : 1.2300 } ".into(),
         ..Message::default()
     };
-    state.pending_messages.push_back((
-        PendingMessage {
-            input_id: "promoted-input".into(),
-            message_id: "original-message".into(),
-            delivery: Delivery::Steer,
-        },
-        message.clone(),
-    ));
+    state
+        .pending_messages
+        .push_back((Delivery::Steer, message.clone()));
 
     assert_eq!(
         finish(state.promote_pending_inputs(InputAdmission::SteersOnly)),
         Ok(vec![PromotedInput {
-            input_id: "promoted-input".into(),
             message: message.clone(),
             publication: Default::default(),
         }])

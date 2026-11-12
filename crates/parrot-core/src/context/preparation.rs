@@ -77,8 +77,7 @@ pub(crate) async fn prepare_request(
         definitions,
         cancellation,
     )
-    .await?
-    .instructions;
+    .await?;
     let messages = states.read_conversation_state().await?.messages;
     let configuration = states
         .get_config(ConfigKey::Context)

@@ -509,27 +509,17 @@ where
             Ok(Some(parrot_core::ConversationTurn { messages, result }))
         })
     }
-    fn peek_pending_input_header(
-        &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::PendingMessage>, CoreError>> {
+    fn has_pending_input(&self) -> BoxFuture<'_, Result<bool, CoreError>> {
         adapt_operation(async move {
             let Some(input) = self.history.peek_pending_input().await? else {
-                return Ok(None);
+                return Ok(false);
             };
-            let delivery = match input.delivery {
-                protocol::Delivery::DELIVERY_STEER => parrot_core::Delivery::Steer,
-                protocol::Delivery::DELIVERY_QUEUE => parrot_core::Delivery::Queue,
-                protocol::Delivery::DELIVERY_UNSPECIFIED => {
-                    return Err(TurnError::Service(
-                        "pending input delivery is unspecified".into(),
-                    ));
-                }
-            };
-            Ok(Some(parrot_core::PendingMessage {
-                input_id: input.id,
-                message_id: input.message_id,
-                delivery,
-            }))
+            match input.delivery {
+                protocol::Delivery::DELIVERY_STEER | protocol::Delivery::DELIVERY_QUEUE => Ok(true),
+                protocol::Delivery::DELIVERY_UNSPECIFIED => Err(TurnError::Service(
+                    "pending input delivery is unspecified".into(),
+                )),
+            }
         })
     }
     fn promote_pending_inputs(
@@ -587,7 +577,6 @@ where
                     provider_content: ProviderContent::default(),
                 };
                 inputs.push(parrot_core::PromotedInput {
-                    input_id: promotion.input.id.clone(),
                     message: provider_message(&message).into(),
                     publication: parrot_core::ConversationPublication {
                         event_id: promotion.published.id,

@@ -2,7 +2,6 @@ use super::tool::{ToolCall, ToolDefinition};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PromotedInput {
-    pub input_id: String,
     pub message: Message,
     pub publication: crate::ConversationPublication,
 }
@@ -77,19 +76,6 @@ impl ConversationTurn {
                 Some(Role::User | Role::Tool)
             )
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PendingMessage {
-    pub input_id: String,
-    pub message_id: String,
-    pub delivery: Delivery,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Delivery {
-    Steer,
-    Queue,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

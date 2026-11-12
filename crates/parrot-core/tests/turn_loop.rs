@@ -2,12 +2,12 @@ use parrot_core::{
     AgentState, BoxFuture, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConfigValue,
     Content, ContextConfiguration, ContextModel, ContextSnapshot, ConversationAddition,
     ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationReceipt,
-    ConversationTurn, Delivery, DerivedContext, Error, ErrorCode, ErrorKind, EventPublisher,
-    FinishReason, InputAdmission, Message, Outcome, PendingMessage, PromotedInput, PromptTemplate,
-    Provider, ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent,
-    SkillMention, SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding,
-    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult,
-    ToolStatus, Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
+    ConversationTurn, DerivedContext, Error, ErrorCode, ErrorKind, EventPublisher, FinishReason,
+    InputAdmission, Message, Outcome, PromotedInput, PromptTemplate, Provider, ProviderRequest,
+    ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States,
+    StatusKey, StatusOffer, StatusOffering, StatusStanding, ToolCall, ToolCallReceipt, ToolCatalog,
+    ToolDefinition, ToolExecutionRequest, ToolResult, ToolStatus, Tools, TurnFlags, TurnModel,
+    TurnOptions, parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -19,6 +19,12 @@ use std::{
     task::{Context, Poll, Wake, Waker},
     thread,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Delivery {
+    Steer,
+    Queue,
+}
 
 #[path = "turn_loop/cancellation.rs"]
 mod cancellation;
@@ -137,7 +143,7 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
         Box::pin(async move {
             let turn = self.states.get_last_turn().await?;
             Ok(turn.as_ref().is_some_and(ConversationTurn::needs_response)
-                || self.states.peek_pending_input_header().await?.is_some())
+                || self.states.has_pending_input().await?)
         })
     }
     fn run_turn<'a>(
@@ -521,8 +527,7 @@ struct MemoryState {
     compactions: VecDeque<CompactedContext>,
     compacted_definitions: Vec<Vec<ToolDefinition>>,
     last_turn: Option<ConversationTurn>,
-    pending_messages: VecDeque<(PendingMessage, Message)>,
-    next_input: usize,
+    pending_messages: VecDeque<(Delivery, Message)>,
     turn_reads: AtomicUsize,
     admissions: Vec<InputAdmission>,
     cancellation: Arc<CancellationSource>,
@@ -653,7 +658,6 @@ impl MemoryState {
             compacted_definitions: Vec::new(),
             last_turn: None,
             pending_messages: VecDeque::new(),
-            next_input: 0,
             turn_reads: AtomicUsize::new(0),
             admissions: Vec::new(),
             cancellation,
@@ -681,14 +685,8 @@ impl MemoryState {
         state
     }
     fn enqueue_message(&mut self, delivery: Delivery, content: &str) {
-        let input = self.next_input;
-        self.next_input += 1;
         self.pending_messages.push_back((
-            PendingMessage {
-                input_id: format!("input-{input}"),
-                message_id: format!("message-{input}"),
-                delivery,
-            },
+            delivery,
             Message {
                 role: Role::User,
                 contents: vec![Content::Text(content.into())],
@@ -1115,17 +1113,12 @@ impl States for MemoryState {
             Ok(self.last_turn.clone())
         })
     }
-    fn peek_pending_input_header(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>> {
+    fn has_pending_input(&self) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async move {
             if self.fail_at == Some("pending_message") {
                 self.trace.step("pending_message", self.fail_at)?;
             }
-            Ok(self
-                .pending_messages
-                .iter()
-                .find(|(message, _)| message.delivery == Delivery::Steer)
-                .or_else(|| self.pending_messages.front())
-                .map(|(message, _)| message.clone()))
+            Ok(!self.pending_messages.is_empty())
         })
     }
     fn promote_pending_inputs(
@@ -1140,7 +1133,7 @@ impl States for MemoryState {
             while let Some(index) = self
                 .pending_messages
                 .iter()
-                .position(|(message, _)| message.delivery == Delivery::Steer)
+                .position(|(message, _)| *message == Delivery::Steer)
             {
                 promoted.push(self.pending_messages.remove(index).unwrap());
             }
@@ -1149,8 +1142,7 @@ impl States for MemoryState {
             }
             Ok(promoted
                 .into_iter()
-                .map(|(input, message)| PromotedInput {
-                    input_id: input.input_id,
+                .map(|(_, message)| PromotedInput {
                     message,
                     publication: Default::default(),
                 })
