@@ -25,28 +25,29 @@ pier run -p deep-swe/tasks --agent-import-path parrot_agent:ParrotAgent \
 
 Useful agent kwargs (`--ak key=value`):
 
-- `binary_url` — tarball to install. Default points at this repository's
-  GitHub release `parrot-x86_64-unknown-linux-musl.tar.gz`. The tarball must
-  contain the `parrot` binary at its root. The download host is added to the
-  network allowlist, so a local HTTP server works under filtered egress.
-- `binary_sha256` — expected sha256 of the downloaded tarball.
-- `provider_config` — JSON object written to
+- `binary_url` is the tarball to install. The default points at this
+  repository's GitHub release `parrot-x86_64-unknown-linux-musl.tar.gz`. The
+  tarball must contain the `parrot` binary at its root. The download host is
+  added to the network allowlist, so a local HTTP server works under filtered
+  egress.
+- `binary_sha256` is the expected sha256 of the downloaded tarball.
+- `provider_config` is a JSON object written to
   `~/.config/parrotrust/config.yaml` under `providers:` for custom gateways,
   e.g. `--ak 'provider_config={"respan":{"type":"openai-compatible","protocol":"responses","base_url":"https://gw.example.com/api","api_key_env":"GW_KEY"}}'`.
-  An existing `config.yaml` is never overwritten; pre-bake one instead.
-- `mode` — optional Parrot foreground profile passed as `--mode`.
+  An existing `config.yaml` is never overwritten. Pre-bake one instead.
+- `mode` is an optional Parrot foreground profile passed as `--mode`.
 
-Provider API keys are passed from the Pier job environment to the sandbox
-process (`agent.env`, or the host environment) matched by the model's provider
-id, e.g. `openai/...` needs `OPENAI_API_KEY`; `provider_config` entries can
+Pier passes provider API keys from the job environment to the sandbox process
+(`agent.env`, or the host environment) by matching the model's provider id. For
+example, `openai/...` needs `OPENAI_API_KEY`. Entries in `provider_config` can
 name their own `api_key_env`. OAuth-backed providers such as `chatgpt` have no
 environment key, so use API-key providers for benchmark runs.
 
-The network allowlist contains the provider endpoints (from the provider id
-and `provider_config` base URLs), `models.dev` (Parrot fetches the model
-catalog from it at startup, needed for unknown models), and the `binary_url`
-host. The `--model` value must be a fully qualified `provider/model`; the
-config's `model_aliases` are not reachable in a fresh sandbox.
+The network allowlist contains the provider endpoints (from the provider id and
+`provider_config` base URLs), `models.dev`, which Parrot fetches at startup and
+needs for unknown models, and the `binary_url` host. The `--model` value must be
+a fully qualified `provider/model`. The config's `model_aliases` are not
+reachable in a fresh sandbox.
 
 ## Terminal-Bench
 
@@ -78,19 +79,18 @@ at `high` reasoning effort.
 | Partial score | 0.954 |
 | Mean reward | 0.575 |
 
-Token usage recorded by the one-shot event log: 1.42B provider input tokens
-(97% served from cache) and 8.6M output tokens across 113 tasks. The gateway
-did not return a cost figure for this run; priced at the blended rate measured
-on complete reference runs of the same provider, that is roughly **$51 total,
-about $0.45 per task**. Two mid-run infrastructure incidents (host disk
-exhaustion and docker network-pool exhaustion) forced one rerun of each
-affected task and added roughly $6-8 of wasted spend; every task received one
-clean scored attempt.
+The one-shot event log recorded 1.42B provider input tokens (97% served from
+cache) and 8.6M output tokens across 113 tasks. The gateway did not return a cost
+figure for this run. Priced at the blended rate measured on complete reference
+runs of the same provider, that is roughly **$51 total, about $0.45 per task**.
+Two mid-run infrastructure incidents (host disk exhaustion and docker
+network-pool exhaustion) forced one rerun of each affected task and added roughly
+$6-8 of wasted spend. Every task received one clean scored attempt.
 
 For comparison, the [Harness
 Leaderboard](https://huggingface.co/spaces/joelniklaus/harness-leaderboard)
 reports per-attempt DeepSWE resolve rates of 61-66% for other harnesses on the
-same model and effort (3 attempts per task, HF Sandbox infrastructure); a
+same model and effort (3 attempts per task, HF Sandbox infrastructure). A
 single-attempt result carries roughly ±10 points of run-to-run noise.
 
 ## Files produced per trial
@@ -98,9 +98,10 @@ single-attempt result carries roughly ±10 points of run-to-run noise.
 Inside the sandbox at `/logs/agent/` (Pier downloads them into the trial's
 `agent/` directory):
 
-- `parrot.txt` — merged stdout/stderr of the one-shot run (human-readable).
-- `parrot.jsonl` — the event log consumed for trajectory conversion.
-- `trajectory.json` — generated after the run from `parrot.jsonl`.
+- `parrot.txt` holds the merged stdout and stderr of the one-shot run, in
+  human-readable form.
+- `parrot.jsonl` is the event log consumed for trajectory conversion.
+- `trajectory.json` is generated after the run from `parrot.jsonl`.
 
 ## The `parrot.jsonl` contract
 
@@ -123,7 +124,7 @@ order, LF-separated, append-only, flushed per line:
   `artifacts`) and bytes fields are omitted. Repeated scalar fields (e.g.
   `tool_call_ids`) are kept as string arrays, so tool results are read from
   `tool_finished.result` only.
-- Unknown payload types and keys may appear in the future; parsers must be
+- Unknown payload types and keys may appear in the future. Parsers must be
   tolerant.
 
 ## Trajectory conversion rules
@@ -131,23 +132,24 @@ order, LF-separated, append-only, flushed per line:
 - One **user** step per `input_admitted` event (the rendered instruction).
 - One **agent** step per provider request, bounded by
   `request_usage_recorded`. Streamed `text_chunk` fragments concatenate into
-  the step message; `reasoning_chunk` fragments into `reasoning_content`;
-  assembled `tool_call_chunk` fragments into structured tool calls.
+  the step message. `reasoning_chunk` fragments concatenate into
+  `reasoning_content`. Assembled `tool_call_chunk` fragments become structured
+  tool calls.
 - Tool results (`tool_finished.result`) are attributed to the request whose
   `tool_call_ids` own that call, so the step that issued a tool call also
   carries its observation.
 - Step metrics come from the request's usage record (`prompt_tokens`,
-  `completion_tokens`, `cached_tokens`, `cost_usd = input_cost +
-  output_cost`, and `context_tokens`/`context_limit` in `extra`).
-- `final_metrics` sums all usage records; `peak_context_tokens` is the largest
-  observed `context_size` (falling back to the largest step prompt token
-  count); `summarization_count` counts `compaction_started` events.
-- `turn_failed` / `agent_failed` messages do not become steps; the CLI exits
-  nonzero on failure and Pier records the exception.
+  `completion_tokens`, `cached_tokens`, `cost_usd = input_cost + output_cost`,
+  plus `context_tokens` and `context_limit` in `extra`).
+- `final_metrics` sums all usage records. `peak_context_tokens` is the largest
+  observed `context_size`, falling back to the largest step prompt token count.
+  `summarization_count` counts `compaction_started` events.
+- `turn_failed` and `agent_failed` messages do not become steps. The CLI exits
+  nonzero on failure, and Pier records the exception.
 
 ## Known limitations
 
 - Subagent (background agent) trajectories are filtered out of the main
-  trajectory; only the main agent session's events are converted.
+  trajectory. Only the main agent session's events are converted.
 - Events carry no wall-clock timestamps, so ATIF steps have none.
 - Events after the last usage record form a final step without usage metrics.
