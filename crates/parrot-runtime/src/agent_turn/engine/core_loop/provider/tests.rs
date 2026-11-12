@@ -907,6 +907,48 @@ async fn storage_publication_output_and_usage_failures_all_close_the_real_stream
 }
 
 #[tokio::test]
+async fn completion_usage_is_recorded_before_a_buffered_fragment_commit_fails() {
+    let fixture = Fixture::new();
+    let publisher = fixture.publisher();
+    let output = Output::default();
+    let activity = Activity::default();
+    let mut usage = Usage::default();
+    let ids = || "duplicate".into();
+    let state = StreamState::new(false);
+    let completion = Completion {
+        input_tokens: 350,
+        ..Completion::default()
+    };
+    let session = FakeSession::new(
+        vec![
+            text("opening"),
+            text(" held"),
+            Step::Event(sessions::Event::Completed(completion.clone())),
+        ],
+        state.clone(),
+    );
+    let request = request();
+    let result = StreamEffects::stream(
+        StreamEffects {
+            history: &fixture.history,
+            publisher: &publisher,
+            event_id: &ids,
+            output: &output,
+            activity: &activity,
+        },
+        &mut usage,
+        &session,
+        request.clone(),
+        &NeverCancelled,
+    )
+    .await;
+
+    assert!(matches!(result, Err(ProviderCallError::Storage(_))));
+    assert_eq!(usage.observed, [(request, completion)]);
+    state.assert_closed();
+}
+
+#[tokio::test]
 async fn close_failure_is_awaited_and_does_not_skip_idle_activity_or_newline() {
     let fixture = Fixture::new();
     let publisher = fixture.publisher();

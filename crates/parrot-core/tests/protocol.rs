@@ -55,8 +55,8 @@ fn unsupported_provider_operations_never_return_a_fake_response_or_token_count()
         parrot_core::CancellationToken::uncancelled(),
     ))
     .unwrap_err();
-    assert_eq!(invocation.code, ErrorCode::InvalidOperation);
-    assert!(invocation.message.contains("invoke"));
+    assert_eq!(invocation.error.code, ErrorCode::InvalidOperation);
+    assert!(invocation.error.message.contains("invoke"));
     let estimate = provider
         .estimate_input_tokens("instructions", &[], &[])
         .unwrap_err();

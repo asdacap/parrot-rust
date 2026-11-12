@@ -14,8 +14,31 @@ pub(super) struct RuntimeProvider<'a, S: AccessSnapshot> {
     pub(super) event_id: &'a (dyn Fn() -> String + Send + Sync),
     pub(super) output: &'a dyn SessionOutput,
     pub(super) activity: &'a dyn SessionActivity,
-    pub(super) state: &'a Mutex<State>,
+    pub(super) usage: &'a SessionUsageRecorder,
     pub(super) events: ContextEmitter<'a>,
+}
+
+struct RequestUsage<'a> {
+    selected: &'a parrot_provider::routing::registry::ProviderModel,
+    recorder: &'a SessionUsageRecorder,
+    input_tokens: Option<i32>,
+}
+
+impl ProviderUsage for RequestUsage<'_> {
+    fn observe_completion<'a>(
+        &'a mut self,
+        request: &'a Request,
+        completed: &'a Completion,
+    ) -> BoxFuture<'a, Result<(), EventError>> {
+        Box::pin(async move {
+            if completed.input_tokens > 0 {
+                self.input_tokens = Some(completed.input_tokens);
+            }
+            self.recorder
+                .record_request(self.selected, request.reasoning.as_ref(), completed)
+                .await
+        })
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -88,26 +111,19 @@ impl<S: AccessSnapshot> parrot_core::Provider for RuntimeProvider<'_, S> {
         &'a self,
         request: ProviderRequest,
         cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<ProviderResponse, CoreError>>
+    ) -> BoxFuture<'a, Result<ProviderResponse, parrot_core::ProviderInvokeError>>
     where
         'c: 'a,
     {
         Box::pin(async move {
-            let selection = self.binding.capture_selection()?;
+            let selection = self.binding.capture_selection().map_err(CoreError::from)?;
             let selected = &selection.model.canonical_model;
-            let mut state = self.state.lock().await;
             let request: sessions::Request = request.into();
-            let estimate = crate::compaction::CompactionPlanner::estimate_input_tokens(
+            let mut usage = RequestUsage {
                 selected,
-                &request.instructions,
-                &request.tools,
-                &request.messages,
-            )
-            .map_err(|error| CoreError::from(TurnError::Planning(error)))?;
-            state.request_accounting = Some(RequestAccounting {
-                selected: selected.clone(),
-                estimated_input_tokens: estimate,
-            });
+                recorder: self.usage,
+                input_tokens: None,
+            };
             let session = self
                 .sessions
                 .get(selected.provider.clone())
@@ -124,7 +140,7 @@ impl<S: AccessSnapshot> parrot_core::Provider for RuntimeProvider<'_, S> {
             };
             let event = match StreamEffects::stream(
                 effects,
-                &mut *state,
+                &mut usage,
                 session.as_ref(),
                 request,
                 &cancellation,
@@ -146,12 +162,26 @@ impl<S: AccessSnapshot> parrot_core::Provider for RuntimeProvider<'_, S> {
                 ) => {
                     let mut error = CoreError::from(TurnError::ProviderCall(error));
                     error.kind = ErrorKind::RequestTooLarge;
-                    return Err(error);
+                    return Err(parrot_core::ProviderInvokeError {
+                        error,
+                        input_tokens: usage.input_tokens,
+                    });
                 }
-                Err(error) => return Err(CoreError::from(TurnError::ProviderCall(error))),
+                Err(error) => {
+                    return Err(parrot_core::ProviderInvokeError {
+                        error: CoreError::from(TurnError::ProviderCall(error)),
+                        input_tokens: usage.input_tokens,
+                    });
+                }
             };
             match event.base_event() {
-                sessions::Event::Completed(completed) => Ok(completed.clone().into()),
+                sessions::Event::Completed(completed) => {
+                    let mut response: ProviderResponse = completed.clone().into();
+                    if let Some(input_tokens) = usage.input_tokens {
+                        response.input_tokens = input_tokens;
+                    }
+                    Ok(response)
+                }
                 _ => unreachable!("provider call returns completion"),
             }
         })
@@ -232,6 +262,12 @@ impl StreamEffects<'_> {
             Self::next(effects, stream, &mut progress.fragments, cancellation).await?
         {
             let base = event.base_event();
+            if let sessions::Event::Completed(value) = base {
+                usage
+                    .observe_completion(request, value)
+                    .await
+                    .map_err(ProviderCallError::Storage)?;
+            }
             if !matches!(
                 base,
                 sessions::Event::TextDelta(_) | sessions::Event::ReasoningDelta { .. }
@@ -289,10 +325,6 @@ impl StreamEffects<'_> {
                 .await?;
             }
             if let sessions::Event::Completed(value) = base {
-                usage
-                    .observe_completion(request, value)
-                    .await
-                    .map_err(ProviderCallError::Storage)?;
                 let mut published = Self::event(effects);
                 published.set_provider_call_usage(protocol::ProviderCallUsage {
                     input_tokens: i64::from(value.input_tokens.max(0)),

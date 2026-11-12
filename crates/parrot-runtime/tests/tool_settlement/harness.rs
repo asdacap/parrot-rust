@@ -160,9 +160,6 @@ impl Harness {
                 )
                 .unwrap(),
             context: fixture.controller(),
-            request_status: Some(Arc::new(Status)),
-            request_accounting: None,
-            usage: usage.clone(),
         });
         Self {
             config,
@@ -200,6 +197,7 @@ impl Harness {
             state: &self.runtime_state,
             history: &self.events.0,
             prompt: &self.prompt,
+            status: &Status,
             sessions: &self.sessions,
             usage: &self.usage,
             capture,

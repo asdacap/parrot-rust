@@ -34,7 +34,7 @@ pub use message::{
     Content, ConversationTurn, FinishReason, InputAdmission, Message, PromotedInput,
     ProviderRequest, ProviderResponse, Reasoning, Role,
 };
-pub use provider::{Provider, Tools};
+pub use provider::{Provider, ProviderInvokeError, Tools};
 pub use skill::{DerivedContext, Skill, SkillContent, SkillReference};
 pub use states::States;
 pub use tool::{

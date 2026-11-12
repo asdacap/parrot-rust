@@ -177,13 +177,18 @@ async fn execute_turn<M: ToolResultMetadata>(
         let attempt = state.count_request();
         states.set_agent_state(state.clone()).await?;
         let invoked = provider.invoke(prepared.request, cancellation).await;
-        if !invoked
-            .as_ref()
-            .is_ok_and(|response| response.input_tokens > 0)
-        {
-            state.last_request_statistic = states.get_agent_state().await?.last_request_statistic;
+        let input_tokens = match &invoked {
+            Ok(response) => Some(response.input_tokens),
+            Err(error) => error.input_tokens,
+        };
+        if let Some(input_tokens) = input_tokens {
+            state.last_request_statistic.observe_usage(
+                &prepared.model_selector,
+                prepared.estimated_input_tokens,
+                input_tokens,
+            );
         }
-        let response = match invoked {
+        let response = match invoked.map_err(|error| error.error) {
             Ok(response) => response,
             Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
                 compacted_oversized = true;
@@ -205,11 +210,6 @@ async fn execute_turn<M: ToolResultMetadata>(
             Err(error) => return Err(error),
         };
         compacted_oversized = false;
-        state.last_request_statistic.observe_usage(
-            &prepared.model_selector,
-            prepared.estimated_input_tokens,
-            response.input_tokens,
-        );
         let retry_template =
             if response.finish_reason == FinishReason::Length && !response.tool_calls.is_empty() {
                 Some(ConfigKey::TruncatedToolCallTemplate)
