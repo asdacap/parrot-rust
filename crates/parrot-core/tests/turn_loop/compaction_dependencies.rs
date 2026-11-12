@@ -10,7 +10,7 @@ fn compaction_reads_return_owned_conversation_data_without_invoking_a_summary() 
     let state = MemoryState::new([]);
     state.request().messages = vec![compaction_support::message("saved conversation")];
     let provider = state.summary_provider.clone();
-    let input = retain_owned(finish(parrot_core::read_conversation_state(&state)).unwrap());
+    let input = retain_owned(finish(state.read_conversation_state()).unwrap());
     drop(state);
 
     assert_eq!(
@@ -182,19 +182,14 @@ fn core_plans_and_fits_using_only_owned_data_and_injected_native_effects() {
 
 #[test]
 fn preparation_failures_stop_without_recording_or_invoking_a_summary() {
-    for stage in [
-        "conversation_summary",
-        "conversation_tail",
-        "estimate",
-        "status",
-    ] {
+    for stage in ["conversation", "estimate", "status"] {
         let mut state = MemoryState::new([Reply::TooLarge("oversized")]);
         state.compaction_plan = Some(compaction_support::plan(&["saved group", "tail"]));
         let provider = compaction_support::Provider::default();
         let mut compaction = MemoryCompaction::new(state.compaction_plan.clone(), provider.clone());
         let error = Error::failed(stage);
         match stage {
-            "conversation_summary" | "conversation_tail" => {
+            "conversation" => {
                 state.fail_at = Some(stage);
             }
             "estimate" => compaction.effects.context_failure = Some((1, error.clone())),
@@ -204,7 +199,10 @@ fn preparation_failures_stop_without_recording_or_invoking_a_summary() {
         assert_eq!(state.run_with_compaction(&mut compaction), Err(error));
         assert!(state.recorded_compactions.is_empty());
         assert!(provider.requests.lock().unwrap().is_empty());
-        assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
+        assert_eq!(
+            state.provider.requests.lock().unwrap().len(),
+            usize::from(stage != "conversation")
+        );
     }
 }
 

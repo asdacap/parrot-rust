@@ -66,7 +66,7 @@ pub(crate) async fn prepare_request(
         crate::prepare_context_epoch(states, provider, publisher, definitions, cancellation)
             .await?
             .instructions;
-    let messages = states.read_provider_messages().await?;
+    let messages = states.read_conversation_state().await?.messages;
     let configuration = states
         .get_config(ConfigKey::Context)
         .await?

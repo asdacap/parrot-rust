@@ -377,7 +377,27 @@ impl ContextController {
         &mut self.blobs
     }
 
-    pub(crate) async fn read_conversation_summary(
+    pub(crate) async fn read_conversation_state(
+        &self,
+        conversation: &AgentConversation,
+    ) -> ContextResult<parrot_core::ConversationState> {
+        let summary = self.read_conversation_summary().await?;
+        let watermark = summary.as_ref().map_or(0, |summary| summary.watermark);
+        let history = self.read_conversation_tail(conversation, watermark).await?;
+        let messages = conversation
+            .messages()
+            .iter()
+            .map(provider_message)
+            .map(Into::into)
+            .collect();
+        Ok(parrot_core::ConversationState {
+            summary,
+            history,
+            messages,
+        })
+    }
+
+    async fn read_conversation_summary(
         &self,
     ) -> ContextResult<Option<parrot_core::ConversationSummary>> {
         let snapshot = self
@@ -391,7 +411,7 @@ impl ContextController {
         }))
     }
 
-    pub(crate) async fn read_conversation_tail(
+    async fn read_conversation_tail(
         &self,
         conversation: &AgentConversation,
         after: i64,
@@ -667,20 +687,6 @@ impl parrot_core::States for EpochStates<'_> {
         })
     }
 
-    fn read_provider_messages(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::Message>, parrot_core::Error>> {
-        Box::pin(async move {
-            Ok(self
-                .conversation
-                .messages()
-                .iter()
-                .map(provider_message)
-                .map(Into::into)
-                .collect())
-        })
-    }
-
     fn read_token_calibration(
         &self,
     ) -> BoxFuture<'_, Result<parrot_core::TokenCalibration, parrot_core::Error>> {
@@ -742,27 +748,14 @@ impl parrot_core::States for EpochStates<'_> {
             }
         })
     }
-    fn read_conversation_summary(
+    fn read_conversation_state(
         &self,
-    ) -> BoxFuture<'_, Result<Option<parrot_core::ConversationSummary>, parrot_core::Error>> {
+    ) -> BoxFuture<'_, Result<parrot_core::ConversationState, parrot_core::Error>> {
         Box::pin(async move {
             self.controller
                 .lock()
                 .await
-                .read_conversation_summary()
-                .await
-                .map_err(|error| self.capture_error(error))
-        })
-    }
-    fn read_conversation_tail(
-        &self,
-        after: i64,
-    ) -> BoxFuture<'_, Result<Vec<parrot_core::ConversationHistoryItem>, parrot_core::Error>> {
-        Box::pin(async move {
-            self.controller
-                .lock()
-                .await
-                .read_conversation_tail(self.conversation, after)
+                .read_conversation_state(self.conversation)
                 .await
                 .map_err(|error| self.capture_error(error))
         })

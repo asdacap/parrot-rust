@@ -18,7 +18,7 @@ pub async fn prepare_compaction(
     let outcome: Result<CompactionInput, Error> = async {
         publisher.on_epoch_started().await?;
         let instructions = states.capture_system_prompt().await?;
-        let raw = crate::read_conversation_state(states).await?;
+        let raw = states.read_conversation_state().await?;
         let base_watermark = raw.summary.as_ref().map_or(0, |summary| summary.watermark);
         let groups = assemble_groups(&raw);
         let estimate = provider.estimate_input_tokens(&instructions, definitions, &raw.messages)?;

@@ -89,7 +89,7 @@ pub async fn steer_status(
         return Err(Error::cancelled());
     }
     let instructions = states.capture_system_prompt().await?;
-    let messages = states.read_provider_messages().await?;
+    let messages = states.read_conversation_state().await?.messages;
     let configuration = states
         .get_config(ConfigKey::Context)
         .await?

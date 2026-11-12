@@ -20,7 +20,7 @@ pub async fn prepare_context_epoch(
         return Err(Error::cancelled());
     }
     let mut instructions = states.capture_system_prompt().await?;
-    let mut messages = states.read_provider_messages().await?;
+    let mut messages = states.read_conversation_state().await?.messages;
     let mut configuration = states
         .get_config(ConfigKey::Context)
         .await?
@@ -34,7 +34,7 @@ pub async fn prepare_context_epoch(
             compact_context(states, provider, publisher, definitions, cancellation).await?;
         instructions = compacted.instructions;
         reduced = compacted.reduced;
-        messages = states.read_provider_messages().await?;
+        messages = states.read_conversation_state().await?.messages;
         configuration = states
             .get_config(ConfigKey::Context)
             .await?
