@@ -29,7 +29,7 @@ pub async fn run(
         }
         match run_turn(states, tools, provider, publisher, cancellation).await? {
             Outcome::Completed(completed) => answer = completed,
-            Outcome::BudgetExhausted => return Ok(Outcome::BudgetExhausted),
+            exhausted @ Outcome::BudgetExhausted(_) => return Ok(exhausted),
         }
     }
 }
@@ -109,7 +109,7 @@ async fn execute_turn(
             }
         }
         let Some(flags) = state.admit(options.maximum_requests) else {
-            return Ok(Outcome::BudgetExhausted);
+            return exhaust_budget(states).await;
         };
         let definitions = if flags.final_phase {
             &catalog.final_phase
@@ -213,7 +213,7 @@ async fn execute_turn(
             )
             .await?;
             if flags.final_phase && !state.try_extend_settlement() {
-                return Ok(Outcome::BudgetExhausted);
+                return exhaust_budget(states).await;
             }
             continue;
         }
@@ -250,6 +250,12 @@ async fn execute_turn(
             .await?;
         state.restart();
     }
+}
+
+/// Renders the terminal notice core records when the invocation budget runs out.
+async fn exhaust_budget(states: &dyn States) -> Result<Outcome, Error> {
+    let notice = rendering::render_template(states, ConfigKey::RunawayTemplate, &[]).await?;
+    Ok(Outcome::BudgetExhausted(notice))
 }
 
 /// Records an interrupted assistant turn through the same generic conversation operation.

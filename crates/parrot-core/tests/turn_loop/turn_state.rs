@@ -424,7 +424,7 @@ fn sequential_run_turn_calls_retain_the_total_settlement_extension_limit() {
             &provider,
             CancellationToken::new(provider.cancellation.as_ref())
         )),
-        Ok(Outcome::BudgetExhausted)
+        Ok(Outcome::BudgetExhausted(RUNAWAY_NOTICE.into()))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 6);
     assert_eq!(state.applied_results.len(), 5);

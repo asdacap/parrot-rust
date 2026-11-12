@@ -17,6 +17,7 @@ pub enum ConfigKey {
     FinalRequestTemplate,
     RestoredToolsTemplate,
     InterruptedTemplate,
+    RunawayTemplate,
     TruncatedToolCallTemplate,
     InvalidToolCallTemplate,
     CrashedToolTemplate,

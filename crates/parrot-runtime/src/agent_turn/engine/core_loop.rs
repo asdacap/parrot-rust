@@ -261,12 +261,10 @@ where
                     backend.activity.assistant_message(&completed);
                     answer = completed;
                 }
-                Ok(parrot_core::Outcome::BudgetExhausted) => {
+                Ok(parrot_core::Outcome::BudgetExhausted(notice)) => {
                     failed_key = states.persistence_key;
-                    backend
-                        .fail(backend.notices.runaway.clone(), String::new())
-                        .await?;
-                    return Ok(parrot_core::Outcome::BudgetExhausted);
+                    backend.fail(notice.clone(), String::new()).await?;
+                    return Ok(parrot_core::Outcome::BudgetExhausted(notice));
                 }
                 Err(error) => {
                     failed_key = states.persistence_key;
@@ -284,9 +282,7 @@ where
     }
     let execution = match outcome {
         Ok(parrot_core::Outcome::Completed(answer)) => Ok(Execution::succeeded(answer)),
-        Ok(parrot_core::Outcome::BudgetExhausted) => {
-            Ok(Execution::failed(&backend.notices.runaway))
-        }
+        Ok(parrot_core::Outcome::BudgetExhausted(notice)) => Ok(Execution::failed(notice)),
         Err(error) => Err(TurnError::Core(error)),
     };
     (execution, failed_key)
