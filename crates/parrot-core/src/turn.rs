@@ -1,36 +1,46 @@
 //! Turn engine: drains ready turns and drives one turn from input to settlement.
 
 use crate::{
-    AgentState, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConversationAddition,
-    ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationTurn, Error,
-    ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome, Provider, Role,
-    States, ToolCallReceipt, Tools, add_phase_prompt, context, execute_tools, rendering, skills,
-    steer_status,
+    AgentState, BoxFuture, CancellationToken, CompletionBlockerFeedback, ConfigKey,
+    ConversationAddition, ConversationEvent, ConversationOrigin, ConversationPersistence,
+    ConversationTurn, Error, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message,
+    Outcome, Provider, Role, States, ToolCallReceipt, Tools, add_phase_prompt, context,
+    execute_tools, rendering, skills, steer_status,
 };
+
+/// Supplies the drain loop with runtime-owned lifecycle facts and per-turn work.
+pub trait TurnLifecycle: Send {
+    /// Reports whether runtime-owned work is scheduled and must run before another turn.
+    fn has_scheduled_work(&self) -> bool;
+    /// Reports whether a turn awaits a response or pending input remains.
+    fn has_ready_turn(&mut self) -> BoxFuture<'_, Result<bool, Error>>;
+    /// Runs one turn, including its open and finish effects.
+    fn run_turn<'a>(
+        &'a mut self,
+        cancellation: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<Outcome, Error>>;
+}
 
 /// Drains ready turns using state-backed settings and the invocation budget.
 pub async fn run(
-    states: &mut dyn States,
-    tools: &dyn Tools,
-    provider: &dyn Provider,
-    publisher: &dyn EventPublisher,
+    lifecycle: &mut dyn TurnLifecycle,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
     let mut answer = String::new();
     loop {
+        if lifecycle.has_scheduled_work() {
+            return Ok(Outcome::Completed(answer));
+        }
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
-        let turn = states.get_last_turn().await?;
-        if !turn.as_ref().is_some_and(ConversationTurn::needs_response)
-            && states.peek_pending_input_header().await?.is_none()
-        {
+        let token = CancellationToken::new(&cancellation);
+        if !lifecycle.has_ready_turn().await? {
             return Ok(Outcome::Completed(answer));
         }
-        open_turn(states, publisher, cancellation).await?;
-        match run_turn(states, tools, provider, publisher, cancellation).await? {
+        match lifecycle.run_turn(token).await? {
             Outcome::Completed(completed) => answer = completed,
-            Outcome::BudgetExhausted => return Ok(Outcome::BudgetExhausted),
+            exhausted @ Outcome::BudgetExhausted(_) => return Ok(exhausted),
         }
     }
 }
@@ -126,7 +136,7 @@ async fn execute_turn(
             }
         }
         let Some(flags) = state.admit(options.maximum_requests) else {
-            return Ok(Outcome::BudgetExhausted);
+            return exhaust_budget(states).await;
         };
         let definitions = if flags.final_phase {
             &catalog.final_phase
@@ -230,7 +240,7 @@ async fn execute_turn(
             )
             .await?;
             if flags.final_phase && !state.try_extend_settlement() {
-                return Ok(Outcome::BudgetExhausted);
+                return exhaust_budget(states).await;
             }
             continue;
         }
@@ -267,6 +277,12 @@ async fn execute_turn(
             .await?;
         state.restart();
     }
+}
+
+/// Renders the terminal notice core records when the invocation budget runs out.
+async fn exhaust_budget(states: &dyn States) -> Result<Outcome, Error> {
+    let notice = rendering::render_template(states, ConfigKey::RunawayTemplate, &[]).await?;
+    Ok(Outcome::BudgetExhausted(notice))
 }
 
 /// Records an interrupted assistant turn through the same generic conversation operation.

@@ -1671,6 +1671,7 @@ where
                         .map_err(child)?;
                         let process = ProcessFactories::new(process_services.clone(), &definitions)
                             .map_err(child)?;
+                        let interactive = user.permissions.is_interactive();
                         let agents = AgentFactories::new(
                             AgentServices {
                                 runtime: catalog_agents.clone(),
@@ -1678,6 +1679,7 @@ where
                                 questions: catalog_agents.clone(),
                                 communication: catalog_agents.clone(),
                                 agent_depth: scope.identity().session.depth,
+                                interactive,
                                 templates: user.templates.clone(),
                                 allow_parent: config.configuration.runtime.agent_send_to_parent,
                             },
@@ -1692,6 +1694,7 @@ where
                                 filesystem: Arc::new(config.filesystem.clone()),
                                 templates: user.templates.clone(),
                                 agent_depth: scope.identity().session.depth,
+                                interactive,
                             },
                             &definitions,
                         )

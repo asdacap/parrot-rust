@@ -121,6 +121,40 @@ impl EventPublisher for MemoryEventPublisher {
     }
 }
 
+const RUNAWAY_NOTICE: &str = "configured runaway notice";
+
+struct MemoryTurnLifecycle<'a> {
+    states: &'a mut MemoryState,
+    tools: &'a dyn Tools,
+    provider: &'a dyn Provider,
+    publisher: &'a MemoryEventPublisher,
+}
+
+impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
+    fn has_scheduled_work(&self) -> bool {
+        false
+    }
+    fn has_ready_turn(&mut self) -> BoxFuture<'_, Result<bool, Error>> {
+        Box::pin(async move { self.states.has_ready_turn().await })
+    }
+    fn run_turn<'a>(
+        &'a mut self,
+        cancellation: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<Outcome, Error>> {
+        Box::pin(async move {
+            parrot_core::open_turn(self.states, self.publisher, cancellation).await?;
+            parrot_core::run_turn(
+                self.states,
+                self.tools,
+                self.provider,
+                self.publisher,
+                cancellation,
+            )
+            .await
+        })
+    }
+}
+
 async fn run(
     states: &mut MemoryState,
     tools: &dyn Tools,
@@ -133,7 +167,13 @@ async fn run(
         compacting: states.compacting.clone(),
         compaction: states.compaction.clone(),
     };
-    parrot_core::run(states, tools, provider, &publisher, cancellation).await
+    let mut lifecycle = MemoryTurnLifecycle {
+        states,
+        tools,
+        provider,
+        publisher: &publisher,
+    };
+    parrot_core::run(&mut lifecycle, cancellation).await
 }
 
 async fn run_turn(
@@ -548,6 +588,7 @@ impl MemoryState {
                     ConfigKey::FinalRequestTemplate,
                     "Finish the current turn.".into(),
                 ),
+                (ConfigKey::RunawayTemplate, RUNAWAY_NOTICE.into()),
                 (
                     ConfigKey::SkillSelectedTemplate,
                     "<skill>\n<name>{name}</name>\n<path>{path}</path>\n{content}\n</skill>".into(),
@@ -1319,7 +1360,10 @@ fn invalid_and_truncated_tool_responses_retry_without_recording_or_executing_cal
 fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
     let mut state = MemoryState::new((0..5).map(|_| Reply::tools("call")));
     state.maximum = 1;
-    assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
+    assert_eq!(
+        state.run(),
+        Ok(Outcome::BudgetExhausted(RUNAWAY_NOTICE.into()))
+    );
     assert_eq!(state.request().rendered_instructions.len(), 5);
     assert!(
         state
@@ -1347,7 +1391,10 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
             .count(),
         5
     );
-    assert_eq!(state.trace.values().last().unwrap(), "record_results");
+    assert_eq!(
+        &state.trace.values()[state.trace.values().len() - 2..],
+        ["record_results", "render_template"]
+    );
     assert_eq!(state.applied_results.len(), 5);
     assert!(!state.trace.values().iter().any(|entry| entry == "complete"));
     assert_eq!(state.recorded_catalogs.len(), 5);
@@ -1363,7 +1410,10 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
 fn malformed_final_response_exhausts_the_request_limit_without_a_settlement_extension() {
     let mut state = MemoryState::new([Reply::invalid("bad")]);
     state.maximum = 1;
-    assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
+    assert_eq!(
+        state.run(),
+        Ok(Outcome::BudgetExhausted(RUNAWAY_NOTICE.into()))
+    );
     assert_eq!(state.request().rendered_instructions.len(), 1);
 }
 
@@ -1387,7 +1437,7 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
             if disable_limits {
                 Ok(Outcome::Completed("answer".into()))
             } else {
-                Ok(Outcome::BudgetExhausted)
+                Ok(Outcome::BudgetExhausted(RUNAWAY_NOTICE.into()))
             }
         );
         assert_eq!(state.retries, [("invalid tool calls".into(), 1)]);
@@ -1413,7 +1463,7 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
             if disable_limits {
                 "complete"
             } else {
-                "promote"
+                "render_template"
             }
         );
     }
@@ -1423,8 +1473,14 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
 fn exhausted_budget_returns_without_provider_or_terminal_state_effects() {
     let mut state = MemoryState::new([]);
     state.maximum = 0;
-    assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
-    assert_eq!(state.trace.values(), ["catalog", "promote"]);
+    assert_eq!(
+        state.run(),
+        Ok(Outcome::BudgetExhausted(RUNAWAY_NOTICE.into()))
+    );
+    assert_eq!(
+        state.trace.values(),
+        ["catalog", "promote", "render_template"]
+    );
     assert!(state.provider.requests.lock().unwrap().is_empty());
     assert!(state.tools.requests.lock().unwrap().is_empty());
     assert!(state.pending_messages.is_empty());
@@ -1781,7 +1837,10 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
     ]);
     state.maximum = 1;
     state.enqueue_message(Delivery::Queue, "second question");
-    assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
+    assert_eq!(
+        state.run(),
+        Ok(Outcome::BudgetExhausted(RUNAWAY_NOTICE.into()))
+    );
     assert_eq!(state.request().rendered_instructions.len(), 6);
     assert!(state.final_requests.contains(&1));
     assert_eq!(state.final_requests, [1, 2, 3, 4, 5, 6]);
@@ -1823,7 +1882,10 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
         .prompts()
         .exit_blockers
         .push_back(vec!["work remains".into()]);
-    assert_eq!(state.run(), Ok(Outcome::BudgetExhausted));
+    assert_eq!(
+        state.run(),
+        Ok(Outcome::BudgetExhausted(RUNAWAY_NOTICE.into()))
+    );
     assert_eq!(state.request().rendered_instructions.len(), 9);
     let catalogs = state.capture_catalogs();
     assert_eq!(catalogs[0], ["read", "write"]);
@@ -1855,7 +1917,10 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
         8
     );
     assert_eq!(state.applied_results.len(), 8);
-    assert_eq!(state.trace.values().last().unwrap(), "record_results");
+    assert_eq!(
+        &state.trace.values()[state.trace.values().len() - 2..],
+        ["record_results", "render_template"]
+    );
 }
 
 #[test]

@@ -29,6 +29,44 @@ pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) agent_state: &'a mut parrot_core::AgentState,
 }
 
+impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
+    pub(super) fn bind(
+        backend: &'a RuntimeBackend<S>,
+        binding: &'a TurnBinding<S>,
+        cancellation: &'a dyn Cancellation,
+        work: &'a dyn DrainWork,
+        agent_state: &'a mut parrot_core::AgentState,
+    ) -> Self {
+        Self {
+            history: &backend.history,
+            sessions: &backend.sessions,
+            selection: backend.selection.as_ref(),
+            activity: backend.activity.as_ref(),
+            state: &backend.state,
+            prompt: &backend.prompt,
+            skills: backend.skills.as_ref(),
+            status: backend.status.as_ref(),
+            completion_sources: &backend.completion_sources,
+            templates: &backend.templates,
+            publisher: backend.publisher.as_ref(),
+            usage: &backend.usage,
+            compactor: &backend.compactor,
+            event_id: &backend.event_id,
+            events: ContextEmitter::new(
+                &backend.history,
+                backend.publisher.as_ref(),
+                &backend.broker,
+                backend.event_id.as_ref(),
+            ),
+            binding,
+            cancellation,
+            work,
+            persistence_key: None,
+            agent_state,
+        }
+    }
+}
+
 impl<S> CoreStates for RuntimeStates<'_, S>
 where
     S: AccessSnapshot + 'static,

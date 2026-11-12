@@ -154,6 +154,13 @@ impl<T: Clone + Send + Sync + 'static> PermissionBroker<T> {
         })
     }
 
+    /// Whether this session can wait for the user. A non-interactive session
+    /// answers permission requests by rejecting them, so nothing that needs a
+    /// user answer may be offered to its agents.
+    pub fn is_interactive(&self) -> bool {
+        self.interactive
+    }
+
     pub async fn request(
         &self,
         request: PermissionRequest<T>,

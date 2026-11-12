@@ -3,7 +3,9 @@ use super::message::{ProviderResponse, Reasoning};
 #[derive(Debug, Eq, PartialEq)]
 pub enum Outcome {
     Completed(String),
-    BudgetExhausted,
+    /// The invocation budget ran out before the turn completed. Carries the
+    /// rendered terminal notice core records for that failure.
+    BudgetExhausted(String),
 }
 
 /// One rejected completion attempt: the blocker feedback messages steering the

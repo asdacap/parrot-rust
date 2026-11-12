@@ -150,7 +150,6 @@ pub struct RuntimeBackend<S: AccessSnapshot + 'static> {
     execution_activity: std::sync::Mutex<Option<i64>>,
 }
 struct Notices {
-    runaway: String,
     interrupted_result: String,
 }
 
@@ -184,14 +183,7 @@ where
             &config.templates,
         )?;
         let reminders = config.reminders;
-        let render = |key: &str| {
-            config
-                .templates
-                .render(key, &[], &NeverCancelled)
-                .map_err(|e| TurnError::Service(e.to_string()))
-        };
         let notices = Notices {
-            runaway: render("agent-session.runaway")?,
             interrupted_result: config
                 .tool_execution
                 .templates

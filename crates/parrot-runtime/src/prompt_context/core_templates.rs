@@ -23,6 +23,7 @@ const PROMPT_TEMPLATE_CONFIG_KEYS: &[(ConfigKey, &str)] = &[
         ConfigKey::InterruptedTemplate,
         "agent-session.interrupted-note",
     ),
+    (ConfigKey::RunawayTemplate, "agent-session.runaway"),
     (
         ConfigKey::TruncatedToolCallTemplate,
         "agent-session.truncated-tool-call",

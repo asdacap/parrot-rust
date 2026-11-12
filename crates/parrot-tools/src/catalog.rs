@@ -490,6 +490,9 @@ pub struct AgentServices<R, M, Q, A> {
     pub questions: Arc<Q>,
     pub communication: Arc<A>,
     pub agent_depth: i32,
+    /// False when the user session cannot prompt its user. Tools that wait on a
+    /// user answer are then omitted from the catalog instead of blocking.
+    pub interactive: bool,
     pub templates: Arc<dyn ResultTemplates>,
     pub allow_parent: bool,
 }
@@ -551,7 +554,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
             question: bind(
                 "question",
                 &[],
-                services.agent_depth == 0,
+                services.interactive && services.agent_depth == 0,
                 QuestionTool::<_, S>::new(
                     definition("question")?,
                     services.questions,
@@ -607,6 +610,9 @@ pub struct SessionBindings<C, I, P, F> {
     pub filesystem: Arc<F>,
     pub templates: Arc<PromptTemplateCatalog>,
     pub agent_depth: i32,
+    /// False when the user session cannot prompt its user. A write-permission
+    /// request would be rejected before it reached anyone, so the tool is omitted.
+    pub interactive: bool,
 }
 impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> SessionFactories<S, T> {
     pub fn new<C, I, P, F>(
@@ -654,7 +660,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> Sess
             permission: bind(
                 "request_write_permission",
                 &[],
-                services.agent_depth == 0,
+                services.interactive && services.agent_depth == 0,
                 RequestWritePermissionTool::new(
                     definitions.describe("request_write_permission")?.clone(),
                     services.permission,

@@ -97,6 +97,14 @@ pub trait States: Send + Sync {
     fn peek_pending_input_header(&self) -> BoxFuture<'_, Result<Option<PendingMessage>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.peek_pending_input_header")) })
     }
+    /// Reports whether a turn awaits a response or pending input remains.
+    fn has_ready_turn(&self) -> BoxFuture<'_, Result<bool, Error>> {
+        Box::pin(async {
+            let turn = self.get_last_turn().await?;
+            Ok(turn.as_ref().is_some_and(ConversationTurn::needs_response)
+                || self.peek_pending_input_header().await?.is_some())
+        })
+    }
     /// Promotes all currently pending steers, or one queued input when permitted,
     /// preserving atomic native admission and returning the promoted content explicitly.
     /// Returns commit receipts without adding messages, publishing, or preparing prompts.
