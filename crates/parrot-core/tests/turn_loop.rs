@@ -109,6 +109,37 @@ impl EventPublisher for MemoryEventPublisher {
 
 const RUNAWAY_NOTICE: &str = "configured runaway notice";
 
+struct MemoryTurnLifecycle<'a> {
+    states: &'a mut MemoryState,
+    tools: &'a dyn Tools,
+    provider: &'a dyn Provider,
+    publisher: &'a MemoryEventPublisher,
+}
+
+impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
+    fn has_scheduled_work(&self) -> bool {
+        false
+    }
+    fn has_ready_turn(&mut self) -> BoxFuture<'_, Result<bool, Error>> {
+        Box::pin(async move { self.states.has_ready_turn().await })
+    }
+    fn run_turn<'a>(
+        &'a mut self,
+        cancellation: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<Outcome, Error>> {
+        Box::pin(async move {
+            parrot_core::run_turn(
+                self.states,
+                self.tools,
+                self.provider,
+                self.publisher,
+                cancellation,
+            )
+            .await
+        })
+    }
+}
+
 async fn run(
     states: &mut MemoryState,
     tools: &dyn Tools,
@@ -120,7 +151,13 @@ async fn run(
         compacting: states.compacting.clone(),
         compaction: states.compaction.clone(),
     };
-    parrot_core::run(states, tools, provider, &publisher, cancellation).await
+    let mut lifecycle = MemoryTurnLifecycle {
+        states,
+        tools,
+        provider,
+        publisher: &publisher,
+    };
+    parrot_core::run(&mut lifecycle, cancellation).await
 }
 
 async fn run_turn(
