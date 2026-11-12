@@ -1261,17 +1261,6 @@ impl RawActivityView {
                         }),
                     ),
                 ),
-            Some(Payload::ToolRequestReceived(request)) if request.tool_call_count > 1 => self
-                .commit_item(
-                    &mut commits,
-                    self.wrap(
-                        owner,
-                        Arc::new(ActivityValue::Notice {
-                            marker: "⚙".to_owned(),
-                            text: format!("requested {} tool calls", request.tool_call_count),
-                        }),
-                    ),
-                ),
             _ => {}
         }
         if main_activity.is_none()
