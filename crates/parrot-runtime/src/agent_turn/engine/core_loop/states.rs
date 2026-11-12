@@ -157,6 +157,7 @@ where
                     }
                 }
                 ConversationPersistence::CloseTurn {
+                    start_event_id,
                     finish_reason,
                     usage,
                 } => {
@@ -164,10 +165,10 @@ where
                         .join_mutations()
                         .await
                         .map_err(|error| TurnError::Service(error.to_string()))?;
-                    let key = self
-                        .persistence_key
-                        .as_ref()
-                        .ok_or_else(|| TurnError::Service("turn start is unavailable".into()))?;
+                    let key = TurnKey {
+                        agent_session_id: self.history.agent_session_id().to_owned(),
+                        start_event_id,
+                    };
                     let mut event = self.events.event();
                     let completed: sessions::Completion = ProviderResponse {
                         finish_reason,
@@ -190,7 +191,7 @@ where
                         .repository()
                         .events()
                         .close_turn_and_publish(
-                            key.clone(),
+                            key,
                             event,
                             Some(record),
                             &PublisherRef(self.publisher),
@@ -294,7 +295,7 @@ where
             Ok(model)
         })
     }
-    fn record_conversation_turn_started(
+    fn activate_conversation_turn(
         &mut self,
         turn_id: &str,
     ) -> BoxFuture<'_, Result<(), CoreError>> {
@@ -305,11 +306,6 @@ where
                 start_event_id: turn_id.clone(),
             });
             self.activity.turn_started(&turn_id);
-            Ok(())
-        })
-    }
-    fn activate_conversation_turn(&mut self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
             let selection = self.binding.capture_selection()?;
             {
                 let mut state = self.state.lock().await;

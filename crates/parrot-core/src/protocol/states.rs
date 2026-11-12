@@ -49,23 +49,14 @@ pub trait States: Send + Sync {
     fn begin_conversation_turn(&mut self) -> BoxFuture<'_, Result<crate::TurnModel, Error>> {
         Box::pin(async { Err(Error::unsupported("States.begin_conversation_turn")) })
     }
-    /// Records the start-event ID after core publishes the event.
-    /// Runtime pairs the ID with the agent-session ID to key subsequent conversation-turn persistence
-    /// and notifies session activity that the conversation turn started.
-    fn record_conversation_turn_started(
+    /// Records the published start-event ID and activates the conversation turn.
+    /// Runtime sets the persistence key and notifies session activity before preparing context.
+    /// It then ensures the prompt epoch, binds request status to the captured model selection,
+    /// and begins the conversation turn's skill snapshot.
+    fn activate_conversation_turn(
         &mut self,
-        _turn_id: &str,
+        _start_event_id: &str,
     ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async {
-            Err(Error::unsupported(
-                "States.record_conversation_turn_started",
-            ))
-        })
-    }
-    /// Activates the conversation turn after core records its start-event ID.
-    /// Runtime ensures the context's prompt epoch, binds request status to the captured
-    /// model selection, and begins the conversation turn's skill snapshot.
-    fn activate_conversation_turn(&mut self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("States.activate_conversation_turn")) })
     }
     /// Joins accepted mutations and reads ordered completion blockers.

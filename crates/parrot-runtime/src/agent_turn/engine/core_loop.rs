@@ -162,7 +162,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                     cancellation,
                 };
                 let token = parrot_core::CancellationToken::new(cancellation);
-                parrot_core::open_turn(&mut states, &publisher, token).await?;
+                let start_event_id = parrot_core::open_turn(&mut states, &publisher, token).await?;
                 let provider = RuntimeProvider {
                     model: binding.capture_selection().map_err(CoreError::from)?.model,
                     sessions: &backend.sessions,
@@ -179,7 +179,15 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                         backend.event_id.as_ref(),
                     ),
                 };
-                parrot_core::run_turn(&mut states, &tools, &provider, &publisher, token).await
+                parrot_core::run_turn(
+                    &mut states,
+                    &tools,
+                    &provider,
+                    &publisher,
+                    &start_event_id,
+                    token,
+                )
+                .await
             }
             .await;
             match result {
@@ -267,8 +275,7 @@ where
     let mut agent_state = parrot_core::AgentState::new(backend.agent_limits.disable_max_turns);
     let mut states =
         RuntimeStates::bind(backend, &binding, &NeverCancelled, work, &mut agent_state);
-    states.persistence_key = Some(key.clone());
-    if let Some(message) = parrot_core::interrupt_turn(&mut states)
+    if let Some(message) = parrot_core::interrupt_turn(&mut states, &key.start_event_id)
         .await
         .map_err(TurnError::Core)?
     {
