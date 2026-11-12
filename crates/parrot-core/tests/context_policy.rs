@@ -1,6 +1,6 @@
 use parrot_core::{
     ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, Error, ErrorCode, ErrorKind,
-    OutputTokenError, TokenCalibration,
+    OutputTokenError, RequestStatistic,
 };
 
 struct Fixture {
@@ -33,7 +33,7 @@ fn calibration_preserves_original_rows_and_saturates_positive_corrections() {
         (1000, 500, 1200, 1200),
         (1000, 1500, i64::MAX, i64::MAX),
     ] {
-        let mut calibration = TokenCalibration::default();
+        let mut calibration = RequestStatistic::default();
         calibration.observe_usage("provider/model", previous, actual);
         assert_eq!(
             calibration.estimate_input_tokens("provider/model", current),
@@ -45,7 +45,7 @@ fn calibration_preserves_original_rows_and_saturates_positive_corrections() {
 #[test]
 fn missing_usage_preserves_calibration_while_switch_and_reset_clear_its_effect() {
     for missing in [0, -1] {
-        let mut calibration = TokenCalibration::default();
+        let mut calibration = RequestStatistic::default();
         calibration.observe_usage("provider/model", 1000, missing);
         assert_eq!(
             calibration.estimate_input_tokens("provider/model", 1200),
@@ -58,7 +58,7 @@ fn missing_usage_preserves_calibration_while_switch_and_reset_clear_its_effect()
             1900
         );
     }
-    let mut calibration = TokenCalibration::default();
+    let mut calibration = RequestStatistic::default();
     assert_eq!(calibration.estimate_input_tokens("provider/model", -1), 0);
     calibration.observe_usage("provider/model", 1000, 1500);
     assert_eq!(calibration.estimate_input_tokens("other/model", 1200), 1200);
@@ -74,7 +74,7 @@ fn missing_usage_preserves_calibration_while_switch_and_reset_clear_its_effect()
 
 #[test]
 fn calibration_clamps_negative_previous_estimates_and_ignores_nonpositive_actuals() {
-    let mut calibration = TokenCalibration::default();
+    let mut calibration = RequestStatistic::default();
     calibration.observe_usage("provider/model", -100, 50);
     assert_eq!(calibration.estimate_input_tokens("provider/model", -1), 50);
     assert_eq!(calibration.estimate_input_tokens("provider/model", 20), 70);
@@ -100,7 +100,7 @@ fn output_capacity_uses_model_limits_or_fallback_and_preserves_integer_headroom(
         fixture.configuration.model.maximum_output_tokens = output;
         fixture.configuration.model.maximum_input_tokens = input;
         assert_eq!(
-            TokenCalibration::default()
+            RequestStatistic::default()
                 .calculate_maximum_output_tokens(&fixture.configuration.model, estimate),
             Ok(expected)
         );
@@ -109,7 +109,7 @@ fn output_capacity_uses_model_limits_or_fallback_and_preserves_integer_headroom(
 
 #[test]
 fn actual_usage_calibration_reserves_five_percent_headroom() {
-    let mut calibration = TokenCalibration::default();
+    let mut calibration = RequestStatistic::default();
     calibration.observe_usage("provider/model", 120000, 147776);
     let fixture = Fixture::new(180000);
     for (estimate, expected_input, expected_output) in
@@ -148,7 +148,7 @@ fn compaction_boundary_keeps_full_requested_output_and_strict_headroom() {
             .configuration
             .model
             .calculate_requested_output_tokens();
-        let calibration = TokenCalibration::default();
+        let calibration = RequestStatistic::default();
         assert_eq!(
             calibration.calculate_maximum_output_tokens(&fixture.configuration.model, trigger),
             Ok(requested)
@@ -176,7 +176,7 @@ fn output_exhaustion_preserves_typed_errors_messages_and_core_classification() {
     ] {
         let mut fixture = Fixture::new(context);
         fixture.configuration.model.maximum_input_tokens = input;
-        let mut calibration = TokenCalibration::default();
+        let mut calibration = RequestStatistic::default();
         calibration.observe_usage("provider/model", 1000, actual);
         assert_eq!(
             calibration.calculate_maximum_output_tokens(&fixture.configuration.model, 1000),
@@ -205,19 +205,19 @@ fn explicit_input_limits_are_strict_even_when_the_context_window_is_unknown() {
         let mut fixture = Fixture::new(context_window);
         fixture.configuration.model.maximum_input_tokens = 1000;
         assert!(
-            TokenCalibration::default()
+            RequestStatistic::default()
                 .calculate_maximum_output_tokens(&fixture.configuration.model, 1000)
                 .is_ok()
         );
         assert_eq!(
-            TokenCalibration::default()
+            RequestStatistic::default()
                 .calculate_maximum_output_tokens(&fixture.configuration.model, 1001),
             Err(OutputTokenError::InputLimitExceeded)
         );
     }
     let fixture = Fixture::new(-1);
     assert_eq!(
-        TokenCalibration::default()
+        RequestStatistic::default()
             .calculate_maximum_output_tokens(&fixture.configuration.model, i64::MAX),
         Ok(32768)
     );
@@ -286,7 +286,7 @@ fn an_unknown_window_does_not_resolve_a_percentage_override_into_a_token_limit()
 fn calibrated_compaction_only_uses_the_calibrated_trigger_when_input_limit_is_positive() {
     let mut fixture = Fixture::new(0);
     fixture.configuration.context_limit = Some(ContextLimit::Tokens(100));
-    let mut calibration = TokenCalibration::default();
+    let mut calibration = RequestStatistic::default();
     calibration.observe_usage("provider/model", 50, 150);
     let unbounded = ContextSnapshot::estimate(50, &fixture.configuration);
     assert!(!unbounded.requires_compaction(&calibration, "provider/model"));
@@ -295,7 +295,7 @@ fn calibrated_compaction_only_uses_the_calibrated_trigger_when_input_limit_is_po
     assert!(bounded.requires_compaction(&calibration, "provider/model"));
     assert!(!bounded.requires_compaction(&calibration, "other/model"));
     let raw = ContextSnapshot::estimate(101, &fixture.configuration);
-    assert!(raw.requires_compaction(&TokenCalibration::default(), "provider/model"));
+    assert!(raw.requires_compaction(&RequestStatistic::default(), "provider/model"));
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn post_compaction_fit_check_is_raw_strict_and_preserves_its_special_error() {
 
 #[test]
 fn calibration_clones_keep_mutations_session_local() {
-    let mut calibration = TokenCalibration::default();
+    let mut calibration = RequestStatistic::default();
     calibration.observe_usage("provider/model", 10, 20);
     let child = calibration.clone();
 

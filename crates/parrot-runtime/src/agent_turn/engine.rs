@@ -106,7 +106,7 @@ impl ProviderUsage for State {
                 .request_accounting
                 .as_ref()
                 .ok_or_else(|| EventError::Invalid("request accounting is unavailable".into()))?;
-            self.agent_state.token_calibration.observe_usage(
+            self.agent_state.last_request_statistic.observe_usage(
                 &accounting.selected.selector(),
                 accounting.estimated_input_tokens,
                 completed.input_tokens,

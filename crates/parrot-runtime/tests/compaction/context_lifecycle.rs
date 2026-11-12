@@ -491,7 +491,7 @@ async fn provider_failure_keeps_snapshot_absent_budget_calibration_and_top_level
         let mut controller = fixture.controller(history.clone(), 90);
         prompt
             .agent_state
-            .token_calibration
+            .last_request_statistic
             .observe_usage("scripted/model", 100, 1000);
         let error = controller
             .compact(
@@ -515,7 +515,7 @@ async fn provider_failure_keeps_snapshot_absent_budget_calibration_and_top_level
         assert_eq!(
             prompt
                 .agent_state
-                .token_calibration
+                .last_request_statistic
                 .estimate_input_tokens("scripted/model", 100),
             1000
         );

@@ -83,7 +83,7 @@ fn raw_and_calibrated_triggers_compact_and_use_returned_epoch() {
         if calibrated {
             state
                 .budget
-                .token_calibration
+                .last_request_statistic
                 .observe_usage("memory/model", 0, 950);
         }
         state.request().estimate_script.push_back(0);
@@ -146,7 +146,7 @@ fn separate_context_reads_use_compaction_configuration_and_calibration() {
     state.request().estimated_input_tokens = 100;
     state
         .budget
-        .token_calibration
+        .last_request_statistic
         .observe_usage("memory/model", 0, 950);
     let mut compacted = state.request().context.clone();
     compacted.configuration.model.context_window = 2000;
@@ -352,7 +352,7 @@ fn completed_usage_calibrates_later_turns_and_completion_blocker_restarts() {
     assert_eq!(
         state
             .budget
-            .token_calibration
+            .last_request_statistic
             .estimate_input_tokens("memory/model", 200),
         450
     );
@@ -361,14 +361,14 @@ fn completed_usage_calibrates_later_turns_and_completion_blocker_restarts() {
     assert_eq!(
         state
             .budget
-            .token_calibration
+            .last_request_statistic
             .estimate_input_tokens("memory/model", 200),
         450
     );
     assert_eq!(
         state
             .budget
-            .token_calibration
+            .last_request_statistic
             .estimate_input_tokens("other/model", 200),
         200
     );
@@ -389,7 +389,7 @@ fn discarded_tool_responses_still_record_provider_usage() {
         assert_eq!(
             state
                 .budget
-                .token_calibration
+                .last_request_statistic
                 .estimate_input_tokens("memory/model", 200),
             450
         );

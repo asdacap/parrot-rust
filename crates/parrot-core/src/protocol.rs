@@ -25,7 +25,7 @@ pub use compaction::{
 pub use config::{ConfigKey, ConfigValue, PromptTemplate};
 pub use context::{
     ContextCompaction, ContextConfiguration, ContextLimit, ContextModel, ContextReminderCheckpoint,
-    ContextSnapshot, TokenCalibration,
+    ContextSnapshot, RequestStatistic,
 };
 pub use conversation::{ConversationHistoryItem, ConversationState, ConversationSummary};
 pub use error::{Error, ErrorCode, ErrorDetail, ErrorKind};

@@ -45,7 +45,7 @@ pub struct ContextCompaction {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TokenCalibration {
+pub struct RequestStatistic {
     pub(crate) selector: Option<String>,
     pub(crate) estimated_input_tokens: i64,
     pub(crate) actual_input_tokens: i32,

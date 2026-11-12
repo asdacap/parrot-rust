@@ -177,7 +177,7 @@ async fn execute_turn<M: ToolResultMetadata>(
             .as_ref()
             .is_ok_and(|response| response.input_tokens > 0)
         {
-            state.token_calibration = states.get_agent_state().await?.token_calibration;
+            state.last_request_statistic = states.get_agent_state().await?.last_request_statistic;
         }
         let response = match invoked {
             Ok(response) => response,
@@ -201,7 +201,7 @@ async fn execute_turn<M: ToolResultMetadata>(
             Err(error) => return Err(error),
         };
         compacted_oversized = false;
-        state.token_calibration.observe_usage(
+        state.last_request_statistic.observe_usage(
             &prepared.model_selector,
             prepared.estimated_input_tokens,
             response.input_tokens,

@@ -457,7 +457,7 @@ impl ContextController {
                 )
                 .await?;
             reduced = true;
-            input.agent_state.token_calibration.reset();
+            input.agent_state.last_request_statistic.reset();
             input.conversation.reload().await?;
             if appended {
                 input

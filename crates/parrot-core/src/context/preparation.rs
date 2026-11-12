@@ -35,7 +35,7 @@ pub(crate) async fn compact_context(
         .await;
     *state = states.get_agent_state().await?;
     if reduced && recorded.is_ok() {
-        state.token_calibration.reset();
+        state.last_request_statistic.reset();
     }
     match recorded {
         Ok(instructions) => {
@@ -86,7 +86,7 @@ pub(crate) async fn prepare_request(
         .into_context()?;
     let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
     let max_output_tokens = state
-        .token_calibration
+        .last_request_statistic
         .calculate_maximum_output_tokens(&configuration.model, estimate)?;
     Ok(PreparedRequest {
         estimated_input_tokens: estimate,

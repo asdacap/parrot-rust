@@ -63,7 +63,7 @@ pub struct AgentState {
     /// Durable final-phase marker read without changing the conversation.
     pub final_phase: bool,
     /// Latest model-specific input-token estimate and provider-reported usage.
-    pub token_calibration: crate::TokenCalibration,
+    pub last_request_statistic: crate::RequestStatistic,
     /// Per-slot hashes recorded by the latest persisted status assembly.
     pub standing_statuses: crate::StatusStanding,
     /// Per-invocation setting that turns off the provider-request limit entirely.

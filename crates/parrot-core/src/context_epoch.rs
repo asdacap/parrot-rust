@@ -30,7 +30,7 @@ pub async fn prepare_context_epoch(
     let mut context = ContextSnapshot::estimate(estimate, &configuration);
     let mut reduced = false;
     if context.requires_compaction(
-        &state.token_calibration,
+        &state.last_request_statistic,
         &configuration.model.canonical_model,
     ) {
         let compacted = compact_context(

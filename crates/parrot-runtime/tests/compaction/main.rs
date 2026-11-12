@@ -1,4 +1,4 @@
-use parrot_core::{ContextModel, OutputTokenError, TokenCalibration};
+use parrot_core::{ContextModel, OutputTokenError, RequestStatistic};
 mod context;
 mod execution;
 
@@ -129,7 +129,7 @@ fn original_calibration_rows_and_saturation() {
         (1000, 500, 1200, 1200),
         (1000, 1500, i64::MAX, i64::MAX),
     ] {
-        let mut budget = TokenCalibration::default();
+        let mut budget = RequestStatistic::default();
         budget.observe_usage("provider/model", previous, actual);
         assert_eq!(
             budget.estimate_input_tokens("provider/model", current),
@@ -140,14 +140,14 @@ fn original_calibration_rows_and_saturation() {
 #[test]
 fn original_missing_usage_switch_and_reset() {
     for missing in [0, -1] {
-        let mut budget = TokenCalibration::default();
+        let mut budget = RequestStatistic::default();
         budget.observe_usage("provider/model", 1000, missing);
         assert_eq!(budget.estimate_input_tokens("provider/model", 1200), 1200);
         budget.observe_usage("provider/model", 1000, 1500);
         budget.observe_usage("provider/model", 1200, missing);
         assert_eq!(budget.estimate_input_tokens("provider/model", 1400), 1900);
     }
-    let mut budget = TokenCalibration::default();
+    let mut budget = RequestStatistic::default();
     assert_eq!(budget.estimate_input_tokens("provider/model", -1), 0);
     budget.observe_usage("provider/model", 1000, 1500);
     assert_eq!(budget.estimate_input_tokens("other/model", 1200), 1200);
@@ -173,7 +173,7 @@ fn original_output_budget_rows() {
         selected.model.max_output_tokens = output;
         selected.model.max_input_tokens = input;
         assert_eq!(
-            TokenCalibration::default().calculate_maximum_output_tokens(
+            RequestStatistic::default().calculate_maximum_output_tokens(
                 &ContextModel {
                     canonical_model: "provider/model".into(),
                     context_window: selected.model.context_window,
@@ -188,7 +188,7 @@ fn original_output_budget_rows() {
 }
 #[test]
 fn original_actual_usage_five_percent_rows() {
-    let mut budget = TokenCalibration::default();
+    let mut budget = RequestStatistic::default();
     budget.observe_usage("provider/model", 120000, 147776);
     let mut selected = model(180000);
     selected.model.max_output_tokens = 0;
@@ -232,7 +232,7 @@ fn compaction_boundaries_preserve_full_requested_output_and_request_headroom() {
             .estimate_selected_context(&select(&selected), "", &[], &[])
             .unwrap();
         let trigger = snapshot.trigger_tokens.unwrap();
-        let budget = TokenCalibration::default();
+        let budget = RequestStatistic::default();
         let requested = if output > 0 { output } else { 32 * 1024 };
         assert_eq!(
             budget.calculate_maximum_output_tokens(
@@ -276,7 +276,7 @@ fn original_exhausted_capacity_rows_exact_messages() {
     ] {
         let mut selected = model(context);
         selected.model.max_input_tokens = input;
-        let mut budget = TokenCalibration::default();
+        let mut budget = RequestStatistic::default();
         budget.observe_usage("provider/model", 1000, actual);
         assert_eq!(
             budget.calculate_maximum_output_tokens(

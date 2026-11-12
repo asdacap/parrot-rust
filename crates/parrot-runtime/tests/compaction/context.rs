@@ -804,7 +804,7 @@ async fn terminal_publication_failure_reports_failed_after_durable_snapshot() {
     events.fail_finished.store(true, Ordering::Relaxed);
     prompt
         .agent_state
-        .token_calibration
+        .last_request_statistic
         .observe_usage("scripted/model", 100, 1000);
     let mut controller = fixture.controller(history.clone(), 90);
     let error = controller
@@ -827,7 +827,7 @@ async fn terminal_publication_failure_reports_failed_after_durable_snapshot() {
     assert_eq!(
         prompt
             .agent_state
-            .token_calibration
+            .last_request_statistic
             .estimate_input_tokens("scripted/model", 100),
         100
     );

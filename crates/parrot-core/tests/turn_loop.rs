@@ -801,9 +801,9 @@ impl MemoryState {
     ) -> Result<Outcome, Error> {
         *self.compaction.lock().unwrap() =
             MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
-        let calibration = std::mem::take(&mut self.budget.token_calibration);
+        let calibration = std::mem::take(&mut self.budget.last_request_statistic);
         self.budget = AgentState::new(self.unlimited);
-        self.budget.token_calibration = calibration;
+        self.budget.last_request_statistic = calibration;
         let source = self.cancellation.clone();
         finish(run(
             self,
@@ -814,9 +814,9 @@ impl MemoryState {
     }
     fn run_with_compaction(&mut self, compaction: &mut MemoryCompaction) -> Result<Outcome, Error> {
         std::mem::swap(&mut *self.compaction.lock().unwrap(), compaction);
-        let calibration = std::mem::take(&mut self.budget.token_calibration);
+        let calibration = std::mem::take(&mut self.budget.last_request_statistic);
         self.budget = AgentState::new(self.unlimited);
-        self.budget.token_calibration = calibration;
+        self.budget.last_request_statistic = calibration;
         let tools = self.tools.clone();
         let provider = self.provider.clone();
         let result = finish(run(
@@ -1264,7 +1264,7 @@ impl States for MemoryState {
                     .map(|result| result.map(|fitted| fitted.result)),
             );
             if let Some(fitted) = result? {
-                self.budget.token_calibration.reset();
+                self.budget.last_request_statistic.reset();
                 self.fitted_statuses.push(fitted.status);
             }
             if let Some(compacted) = self.compactions.pop_front() {

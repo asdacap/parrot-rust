@@ -1,4 +1,4 @@
-use crate::{ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, TokenCalibration};
+use crate::{ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, RequestStatistic};
 mod preparation;
 pub(crate) use preparation::{compact_context, prepare_request};
 
@@ -133,7 +133,7 @@ impl ContextSnapshot {
             .is_some_and(|trigger| input_tokens > trigger)
     }
 
-    pub fn requires_compaction(&self, calibration: &TokenCalibration, selector: &str) -> bool {
+    pub fn requires_compaction(&self, calibration: &RequestStatistic, selector: &str) -> bool {
         self.exceeds_trigger()
             || (self.input_limit > 0
                 && self.exceeds_compaction_trigger(
@@ -156,7 +156,7 @@ impl ContextSnapshot {
     }
 }
 
-impl TokenCalibration {
+impl RequestStatistic {
     pub fn estimate_input_tokens(&self, selector: &str, estimated_input_tokens: i64) -> i64 {
         let estimate = estimated_input_tokens.max(0);
         if self.selector.as_deref() != Some(selector) {
