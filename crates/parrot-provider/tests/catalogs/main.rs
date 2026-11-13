@@ -132,7 +132,7 @@ fn models_dev_prices_accept_invariant_numeric_whitespace() {
 }
 
 #[test]
-fn catalog_boundary_projection_matches_pinned_dotnet_raw_v2_bytes() {
+fn catalog_boundary_projection_matches_captured_raw_v2_bytes() {
     let inputs = boundary_inputs();
     let mut output = String::from("[");
     for (index, label) in [
@@ -209,7 +209,7 @@ fn project_provider_model(model: &Model) -> serde_json::Value {
 }
 
 #[test]
-fn canonical_provider_and_merge_projections_match_pinned_dotnet_raw_v2_bytes() {
+fn canonical_provider_and_merge_projections_match_captured_raw_v2_bytes() {
     let inputs: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/catalog-provider-inputs.json")).unwrap();
     let models_dev_json = inputs["models-dev"].as_str().unwrap();

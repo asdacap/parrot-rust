@@ -1,4 +1,4 @@
-//! Independent raw-v2 regressions captured from the pinned .NET source.
+//! Independently captured raw-v2 Markdown regressions.
 use parrot_cli::terminal_layout::{MarkdownRenderer, TerminalText, ToolYamlFormatter};
 use serde_json::{Value, json};
 

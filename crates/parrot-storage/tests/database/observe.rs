@@ -1,4 +1,4 @@
-//! Test-only structural observer; matches the separately captured .NET observer.
+//! Test-only structural database observer.
 use super::{Connection, DatabaseError};
 use rusqlite::types::ValueRef;
 use serde_json::{Map, Value, json};
@@ -97,8 +97,8 @@ pub fn inspect(connection: &Connection, path: &Path) -> Result<Value, DatabaseEr
     }))
 }
 
-/// Observe the raw fixture connection's actual native defaults, just as the
-/// independent .NET observer does. Production SessionDatabase explicitly enables FK.
+/// Observes the raw fixture connection's defaults. Production SessionDatabase
+/// explicitly enables foreign keys.
 pub fn inspect_raw(path: &Path) -> Result<Value, DatabaseError> {
     let connection = Connection::open(path)?;
     inspect(&connection, path)

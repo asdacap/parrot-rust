@@ -1,8 +1,7 @@
 //! Complete JSON formatting at the final-message consumer boundary.
 //!
-//! Port of ToolYamlFormatter / EnhancedFinalMessageRenderer at .NET source
-//! 5f27a8a92625ee31d8bec094e5c3e09550193781. Parsing retains member order and
-//! numeric lexemes; it deliberately does not pass through serde_json::Value.
+//! Parsing retains member order and numeric lexemes without passing through
+//! serde_json::Value.
 
 use std::collections::HashSet;
 use std::fmt;
@@ -10,7 +9,6 @@ use std::fmt;
 use super::MarkdownRenderer;
 
 /// A valid JSON string whose UTF-16 escapes cannot be converted to Unicode.
-/// The source throws InvalidOperationException here, outside its catch filter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FinalFormatError {
     InvalidUnicodeScalar,
@@ -27,8 +25,8 @@ impl std::error::Error for FinalFormatError {}
 pub struct ToolYamlFormatter;
 
 impl ToolYamlFormatter {
-    /// `Ok(None)` is the source's caught JsonException / ArgumentException path.
-    /// Conversion exceptions remain errors rather than silently falling back.
+    /// Returns `Ok(None)` for malformed JSON or duplicate keys.
+    /// Invalid Unicode scalar values remain errors rather than silently falling back.
     pub fn try_format(value: &str) -> Result<Option<String>, FinalFormatError> {
         let mut parser = Parser {
             source: value,
@@ -47,13 +45,10 @@ impl ToolYamlFormatter {
             Err(ConvertError::Scalar(error)) => return Err(error),
         };
         let mut text = String::new();
-        // YamlDotNet treats a standalone empty scalar as an empty document,
-        // even when the representation node requests DoubleQuoted style.
+        // A standalone empty scalar is rendered as an empty document.
         if !matches!(&node, Node::String(value) if value.is_empty()) {
             emit(&node, 0, &mut text);
         }
-        // YamlStream.Save writes document delimiters; the source removes them
-        // and TrimEnd's the result. Our emitter never inserts those delimiters.
         Ok(Some(text.trim_end().to_owned()))
     }
 
@@ -264,8 +259,7 @@ enum ConvertError {
 
 fn decode(raw: &str) -> Result<String, ConvertError> {
     // The structural parser already validated every JSON escape. A decoding
-    // failure can therefore only be an unpaired surrogate (accepted by .NET's
-    // JsonDocument, rejected later by JsonElement.GetString / property.Name).
+    // failure can therefore only be an unpaired surrogate.
     serde_json::from_str(raw)
         .map_err(|_| ConvertError::Scalar(FinalFormatError::InvalidUnicodeScalar))
 }
@@ -327,7 +321,6 @@ fn emit(node: &Node, indent: usize, out: &mut String) {
                     out.push_str(nested.trim_start_matches(' '));
                 } else {
                     out.push('\n');
-                    // YamlDotNet emits indentless block sequences as map values.
                     emit(
                         value,
                         indent

@@ -29,7 +29,7 @@ for required in config/predefined_config.runtime.yaml config/predefined_config.s
 done
 (cd "$resources" && sha256sum -c resources.sha256)
 if find "$prefix" -type f \( -name '*.dll' -o -name '*.runtimeconfig.json' -o -name dotnet -o -name reference-dotnet \) -print | grep .; then
-  echo 'forbidden .NET/reference artifact in native package' >&2
+  echo 'forbidden managed-runtime or reference artifact in native package' >&2
   exit 1
 fi
 if [[ "$target" == x86_64-linux* ]]; then

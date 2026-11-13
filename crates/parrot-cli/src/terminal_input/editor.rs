@@ -15,7 +15,7 @@ impl std::error::Error for EditorRangeError {}
 
 /// A bounded editor whose cursor and replacement ranges count Unicode scalars,
 /// not UTF-8 bytes or grapheme clusters. Invalid UTF-16 is not representable in
-/// Rust `&str`; this API does not emulate .NET's replacement of lone surrogates.
+/// Rust `&str`.
 pub struct IncrementalEditor {
     prefix: String,
     maximum_runes: usize,
@@ -56,7 +56,7 @@ impl IncrementalEditor {
     }
 
     pub fn remember(&mut self, entry: &str) {
-        if !entry.trim_matches(dotnet_whitespace).is_empty() {
+        if !entry.trim_matches(is_editor_whitespace).is_empty() {
             self.history.push(entry.to_owned());
         }
     }
@@ -131,7 +131,7 @@ impl IncrementalEditor {
             }
             TerminalKeyKind::Submit => {
                 let text: String = self.text.iter().collect();
-                let submitted = text.trim_matches(dotnet_whitespace).to_owned();
+                let submitted = text.trim_matches(is_editor_whitespace).to_owned();
                 self.clear();
                 self.history_index = 0;
                 self.draft.clear();
@@ -201,8 +201,7 @@ impl IncrementalEditor {
     }
 }
 
-// String.Trim uses Char.IsWhiteSpace, not ASCII whitespace or grapheme boundaries.
-fn dotnet_whitespace(value: char) -> bool {
+fn is_editor_whitespace(value: char) -> bool {
     matches!(value, '\u{0009}'..='\u{000d}' | ' ' | '\u{0085}' | '\u{00a0}'
         | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}'
         | '\u{202f}' | '\u{205f}' | '\u{3000}')

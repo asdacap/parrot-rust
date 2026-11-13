@@ -186,7 +186,7 @@ fn platform_path_normalizes_lexically_without_filesystem_access() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn linux_full_path_normalization_matches_dotnet_trailing_separator_behavior() {
+fn linux_full_path_normalization_preserves_trailing_separators() {
     for (path, expected) in [
         ("/tmp/skill/.", "/tmp/skill"),
         ("/tmp/skill/..", "/tmp"),

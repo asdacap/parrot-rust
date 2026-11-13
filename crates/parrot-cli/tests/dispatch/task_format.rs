@@ -243,7 +243,7 @@ fn progress_try_read_uses_exact_kind_and_protobuf_not_json() {
 
 #[test]
 #[ignore = "Rust duration rounding no longer reproduces C# unchecked overflow"]
-fn duration_maximum_preserves_dotnet_unchecked_overflow() {
+fn duration_maximum_preserves_wrapping_overflow() {
     assert_eq!(DurationFormatter::format(i64::MAX), "0s");
 }
 

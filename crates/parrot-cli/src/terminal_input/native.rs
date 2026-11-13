@@ -1,4 +1,4 @@
-//! Native raw input, ported from UnixRawTerminal at 5f27a8a92625ee31d8bec094e5c3e09550193781.
+//! Native raw terminal input.
 //! The descriptor is borrowed: its owner must keep it open until restoration. Signal ownership
 //! belongs to the caller, which must unwind/close normally; SIGKILL cannot run `Drop`.
 

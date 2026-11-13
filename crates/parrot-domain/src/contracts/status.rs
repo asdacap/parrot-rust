@@ -1,13 +1,7 @@
 //! Synchronous observation of scoped process owners for runtime status assembly.
 //!
-//! Mirrors source revision 5f27a8a92625ee31d8bec094e5c3e09550193781:
-//! `Parrot.Common/Statuses/ActiveWorkObservation.cs:3-6`,
-//! `ActiveWorkState.cs:3-6`, `Process/ShellProcessStatusSnapshot.cs:5-12`,
-//! `IProcessOwner.cs:53-57`, and `Parrot.Tool.Process/Process/ShellProcessOwner.cs:172-199`.
-//! Runtime status query/provider assembly remains runtime-local. The production
-//! host adapter remains open in P08/P05 T41; empty test observers are not backend
-//! proof. This port neither enumerates global OS processes nor launches, signals,
-//! or grants access to processes.
+//! Runtime status assembly remains runtime-local. Observation neither enumerates
+//! global OS processes nor launches, signals, or grants access to processes.
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ActiveWorkState {

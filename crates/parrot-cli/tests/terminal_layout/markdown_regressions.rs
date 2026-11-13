@@ -1,6 +1,4 @@
-//! Focused parity cases for the pinned MarkdownRenderer.cs and TerminalText.cs
-//! at 5f27a8a92625ee31d8bec094e5c3e09550193781. Expectations follow source
-//! StringInfo, Inline/Style.Merge, CodeRuns/AddCode, and AddRuns behavior.
+//! Markdown rendering and terminal text regression cases.
 use parrot_cli::terminal_layout::{MarkdownRenderer, TerminalText};
 
 fn ansi(code: &str, text: &str) -> String {
@@ -207,7 +205,7 @@ fn code_highlighting_caps_are_inclusive_and_count_utf16_units_plus_newlines() {
     assert_eq!(over.len(), 10_001);
     assert!(over.iter().all(|line| line == &ansi("38;5;195", "42")));
 
-    // BMP non-ASCII text has multiple UTF-8 bytes, but counts once in .NET String.Length.
+    // BMP non-ASCII text has multiple UTF-8 bytes but one UTF-16 code unit.
     let at_bytes = "42 ".to_owned() + &"é".repeat(512 * 1024 - 4);
     let at = MarkdownRenderer::render("", &format!("~~~rust\n{at_bytes}\n~~~"), 600_000, true);
     assert!(at[0].starts_with(&ansi("33", "42")));

@@ -21,7 +21,7 @@ compatible database format. See
 Only the application directory component changes, not workspace identities,
 command names, user content, environment variable names or historical text:
 
-| Kind | Rust root | Legacy .NET root |
+| Kind | Current root | Legacy root |
 | --- | --- | --- |
 | Config | `${XDG_CONFIG_HOME:-$HOME/.config}/parrotrust` | `${XDG_CONFIG_HOME:-$HOME/.config}/parrotdotnet` |
 | State | `${XDG_STATE_HOME:-$HOME/.local/state}/parrotrust` | `${XDG_STATE_HOME:-$HOME/.local/state}/parrotdotnet` |
@@ -38,7 +38,7 @@ Configuration and credentials are **new-root only**, regardless of fallback:
   and literal alias names, including `low_llm`. The execution-time ban on low-tier
   helpers is not a rename or deletion of the A002 configuration strings.
 - Manually copy `credentials.json` and selected `credential_presets/<name>.json`
-  only if you deliberately want those accounts available to Rust. Presets contain
+  only if you deliberately want those accounts available to Parrot. Presets contain
   secrets just like the credential store. Environment-based keys and provider
   headers are not transferred by copying a preset. Do not print or commit their
   contents.
@@ -48,7 +48,7 @@ Configuration and credentials are **new-root only**, regardless of fallback:
   command is needed for a filesystem copy, and none is authorized or tested by
   this documentation task.
 - Do not copy or edit generated `predefined_config.yaml` as the user override.
-  Rust refreshes that readable default copy. Put intentional overrides in
+  Parrot refreshes that readable default copy. Put intentional overrides in
   `config.yaml`. Explicit old Scriban templates must be manually adapted to
   MiniJinja. Parrot does not rewrite user templates automatically. Back up custom
   templates before making a manual change.
@@ -96,10 +96,9 @@ unchanged, and additional namespaced provider keys can be added with nonempty
 inline strings or block scalars.
 
 The seven built-in static system prompts are Markdown files under
-`assets/config/system-prompts/`, embedded into the binary at compile time. The
-[resource reference](../../assets/config/README-resources.md#built-in-system-prompts)
-lists their provider keys and filenames. Predefined configuration uses values
-such as `@builtin:system-prompts/base.md` to select these bundled assets. A value
+`assets/config/system-prompts/`, embedded into the binary at compile time.
+Predefined configuration uses values such as `@builtin:system-prompts/base.md`
+to select these bundled assets. A value
 beginning with the exact, case-sensitive `@builtin:` prefix must be a complete
 known reference. An empty or unknown reference is a configuration error. Any
 other nonempty value remains literal text. References do not load arbitrary
@@ -127,9 +126,8 @@ Removing that field restores the built-in default. Other profile fields, such as
 usage, allowed tools, flags, and limits, remain unchanged unless overridden.
 
 The ten built-in agent-profile prompts are Markdown files under
-`assets/config/profile-prompts/`, embedded into the binary at compile time. The
-[resource reference](../../assets/config/README-resources.md#built-in-profile-prompts)
-links all ten files. Predefined configuration selects them using values such as
+`assets/config/profile-prompts/`, embedded into the binary at compile time.
+Predefined configuration selects them using values such as
 `@builtin:profile-prompts/build.md`. References resolve after user configuration
 is merged. A value beginning with the exact, case-sensitive `@builtin:` prefix
 must select a known built-in asset. An empty or unknown reference reports an
@@ -514,14 +512,14 @@ but this does not promise exactly-once external tool effects.
 
 ## Ownership, takeover and concurrency
 
-**Never use .NET and Rust concurrently on the same workspace**, even if their
-session IDs or application roots differ. Rust admission checks ownership in both
-roots before activation, including legacy owners, but these checks are not a
-global lock against every process or version. **Existing .NET cannot observe
-new-root Rust ownership records. No cross-version global locking or simultaneous
-same-workspace safety is promised.** A .NET process started after Rust admission
-can miss the Rust owner. Different XDG roots or hosts make that limit still more
-important. Establish exclusive use operationally before switching versions.
+**Never run different application versions concurrently on the same workspace**,
+even if their session IDs or application roots differ. Admission checks ownership
+in both roots before activation, including legacy owners, but these checks are
+not a global lock against every process or version. Older versions may not
+observe current-root ownership records and can miss an active owner.
+**No cross-version global locking or simultaneous same-workspace safety is
+promised.** Different XDG roots or hosts make that limit still more important.
+Establish exclusive use operationally before switching versions.
 
 - An inactive, valid owner can be resumed under the selected-root rules.
 - A verified live owner is not displaced by takeover. A009 also refuses a local
@@ -542,7 +540,7 @@ operate another process's workspace.
 
 ## Backup and rollback checklist
 
-1. Close both implementations and their sessions **normally** and establish that
+1. Close all application versions and their sessions **normally**. Establish that
    no writer is using the workspace or state being backed up. Do not use takeover
    as a stopping mechanism. An ownership record alone is not a host-wide
    quiescence proof.
@@ -563,11 +561,11 @@ operate another process's workspace.
    unsupported. If you restore a backup,
    first retain a separate snapshot of the current state for recovery. Restore
    the complete consistent backup and corresponding workspace snapshot while
-   both apps are closed. Restoring discards post-backup changes, so plan recovery
-   explicitly.
+   all application versions are closed. Restoring discards post-backup changes,
+   so plan recovery explicitly.
 5. Do not merge individual SQLite, history, or queue files across versions or
-   roots, point .NET at the Rust root, or treat setting the flag false as
-   rollback. Validate recovery on an isolated copy before using the only original
+   roots, point an older binary at the current root, or treat setting the flag
+   false as rollback. Validate recovery on an isolated copy before using the only original
    state.
 
 See [installation limits](installation.md) before opening existing state.

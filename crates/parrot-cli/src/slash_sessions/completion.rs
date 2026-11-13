@@ -220,10 +220,8 @@ impl SkillCompletionState {
                 .available
                 .iter()
                 .filter(|skill| {
-                    // The token grammar is ASCII. Valid catalog names are not
-                    // restricted to ASCII: the .NET OrdinalIgnoreCase treatment of
-                    // non-ASCII names versus ASCII prefixes remains explicitly OPEN
-                    // in T67's source map; do not substitute Unicode lowercasing.
+                    // The token grammar and prefix comparison are ASCII even when
+                    // the rest of a catalog name contains Unicode.
                     skill
                         .name
                         .get(..token.prefix.len())

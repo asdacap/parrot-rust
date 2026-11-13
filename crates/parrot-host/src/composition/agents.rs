@@ -151,10 +151,8 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentRuntime for ScopedAgentRuntim
                 ForkSelection::Full => "full",
                 ForkSelection::Named(title) => title,
             };
-            // The source's AgentLaunchRequest.Selection is null-checked, but
-            // SelectChild deliberately resolves the live parent policy lineage
-            // (pinned AgentSpawner.cs:191,219; resume:178-183). Do not permanently fold
-            // this invocation capture into the child's raw profile policy.
+            // Child selection resolves the live parent policy lineage. Do not
+            // permanently fold this invocation capture into the child's profile policy.
             let _invocation_security = security;
             let operation = owner
                 .spawner()

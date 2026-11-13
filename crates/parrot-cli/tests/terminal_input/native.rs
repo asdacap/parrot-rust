@@ -1,4 +1,4 @@
-//! Source cases: UnixRawTerminalTests.cs at 5f27a8a92625ee31d8bec094e5c3e09550193781.
+//! Raw terminal input regression cases.
 //! Run through the workspace terminal-input integration target, not a synthetic PTY shim.
 
 #[path = "../support/native_termios.rs"]

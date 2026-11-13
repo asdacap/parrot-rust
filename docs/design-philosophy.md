@@ -1,9 +1,8 @@
 # Design philosophy
 
-Ported from the [Parrot .NET README](https://github.com/asdacap/parrotdotnet/blob/28e206c43829aa366e31bdeb0dd52711e3108d88/README.md)
-at commit `28e206c43829aa366e31bdeb0dd52711e3108d88`. The principles and hypotheses
-below apply to the Rust port. They do not assert implementation parity. The
-model-alias link points to this repository's predefined configuration.
+These principles and hypotheses guide Parrot's agent scope, delegation, and
+model selection. The model-alias link points to this repository's predefined
+configuration.
 
 ## Agent scope and context: design principles
 

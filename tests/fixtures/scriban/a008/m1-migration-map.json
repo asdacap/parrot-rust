@@ -26,7 +26,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.scalar.invalid.1"
       ],
@@ -92,7 +92,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.scalar.invalid.2"
       ],
@@ -158,7 +158,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.scalar.invalid.3"
       ],
@@ -224,7 +224,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.scalar.invalid.4"
       ],
@@ -290,7 +290,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.engine.1"
       ],
@@ -358,7 +358,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.engine.2"
       ],
@@ -429,7 +429,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.arguments.missing",
         "A008.M1.arguments.extra",
@@ -583,7 +583,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.scalar.multiline",
         "A008.M1.scalar.inherited"
@@ -682,7 +682,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.runtime.nested"
       ],
@@ -805,7 +805,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.strict.1.missing",
         "A008.M1.strict.1.required",
@@ -825,7 +825,7 @@
         "kind": "UndefinedError",
         "prefix": "prompt_templates.custom.structured.template"
       },
-      "expectation_policy": "Missing required items catalog error unchanged. Missing variable/member/index remains strict path-prefixed error; native diagnostic text replaces Scriban. Unsupported CLR object assertion becomes explicit owned-serde-only API boundary proof, NOT success or dropped assertion",
+      "expectation_policy": "Missing required items catalog error unchanged. Missing variable/member/index remains strict path-prefixed error; native diagnostic text replaces Scriban. Unsupported runtime-object assertion becomes explicit owned-serde-only API boundary proof, NOT success or dropped assertion",
       "T11_handoff_disposition": "delegated_T12_not_executed",
       "assertion_migrations": [
         {
@@ -949,7 +949,7 @@
             "host_objects_representable": false,
             "required_test": "prove no host-object/callable or engine-type input API; do not stringify Version into success"
           },
-          "migration_evidence": "A008 owned-serde API replaces CLR script-value validation, exact per-assertion boundary mapping",
+          "migration_evidence": "A008 owned-serde API replaces runtime script-value validation, exact per-assertion boundary mapping",
           "native_execution_status": "pending_implementation_owner_not_a_native_pass"
         }
       ]
@@ -967,7 +967,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.strict.2.missing",
         "A008.M1.strict.2.required",
@@ -987,7 +987,7 @@
         "kind": "UndefinedError",
         "prefix": "prompt_templates.custom.structured.template"
       },
-      "expectation_policy": "Missing required items catalog error unchanged. Missing variable/member/index remains strict path-prefixed error; native diagnostic text replaces Scriban. Unsupported CLR object assertion becomes explicit owned-serde-only API boundary proof, NOT success or dropped assertion",
+      "expectation_policy": "Missing required items catalog error unchanged. Missing variable/member/index remains strict path-prefixed error; native diagnostic text replaces Scriban. Unsupported runtime-object assertion becomes explicit owned-serde-only API boundary proof, NOT success or dropped assertion",
       "T11_handoff_disposition": "delegated_T12_not_executed",
       "assertion_migrations": [
         {
@@ -1111,7 +1111,7 @@
             "host_objects_representable": false,
             "required_test": "prove no host-object/callable or engine-type input API; do not stringify Version into success"
           },
-          "migration_evidence": "A008 owned-serde API replaces CLR script-value validation, exact per-assertion boundary mapping",
+          "migration_evidence": "A008 owned-serde API replaces runtime script-value validation, exact per-assertion boundary mapping",
           "native_execution_status": "pending_implementation_owner_not_a_native_pass"
         }
       ]
@@ -1129,7 +1129,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.strict.3.missing",
         "A008.M1.strict.3.required",
@@ -1149,7 +1149,7 @@
         "kind": "UndefinedError",
         "prefix": "prompt_templates.custom.structured.template"
       },
-      "expectation_policy": "Missing required items catalog error unchanged. Missing variable/member/index remains strict path-prefixed error; native diagnostic text replaces Scriban. Unsupported CLR object assertion becomes explicit owned-serde-only API boundary proof, NOT success or dropped assertion",
+      "expectation_policy": "Missing required items catalog error unchanged. Missing variable/member/index remains strict path-prefixed error; native diagnostic text replaces Scriban. Unsupported runtime-object assertion becomes explicit owned-serde-only API boundary proof, NOT success or dropped assertion",
       "T11_handoff_disposition": "delegated_T12_not_executed",
       "assertion_migrations": [
         {
@@ -1273,7 +1273,7 @@
             "host_objects_representable": false,
             "required_test": "prove no host-object/callable or engine-type input API; do not stringify Version into success"
           },
-          "migration_evidence": "A008 owned-serde API replaces CLR script-value validation, exact per-assertion boundary mapping",
+          "migration_evidence": "A008 owned-serde API replaces runtime script-value validation, exact per-assertion boundary mapping",
           "native_execution_status": "pending_implementation_owner_not_a_native_pass"
         }
       ]
@@ -1291,7 +1291,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.custom.true.repeat1",
         "A008.M1.custom.true.repeat2",
@@ -13520,7 +13520,7 @@
       "source_reference_status": "passed",
       "implementation_owner": "T12-prompt-template-engines",
       "native_verification_status": "pending_owner_execution",
-      "evidence_kind": "independent_original_dotnet_and_pinned_native_contract_not_native_execution",
+      "evidence_kind": "independent_baseline_and_pinned_contract_not_current_execution",
       "source_case_ids": [
         "A008.M1.custom.false.repeat1",
         "A008.M1.custom.false.repeat2",

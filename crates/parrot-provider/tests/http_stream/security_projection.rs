@@ -33,7 +33,7 @@ pub fn observe(input: &Value) -> Value {
             )
         }
         Err(error) => {
-            // Source CLR identity adapter, not a native Rust exception claim.
+            // Captured category label, not a Rust exception type.
             let message = if error == url::ParseError::RelativeUrlWithoutBase {
                 "Invalid URI: The Authority/Host could not be parsed."
             } else {

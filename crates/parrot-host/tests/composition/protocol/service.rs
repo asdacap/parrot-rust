@@ -1,6 +1,4 @@
-//! T62 public ParrotService contract tests.
-//! Pinned source: 5f27a8a92625ee31d8bec094e5c3e09550193781,
-//! test/Parrot.Core.Tests/ParrotServiceTests.cs (source names on each test).
+//! Public ParrotService contract tests.
 //! The local FakeHostedSession proves routing only, not production agent/session
 //! composition, provider execution, skill discovery or permission authorization.
 #[path = "support.rs"]

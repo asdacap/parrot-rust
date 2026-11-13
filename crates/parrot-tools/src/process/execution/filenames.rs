@@ -4,8 +4,8 @@
 //! Extracted from the actual pinned Haikunator.dll (SHA256
 //! f9ebf37fb71478508252b0924d2472140c1cf122b11a6dc78d1c8960ea9699fa).
 //! The ordered lists deliberately retain the package's duplicate sun/water.
-//! Native random selection is independent of the CLR PRNG; filenames have no
-//! uniqueness guarantee. Exclusive file creation and retries belong to callers.
+//! Random filenames have no uniqueness guarantee.
+//! Exclusive file creation and retries belong to callers.
 
 use std::collections::hash_map::RandomState;
 use std::hash::BuildHasher;

@@ -128,7 +128,7 @@ pub fn serialize_entry(entry: &AgentHistoryEntry) -> Result<Vec<u8>> {
     }
     let mut bytes = Vec::new();
     let mut serializer =
-        serde_json::Serializer::with_formatter(&mut bytes, DotNetJsonFormatter(CompactFormatter));
+        serde_json::Serializer::with_formatter(&mut bytes, HistoryJsonFormatter(CompactFormatter));
     Value::Object(object)
         .serialize(&mut serializer)
         .map_err(|error| Error::invalid_data(format!("serialize history entry: {error}")))?;
@@ -139,7 +139,7 @@ pub(crate) fn serialize_metadata(metadata: &super::SessionMeta) -> Result<Vec<u8
     let mut bytes = Vec::new();
     let mut serializer = serde_json::Serializer::with_formatter(
         &mut bytes,
-        DotNetJsonFormatter(PrettyFormatter::new()),
+        HistoryJsonFormatter(PrettyFormatter::new()),
     );
     metadata
         .serialize(&mut serializer)
@@ -147,7 +147,7 @@ pub(crate) fn serialize_metadata(metadata: &super::SessionMeta) -> Result<Vec<u8
     Ok(bytes)
 }
 
-pub(crate) struct DotNetJsonFormatter<F>(pub(crate) F);
+pub(crate) struct HistoryJsonFormatter<F>(pub(crate) F);
 
 macro_rules! delegate_layout {
     ($method:ident $(, $argument:ident: $kind:ty)*) => {
@@ -160,7 +160,7 @@ macro_rules! delegate_layout {
     };
 }
 
-impl<F: Formatter> Formatter for DotNetJsonFormatter<F> {
+impl<F: Formatter> Formatter for HistoryJsonFormatter<F> {
     delegate_layout!(begin_array);
     delegate_layout!(end_array);
     delegate_layout!(begin_array_value, first: bool);
@@ -190,8 +190,8 @@ impl<F: Formatter> Formatter for DotNetJsonFormatter<F> {
     where
         W: ?Sized + io::Write,
     {
-        // Both runtimes use shortest round-trip digits, but .NET's general
-        // notation keeps integral doubles without '.0' and uses signed E+NN.
+        // Persist integral doubles without a trailing decimal and use signed E+NN
+        // exponents to keep the stored number format stable.
         let rendered = value.to_string();
         let unsigned = rendered.trim_start_matches('-');
         let decimal = unsigned.find('.').unwrap_or(unsigned.len());
@@ -343,7 +343,7 @@ mod tests {
         ];
         for (value, expected) in values.into_iter().zip(BOUNDARY_BYTES.lines().skip(1)) {
             let mut actual = Vec::new();
-            DotNetJsonFormatter(CompactFormatter)
+            HistoryJsonFormatter(CompactFormatter)
                 .write_f64(&mut actual, value)
                 .unwrap();
             assert_eq!(actual, expected.as_bytes(), "value {value}");
@@ -352,7 +352,7 @@ mod tests {
                 .unwrap()
                 .serialize(&mut serde_json::Serializer::with_formatter(
                     &mut serialized,
-                    DotNetJsonFormatter(CompactFormatter),
+                    HistoryJsonFormatter(CompactFormatter),
                 ))
                 .unwrap();
             assert_eq!(serialized, expected.as_bytes(), "number {value}");
@@ -378,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn discriminated_history_jsonl_matches_the_independent_dotnet_payload() {
+    fn discriminated_history_jsonl_matches_captured_payload() {
         let entries = [
             AgentHistoryEntry::Compaction {
                 sequence: 7,

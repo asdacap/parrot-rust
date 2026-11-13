@@ -182,8 +182,8 @@ pub(super) fn replay_statistics_with_parents(
     let facts = read_statistics_events(tx, progress.as_ref())?;
     let mut parent_order = parents.keys().cloned().collect::<Vec<_>>();
     let mut agents = HashMap::new();
-    // .NET dictionaries enumerate in insertion order. Preserve that order for
-    // floating-point accumulation and source-first validation diagnostics.
+    // Preserve insertion order for deterministic floating-point accumulation
+    // and validation diagnostics.
     let mut agent_order = Vec::new();
     for (_, event) in &facts {
         let agent = &event.agent_session_id;

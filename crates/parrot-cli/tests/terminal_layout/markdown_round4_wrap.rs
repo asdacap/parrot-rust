@@ -1,5 +1,4 @@
-//! BeginRow/EmitBroken observations from MarkdownRenderer.cs at
-//! 5f27a8a92625ee31d8bec094e5c3e09550193781.
+//! Captured Markdown row and broken-word wrapping regressions.
 use parrot_cli::terminal_layout::MarkdownRenderer;
 
 #[test]
@@ -31,7 +30,7 @@ fn broken_words_reset_continuation_start_across_styled_zero_cell_runs() {
 
 // The 15 retained style_boundary_layout_probe mismatches from
 // t70-frozen-round3-source-recapture.json, then their exact colored source rows,
-// recaptured via AcceptanceProbe.cs. The other nine original passing inputs were
+// recaptured independently. The other nine original passing inputs were
 // not retained. Oversize first graphemes on continuation rows are intentional.
 const SOURCE_CASES: &str = r#"[
 {"input":{"op":"md","source":"界**́**̀ab","prefix":"p ","width":1,"color":false},"source":["p","  界","  ́̀a","  b"]},

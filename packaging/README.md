@@ -90,10 +90,9 @@ Artifact roots and raw CLI outputs are retained at the printed private location
 in `local-production.log`. The fixture reports retained child-log paths on
 failure.
 
-Audit the actual runtime closure and linked libraries after the build. No .NET
-assembly or runtime, source-reference runner, or development SDK is permitted in
-the native runtime output or closure. Build tools and Cargo metadata are not
-runtime linked-library evidence. Retained skill `.py` source files are inert
+Audit the actual runtime closure and linked libraries after the build. Development
+SDKs and test runners do not belong in the runtime output or closure. Build tools
+and Cargo metadata are not runtime linked-library evidence. Retained skill `.py` source files are inert
 resources. They are not a Python runtime dependency, and this recipe never
 executes them. Executing the packaged `queue` skill requires Python 3 in the
 agent's command environment. The native package does not supply the interpreter.

@@ -70,10 +70,9 @@ does not run these application checks and cannot replace the required smoke.
   production security bundle remains a separate blocker on every platform.
 - A source build uses the locked Nix toolchain. Native macOS requires a real
   Apple Silicon macOS runner with its Darwin SDK and toolchain closure. The
-  original source guide lists Xcode Command Line Tools, but this native
-  dependency closure has not been validated here. Its .NET SDK requirement
-  belongs to the original development oracle, not the Rust runtime. Linux
-  evaluation or cross-compilation cannot establish that platform's behavior.
+  dependency closure, including Xcode Command Line Tools, has not been
+  validated here. Linux evaluation or
+  cross-compilation cannot establish that platform's behavior.
 
 The Apple Silicon recipe is **not executed natively in current evidence**:
 

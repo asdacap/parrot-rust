@@ -845,7 +845,7 @@ fn read_image_upload(root: &Node) -> Result<Option<ImageUploadConfig>> {
 fn read_https_url(node: &Node, key: &str) -> Result<String> {
     let value = scalar_or_empty(node, key);
     // WHATWG URL parsing repairs missing authority slashes and drops tabs in
-    // hosts; System.Uri rejects those source inputs instead.
+    // hosts. Reject those malformed inputs before parsing.
     let authority = value
         .trim_matches([' ', '\t', '\r', '\n'])
         .split_once(':')

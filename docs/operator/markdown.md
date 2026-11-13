@@ -28,7 +28,7 @@ The CLI still owns the pending preview and committed scrollback. Completed ordin
 
 Pending text remains a raw preview, not partially rendered Markdown. Response completion, EOF, cancellation and stream errors commit the remaining text once through the existing response lifecycle. Final JSON-to-YAML conversion still occurs at that boundary where eligible.
 
-JSON object keys are always double-quoted YAML strings, including ordinary names, numbers, dates and tag-looking text. Key formatting does not consult .NET date parsing or the local timezone. Long serialized keys and multiline keys use explicit YAML key syntax. Member order, numeric spelling and value formatting are retained. Malformed JSON and duplicate keys fall back to the original text.
+JSON object keys are always double-quoted YAML strings, including ordinary names, numbers, dates and tag-looking text. Key formatting does not interpret keys as dates or consult the local timezone. Long serialized keys and multiline keys use explicit YAML key syntax. Member order, numeric spelling and value formatting are retained. Malformed JSON and duplicate keys fall back to the original text.
 
 Code highlighting continues across logical lines when a code block wraps. Untrusted
 input cannot supply terminal-control sequences through Markdown or code highlighting.

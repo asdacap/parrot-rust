@@ -959,8 +959,7 @@ async fn web_port_uses_same_startup_and_forces_interactive_permissions() {
     bounded(server.close()).await.unwrap();
 }
 
-// Ordinary root-selection adaptation beyond the single-StatePaths .NET source:
-// these are not source parity or physical-grant/security predicates.
+// These root-selection tests do not establish physical filesystem authorization.
 #[tokio::test]
 async fn legacy_only_candidate_attaches_to_legacy_socket_in_place() {
     let context = Context::new();

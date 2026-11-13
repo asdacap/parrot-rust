@@ -1,6 +1,4 @@
-//! A007 mappings from the pinned .NET helper tests. Serializer golden strings
-//! were independently observed by running the unchanged ToolYamlFormatter.cs
-//! against YamlDotNet 18.1.0 (not derived from this Rust implementation).
+//! JSON-to-YAML formatting regressions with independently captured golden strings.
 
 use parrot_cli::terminal_layout::{
     EnhancedFinalMessageRenderer, FinalFormatError, MarkdownLiveRenderer, ToolYamlFormatter,
@@ -182,7 +180,7 @@ fn distinguishes_caught_parse_failures_from_valid_scalar_conversion_errors() {
 
 #[test]
 #[ignore = "Rust formatter always double-quotes string mapping keys"]
-fn matches_yamldotnet_double_quoted_escape_rules() {
+fn escapes_double_quoted_yaml_strings() {
     let source = r#"{"controls":"\u0000\u0007\b\t\n\u000b\f\r\u001b\u0085\u00a0\u2028\u2029\u007f","unicode":"日本 😀"}"#;
     assert_eq!(
         ToolYamlFormatter::format(source).unwrap(),
@@ -218,7 +216,7 @@ fn quotes_mapping_keys_without_classifying_their_contents() {
 }
 
 #[test]
-#[ignore = "Rust formatter quotes all keys without CLR decimal or date classification"]
+#[ignore = "Formatter quotes all keys without decimal or date classification"]
 fn preserves_source_unquoted_key_families() {
     for key in [
         "1,000",

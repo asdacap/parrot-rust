@@ -1,5 +1,5 @@
-//! T66 real settings command characterization with synthetic roots and native RPC.
-//! Original .NET source execution remains NOT_RUN; no live credentials/providers.
+//! Settings command characterization with synthetic roots and RPC.
+//! No live credentials or providers are used.
 
 mod auth;
 mod auth_presets;

@@ -38,7 +38,7 @@ fn state(lines: &mut Vec<String>, id: &str, editor: &IncrementalEditor, submitte
 }
 
 #[test]
-fn independent_dotnet_decoder_and_scalar_editor_observations_match_exactly() {
+fn decoder_and_scalar_editor_match_captured_observations() {
     let mut lines = Vec::new();
     let sequences = [
         "\x1b[A",

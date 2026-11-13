@@ -587,7 +587,7 @@ async fn caller_cancellation_is_forwarded_without_an_extra_registry_cancellation
         Error::Cancelled
     );
     assert_eq!(aware.list_calls.load(Ordering::SeqCst), 0);
-    // A ready source collaborator may ignore its cancellation token, as in .NET.
+    // A ready collaborator may ignore its cancellation token.
     let ignoring = registry_for_ignoring_provider();
     assert_eq!(
         selectors(ignoring.available_models(&Token(true)).await.unwrap()),

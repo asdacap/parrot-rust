@@ -34,7 +34,7 @@ fn matches_unchanged_date_and_yaml_explicit_key_rows() {
 }
 
 #[test]
-#[ignore = "Rust formatter double-quotes keys instead of CLR date and folded key styles"]
+#[ignore = "Formatter double-quotes keys instead of date and folded key styles"]
 fn preserves_source_date_and_yaml_explicit_key_styles() {
     assert_source_key_rows(true);
 }
@@ -73,7 +73,7 @@ fn source_explicit_long_emoji_key_remains_quoted() {
 }
 
 #[test]
-#[ignore = "Rust formatter uses rendered YAML key length instead of CLR UTF-16 length"]
+#[ignore = "Formatter uses rendered YAML key length instead of UTF-16 length"]
 fn preserves_source_utf16_long_key_boundaries() {
     assert_source_long_keys(true);
 }

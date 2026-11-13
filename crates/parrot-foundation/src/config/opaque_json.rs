@@ -103,8 +103,8 @@ fn invariant_double(value: &str) -> Option<f64> {
     if let Some(text) = invariant_numeric_text(value) {
         return text.parse().ok();
     }
-    // .NET's special-token fallback trims Unicode whitespace, unlike its
-    // numeric grammar. It accepts NaN/Infinity, not Rust's shorter "inf".
+    // Special tokens allow Unicode whitespace, unlike the numeric grammar.
+    // Accept NaN/Infinity, not Rust's shorter "inf".
     let text = value.trim();
     let token = text.strip_prefix(['+', '-']).unwrap_or(text);
     if token.eq_ignore_ascii_case("nan") {
@@ -124,7 +124,7 @@ fn invariant_double(value: &str) -> Option<f64> {
 #[path = "../../tests/config/opaque_numeric.rs"]
 mod opaque_numeric_tests;
 
-/// The default System.Text.Json encoder escapes non-ASCII and HTML-sensitive characters.
+/// Escapes non-ASCII and HTML-sensitive characters in a JSON string.
 pub fn json_string(value: &str) -> String {
     let mut output = String::from("\"");
     for character in value.chars() {

@@ -1,7 +1,7 @@
 //! Input-only production API observations for the five shared HTTP families.
 //!
-//! CLR category labels are source-identity adapters, not Rust runtime type
-//! claims. Native-only disposed/cancellation text is confined to this adapter.
+//! Captured category labels identify fixture outcomes, not Rust runtime types.
+//! Disposed and cancellation text is confined to this adapter.
 //! `observe` receives only scenario identities and inputs, never expectations.
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::http_stream::*;

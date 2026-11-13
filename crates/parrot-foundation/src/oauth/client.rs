@@ -1459,8 +1459,8 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Rust device expiry is capped by login timeout instead of .NET TimeSpan limits"]
-    async fn device_expiry_overflow_preserves_dotnet_failure_category() {
+    #[ignore = "Device expiry is capped by login timeout rather than integer duration limits"]
+    async fn device_expiry_overflow_preserves_failure_category() {
         let body = r#"{"device_auth_id":"d","user_code":"u","expires_in":9223372036854775807}"#;
         let (url, server) = issuer(vec![(200, body.to_owned())]).await;
         assert_eq!(

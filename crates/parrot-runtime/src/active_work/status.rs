@@ -260,7 +260,7 @@ fn validate_key(key: &str, subject: &str) -> Result<(), StatusError> {
         Ok(())
     }
 }
-/// .NET Ordinal compares UTF-16 code units, not UTF-8 bytes/scalar values.
+/// Compares UTF-16 code units, not UTF-8 bytes or Unicode scalar values.
 pub(crate) fn ordinal(left: &str, right: &str) -> std::cmp::Ordering {
     left.encode_utf16().cmp(right.encode_utf16())
 }

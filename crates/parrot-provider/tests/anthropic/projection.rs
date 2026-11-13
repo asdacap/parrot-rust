@@ -1,5 +1,5 @@
-//! Input-only observations through production APIs. CLR labels below identify
-//! the independent source contract, not Rust runtime exception types.
+//! Input-only observations through production APIs. Captured category labels
+//! identify fixture outcomes, not Rust runtime exception types.
 #[path = "../../src/anthropic/wire_json.rs"]
 mod wire_json;
 

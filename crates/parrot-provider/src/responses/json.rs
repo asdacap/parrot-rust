@@ -1,7 +1,7 @@
 use serde_json::value::RawValue;
 use std::io;
 
-/// Compact JSON with System.Text.Json's default JavaScript-safe escaping while
+/// Compacts JSON with JavaScript-safe escaping while
 /// preserving numeric token spellings and duplicate object properties.
 pub(super) fn source_compact(raw: &str) -> Result<String, serde_json::Error> {
     let _: Box<RawValue> = serde_json::from_str(raw)?;

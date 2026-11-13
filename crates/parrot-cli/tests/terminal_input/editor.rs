@@ -275,7 +275,7 @@ fn end_of_file_deletes_at_cursor_without_submitting() {
 }
 
 #[test]
-fn insertion_filters_dotnet_control_scalars_but_preserves_newlines_and_format_characters() {
+fn insertion_filters_control_scalars_but_preserves_newlines_and_format_characters() {
     let mut editor = IncrementalEditor::new("", 400);
     let controls: String = (0..=0x9f)
         .filter_map(char::from_u32)
@@ -311,7 +311,7 @@ fn multiline_paste_and_newline_remain_until_submit() {
 }
 
 #[test]
-fn submit_uses_dotnet_whitespace_and_resets_draft_without_remembering_automatically() {
+fn submit_trims_unicode_whitespace_and_resets_draft_without_remembering_automatically() {
     let mut editor = IncrementalEditor::new("", 100);
     editor.replace("draft");
     editor.remember("entry");

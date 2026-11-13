@@ -1,5 +1,5 @@
 //! Independent supplemental RFC6455 invariants. This author did not inspect native.rs.
-//! These are protocol safety checks, not claims that .NET rejects every invalid frame identically.
+//! These are protocol safety checks, not general application security proofs.
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::http_stream::ProviderHttpClient;
 use parrot_provider::responses_websocket::{
@@ -445,7 +445,7 @@ impl Socket for CancelAfterRead {
     }
 }
 
-// Expectations come only from the immutable actual .NET native captures.
+// Expectations come only from the immutable captured observations.
 #[tokio::test]
 async fn independent_native_source_receive_boundaries_match_observations() {
     use parrot_provider::responses_websocket::{ResponsesWebSocket, WebSocketError};
@@ -599,7 +599,7 @@ async fn independent_native_source_receive_boundaries_match_observations() {
 }
 
 /// Closes the six source-native observations not selected by the receive-boundary test.
-/// Compares exception category/status and source-owned close diagnostics, not CLR wording.
+/// Compares error category, status, and captured close diagnostics, not runtime wording.
 #[tokio::test]
 async fn independent_native_source_handshake_and_empty_close_match_observations() {
     use parrot_provider::responses_websocket::{ResponsesWebSocket, WebSocketError};

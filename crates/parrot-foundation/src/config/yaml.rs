@@ -139,8 +139,8 @@ fn read_node(
     Ok(node)
 }
 
-/// Parse without inferring scalar types: YamlDotNet's representation model stores
-/// scalar text, quoting style and tags independently.
+/// Parses without inferring scalar types, retaining scalar text, quoting style,
+/// and tags independently.
 pub fn parse_documents(content: &str) -> Result<Vec<Node>> {
     let tokens: Vec<_> = Scanner::new(content.chars()).collect();
     let mut events = Events {

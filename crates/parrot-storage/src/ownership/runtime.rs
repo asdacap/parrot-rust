@@ -203,7 +203,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn process_clock_ticks_use_dotnet_utc_epoch_and_integer_precision() {
+    fn process_clock_ticks_use_year_one_utc_epoch_and_integer_precision() {
         assert_eq!(process_start_ticks(0, 0, 100), Some(UNIX_EPOCH_TICKS));
         assert_eq!(
             process_start_ticks(1, 123, 100),

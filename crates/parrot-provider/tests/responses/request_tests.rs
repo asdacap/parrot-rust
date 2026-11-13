@@ -4,7 +4,7 @@ use serde_json::Value;
 const OUTBOUND_ORACLE: &str = include_str!("fixtures/outbound/expected.json");
 
 #[test]
-fn source_encoded_responses_requests_match_actual_dotnet_adapter() {
+fn encoded_responses_requests_match_captured_requests() {
     let expected: Value = serde_json::from_str(OUTBOUND_ORACLE).unwrap();
     assert_eq!(expected["cases"].as_array().unwrap().len(), 16);
     let selected = [

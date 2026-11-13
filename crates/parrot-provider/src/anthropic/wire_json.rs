@@ -1,5 +1,4 @@
-//! Anthropic's source serializer uses the default .NET JSON encoder. Preserve
-//! numeric lexemes and duplicate object properties when replaying JsonElement.
+//! Escaped wire JSON that preserves numeric lexemes and duplicate object properties.
 use serde_json::{Value, value::RawValue};
 use std::fmt::Write;
 
