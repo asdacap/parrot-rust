@@ -55,6 +55,18 @@ fn narrow_list_markers_use_safe_grapheme_wrapping() {
 }
 
 #[test]
+fn inline_files_and_symbols_have_foreground_color_without_background() {
+    for source in ["`src/main.rs`", "`MarkdownRenderer`", "**`render()`**"] {
+        let colored = MarkdownRenderer::render("", source, 80, true).join("\n");
+        let uncolored = MarkdownRenderer::render("", source, 80, false).join("\n");
+        assert_eq!(plain(&colored), uncolored);
+        assert!(!uncolored.contains('\x1b'));
+        assert!(colored.contains("\x1b[38;2;"), "{colored:?}");
+        assert!(!colored.contains("\x1b[48;"), "{colored:?}");
+    }
+}
+
+#[test]
 fn repeated_inline_code_keeps_style_output_linear() {
     for color in [false, true] {
         let render = |count| {

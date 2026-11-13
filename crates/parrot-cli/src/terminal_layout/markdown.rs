@@ -2,8 +2,8 @@ use std::{fmt::Write, sync::LazyLock};
 
 use syntect::{
     easy::HighlightLines,
-    highlighting::{FontStyle, Style, ThemeSet},
-    parsing::SyntaxSet,
+    highlighting::{FontStyle, Highlighter, Style, ThemeSet},
+    parsing::{Scope, SyntaxSet},
 };
 use termimad::{
     FmtText, MadSkin,
@@ -15,6 +15,24 @@ use super::TerminalText;
 
 static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_no_newlines);
 static THEMES: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
+static SKIN: LazyLock<MadSkin> = LazyLock::new(|| {
+    let highlighter = Highlighter::new(&THEMES.themes["base16-ocean.dark"]);
+    let foreground = [
+        "markup.inline.raw.string.markdown",
+        "markup.raw.inline.markdown",
+    ]
+    .into_iter()
+    .find_map(|scope| {
+        let scope = Scope::new(scope).expect("inline-code scopes are valid");
+        highlighter.style_mod_for_stack(&[scope]).foreground
+    })
+    .map(|color| termimad::rgb(color.r, color.g, color.b))
+    .unwrap_or(termimad::crossterm::style::Color::Cyan);
+    MadSkin {
+        inline_code: termimad::CompoundStyle::with_fg(foreground),
+        ..MadSkin::default()
+    }
+});
 
 /// Markdown formatting without terminal I/O. The caller owns drawing and flushing.
 pub struct MarkdownRenderer;
@@ -31,7 +49,7 @@ impl MarkdownRenderer {
             .max(1)
             .saturating_sub(TerminalText::width(&prefix))
             .max(1);
-        let skin = MadSkin::default();
+        let skin = &*SKIN;
         let parsed = parse_text(source, Options::default().keep_code_fences(true));
         let mut lines = parsed.lines.into_iter();
         let mut ordinary = Vec::new();
@@ -41,7 +59,7 @@ impl MarkdownRenderer {
                 ordinary.push(line);
                 continue;
             }
-            render_ordinary(&skin, &mut ordinary, width, color, &mut output);
+            render_ordinary(skin, &mut ordinary, width, color, &mut output);
             let language = line.code_fence_lang().unwrap_or_default();
             let mut code = Vec::new();
             for line in lines.by_ref() {
@@ -59,7 +77,7 @@ impl MarkdownRenderer {
             }
             render_code(&code, language, width, color, &mut output);
         }
-        render_ordinary(&skin, &mut ordinary, width, color, &mut output);
+        render_ordinary(skin, &mut ordinary, width, color, &mut output);
         let continuation = " ".repeat(TerminalText::width(&prefix));
         output
             .into_iter()
