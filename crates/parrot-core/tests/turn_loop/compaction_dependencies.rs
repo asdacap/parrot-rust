@@ -148,7 +148,7 @@ fn core_plans_and_fits_using_only_owned_data_and_injected_native_effects() {
     let summaries = provider.requests.lock().unwrap();
     assert_eq!(summaries.len(), 1);
     assert_eq!(
-        summaries[0].messages[1],
+        summaries[0].messages[0],
         compaction_support::message("saved group")
     );
     assert!(summaries[0].tools.is_empty());

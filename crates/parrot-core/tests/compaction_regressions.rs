@@ -334,6 +334,6 @@ fn fallback_reports_the_terminal_diagnostic_without_retrying_a_failed_single_gro
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].messages.len(), 3);
     assert_eq!(requests[1].messages.len(), 2);
-    assert_eq!(requests[1].messages[1], fixture.plan.groups[0].messages[0]);
+    assert_eq!(requests[1].messages[0], fixture.plan.groups[0].messages[0]);
     assert_eq!(fixture.provider.replies.lock().unwrap().len(), 1);
 }

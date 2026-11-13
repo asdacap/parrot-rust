@@ -2231,7 +2231,7 @@ fn oversized_recovery_invokes_core_summary_requests_and_records_the_result_befor
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].model, "summary-model");
     assert_eq!(
-        requests[0].messages[1],
+        requests[0].messages[0],
         compaction_support::message("original group")
     );
     assert!(requests[0].tools.is_empty());

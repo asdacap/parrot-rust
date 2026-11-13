@@ -115,13 +115,13 @@ fn core_builds_private_summary_requests_and_preserves_the_retained_suffix() {
         ProviderRequest {
             model: plan.model,
             messages: vec![
+                message("first"),
+                message("second"),
                 parrot_core::Message {
                     role: Role::System,
                     contents: vec![Content::Text(plan.summary_instructions)],
                     ..parrot_core::Message::default()
                 },
-                message("first"),
-                message("second")
             ],
             max_output_tokens: plan.summary_output_tokens,
             reasoning: plan.reasoning,
@@ -162,10 +162,10 @@ fn chunking_uses_the_actual_previous_summary_without_replaying_consumed_groups()
     ]);
     let result = run(Some(plan), &mut effects, &provider).unwrap().unwrap();
     let requests = provider.requests.lock().unwrap();
-    assert_eq!(texts(&requests[0]), ["instructions", "first-14-bytes!"]);
+    assert_eq!(texts(&requests[0]), ["first-14-bytes!", "instructions"]);
     assert_eq!(
         texts(&requests[1]),
-        ["instructions", "prefix:x", "other-14-bytes!"]
+        ["prefix:x", "other-14-bytes!", "instructions"]
     );
     assert_eq!(result.summary.contents, [Content::Text("prefix:y".into())]);
 }
@@ -236,10 +236,10 @@ fn compaction_uses_one_estimator_for_complete_summary_requests() {
     .unwrap();
     let requests = provider.provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 2);
-    assert_eq!(texts(&requests[0]), ["instructions", "first-14-bytes!"]);
+    assert_eq!(texts(&requests[0]), ["first-14-bytes!", "instructions"]);
     assert_eq!(
         texts(&requests[1]),
-        ["instructions", "prefix:x", "other-14-bytes!"]
+        ["prefix:x", "other-14-bytes!", "instructions"]
     );
     let estimates = provider.estimates.lock().unwrap();
     for request in requests.iter() {
@@ -268,11 +268,11 @@ fn empty_summary_fallback_halves_odd_atomic_groups_and_carries_each_actual_summa
     assert_eq!(
         requests.iter().map(texts).collect::<Vec<_>>(),
         [
-            vec!["instructions", "a", "b", "c", "d", "e"],
-            vec!["instructions", "a", "b", "c"],
-            vec!["instructions", "a", "b"],
-            vec!["instructions", "prefix:A", "c"],
-            vec!["instructions", "prefix:B", "d", "e"],
+            vec!["a", "b", "c", "d", "e", "instructions"],
+            vec!["a", "b", "c", "instructions"],
+            vec!["a", "b", "instructions"],
+            vec!["prefix:A", "c", "instructions"],
+            vec!["prefix:B", "d", "e", "instructions"],
         ]
     );
     assert_eq!(result.summary.contents, [Content::Text("prefix:C".into())]);
@@ -353,7 +353,7 @@ fn a_previous_summary_can_force_one_late_spill_of_the_original_atomic_group() {
     let requests = provider.requests.lock().unwrap();
     assert_eq!(
         texts(&requests[1]),
-        ["instructions", "prefix:123456789012", "blob"]
+        ["prefix:123456789012", "blob", "instructions"]
     );
 }
 
@@ -398,8 +398,8 @@ fn oversized_groups_write_json_with_image_path_before_rendering_the_notice() {
         "image/test"
     );
     let requests = provider.requests.lock().unwrap();
-    assert_eq!(texts(&requests[0]), ["instructions", "blob"]);
-    assert_eq!(requests[0].messages[1].role, Role::System);
+    assert_eq!(texts(&requests[0]), ["blob", "instructions"]);
+    assert_eq!(requests[0].messages[0].role, Role::System);
 }
 
 #[test]

@@ -87,11 +87,7 @@ impl CompactionPlan {
         preceding_summary: &str,
         messages: impl IntoIterator<Item = &'m Message>,
     ) -> Vec<Message> {
-        let mut request_messages = vec![Message {
-            role: Role::System,
-            contents: vec![Content::Text(self.summary_instructions.clone())],
-            ..Message::default()
-        }];
+        let mut request_messages = Vec::new();
         if !preceding_summary.is_empty() {
             request_messages.push(Message {
                 role: Role::System,
@@ -103,6 +99,11 @@ impl CompactionPlan {
             });
         }
         request_messages.extend(messages.into_iter().cloned());
+        request_messages.push(Message {
+            role: Role::System,
+            contents: vec![Content::Text(self.summary_instructions.clone())],
+            ..Message::default()
+        });
         request_messages
     }
 }
