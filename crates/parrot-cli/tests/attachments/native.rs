@@ -1,6 +1,5 @@
-//! Focused generated-native uploader tests, not application/security proof.
-//! The PNG bytes are the source-supplied one-pixel fixture. Source .NET execution
-//! is NOT_RUN; these tests neither retry T36 nor establish an authorized backend.
+//! Focused attachment uploader tests using a one-pixel PNG fixture.
+//! These tests do not establish backend authorization or application security.
 
 use super::support::*;
 use parrot_cli::attachments::uploader::{

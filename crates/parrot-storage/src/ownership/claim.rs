@@ -1,6 +1,6 @@
 use super::runtime::{fingerprint_host, random_id};
 use super::types::*;
-use crate::history_files::json::DotNetJsonFormatter;
+use crate::history_files::json::HistoryJsonFormatter;
 use parrot_domain::values::identifiers::UserSessionId;
 use sha2::{Digest, Sha256};
 use std::{
@@ -581,7 +581,7 @@ pub fn serialize_owner(record: &OwnerRecord) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     let mut serializer = serde_json::Serializer::with_formatter(
         &mut bytes,
-        DotNetJsonFormatter(serde_json::ser::PrettyFormatter::with_indent(b"  ")),
+        HistoryJsonFormatter(serde_json::ser::PrettyFormatter::with_indent(b"  ")),
     );
     record
         .serialize(&mut serializer)

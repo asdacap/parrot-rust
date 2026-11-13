@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "provenance": "Source-shaped authored regressions tied to pinned source policies in docs/port/reports/T77; not new original upstream test IDs or independent .NET runtime observations.",
+  "provenance": "Authored stream regressions, not independently captured runtime observations.",
   "sse": [
     {"name":"duplicate-fields-and-nul-id", "input":"event: old\nevent: new\nid: retained\nid: bad\u0000id\ndata: first\ndata:  second\n\n", "limit":512, "events":[{"event":"new","id":"retained","data":"first\n second"}]},
     {"name":"unknown-only", "input":": ignored\nretry: 1\nunknown: value\n\n", "limit":128, "events":[]},

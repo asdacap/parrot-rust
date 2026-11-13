@@ -428,9 +428,8 @@ fn append_field(output: &mut String, key: &str, value: Option<&str>) {
 }
 
 fn should_escape(character: char) -> bool {
-    // .NET enumerates UTF-16 `char`s, so non-BMP scalars arrive as surrogate
-    // units whose category is Surrogate rather than the scalar's Cf category.
-    // Preserve those pairs verbatim to match its formatting.
+    // Preserve non-BMP scalars verbatim rather than escaping their
+    // individual UTF-16 surrogate units.
     if character as u32 > 0xFFFF {
         return false;
     }

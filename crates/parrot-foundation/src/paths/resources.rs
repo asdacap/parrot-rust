@@ -195,8 +195,6 @@ mod tests {
 
     #[test]
     fn listed_session_main_agent_blob_directory_matches_storage_invariant_line329() {
-        // Current proof for pinned 5f27a8a9 StorageInvariantTests.cs:329, not historical authority.
-        // Parrot.Infrastructure.Tests::Parrot.Core.Tests.StorageInvariantTests.1.1.Listing_reads_meta_json_and_never_a_database.1.1.0::assertion.line329
         let fixture = std::env::temp_dir().join(format!("parrot-line329-{}", std::process::id()));
         let workspace = fixture.join("work");
         fs::create_dir_all(&workspace).unwrap();

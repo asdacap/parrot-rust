@@ -1,6 +1,3 @@
-Ported from [Parrot .NET's AGENTS.md](https://github.com/asdacap/parrotdotnet/blob/28e206c43829aa366e31bdeb0dd52711e3108d88/AGENTS.md)
-at commit `28e206c43829aa366e31bdeb0dd52711e3108d88`, with Rust terminology,
-lifecycle examples, build gates and source paths adapted for this repository.
 See also [Design philosophy](docs/design-philosophy.md).
 
 ## Guideline
@@ -16,7 +13,7 @@ method is already obvious.
 - Prefer rich domain objects rather than anemic domain models.
   - For example, if something is agent session specific, create an instance per agent session and store in the same
   scope as the agent session.
-- No .NET-style events.
+- No event-based lifecycle coordination.
 - No subclass unless necessary. Prefer composition in Rust.
 - No subtrait unless necessary.
 - NEVER turn off lint rules repo wide or crate wide. Exception is test crates can have lint rules disabled AFTER user
@@ -129,13 +126,12 @@ observed resource limit or tests that require serial execution, and report why.
 
 The [CI workflow](.github/workflows/check.yml) also defines frontend, contract,
 native-platform and package-smoke gates. The workspace denies Rust warnings and
-Clippy's `all` lint group. This is native Rust, not a .NET Native AOT build.
+Clippy's `all` lint group.
 
 ## The rules that get broken most often
 
 - **Do not deviate from the plan.** If the plan is wrong, stop and say so rather
   than improvising a fix.
-- **Do not port a component the map does not name.** Fix the map first.
 - **Never turn a rule off.** Not inline, not per-file, not repository-wide.
   Lint-suppression attributes such as `#[allow(...)]` and `#[expect(...)]` are not
   permitted, and neither is weakening the lint configuration in `Cargo.toml`.
@@ -149,13 +145,12 @@ Clippy's `all` lint group. This is native Rust, not a .NET Native AOT build.
   abstraction.
 - **Prefer a trait over a config flag**, and do not add a trait with a
   single implementation just to enable a mock.
-- **A failing ported test is skipped and reported**, never weakened or deleted.
+- **A failing test is reported**, never weakened or deleted to hide a failure.
 
 ## Commits
 
-A commit message for a migrated component names the upstream .NET components or
-source paths it absorbed. Check `git status` for unexpected changes before
-committing. If there are any, do not commit.
+Check `git status` for unexpected changes before committing. If there are any,
+do not commit.
 
 When the user says "commit", also clean generated build, test, and dependency
 artifacts from this worktree before committing. Preserve user files and unrelated

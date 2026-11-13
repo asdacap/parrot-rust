@@ -1,5 +1,5 @@
 //! Source-identity adapters label typed Rust outcomes for comparison only.
-//! Native CLR class names are not claimed as Rust runtime exception types.
+//! Captured category labels are not Rust runtime exception types.
 use super::family_projection::source_error;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::http_stream::*;
@@ -241,8 +241,7 @@ async fn observe_idle(case_id: &str) -> Value {
             tokio::time::advance(Duration::from_secs(300)).await;
             let error = read.await.unwrap_err();
             assert_eq!(error, HttpError::Cancelled);
-            // T07's typed cancellation carries the caller context, not a CLR
-            // exception token object; this labels that source assertion seam.
+            // Typed cancellation carries the caller context, not an exception object.
             json!({"completed_before_cancel": completed_before_cancel, "caller_token_preserved": token.is_cancelled(), "error":{"category":"System.OperationCanceledException","message":"The operation was canceled."}})
         }
         "idle.empty-eof-dispose" => {

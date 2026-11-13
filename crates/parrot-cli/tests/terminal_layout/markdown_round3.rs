@@ -1,5 +1,4 @@
-//! Round 3 custom-parser regressions against MarkdownRenderer.cs at
-//! 5f27a8a92625ee31d8bec094e5c3e09550193781 (LineRuns, ListMarker, TryFence).
+//! Custom-parser regressions for line runs, list markers, and code fences.
 use parrot_cli::terminal_layout::MarkdownRenderer;
 
 fn ansi(code: &str, text: &str) -> String {

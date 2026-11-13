@@ -232,9 +232,7 @@ impl SlashCommand for SandboxEnableCommand {
     }
 }
 
-// Catch(Exception) uses RpcException.Message, unlike the skills RPC catch,
-// which uses Status.Detail. This projects remote status without claiming that
-// native transport diagnostics reproduce a .NET DebugException.
+// Session command failures include the remote status code as well as its detail.
 fn exception_message(failure: &SlashFailure) -> String {
     match failure {
         SlashFailure::Rpc(status) => format!(

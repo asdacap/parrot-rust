@@ -240,7 +240,7 @@
     "direct_mode": "Enumerate actual retry provider Call with the request and caller token, capturing yielded events and the terminal exception.",
     "session_mode": "Open actual retry session; BeginTurn; enumerate its Call with the same request/token; await session disposal before projecting counters.",
     "event_projection": "Actual Kind.ToString, Text, Attempt and RetryAfter.TotalMilliseconds only.",
-    "error_projection": "Actual terminal CLR FullName and unmodified Message.",
+    "error_projection": "Captured terminal error category and unmodified message.",
     "diagnostic_probe": "Call actual DiagnosticEvent.ClassifyFailure on the constructed exception for the input failure category. This is separate from physical request tracing and does not invent classification values."
   }
 }

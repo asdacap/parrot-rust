@@ -2,13 +2,13 @@ use parrot_cli::terminal_layout::ToolYamlFormatter;
 use serde_json::{Value, json};
 
 #[test]
-fn matches_unaffected_independent_dotnet_yaml_formatter_cases() {
+fn matches_captured_yaml_formatter_cases() {
     assert_oracle_cases(false);
 }
 
 #[test]
 #[ignore = "Rust formatter always double-quotes string mapping keys"]
-fn preserves_superseded_dotnet_yaml_key_presentation_cases() {
+fn preserves_legacy_yaml_key_presentation_cases() {
     assert_oracle_cases(true);
 }
 

@@ -1,32 +1,35 @@
-# Experimental native Rust port of Parrot
+# Parrot Rust AI coding assistant
 
-Native port of Parrot, with behavior updates against .NET reference commit
-`4eb01b9acd83cfab7ce8b18491bb311180fff987`. The executable remains `parrot`.
-The retained browser frontend, protocols, prompts, skills, and Linux C PTY helper
-are part of the project. The .NET application is a development reference, not a
-native runtime dependency.
+Parrot is an AI coding assistant written in Rust.
+It provides a command-line interface and a browser frontend for agent sessions,
+with tool execution, configurable models, skills, and subagent delegation.
 
-**Not a production-ready or release-accepted replacement.** Local session
-creation and resume, `serve`, and `web` now use the native production service and
-the security and capability bundle. These paths, existing-owner attachment, and
-explicit remote `chat --connect` remain experimental. This is not a claim of
-complete .NET behavior parity. Do not substitute an unrestricted or test/denying
-backend. Templates use MiniJinja. Existing Scriban templates require manual
-conversion.
+Local session creation and resume, `serve`, and `web` use the production service
+and the security and capability bundle. The web frontend remains experimental.
+Do not substitute an unrestricted or test/denying backend. Templates use
+MiniJinja. Existing Scriban templates require manual conversion.
 
 **Back up before opening existing state.** Incompatible databases are refused,
 not migrated or reset. Use `parrot chat --new-session` to start fresh without
 replacing the old session. See [state and rollback](docs/operator/state-and-rollback.md).
-Never run .NET and Rust against the same workspace concurrently. Existing .NET
-cannot observe ownership records in the new Rust root, so there is **no global
+Do not run older versions against the same workspace concurrently. Older
+versions may not observe current ownership records, so there is **no global
 cross-version locking or simultaneous same-workspace safety guarantee**.
+
+## Documentation
+
+- [Installation and platform requirements](docs/operator/installation.md)
+- [Configuration, backups, and rollback](docs/operator/state-and-rollback.md)
+- [CLI Markdown rendering](docs/operator/markdown.md)
+- [Benchmarking agent runs](docs/operator/benchmarking.md)
+- [Design philosophy](docs/design-philosophy.md)
+- [Domain glossary](GLOSSARY.md)
 
 ## Design philosophy
 
 See [Design philosophy](docs/design-philosophy.md) for the original principles
-on bounded agent scope, delegation, parent attention and model-tier selection,
-ported from the .NET repository. Repository contributor guidance is in
-[AGENTS.md](AGENTS.md).
+on bounded agent scope, delegation, parent attention, and model-tier selection.
+Repository contributor guidance is in [AGENTS.md](AGENTS.md).
 
 ## Core and runtime
 

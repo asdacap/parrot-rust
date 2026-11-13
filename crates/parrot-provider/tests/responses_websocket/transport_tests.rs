@@ -46,7 +46,7 @@ fn source_transport_cases_match_owned_observations() {
     );
 }
 
-/// The source-only ParseState internals and CLR implementation details are not
+/// Parser internals and runtime implementation details are not
 /// transport observations. Events retain every T27 externally visible field.
 fn selected_source(mut source: Value) -> Value {
     for key in [
@@ -61,7 +61,7 @@ fn selected_source(mut source: Value) -> Value {
         if let Some(object) = value.as_object_mut() {
             object.remove("hresult");
             // Injected Rust errors carry their public category/message/status,
-            // not CLR exception chains. Do not claim inner-exception parity.
+            // not exception chains from the fixture capture runtime.
             object.remove("inner");
             if object.get("type").and_then(Value::as_str)
                 == Some("System.Text.Json.JsonReaderException")

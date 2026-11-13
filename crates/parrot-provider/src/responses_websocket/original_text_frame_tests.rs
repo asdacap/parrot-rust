@@ -78,7 +78,6 @@ impl Socket for ScriptedSocket {
 
 #[tokio::test]
 async fn original_text_frames_reassemble_and_share_responses_event_semantics() {
-    // ResponsesWebSocketTests.cs:140-146, including the original byte boundary.
     let delta = r#"{"type":"response.output_text.delta","delta":"hello"}"#;
     let completed = r#"{"type":"response.completed","response":{"id":"resp-1","usage":{"input_tokens":7,"output_tokens":2},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}}"#;
     let split = delta.as_bytes();

@@ -49,8 +49,8 @@ fn executable_https_explicit_pem_preserves_chain_trust_authentication_and_shutdo
         let certificate = directory.join("server.pem");
         let key = directory.join("key.pem");
         std::fs::write(
-            fixture.root.join("workspace/appsettings.json"),
-            "malformed legacy configuration",
+            fixture.root.join("workspace/server-config.json"),
+            "malformed server configuration",
         )
         .unwrap();
         let mut child = fixture.spawn_with_environment(
@@ -66,16 +66,10 @@ fn executable_https_explicit_pem_preserves_chain_trust_authentication_and_shutdo
                 key.to_str().unwrap(),
             ],
             &[
-                ("ASPNETCORE_CONTENTROOT", "/absent-aspnetcore-root"),
-                ("DOTNET_CONTENTROOT", "/absent-dotnet-root"),
-                ("DOTNET_ENVIRONMENT", "Staging"),
-                (
-                    "ASPNETCORE_Kestrel__Certificates__Default__Path",
-                    "absent.pem",
-                ),
-                ("DOTNET_Kestrel__Certificates__Default__Path", "absent.pem"),
-                ("Kestrel__Certificates__Default__Path", "absent.pem"),
-                ("Kestrel__Certificates__Default__KeyPath", "absent-key.pem"),
+                ("CONTENT_ROOT", "/absent-content-root"),
+                ("APP_ENVIRONMENT", "Staging"),
+                ("TLS_CERT_FILE", "absent.pem"),
+                ("TLS_KEY_FILE", "absent-key.pem"),
             ],
         );
         let address = child.line("parrot: listening on ");
@@ -320,13 +314,13 @@ fn executable_https_rejects_missing_unreadable_and_invalid_pem_safely() {
 }
 
 #[test]
-fn executable_https_legacy_configuration_does_not_supply_an_identity() {
+fn executable_https_unrelated_configuration_does_not_supply_an_identity() {
     let fixture = Fixture::new(false);
     tls_identity_files(&fixture);
     let token_path = tls_token(&fixture);
     std::fs::write(
-        fixture.root.join("workspace/appsettings.json"),
-        r#"{"Kestrel":{"Certificates":{"Default":{"Path":"server.pem","KeyPath":"key.pem"}}}}"#,
+        fixture.root.join("workspace/server-config.json"),
+        r#"{"tls":{"certificate":"server.pem","key":"key.pem"}}"#,
     )
     .unwrap();
     let output = fixture
@@ -338,20 +332,7 @@ fn executable_https_legacy_configuration_does_not_supply_an_identity() {
                 "--token-file",
                 token_path.to_str().unwrap(),
             ],
-            &[
-                (
-                    "ASPNETCORE_Kestrel__Certificates__Default__Path",
-                    "server.pem",
-                ),
-                (
-                    "ASPNETCORE_Kestrel__Certificates__Default__KeyPath",
-                    "key.pem",
-                ),
-                ("DOTNET_Kestrel__Certificates__Default__Path", "server.pem"),
-                ("DOTNET_Kestrel__Certificates__Default__KeyPath", "key.pem"),
-                ("Kestrel__Certificates__Default__Path", "server.pem"),
-                ("Kestrel__Certificates__Default__KeyPath", "key.pem"),
-            ],
+            &[("TLS_CERT_FILE", "server.pem"), ("TLS_KEY_FILE", "key.pem")],
         )
         .finish();
     assert!(!output.status.success(), "{}", describe(&output));

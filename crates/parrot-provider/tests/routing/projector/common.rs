@@ -149,7 +149,7 @@ pub fn error(value: &Error) -> Value {
             "Parrot.Llm.Wire.ProviderRequestTooLargeException"
         }
         Error::Disposed | Error::Http(HttpError::Disposed) => "System.ObjectDisposedException",
-        // Parser diagnostics are actual native Rust observations, not fabricated CLR values.
+        // Parser diagnostics are actual Rust observations, not fabricated fixture values.
         Error::Encode(_) | Error::Http(HttpError::InvalidJsonString(_)) => {
             "parrot_provider::sessions::Error"
         }

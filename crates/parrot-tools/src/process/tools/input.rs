@@ -1,5 +1,4 @@
-//! Typed process-tool arguments. JSON diagnostics use Rust wording rather than
-//! reproducing System.Text.Json's CLR type names and exception paths.
+//! Typed process-tool arguments with Rust JSON diagnostics.
 
 use std::collections::BTreeMap;
 use std::fmt;

@@ -337,7 +337,7 @@ fn is_cancellation(key: &TerminalKey) -> bool {
     )
 }
 fn ordinal_uppercase(ch: char) -> char {
-    // These exclusions are defined by .NET's InitOrdinalCasingPage, not full case folding.
+    // Dotless i and long s remain distinct from ASCII letters in ordinal matching.
     match ch {
         '\u{0131}' | '\u{017f}' => ch,
         _ => ordinal_data::SIMPLE_UPPERCASE

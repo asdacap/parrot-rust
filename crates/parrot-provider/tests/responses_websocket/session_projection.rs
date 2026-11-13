@@ -1,5 +1,5 @@
 //! Input-only execution over the actual session and T27 adapters.
-//! The test-only reference projection excludes CLR private fields/type identity,
+//! The test-only reference projection excludes private fields and runtime type identity,
 //! T30 HTTP lifecycle events and T25 HTTP diagnostic/header production. All owned
 //! response/retry values, request bytes, turn-state arguments, connector calls and
 //! socket lifecycle counters are compared exactly.

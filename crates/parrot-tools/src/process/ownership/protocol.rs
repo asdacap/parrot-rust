@@ -136,7 +136,7 @@ mod tests {
         ActiveShellProcessState {
             process_id: "active-b".into(),
             name: "build".into(),
-            command: "dotnet build".into(),
+            command: "cargo build".into(),
             description: "description".into(),
             origin_tool_call_id: "call-id".into(),
             owner_agent_session_id: "agent-id".into(),
@@ -194,7 +194,7 @@ mod tests {
             let process = &first.processes[0];
             assert_eq!(process.process_id, "active-b");
             assert_eq!(process.name, "build");
-            assert_eq!(process.command, "dotnet build");
+            assert_eq!(process.command, "cargo build");
             assert_eq!(process.description, "description");
             assert_eq!(process.origin_tool_call_id, "call-id");
             assert_eq!(process.owner_agent_session_id, "agent-id");

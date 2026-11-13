@@ -243,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    fn metadata_bytes_match_the_independent_dotnet_payload() {
+    fn metadata_bytes_match_captured_payload() {
         let metadata = SessionMeta::new(
             "session-one",
             "/tmp/c/workspace/t19-state/workspace",

@@ -1,4 +1,4 @@
-//! Source-derived component expectations, not an independent .NET export.
+//! SSE component regression expectations.
 
 use parrot_provider::http_stream::{HttpError, SseDecoder, SseEvent};
 

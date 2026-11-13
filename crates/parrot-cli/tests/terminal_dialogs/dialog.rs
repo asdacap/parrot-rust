@@ -1,4 +1,4 @@
-//! Source-shaped EnhancedSlashDialogTests. Original .NET rows remain fresh NOT_RUN.
+//! Enhanced slash dialog regression tests.
 
 use std::{
     collections::VecDeque,

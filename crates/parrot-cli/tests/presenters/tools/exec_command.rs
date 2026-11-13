@@ -186,12 +186,12 @@ fn elapsed_clock_survives_animation_frames() {
         Vec::new(),
         Arc::new(move || Duration::from_secs(clock_seconds.load(Ordering::SeqCst))),
     );
-    let live = presenter.present_live(&call("dotnet test"), 0).unwrap();
+    let live = presenter.present_live(&call("cargo test"), 0).unwrap();
     for (frame, seconds_now, expected) in [
-        (0, 0, "⠋ $ dotnet test (running 0s)"),
-        (1, 12, "⠙ $ dotnet test (running 12s)"),
-        (2, 125, "⠹ $ dotnet test (running 2m 05s)"),
-        (3, 3723, "⠸ $ dotnet test (running 1h 02m 03s)"),
+        (0, 0, "⠋ $ cargo test (running 0s)"),
+        (1, 12, "⠙ $ cargo test (running 12s)"),
+        (2, 125, "⠹ $ cargo test (running 2m 05s)"),
+        (3, 3723, "⠸ $ cargo test (running 1h 02m 03s)"),
     ] {
         seconds.store(seconds_now, Ordering::SeqCst);
         let live = animate(&live, frame);

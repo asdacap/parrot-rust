@@ -40,8 +40,7 @@ impl ResponseByteCounter {
 
 /// Each invocation starts a new idle allowance, including the limit probe.
 ///
-/// Like the source's asynchronous-only wrapper, this type does not offer
-/// synchronous reads (a compile-time rather than a native CLR exception boundary).
+/// Synchronous reads are rejected at compile time.
 /// ```compile_fail
 /// use parrot_provider::http_stream::IdleTimeoutStream;
 /// use std::{io::{Cursor, Read}, time::Duration};

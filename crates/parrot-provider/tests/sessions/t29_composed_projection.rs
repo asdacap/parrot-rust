@@ -404,7 +404,7 @@ async fn observe(case: &Case) -> Result<(Value, Value), Error> {
             let timeout = recorded.timeout;
             Ok((
                 json!({"completed":completed(&events),"connect_timeout_ms":timeout.map_or(0, |value| value.as_millis() as u64)}),
-                json!({"connect_timeout_ms":timeout.map(|value|value.as_millis() as u64),"headers":recorded.headers,"semantic_zero_mapping":"None means disabled timeout; this is not raw argument identity with a CLR TimeSpan.Zero."}),
+                json!({"connect_timeout_ms":timeout.map(|value|value.as_millis() as u64),"headers":recorded.headers,"semantic_zero_mapping":"None means disabled timeout, not a zero-duration argument."}),
             ))
         }
         "request_limit" => {
@@ -661,7 +661,7 @@ pub async fn project(input: &str) -> Result<String, Box<dyn std::error::Error>> 
     for case in input.cases {
         let (observation, native_observation) = observe(&case).await?;
         cases.push(json!({"case_id":case.case_id,"group":case.group,"observation":observation}));
-        native.push(json!({"case_id":case.case_id,"observation":native_observation,"construction_qualification":"Only the explicit canonical model/messages and case options are selected. Unasserted fields use Rust request/provider defaults; whole raw request/default/header identity with .NET is not claimed."}));
+        native.push(json!({"case_id":case.case_id,"observation":native_observation,"construction_qualification":"Only the explicit canonical model/messages and case options are selected. Unasserted fields use Rust request/provider defaults; whole raw request/default/header identity with the captured baseline is not claimed."}));
     }
     Ok(serde_json::to_string(
         &json!({"source_commit":"5f27a8a92625ee31d8bec094e5c3e09550193781","contract":CONTRACT,"cases":cases,"native_observations":native}),

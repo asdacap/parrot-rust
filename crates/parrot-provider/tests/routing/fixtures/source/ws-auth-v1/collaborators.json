@@ -22,6 +22,6 @@
   "retry":"source RetryingProvider defaults, injected ImmediateTime",
   "time":"GetUtcNow=DateTimeOffset.UnixEpoch; CreateTimer records due.TotalMilliseconds as long and immediately calls finite due callback; timer Change true, Dispose no-op",
   "lifecycle":"one OpenSession, one BeginTurn, one Call enumeration, catch actual terminal exception, dispose session before projecting counters; raw_session omits RetryingProvider",
-  "error_projection":"recursive actual CLR FullName, complete Message, actual DiagnosticEvent.ClassifyFailure, InnerException; no normalization or exception rewriting",
+  "error_projection":"captured recursive error category, complete message, failure classification, and inner error; no normalization or exception rewriting",
   "counting_wrapper":"delegates actual provider sessions; counts physical Calls, disposal in enumerator finally, opens, session disposals, BeginTurn, TryFallBackToHttp; records actual exceptions from each physical MoveNextAsync"
 }

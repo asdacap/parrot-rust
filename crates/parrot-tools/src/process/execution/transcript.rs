@@ -1,4 +1,4 @@
-//! Disk-backed PTY transcript with .NET-compatible UTF-16 cursors.
+//! Disk-backed PTY transcript with UTF-16 cursors.
 
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};

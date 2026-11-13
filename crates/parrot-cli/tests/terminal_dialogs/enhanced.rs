@@ -1,5 +1,5 @@
-//! Actual enhanced-loop observations over a controlled native UDS service.
-//! Fresh .NET execution is NOT_RUN; fixtures establish orchestration, not security.
+//! Enhanced-loop observations over a controlled UDS service.
+//! Fixtures establish orchestration, not security.
 
 #[path = "enhanced_fixture.rs"]
 mod fixture;

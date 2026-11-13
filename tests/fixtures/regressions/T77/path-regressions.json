@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "provenance": "Lexical path source-shaped fixtures; no physical filesystem/security assertions or pretend .NET fallback baseline.",
+  "provenance": "Lexical path fixtures; no physical filesystem or security assertions.",
   "lexical": [
     {"input":"a/../b", "base":"/synthetic/work", "platform":"Unix", "expected":"/synthetic/work/b"},
     {"input":"/a//b/./c/../", "base":"/unused", "platform":"Unix", "expected":"/a/b/"},
