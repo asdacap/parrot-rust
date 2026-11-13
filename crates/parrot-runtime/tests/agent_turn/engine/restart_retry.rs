@@ -307,7 +307,14 @@ async fn completion_observations_collect_all_sources_in_order_and_retain_once_be
             reminder_notices.push(event.agent_notice().notice.clone());
         }
     }
-    assert_eq!(reminder_notices, ["Completion blocker injected"; 3]);
+    assert_eq!(
+        reminder_notices,
+        [
+            "Completion blocker injected\nfirst completion retry",
+            "Completion blocker injected\nretry completion retry",
+            "Completion blocker injected\nlast completion retry",
+        ]
+    );
     let events = fixture.events().await;
     assert_eq!(
         events

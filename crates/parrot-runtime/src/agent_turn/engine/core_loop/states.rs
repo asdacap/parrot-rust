@@ -118,7 +118,7 @@ where
                             self.events.event(),
                             parrot_core::ConversationEvent::Notice {
                                 kind: "completion_blocker".into(),
-                                notice: "Completion blocker injected".into(),
+                                notice: format!("Completion blocker injected\n{message}"),
                             },
                         );
                         if let Some(candidate) = candidate.take() {
