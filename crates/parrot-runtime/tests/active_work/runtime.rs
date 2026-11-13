@@ -1115,7 +1115,7 @@ async fn pending_asks_active_work_and_exit_reminders_are_collected_in_order_with
     gates[1].entered().await;
     assert_eq!(root.endings().await, 0);
     assert_eq!(root.tasks.observations.load(Ordering::SeqCst), 1);
-    {
+    let expected_notices = {
         let requests = root.provider.requests.lock().unwrap();
         let messages = &requests[1].messages;
         let ask = messages
@@ -1149,7 +1149,9 @@ async fn pending_asks_active_work_and_exit_reminders_are_collected_in_order_with
                 .count(),
             1
         );
-    }
+        [ask, work, exit]
+            .map(|index| format!("Completion blocker injected\n{}", messages[index].content()))
+    };
     let events = root.events().await;
     assert_eq!(
         events
@@ -1165,7 +1167,7 @@ async fn pending_asks_active_work_and_exit_reminders_are_collected_in_order_with
             notices.push(event.agent_notice().notice.clone());
         }
     }
-    assert_eq!(notices, ["Completion blocker injected"; 3]);
+    assert_eq!(notices, expected_notices);
     let reply = " yes\nplain-text reply ";
     for request in root.asks.pending() {
         assert_eq!(request.message, "Choose");

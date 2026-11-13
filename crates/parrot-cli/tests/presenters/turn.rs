@@ -309,6 +309,28 @@ fn typed_turn_events_render_cumulative_text_and_sanitize_terminal_content() {
 }
 
 #[test]
+fn completion_blocker_notice_shows_multiline_model_feedback() {
+    let mut renderer = EnhancedTurnRenderer::new(80, false);
+    let published = event(
+        "",
+        Payload::AgentNotice(wire::AgentNotice {
+            kind: "completion_blocker".into(),
+            notice: "Completion blocker injected\nPending asks:\n- alpha\nReply before finishing."
+                .into(),
+            ..Default::default()
+        }),
+    );
+    let update = renderer.apply_event(&published, false).unwrap();
+    let output = commits(&update.commits, 80).replace("\r\n", "\n");
+    assert!(
+        output.contains(
+            "↻ Completion blocker injected\nPending asks:\n- alpha\nReply before finishing."
+        ),
+        "{output:?}"
+    );
+}
+
+#[test]
 fn split_markdown_chunks_are_promoted_to_scrollback_once() {
     let mut renderer = EnhancedTurnRenderer::new(80, false);
     let mut output = String::new();
