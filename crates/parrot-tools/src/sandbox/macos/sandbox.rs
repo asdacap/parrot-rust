@@ -52,6 +52,29 @@ impl MacSeatbeltSandbox {
             executable: Some(canonical),
         })
     }
+
+    pub fn read_launch(
+        &self,
+        directory: &Path,
+        command: &str,
+    ) -> io::Result<crate::process::execution::LaunchSpec> {
+        let executable = self.executable.as_ref().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::Unsupported, "macOS Seatbelt is unavailable")
+        })?;
+        let profile = super::SeatbeltPolicy::compile_rules(std::iter::empty::<(
+            &str,
+            super::SeatbeltAccess,
+        )>())?;
+        Ok(SeatbeltLaunchPlan::create_inline(
+            executable,
+            &profile,
+            command,
+            directory,
+            std::env::vars_os().filter_map(|(key, value)| {
+                Some((key.into_string().ok()?, value.into_string().ok()?))
+            }),
+        ))
+    }
 }
 
 impl ProcessSandbox for MacSeatbeltSandbox {

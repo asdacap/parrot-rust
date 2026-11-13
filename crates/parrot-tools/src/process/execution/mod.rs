@@ -14,6 +14,8 @@ pub mod locator;
 pub mod native;
 pub mod output;
 mod pipe_decoder;
+mod probe;
+pub use probe::probe_sandbox_read;
 pub mod runner;
 pub mod signals;
 pub mod transcript;

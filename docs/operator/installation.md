@@ -65,14 +65,31 @@ does not run these application checks and cannot replace the required smoke.
   grant permissions or prove a working production sandbox.
 - macOS pipe isolation uses **`/usr/bin/sandbox-exec` (Seatbelt)** at a trusted,
   non-writable system path. It is compatibility isolation, not a promised robust
-  hostile-command boundary. PTY shell mode is unsupported on macOS. Missing
-  sandbox support is not permission to run unconfined. The incomplete local
-  production security bundle remains a separate blocker on every platform.
+  hostile-command boundary. PTY shell mode is unsupported on macOS. The incomplete
+  local production security bundle remains a separate blocker on every platform.
 - A source build uses the locked Nix toolchain. Native macOS requires a real
   Apple Silicon macOS runner with its Darwin SDK and toolchain closure. The
   dependency closure, including Xcode Command Line Tools, has not been
   validated here. Linux evaluation or
   cross-compilation cannot establish that platform's behavior.
+
+Before a new local host starts, Parrot tries to list its launch directory inside
+Bubblewrap on Linux or Seatbelt on macOS. If that check fails, Parrot warns on
+stderr and disables OS process isolation for that host process. This includes
+systems where AppArmor blocks Bubblewrap. Shell commands then run unconfined.
+File-tool permission checks remain active. A successful read check does not prove
+PTY support or every security profile. Cancellation aborts startup without fallback.
+Later failures of sandboxed commands never trigger an unconfined retry.
+
+`parrot --no-sandbox`, `parrot chat --no-sandbox`, `parrot serve --no-sandbox`, and
+`parrot web --no-sandbox` skip the check and disable isolation with a warning.
+Neither explicit disablement nor automatic fallback changes saved configuration.
+A saved `sandbox.enabled: false` also skips the check. Restart without the flag to
+check again when saved configuration enables sandboxing.
+
+The flag is rejected with `--connect` and when ordinary chat would attach to an
+existing host. Restart that host with the flag, or use `chat --new-session` to
+create a separate local session. The flag does not change another host's sandbox.
 
 The Apple Silicon recipe is **not executed natively in current evidence**:
 

@@ -26,6 +26,51 @@ impl SeatbeltLaunchPlan {
         O: Into<String>,
         W: Into<String>,
     {
+        Self::plan(
+            seatbelt_path.as_ref(),
+            ("-f", profile_path.as_ref().as_os_str().to_owned()),
+            command,
+            working_directory.as_ref(),
+            inherited_environment,
+            overrides,
+        )
+    }
+
+    pub fn create_inline<K, V>(
+        seatbelt_path: &Path,
+        profile: &super::SeatbeltPolicySnapshot,
+        command: &str,
+        working_directory: &Path,
+        inherited_environment: impl IntoIterator<Item = (K, V)>,
+    ) -> LaunchSpec
+    where
+        K: Into<String>,
+        V: Into<String>,
+    {
+        Self::plan(
+            seatbelt_path,
+            ("-p", OsString::from(profile.text())),
+            command,
+            working_directory,
+            inherited_environment,
+            std::iter::empty::<(String, String)>(),
+        )
+    }
+
+    fn plan<K, V, O, W>(
+        seatbelt_path: &Path,
+        profile: (&str, OsString),
+        command: &str,
+        working_directory: &Path,
+        inherited_environment: impl IntoIterator<Item = (K, V)>,
+        overrides: impl IntoIterator<Item = (O, W)>,
+    ) -> LaunchSpec
+    where
+        K: Into<String>,
+        V: Into<String>,
+        O: Into<String>,
+        W: Into<String>,
+    {
         let mut environment: std::collections::HashMap<String, String> = inherited_environment
             .into_iter()
             .map(|(key, value)| (key.into(), value.into()))
@@ -36,16 +81,16 @@ impl SeatbeltLaunchPlan {
         let mut environment: Vec<_> = environment.into_iter().collect();
         environment.sort_by(|(left, _), (right, _)| ordinal(left, right));
 
-        let mut launch = LaunchSpec::new(seatbelt_path.as_ref());
-        launch.current_dir = Some(working_directory.as_ref().to_owned());
+        let mut launch = LaunchSpec::new(seatbelt_path);
+        launch.current_dir = Some(working_directory.to_owned());
         launch.clear_environment = true;
         launch.environment.insert(
             OsString::from("PATH"),
             Some(OsString::from("/usr/bin:/bin")),
         );
         launch.args = vec![
-            OsString::from("-f"),
-            profile_path.as_ref().as_os_str().to_owned(),
+            OsString::from(profile.0),
+            profile.1,
             OsString::from("/usr/bin/env"),
             OsString::from("-i"),
         ];

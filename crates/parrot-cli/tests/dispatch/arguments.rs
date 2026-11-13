@@ -87,6 +87,33 @@ fn new_session_is_a_startup_option_not_prompt_text() {
 }
 
 #[test]
+fn no_sandbox_is_a_startup_flag_not_prompt_text() {
+    for arguments in [
+        vec!["--no-sandbox", "hello"],
+        vec!["chat", "--no-sandbox", "hello"],
+    ] {
+        assert_eq!(chat(&arguments).prompt, "hello");
+    }
+    assert!(parse(&args(&["serve", "--no-sandbox"])).is_ok());
+    assert!(parse(&args(&["web", "--no-sandbox"])).is_ok());
+}
+
+#[test]
+fn no_sandbox_rejects_explicit_remote_connection() {
+    for arguments in [
+        vec!["chat", "--no-sandbox", "--connect", "unix:/owner.sock"],
+        vec!["chat", "--connect", "unix:/owner.sock", "--no-sandbox"],
+    ] {
+        assert!(
+            parse(&args(&arguments))
+                .unwrap_err()
+                .message
+                .contains("--no-sandbox")
+        );
+    }
+}
+
+#[test]
 fn stored_model_and_mode_only_fill_fresh_defaults() {
     let mut default = chat(&["chat"]);
     default.apply_configuration("saved-model", "saved-mode");
@@ -112,12 +139,18 @@ fn web_port_is_strict_unsigned_ushort_and_last_occurrence_wins() {
     for (value, expected) in [("0", 0), ("65535", 65535), ("007420", 7420)] {
         assert_eq!(
             parse(&args(&["web", "--port", value])).unwrap(),
-            Command::Runtime(RuntimeCommand::Web { port: expected })
+            Command::Runtime(RuntimeCommand::Web {
+                port: expected,
+                no_sandbox: false
+            })
         );
     }
     assert_eq!(
         parse(&args(&["web", "--port", "12", "--port", "34"])).unwrap(),
-        Command::Runtime(RuntimeCommand::Web { port: 34 })
+        Command::Runtime(RuntimeCommand::Web {
+            port: 34,
+            no_sandbox: false
+        })
     );
 }
 
@@ -144,6 +177,7 @@ fn serve_recognizes_native_tls_flags_without_reading_files() {
             tls_cert_file: "chain.pem".into(),
             tls_key_file: "key.pem".into(),
             unsafe_allow_external: true,
+            no_sandbox: false,
         }))
     );
     for values in [

@@ -250,9 +250,11 @@ impl CommandBackend for Application {
                 RuntimeCommand::Chat(options) => self.chat(options, cancellation).await,
                 RuntimeCommand::Serve(options) => self.serve(options, cancellation).await,
                 #[cfg(feature = "web")]
-                RuntimeCommand::Web { port } => self.web(port, cancellation).await,
+                RuntimeCommand::Web { port, no_sandbox } => {
+                    self.web(port, no_sandbox, cancellation).await
+                }
                 #[cfg(not(feature = "web"))]
-                RuntimeCommand::Web { port: _ } => {
+                RuntimeCommand::Web { .. } => {
                     writeln!(
                         io::stderr(),
                         "parrot: the web UI is not built; compile with the web feature"
@@ -307,6 +309,7 @@ impl Application {
         auth: Arc<AuthServices>,
         roots: ApplicationRoots,
         directory: std::path::PathBuf,
+        no_sandbox: bool,
     ) -> Arc<LocalHost> {
         Arc::new(LocalHost {
             configuration,
@@ -314,6 +317,7 @@ impl Application {
             roots,
             directory,
             auth,
+            no_sandbox,
             diagnostics: self.diagnostics.clone(),
             event_load_progress: Mutex::new(None),
             owner: tokio::sync::Mutex::new(None),
@@ -376,6 +380,7 @@ impl Application {
             auth,
             ApplicationRoots::resolve(&std::env::vars().collect()),
             std::env::current_dir()?,
+            options.no_sandbox,
         );
         let result = async {
             let service = local.service(cancellation).await?;
@@ -403,7 +408,12 @@ impl Application {
     }
 
     #[cfg(feature = "web")]
-    async fn web(&self, port: u16, cancellation: &dyn Cancellation) -> Result<i32, DispatchError> {
+    async fn web(
+        &self,
+        port: u16,
+        no_sandbox: bool,
+        cancellation: &dyn Cancellation,
+    ) -> Result<i32, DispatchError> {
         let (configuration, templates) = self.configuration_and_templates()?;
         let auth = self.auth_services(&configuration)?;
         let roots = ApplicationRoots::resolve(&std::env::vars().collect());
@@ -421,6 +431,7 @@ impl Application {
             auth.clone(),
             roots.clone(),
             directory,
+            no_sandbox,
         );
         let result = async {
             let client = local.open(cancellation).await.map_err(DispatchError::Rpc)?;
@@ -438,7 +449,8 @@ impl Application {
                     }),
                     false,
                 )
-                .with_legacy_path_read_fallback(legacy),
+                .with_legacy_path_read_fallback(legacy)
+                .with_remote_attachment(!no_sandbox),
             );
             let router = Arc::new(WebSessionRouter::new(
                 client.clone(),
@@ -526,6 +538,7 @@ impl Application {
                 auth.clone(),
                 roots.clone(),
                 directory,
+                options.no_sandbox,
             );
             let open_local = local.opener();
             let request = wire::CreateSessionRequest {
@@ -591,7 +604,8 @@ impl Application {
                 options.take_over,
             )
             .with_restore_progress(restore_progress)
-            .with_legacy_path_read_fallback(legacy);
+            .with_legacy_path_read_fallback(legacy)
+            .with_remote_attachment(!options.no_sandbox);
             // The enhanced renderer answers pending interactions; the basic renderer
             // answers them only in its REPL loop.
             let enhanced = !options.basic && io::stdout().is_terminal();
@@ -797,6 +811,7 @@ struct LocalHost {
     roots: ApplicationRoots,
     directory: std::path::PathBuf,
     auth: Arc<AuthServices>,
+    no_sandbox: bool,
     diagnostics: Arc<FileDiagnosticLog>,
     event_load_progress:
         Mutex<Option<parrot_host::composition::factory::user::SessionEventLoadProgress>>,
@@ -824,8 +839,49 @@ impl LocalHost {
         cancellation.check().map_err(|_| DispatchError::Cancelled)?;
         let mut owner = self.owner.lock().await;
         if owner.is_none() {
+            let mut configuration = self.configuration.clone();
+            let warning = if self.no_sandbox {
+                Some("disabled by --no-sandbox".to_owned())
+            } else if configuration.runtime.sandbox_enabled {
+                match parrot_tools::process::execution::probe_sandbox_read(
+                    &self.directory,
+                    cancellation,
+                )
+                .await
+                {
+                    Ok(()) => None,
+                    Err(failure) if failure.kind() == io::ErrorKind::Interrupted => {
+                        return Err(DispatchError::Cancelled);
+                    }
+                    Err(failure) => Some(format!("startup check failed: {failure}")),
+                }
+            } else {
+                None
+            };
+            cancellation.check().map_err(|_| DispatchError::Cancelled)?;
+            if let Some(reason) = warning {
+                configuration.runtime.sandbox_enabled = false;
+                writeln!(
+                    io::stderr(),
+                    "parrot: warning: OS process sandbox {reason}; shell commands run unconfined for this host process"
+                )?;
+                let mut event = DiagnosticEvent::new(
+                    "sandbox",
+                    "startup.disabled",
+                    DiagnosticSeverity::Warning,
+                );
+                event.outcome = Some(
+                    if self.no_sandbox {
+                        "explicit"
+                    } else {
+                        "probe_failed"
+                    }
+                    .into(),
+                );
+                self.diagnostics.write(&event);
+            }
             let mut providers = dispatch::provider_catalog::build(
-                self.configuration.clone(),
+                configuration.clone(),
                 self.auth.credentials.clone(),
                 self.auth.oauth.clone(),
                 cancellation,
@@ -833,7 +889,7 @@ impl LocalHost {
             .await?;
             let host = ProductionHost::with_event_load_progress(
                 ProductionHostConfig {
-                    configuration: self.configuration.clone(),
+                    configuration,
                     templates: self.templates.clone(),
                     roots: self.roots.clone(),
                     launch_directory: self.directory.clone(),

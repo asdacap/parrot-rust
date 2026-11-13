@@ -197,6 +197,7 @@ pub struct LocalChatStartup {
     configure_fresh: ConfigureFresh,
     take_over: bool,
     legacy_path_read_fallback: bool,
+    allow_remote_attachment: bool,
 }
 impl LocalChatStartup {
     /// Use the same resolved workspace that is supplied to the composition
@@ -223,7 +224,13 @@ impl LocalChatStartup {
             configure_fresh,
             take_over,
             legacy_path_read_fallback: true,
+            allow_remote_attachment: true,
         }
+    }
+
+    pub fn with_remote_attachment(mut self, enabled: bool) -> Self {
+        self.allow_remote_attachment = enabled;
+        self
     }
 
     pub fn with_restore_progress(mut self, progress: Arc<RestoreProgress>) -> Self {
@@ -437,6 +444,9 @@ impl LocalChatStartup {
         cancellation: &dyn Cancellation,
     ) -> Result<Option<OpenedLocalSession>, StartupError> {
         match self.attach(id, selected, cancellation).await {
+            Ok(_) if !self.allow_remote_attachment => Err(Status::failed_precondition(
+                "--no-sandbox cannot change an existing host; restart the owning host with --no-sandbox or use --new-session",
+            ).into()),
             Ok(opened) => Ok(Some(opened)),
             Err(failure) => {
                 check(cancellation)?;

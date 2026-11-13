@@ -5,8 +5,8 @@ pub const DEFAULT_WEB_PORT: u16 = 7420;
 pub const AUTH_USAGE: &str =
     "usage: parrot auth login <provider> [--api-key-stdin] [--device] [--s3-stdin]";
 pub const S3_USAGE: &str = "usage: parrot auth login image_upload --s3-stdin";
-pub const SERVE_USAGE: &str = "usage: parrot serve [--listen unix:/path|http://host:port|https://host:port] [--token-file <path>] [--tls-cert-file <path> --tls-key-file <path>] [--unsafe-allow-external]";
-pub const WEB_USAGE: &str = "usage: parrot web [--port <n>]";
+pub const SERVE_USAGE: &str = "usage: parrot serve [--no-sandbox] [--listen unix:/path|http://host:port|https://host:port] [--token-file <path>] [--tls-cert-file <path> --tls-key-file <path>] [--unsafe-allow-external]";
+pub const WEB_USAGE: &str = "usage: parrot web [--port <n>] [--no-sandbox]";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Command {
@@ -22,7 +22,7 @@ pub enum RuntimeCommand {
     Sessions,
     Chat(ChatOptions),
     Serve(ServeOptions),
-    Web { port: u16 },
+    Web { port: u16, no_sandbox: bool },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -80,6 +80,7 @@ pub struct ChatOptions {
     pub connect: String,
     pub token_file: String,
     pub basic: bool,
+    pub no_sandbox: bool,
     pub take_over: bool,
     pub prompt: String,
     pub jsonl_log: String,
@@ -95,6 +96,7 @@ impl Default for ChatOptions {
             connect: String::new(),
             token_file: String::new(),
             basic: false,
+            no_sandbox: false,
             take_over: false,
             prompt: String::new(),
             jsonl_log: String::new(),
@@ -122,6 +124,7 @@ pub struct ServeOptions {
     pub tls_cert_file: String,
     pub tls_key_file: String,
     pub unsafe_allow_external: bool,
+    pub no_sandbox: bool,
 }
 
 pub fn parse(arguments: &[String]) -> Result<Command, UsageError> {
@@ -133,11 +136,22 @@ pub fn parse(arguments: &[String]) -> Result<Command, UsageError> {
         "models" => RuntimeCommand::Models,
         "sessions" => RuntimeCommand::Sessions,
         "chat" => RuntimeCommand::Chat(parse_chat(arguments)?),
+        "--no-sandbox" => {
+            let mut chat_arguments = vec!["chat".to_owned()];
+            chat_arguments.extend_from_slice(arguments);
+            RuntimeCommand::Chat(parse_chat(&chat_arguments)?)
+        }
         "serve" => RuntimeCommand::Serve(parse_serve(arguments)?),
         "web" => {
             let mut port = DEFAULT_WEB_PORT;
+            let mut no_sandbox = false;
             let mut index = 1;
             while index < arguments.len() {
+                if arguments[index] == "--no-sandbox" {
+                    no_sandbox = true;
+                    index += 1;
+                    continue;
+                }
                 if arguments[index] != "--port" {
                     return Err(UsageError::usage(WEB_USAGE));
                 }
@@ -149,7 +163,7 @@ pub fn parse(arguments: &[String]) -> Result<Command, UsageError> {
                 port = value;
                 index += 2;
             }
-            RuntimeCommand::Web { port }
+            RuntimeCommand::Web { port, no_sandbox }
         }
         _ => {
             return Err(UsageError {
@@ -225,6 +239,7 @@ fn parse_chat(arguments: &[String]) -> Result<ChatOptions, UsageError> {
             }
             ("--new-session", _) => options.session_start = ChatSessionStart::Fresh,
             ("--basic", _) => options.basic = true,
+            ("--no-sandbox", _) => options.no_sandbox = true,
             ("--take-over", _) => options.take_over = true,
             ("--jsonl", Some(value)) => {
                 options.jsonl_log = value.clone();
@@ -236,6 +251,11 @@ fn parse_chat(arguments: &[String]) -> Result<ChatOptions, UsageError> {
             _ => words.push(argument.clone()),
         }
         index += 1;
+    }
+    if options.no_sandbox && !options.connect.is_empty() {
+        return Err(UsageError::usage(
+            "--no-sandbox cannot be used with --connect; restart the owning host with --no-sandbox instead",
+        ));
     }
     options.prompt = words.join(" ");
     Ok(options)
@@ -263,6 +283,7 @@ fn parse_serve(arguments: &[String]) -> Result<ServeOptions, UsageError> {
                 index += 1;
             }
             ("--unsafe-allow-external", _) => options.unsafe_allow_external = true,
+            ("--no-sandbox", _) => options.no_sandbox = true,
             _ => return Err(UsageError::usage(SERVE_USAGE)),
         }
         index += 1;

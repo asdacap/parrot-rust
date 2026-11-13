@@ -24,6 +24,8 @@ use protobuf::Message;
 
 #[path = "local_production/https.rs"]
 mod https;
+#[path = "local_production/sandbox.rs"]
+mod sandbox;
 
 const CHILD_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -238,6 +240,10 @@ struct Fixture {
 
 impl Fixture {
     fn new(fail: bool) -> Self {
+        Self::with_chat_responses(fail, Vec::new())
+    }
+
+    fn with_chat_responses(fail: bool, responses: Vec<&'static str>) -> Self {
         // Short roots keep the real per-session Unix socket below sockaddr_un's limit.
         let root = std::env::temp_dir().join(format!(
             "e{:x}-{:x}",
@@ -258,6 +264,7 @@ impl Fixture {
         let stopped = Arc::new(AtomicBool::new(false));
         let stop = stopped.clone();
         let server = thread::spawn(move || {
+            let mut responses = responses.into_iter();
             while !stop.load(Ordering::Acquire) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
@@ -267,7 +274,11 @@ impl Fixture {
                         let (status, content_type, body) = if chat && fail {
                             ("400 Bad Request", "application/json", PROVIDER_FAILURE_BODY)
                         } else if chat {
-                            ("200 OK", "text/event-stream", PROVIDER_SUCCESS_BODY)
+                            (
+                                "200 OK",
+                                "text/event-stream",
+                                responses.next().unwrap_or(PROVIDER_SUCCESS_BODY),
+                            )
                         } else {
                             (
                                 "200 OK",

@@ -637,6 +637,38 @@ scenario_tests! {
 }
 
 #[tokio::test]
+async fn no_sandbox_rejects_attachment_including_after_an_ownership_race() {
+    for scenario in ["connect", "race"] {
+        let context = Context::new();
+        let mut endpoint = Endpoint::new(&context, scenario);
+        endpoint.owner = Some(context.admit(false));
+        let mut local_server = context.server(endpoint.clone(), false).await;
+        let mut owner_server = context.server(endpoint.clone(), true).await;
+        let mut local = context.client(&local_server);
+        let startup = context
+            .startup(local.client().unwrap().clone(), false)
+            .with_remote_attachment(false);
+        let failure = bounded(startup.open(ChatSessionStart::ResumeLatest, true, &Stop::new()))
+            .await
+            .err()
+            .expect("must reject existing host")
+            .into_status();
+        assert_eq!(failure.code(), Code::FailedPrecondition);
+        assert!(failure.message().contains("--no-sandbox"));
+        assert_eq!(context.configurations.load(Ordering::SeqCst), 0);
+        {
+            let calls = endpoint.calls.lock().unwrap();
+            assert!(calls.created.is_empty());
+            assert_eq!(calls.attached.len(), if scenario == "race" { 2 } else { 1 });
+        }
+        assert!(!context.text().contains("creating a new user session"));
+        local.close();
+        bounded(owner_server.close()).await.unwrap();
+        bounded(local_server.close()).await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn empty_restore_reports_zero_events() {
     let context = Context::new();
     context.admit(false).release().unwrap();

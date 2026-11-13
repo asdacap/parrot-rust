@@ -147,7 +147,13 @@ async fn dispatch_preserves_runtime_selection_and_backend_exit() {
     assert!(matches!(&backend.0[1], RuntimeCommand::Models));
     assert!(matches!(&backend.0[2], RuntimeCommand::Sessions));
     assert!(matches!(&backend.0[3], RuntimeCommand::Serve(_)));
-    assert_eq!(backend.0[4], RuntimeCommand::Web { port: 7420 });
+    assert_eq!(
+        backend.0[4],
+        RuntimeCommand::Web {
+            port: 7420,
+            no_sandbox: false
+        }
+    );
     assert!(output.is_empty());
     assert!(error.is_empty());
 }
