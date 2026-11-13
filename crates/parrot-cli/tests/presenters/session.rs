@@ -558,7 +558,7 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
 }
 
 #[test]
-fn task_update_notice_shows_execution_assignments_only_in_the_ui() {
+fn task_update_notice_shows_only_updated_states() {
     use wire::AgentTaskProgressStatus::{
         AGENT_TASK_PROGRESS_STATUS_PENDING as Pending,
         AGENT_TASK_PROGRESS_STATUS_RUNNING as Running,
@@ -599,7 +599,8 @@ fn task_update_notice_shows_execution_assignments_only_in_the_ui() {
                 }),
             ))
             .unwrap();
-        let content = "AgentTask states changed by your update:\n- finished: succeeded";
+        let content =
+            "AgentTask states changed by your update:\n- finished: succeeded\n- updated: pending";
         for (id, source) in [
             ("notification", wire::InputSource::INPUT_SOURCE_NOTIFICATION),
             ("user", wire::InputSource::INPUT_SOURCE_UNSPECIFIED),
@@ -625,31 +626,31 @@ fn task_update_notice_shows_execution_assignments_only_in_the_ui() {
                 ))
                 .unwrap();
             let output = commits(&promoted.commits, 160);
-            if source == wire::InputSource::INPUT_SOURCE_UNSPECIFIED {
-                assert!(!output.contains("Next execution:"), "{output}");
-                continue;
+            for expected in [
+                "AgentTask states changed by your update:",
+                "finished: succeeded",
+                "updated: pending",
+            ] {
+                assert!(output.contains(expected), "{output}");
             }
-            assert!(output.contains("Next execution:"), "{output}");
-            assert!(
-                output.contains("final-review: self, run in this conversation"),
-                "{output}"
-            );
-            assert!(
-                output.contains("package-check: dedicated agent worker, started automatically"),
-                "{output}"
-            );
-            assert!(output.contains("publish: pending, not started"), "{output}");
-            assert!(!output.contains("finished: dedicated"), "{output}");
-            assert!(
-                !output.contains("Do not display task descriptions here"),
-                "{output}"
-            );
+            for omitted in [
+                "Next execution:",
+                "Waiting:",
+                "final-review",
+                "package-check",
+                "publish",
+                "self, run in this conversation",
+                "dedicated agent",
+                "Do not display task descriptions here",
+            ] {
+                assert!(!output.contains(omitted), "{output}");
+            }
         }
     }
 }
 
 #[test]
-fn task_update_notice_distinguishes_completed_pending_and_unavailable_progress() {
+fn task_update_notice_is_unchanged_by_completed_pending_or_unavailable_progress() {
     use wire::AgentTaskProgressStatus::{
         AGENT_TASK_PROGRESS_STATUS_FAILED as Failed, AGENT_TASK_PROGRESS_STATUS_PENDING as Pending,
         AGENT_TASK_PROGRESS_STATUS_SUCCEEDED as Succeeded,
@@ -703,24 +704,19 @@ fn task_update_notice_distinguishes_completed_pending_and_unavailable_progress()
             ))
             .unwrap();
         let output = commits(&promoted.commits, 160);
-        match status {
-            None => assert!(!output.contains("Next execution:"), "{output}"),
-            Some(Succeeded) => {
-                assert!(output.contains("None. All tasks are complete."), "{output}")
-            }
-            Some(_) => {
-                assert!(
-                    output.contains("No visible task is currently running."),
-                    "{output}"
-                );
-                assert!(!output.contains("All tasks are complete"), "{output}");
-                if status == Some(Pending) {
-                    assert!(
-                        output.contains("remaining: pending, not started"),
-                        "{output}"
-                    );
-                }
-            }
+        assert!(
+            output.contains("AgentTask states changed by your update:"),
+            "{output}"
+        );
+        assert!(output.contains("finished: succeeded"), "{output}");
+        for omitted in [
+            "Next execution:",
+            "Waiting:",
+            "remaining",
+            "All tasks are complete",
+            "No visible task is currently running",
+        ] {
+            assert!(!output.contains(omitted), "{output}");
         }
     }
 }
