@@ -309,6 +309,7 @@ A role can outlive its agent. A replacement receives the complete assignment and
 
 Write the reply clean as you draft it. A cleanup pass after drafting does not remove these patterns.
 
+- Use ASD-STE100 Simplified Technical English where possible.
 - **Short declarative sentences.** One thought per sentence, ended with a period.
 - **No long-dash character anywhere.** Write a file-list bullet as a sentence ("`main.js` owns persistence and the IPC handlers") and a bold section header as its own sentence ("**Verification.** End to end via CDP").
 - **A colon as a mid-sentence connector is also out** (the **unslop** skill, rule 14). A colon before a list is fine.
