@@ -249,7 +249,7 @@ impl HttpTransport for Transport {
                 Mode::LiveModels => (200, r#"{"data":[{"id":"live-model","context_window":321}]}"#.into()),
                 Mode::ExternalMembership if uri.as_str() == "https://models.dev/api.json" => (200, r#"{"first":{"id":"first","models":{"external":{"id":"external-first"}}},"second":{"id":"second","models":{"external":{"id":"external-second"}}},"ghost":{"id":"ghost","models":{"external":{"id":"external-ghost"}}}}"#.into()),
                 Mode::ExternalMembership => match uri.host_str().unwrap_or_default() { "first.test" => (200, r#"{"data":[{"id":"live-first"}]}"#.into()), "second.test" => (200, r#"{"data":[{"id":"live-second"}]}"#.into()), _ => (503, String::new()) },
-                Mode::OpenRouter if method == HttpMethod::Get => (200, r#"{"data":[{"id":"vendor/model"}]}"#.into()),
+                Mode::OpenRouter if method == HttpMethod::Get => (200, r#"{"data":[{"id":"vendor/model","context_length":200000,"top_provider":{"max_completion_tokens":8192}}]}"#.into()),
                 Mode::OpenRouter => (200, "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n".into()),
                 Mode::ChatGptModels => (200, r#"{"models":[{"slug":"live","display_name":"Live","context_window":321,"visibility":"list"}]}"#.into()),
                 Mode::ChatGptCall => (200, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".into()),
@@ -547,6 +547,50 @@ async fn openrouter_predefined_preferences_reach_the_request_body_limit_1() {
 #[tokio::test]
 async fn openrouter_predefined_preferences_reach_the_request_body_limit_67108864() {
     openrouter_preferences(67108864).await;
+}
+
+#[tokio::test]
+async fn custom_openrouter_preserves_catalog_metadata_and_routing_preferences() {
+    let fixture = Fixture::new(
+        "providers:\n  openrouter-near:\n    type: openrouter\n    protocol: chat-completions\n    base_url: https://openrouter.ai/api/v1\n    session_header: x-session-id\n    provider_preferences:\n      only: [near-ai/fp8]\n      allow_fallbacks: false\n      require_parameters: true\n      data_collection: deny\n      zdr: true\n",
+    );
+    let configuration = fixture.load();
+    let credentials = Credentials::one("openrouter-near", "key");
+    let transport = Transport::new(Mode::OpenRouter);
+    let built = build_provider(ProviderBuildContext {
+        id: "openrouter-near",
+        config: &configuration.models.providers["openrouter-near"],
+        credentials: credentials.as_ref(),
+        transport: transport.clone(),
+        images: Arc::new(NoImages),
+        connector: Arc::new(NoSocket),
+        external_models: &[],
+        maximum_request_bytes: 64 << 20,
+    })
+    .unwrap();
+    assert_eq!(built.provider.id(), "openrouter-near");
+    let models = built.provider.list_models(&ACTIVE).await.unwrap();
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].provider_id, "openrouter-near");
+    assert_eq!(models[0].context_window, 200000);
+    assert_eq!(models[0].max_output_tokens, 8192);
+    drain(built.provider.as_ref(), request("vendor/model", 0))
+        .await
+        .unwrap();
+    let bodies = transport.post_bodies();
+    assert_eq!(bodies.len(), 1);
+    let body: serde_json::Value = serde_json::from_str(&bodies[0]).unwrap();
+    assert_eq!(
+        body["provider"],
+        serde_json::json!({
+            "only": ["near-ai/fp8"],
+            "allow_fallbacks": false,
+            "require_parameters": true,
+            "data_collection": "deny",
+            "zdr": true
+        })
+    );
+    assert_eq!(body["include_router_metadata"], true);
 }
 
 #[tokio::test]

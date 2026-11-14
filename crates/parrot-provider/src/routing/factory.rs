@@ -36,8 +36,10 @@ pub enum ProviderImplementation {
 }
 impl ProviderImplementation {
     pub fn resolve(id: &str, config: &ProviderConfig) -> Self {
-        if config.provider_type == "anthropic" {
-            return Self::Anthropic;
+        match config.provider_type.as_str() {
+            "anthropic" => return Self::Anthropic,
+            "openrouter" => return Self::OpenRouter,
+            _ => {}
         }
         match id {
             "openai" => Self::OpenAi,
@@ -118,7 +120,7 @@ pub fn build_provider(context: ProviderBuildContext<'_>) -> Result<BuiltProvider
         _ => {
             if !matches!(
                 config.provider_type.as_str(),
-                "" | "compatible" | "openai-compatible"
+                "" | "compatible" | "openai-compatible" | "openrouter"
             ) {
                 return Err(Error::Provider(format!(
                     "provider: unsupported provider type \"{}\" for \"{}\"",
