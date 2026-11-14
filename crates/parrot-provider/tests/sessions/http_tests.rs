@@ -266,6 +266,41 @@ async fn chat_completions_uses_actual_chat_parser() {
 }
 
 #[tokio::test]
+async fn gemini_signed_tool_call_survives_stream_conversion_and_continuation() {
+    let signed = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_weather\",\"function\":{\"name\":\"weather\",\"arguments\":\"{}\"},\"extra_content\":{\"google\":{\"thought_signature\":\"signature-A\"}}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n";
+    let next_call = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_forecast\",\"function\":{\"name\":\"forecast\",\"arguments\":\"{}\"},\"extra_content\":{\"google\":{\"thought_signature\":\"signature-B\"}}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n";
+    let (provider, wire) = retrying_chat(VecDeque::from([signed, next_call, VALID_CHAT]));
+    let session = provider.open_session().unwrap();
+    let cancel = Cancel::never();
+    let mut request = Request {
+        model: "gemini-test".into(),
+        messages: vec![Message::user("Check the weather")],
+        ..Request::default()
+    };
+    for id in ["call_weather", "call_forecast"] {
+        let mut stream = session.call(request.clone()).unwrap();
+        let mut assistant = None;
+        while let Some(event) = stream.next(&cancel).await.unwrap() {
+            if let Event::Completed(completion) = event {
+                assistant = Some(completion.into_message());
+            }
+        }
+        request.messages.push(assistant.unwrap());
+        request.messages.push(Message::tool_result(id, "sunny"));
+    }
+    let mut continuation = session.call(request).unwrap();
+    while continuation.next(&cancel).await.unwrap().is_some() {}
+    let requests = wire.requests.lock().unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
+    for (index, signature) in [(1, "signature-A"), (3, "signature-B")] {
+        assert_eq!(
+            body["messages"][index]["tool_calls"][0]["extra_content"],
+            serde_json::json!({"google": {"thought_signature": signature}})
+        );
+    }
+}
+
+#[tokio::test]
 async fn request_limit_precedes_dump_trace_and_transport() {
     let (transport, wire) = transport(200, &[]);
     let sink = Arc::new(Sink::default());

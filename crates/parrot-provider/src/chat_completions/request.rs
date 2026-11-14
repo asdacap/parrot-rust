@@ -192,7 +192,7 @@ fn write_message(
         }
         body.push(']');
     }
-    if let Some(replay) = replay {
+    if let Some(replay) = &replay {
         if let Some(text) = replay.reasoning_content.as_deref() {
             body.push_str(",\"reasoning_content\":");
             quoted(body, text)?;
@@ -218,7 +218,18 @@ fn write_message(
             quoted(body, call.name())?;
             body.push_str(",\"arguments\":");
             quoted(body, call.arguments_json())?;
-            body.push_str("}}");
+            body.push('}');
+            if let Some(signed) = replay.as_ref().and_then(|replay| {
+                replay
+                    .tool_calls
+                    .iter()
+                    .find(|signed| signed.id == call.id())
+            }) {
+                body.push_str(",\"extra_content\":{\"google\":{\"thought_signature\":");
+                quoted(body, &signed.thought_signature)?;
+                body.push_str("}}");
+            }
+            body.push('}');
         }
         body.push(']');
     }
@@ -233,6 +244,7 @@ struct ReasoningReplay {
     protocol: String,
     reasoning_content: Option<String>,
     reasoning: Option<String>,
+    tool_calls: Vec<super::stream::ToolCallReplay>,
 }
 fn read_replay(message: &impl MessageView, provider_id: &str) -> Option<ReasoningReplay> {
     if message.role() != MessageRole::Assistant || message.provider_id() != provider_id {
@@ -254,11 +266,18 @@ fn read_replay(message: &impl MessageView, provider_id: &str) -> Option<Reasonin
         .transpose()
         .ok()?
         .flatten();
+    let tool_calls = fields
+        .get("ToolCalls")
+        .map(|raw| serde_json::from_str(raw.get()))
+        .transpose()
+        .ok()?
+        .unwrap_or_default();
     let replay = ReasoningReplay {
         version,
         protocol,
         reasoning_content,
         reasoning,
+        tool_calls,
     };
     (replay.version == 1 && replay.protocol == "chat-completions").then_some(replay)
 }

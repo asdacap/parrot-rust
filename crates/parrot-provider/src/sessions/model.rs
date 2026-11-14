@@ -540,12 +540,15 @@ impl From<chat_completions::ChatCompletion> for Completion {
                     reasoning_content: Option<String>,
                     #[serde(skip_serializing_if = "Option::is_none")]
                     reasoning: Option<String>,
+                    #[serde(skip_serializing_if = "Vec::is_empty")]
+                    tool_calls: Vec<chat_completions::ToolCallReplay>,
                 }
                 let body = serde_json::to_string(&NativeReplay {
                     version: replay.version,
                     protocol: replay.protocol,
                     reasoning_content: replay.reasoning_content,
                     reasoning: replay.reasoning,
+                    tool_calls: replay.tool_calls,
                 })
                 .expect("native replay contains only JSON strings and integers");
                 (replay.provider_id, body)

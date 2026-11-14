@@ -255,6 +255,7 @@ fn chat_completion_replay_round_trips_through_origin_only() {
             protocol: "chat-completions".into(),
             reasoning_content: Some("private-reasoning".into()),
             reasoning: None,
+            tool_calls: Vec::new(),
         }),
     });
     assert_eq!(
@@ -278,6 +279,62 @@ fn chat_completion_replay_round_trips_through_origin_only() {
             .unwrap()
             .contains("private-reasoning")
     );
+}
+
+#[test]
+fn gemini_signed_replay_is_scoped_to_its_provider_protocol_version_and_call() {
+    for (provider, role, version, protocol, signed) in [
+        ("google", Role::Assistant, 1, "chat-completions", true),
+        ("other", Role::Assistant, 1, "chat-completions", false),
+        ("google", Role::User, 1, "chat-completions", false),
+        ("google", Role::Assistant, 2, "chat-completions", false),
+        ("google", Role::Assistant, 1, "responses", false),
+    ] {
+        let mut assistant = Message::assistant(
+            "",
+            ["signed", "unsigned"]
+                .map(|id| ToolCall {
+                    id: id.into(),
+                    name: "weather".into(),
+                    arguments_json: "{}".into(),
+                })
+                .into(),
+        );
+        assistant.role = role;
+        assistant.provider_id = provider.into();
+        assistant.provider_content = serde_json::json!({
+            "Version": version,
+            "Protocol": protocol,
+            "ToolCalls": [
+                {"Id": "signed", "ThoughtSignature": "signature-A"},
+                {"Id": "unrelated", "ThoughtSignature": "never-replay"}
+            ]
+        })
+        .to_string();
+        let request = Request {
+            model: "gemini-test".into(),
+            messages: vec![assistant],
+            ..Request::default()
+        };
+        let body: serde_json::Value =
+            serde_json::from_slice(&chat_completions::prepare(&request, "google").unwrap().body)
+                .unwrap();
+        let calls = &body["messages"][0]["tool_calls"];
+        assert_eq!(
+            calls[0]["extra_content"],
+            if signed {
+                serde_json::json!({"google": {"thought_signature": "signature-A"}})
+            } else {
+                serde_json::Value::Null
+            }
+        );
+        assert!(calls[1].get("extra_content").is_none());
+        assert!(
+            !String::from_utf8(chat_completions::prepare(&request, "google").unwrap().body)
+                .unwrap()
+                .contains("never-replay")
+        );
+    }
 }
 
 #[test]

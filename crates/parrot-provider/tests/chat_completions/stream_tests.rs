@@ -424,6 +424,52 @@ async fn owning_http_stream_preserves_lifecycle_order_fragmentation_bytes_and_te
 }
 
 #[tokio::test]
+async fn gemini_indexless_parallel_calls_replay_signatures_after_fragmented_sse() {
+    use parrot_provider::sessions::{Completion, Message, Request};
+
+    let body = concat!(
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call_paris","function":{"name":"weather","arguments":"{\"city\":"}}]}}]}"#,
+        "\n\n",
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call_tokyo","function":{"name":"weather","arguments":"{\"city\":\"Tokyo\"}"}}]}}]}"#,
+        "\n\n",
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call_paris","function":{"arguments":"\"Paris\"}"}}]}}]}"#,
+        "\n\n",
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call_paris","extra_content":{"google":{"thought_signature":"signature-A"}}}]}}]}"#,
+        "\n\n",
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call_paris","extra_content":{"google":{"thought_signature":"signature-A"}}}]},"finish_reason":"stop"}]}"#,
+        "\n\ndata: [DONE]\n\n",
+    );
+    let (http, _, _) = http(body);
+    let mut stream = ChatStream::new(http, "google");
+    let mut completed = None;
+    while let Some(event) = stream.next(&Never).await.unwrap() {
+        if let ChatEvent::Completed(completion) = event {
+            completed = Some(completion);
+        }
+    }
+    let assistant = Completion::from(completed.unwrap()).into_message();
+    let request = Request {
+        model: "gemini-test".into(),
+        messages: vec![
+            Message::user("Check the weather"),
+            assistant,
+            Message::tool_result("call_paris", "sunny"),
+            Message::tool_result("call_tokyo", "cloudy"),
+        ],
+        ..Request::default()
+    };
+    let outgoing: serde_json::Value =
+        serde_json::from_slice(&prepare(&request, "google").unwrap().body).unwrap();
+    assert_eq!(
+        outgoing["messages"][1]["tool_calls"],
+        serde_json::json!([
+            {"id": "call_paris", "type": "function", "function": {"name": "weather", "arguments": "{\"city\":\"Paris\"}"}, "extra_content": {"google": {"thought_signature": "signature-A"}}},
+            {"id": "call_tokyo", "type": "function", "function": {"name": "weather", "arguments": "{\"city\":\"Tokyo\"}"}}
+        ])
+    );
+}
+
+#[tokio::test]
 async fn missing_finish_is_not_promoted_to_successful_completion() {
     let (http, _, _) = http(
         "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"partial\",\"function\":{\"name\":\"run\",\"arguments\":\"{\\\"x\\\":\"}}]}}]}\n\n",

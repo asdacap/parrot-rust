@@ -761,6 +761,11 @@ providers:
       gpt-5.6-luna: {}
       gpt-5.6-terra: {}
       gpt-5.6-sol: {}
+  google:
+    type: openai-compatible
+    protocol: chat-completions
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key_env: GEMINI_API_KEY
   anthropic:
     type: anthropic
     base_url: https://api.anthropic.com/v1
