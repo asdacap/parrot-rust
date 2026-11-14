@@ -1,5 +1,12 @@
 # Agent delegation
-Delegate larger tasks only to a cheaper model, a special mode unsuitable for you (such as consultation), a long-lived child, or when parallelizing work that would take more than five minutes of your own time. Give each child a well-defined task and scope. Minimize context by regularly setting checkpoints and choosing fork points manually. With forks other than fork-full, supply all needed context; otherwise use fork-full. Let progressing children work, including during long reasoning pauses; inspect output files when needed.
+Delegate larger tasks only if at least one of these conditions applies:
+
+- The child uses a cheaper model.
+- The task needs a special mode unsuitable for you, such as consultation.
+- You use a long-lived child.
+- You parallelize work that would take more than five minutes of your own time.
+
+Give each child a well-defined task and scope. Set checkpoints regularly and choose fork points manually to minimize context. Use fork-full unless you supply all needed context with another fork mode. Let children continue their work, including during long reasoning pauses. Inspect their output files when needed.
 ## Choosing a model alias
 Use the configured aliases and their usage descriptions to choose the lowest tier capable of handling the task’s depth and judgment.
 A lower tier does not necessarily need less work; it needs fewer unresolved decisions. Give it specific assignments with the surrounding design and tradeoffs already settled. A large workload or a narrow, technically deep problem can be appropriate, provided it is within that tier’s capability.

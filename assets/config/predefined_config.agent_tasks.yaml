@@ -45,7 +45,9 @@ prompt_templates:
       {children}
       Reuse supplied context and preparation results. Perform only necessary owner-level preparation not assigned elsewhere, then use set_agent_tasks to declare and manage the supplied provisional work in your own graph. On retries or restarts, inspect your existing tasks and reconcile the supplied definitions yourself.
       The provided task list is provisional, not fixed; you may change it as needed to satisfy the task’s scope and acceptance criteria.
-      Perform inner tasks assigned to self in your current agent and record each self task's outcome and result with set_agent_tasks. Supervise dedicated workers and handle later self-assignment notifications without waiting for another setter call. When an inner task fails, resolve it with set_agent_tasks by setting its state to pending to retry it, to succeeded with a result to accept it, or to canceled to cancel it and its dependents. You cannot finish while an inner task is unresolved. Your final JSON does not complete an inner self task.
+      Perform inner tasks assigned to self in your current agent. Record each self task's outcome and result with set_agent_tasks. Supervise dedicated workers. Handle later self-assignment notifications without another setter call.
+      If an inner task fails, resolve it with set_agent_tasks. Set its state to pending to retry it. Set its state to succeeded with a result to accept it. Set its state to canceled to cancel it and its dependents.
+      You cannot finish while an inner task is unresolved. Your final JSON does not complete an inner self task.
       When every inner task, including self tasks, is resolved, return only one strict JSON object with no prose or code fence: {{"result":"nonblank","verdict":"accept"}}, {{"result":"nonblank","verdict":"reject_and_halt","feedback":"nonblank"}}, or {{"result":"nonblank","verdict":"reject_and_retry","feedback":"nonblank"}}.
     allowed_arguments: [header, feedback, children]
     required_arguments: [header, feedback, children]
@@ -203,7 +205,25 @@ system_prompts:
 
 tools:
   set_agent_tasks:
-    description: Upsert tasks by name into your own AgentTask graph. The scheduler assigns one ready ordinary instruction leaf to self in stable graph order. Composites, tasks with model overrides, and other admitted parallel work run on retained dedicated child agents. Self uses no child capacity; a zero extra-task budget permits one self task plus one free dedicated run per owner, including nested owners. Perform self work in your current agent and explicitly record its outcome and result with set_agent_tasks; final chat or JSON does not complete self work. Dedicated workers implement, verify, and retry internally on rejection; their strict final JSON completes their parent task, and restarts retain their child session. The accepted response describes your self assignment and active dedicated work. Recovered accepted calls replay the exact originally sealed response before arguments or artifact files are reread; use get_agent_tasks and later notifications for current state. Later self assignments arrive automatically without another setter call; existing dedicated runs remain stable. You are notified when a task succeeds, when it fails, after each of your updates, and when every task is complete. A failed task holds its dependents until you resolve it by setting its state to pending to retry it, to succeeded with a result to accept it, or to canceled. Changing a running dedicated task's state or execution definition stops its worker execution. Changing a self task invalidates its assignment but does not stop your owner conversation. Updating only visibility with state running preserves its execution. A canceled task also cancels every task that depends on it until it is set back to pending, and resetting a succeeded task to pending resets its dependents too. Each agent sets hidden=true on all its tasks when its nonempty graph transitions to all-succeeded-or-canceled. A task whose payload is a task array passes the full inner task list to its child prompt. The child must use set_agent_tasks to declare and manage its own graph; the runtime does not register or synchronize that list.
+    description: >-
+      Add or update tasks by name in your own AgentTask graph. The scheduler assigns one ready ordinary instruction leaf to self in stable graph order.
+      Composites, tasks with model overrides, and other admitted parallel work run on retained dedicated child agents. Self uses no child capacity.
+      A zero extra-task budget permits one self task plus one free dedicated run per owner, including nested owners.
+      Perform self work in your current agent. Explicitly record its outcome and result with set_agent_tasks. Final chat or JSON does not complete self work.
+      Dedicated workers implement and verify their tasks. They retry internally on rejection. Their strict final JSON completes their parent task. Restarts retain their child session.
+      The accepted response describes your self assignment and active dedicated work.
+      Recovered accepted calls replay the exact originally sealed response before the runtime rereads arguments or artifact files. Use get_agent_tasks and later notifications for current state.
+      Later self assignments arrive automatically without another setter call. Existing dedicated runs remain stable.
+      You receive notifications when a task succeeds, when it fails, after each of your updates, and when every task is complete.
+      If a task fails, its dependents wait until you resolve it. Set its state to pending to retry it. Set its state to succeeded with a result to accept it. Set its state to canceled to cancel it.
+      If you change a running dedicated task's state or execution definition, its worker execution stops.
+      If you change a self task, its assignment becomes invalid. Your owner conversation continues.
+      If you update only visibility with state running, execution continues unchanged.
+      A canceled task cancels every task that depends on it until you set it back to pending.
+      If you reset a succeeded task to pending, its dependents reset too.
+      Each agent sets hidden=true on all its tasks when its nonempty graph transitions to containing only succeeded or canceled tasks.
+      If a task's payload is a task array, the full inner task list passes to its child prompt.
+      The child must use set_agent_tasks to declare and manage its own graph. The runtime does not register or synchronize that list.
     parameters:
       type: object
       properties:
@@ -275,7 +295,7 @@ tools:
               - succeeded
               - failed
               - canceled
-              description: Desired state, pending when omitted. Pending retries or restarts the task, succeeded accepts it with the given result, canceled cancels it and its dependents, and running keeps a running task with an unchanged definition.
+              description: Desired task state. If you omit the state, it is pending. Use pending to retry or restart the task. Use succeeded to accept the task with the supplied result. Use canceled to cancel the task and its dependents. Use running to keep the task running with its existing definition.
             result:
               type: string
               minLength: 1
@@ -291,7 +311,15 @@ tools:
           - acceptance_criteria
           additionalProperties: false
   get_agent_tasks:
-    description: Read your own AgentTask graph. Without a name, lists every task with its name, state, description, hidden flag, and optional read-only assigned_to. With a name, returns that task in full, including its state, result, failure, and assignment metadata, in the shape set_agent_tasks accepts plus execution metadata. assigned_to is self or the absolute registered agent path of its dedicated worker. It is omitted for never-assigned tasks and retains the last assignee after completion until reset. Read-only agent_name remains the dedicated-worker compatibility alias. Do not send assignment metadata to set_agent_tasks. Hidden tasks remain in the returned JSON. The CLI hides them from task-specific displays; live progress temporarily shows active dedicated-worker activity and the paths to active descendants. Hidden self tasks stay hidden.
+    description: >-
+      Read your own AgentTask graph. If you omit name, the tool lists every task with its name, state, description, hidden flag, and optional read-only assigned_to.
+      If you supply name, the tool returns that task in full. It includes the state, result, failure, and assignment metadata.
+      The returned task has the shape set_agent_tasks accepts, with additional execution metadata.
+      The assigned_to value is self or the absolute registered agent path of its dedicated worker. Never-assigned tasks omit assigned_to.
+      After completion, assigned_to retains the last assignee until reset. Read-only agent_name remains the dedicated-worker compatibility alias.
+      Do not send assignment metadata to set_agent_tasks. Hidden tasks remain in the returned JSON.
+      The CLI hides them from task-specific displays. Live progress temporarily shows active dedicated-worker activity and the paths to active descendants.
+      Hidden self tasks stay hidden.
     parameters:
       type: object
       properties:

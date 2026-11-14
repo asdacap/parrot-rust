@@ -173,7 +173,7 @@ prompt_templates:
     allowed_arguments: [percentage, estimated_tokens, context_limit, notification_interval, trigger, trigger_tokens]
     required_arguments: [percentage, estimated_tokens, context_limit, notification_interval, trigger_tokens]
   goal.root-reminder:
-    template: 'User set goal is {goal}. Clear exit reminder "goal" if end condition met.'
+    template: 'The user''s goal is {goal}. If the end condition is met, clear the exit reminder named "goal".'
     allowed_arguments: [goal]
     required_arguments: [goal]
   goal.root-reminder-notice:
@@ -209,7 +209,7 @@ prompt_templates:
     allowed_arguments: [title, titles]
     required_arguments: [title, titles]
   exec-command.stderr-summary:
-    template: '<{line_count} lines truncated to conserved context>'
+    template: '<{line_count} lines omitted to save context>'
     allowed_arguments: [line_count]
     required_arguments: [line_count]
   exec-command.metadata-reminder:
@@ -218,8 +218,8 @@ prompt_templates:
     required_arguments: [command_length]
   monitor.started:
     template: |-
-      Monitor {name} started. Each stdout line arrives as a notification while you keep working; a running monitor keeps this turn open. Stop it early with interrupt_process.
-      stderr does not produce events and is written to {stderr_path}
+      Monitor {name} started. Each stdout line arrives as a notification while you continue your work. A monitor keeps this turn open while it runs. To stop it early, use interrupt_process.
+      The monitor writes stderr to {stderr_path}. stderr does not produce events.
     allowed_arguments: [name, stderr_path]
     required_arguments: [name, stderr_path]
   monitor.event:
@@ -234,7 +234,7 @@ prompt_templates:
     allowed_arguments: [name, description, events, reason, exit_code, error, timeout_ms]
     required_arguments: [name, description, events, reason, exit_code, error, timeout_ms]
   agent-send-tool.description-without-parent:
-    template: Send a message to an agent in this user session using a direct name or a relative or absolute slash-separated agent path. Paths may traverse children, use parent segments to reach ancestors or siblings, or start with /root-name (for example child/grandchild, parent/sibling, or /root-name/child). Sending to any ancestor is disabled; report to the parent through the final message instead. Delegation to a more permissive agent is rejected.
+    template: Send a message to an agent in this user session. Use a direct name or a relative or absolute slash-separated agent path. Paths can pass through children. Use parent segments to reach ancestors or siblings. Start an absolute path with /root-name. Examples include child/grandchild, parent/sibling, and /root-name/child. You cannot send messages to ancestors. Report to your parent in your final message instead. You cannot delegate to an agent with a more permissive security profile.
     allowed_arguments: []
     required_arguments: []
   agent-session.runaway:
@@ -317,7 +317,14 @@ prompt_templates:
     required_arguments: [limit_bytes]
   mode.plan-workflow:
     template: >-
-      {profile_prompt} Write the canonical Markdown plan to this exact file: {plan_artifact}. Write the required AgentTask v1 JSON artifact to this exact file: {task_artifact}. The JSON must be a strict object with schema_version equal to 1 and a nonempty tasks array of top-level sibling tasks; each task requires nonblank name, description, payload, and acceptance_criteria; description must be at most 300 characters. Optional dependencies must be an array of distinct nonblank, case-sensitive names in the same sibling list; an optional model must be a nonblank string. Payload is either a nonblank string or a nonempty recursive task array. You may write optional supporting artifacts under this plan directory and reference them from the canonical plan: {plan_directory}. Do not include the plan in your assistant response. Finish only after writing both canonical files.
+      {profile_prompt} Write the canonical Markdown plan to the exact path {plan_artifact}. Write the required AgentTask v1 JSON artifact to the exact path {task_artifact}.
+      The JSON must be a strict object. Its schema_version must equal 1. Its tasks array must contain at least one top-level sibling task.
+      Each task requires nonblank name, description, payload, and acceptance_criteria fields. The description must be at most 300 characters.
+      The dependencies field is optional. If present, it must be an array of distinct nonblank, case-sensitive names in the same sibling list.
+      The model field is optional. If present, it must be a nonblank string.
+      The payload must be either a nonblank string or a nonempty recursive task array.
+      You may write supporting artifacts under {plan_directory} and reference them from the canonical plan. These artifacts are optional.
+      Do not include the plan in your assistant response. Finish only after you write both canonical files.
     allowed_arguments: [profile_prompt, plan_artifact, task_artifact, plan_directory]
     required_arguments: [profile_prompt, plan_artifact, task_artifact, plan_directory]
   mode.plan-repair-read:
@@ -362,7 +369,10 @@ prompt_templates:
       Shell path environment (defaults; references below describe absolute runtime values):
       {% for entry in entries %}{% if not loop.first %}
       {% endif %}{{ entry.name }} = {{ entry.path }}{% endfor %}
-      WORKDIR is the initial working directory; SCRATCH_DIR is shared within this user session; AGENT_SCRATCH_DIR is this agent's scratch directory; AGENT_DIR contains this agent's history.jsonl.
+      WORKDIR is the initial working directory.
+      SCRATCH_DIR is shared within this user session.
+      AGENT_SCRATCH_DIR is this agent's scratch directory.
+      AGENT_DIR contains this agent's history.jsonl.
       Every agent's output is always available at "$AGENT_DIR/output.txt", including while it runs. A direct subagent's output is at "$AGENT_DIR/<subagent-name>/output.txt"; agent_spawn and agent_status report its exact path.
       TMPDIR is the sandbox-mapped /tmp inside commands; PARROT_HOST_TMPDIR is the full host temp directory outside the sandbox.
       exec_command supports normal shell expansion, for example "$SCRATCH_DIR/somefile.txt" or "${AGENT_SCRATCH_DIR}/somefile.txt". Quote paths to preserve spaces. Explicit env entries override these defaults for that command only; overriding one variable does not change the others. The read, write and edit path arguments expand "$NAME" and "${NAME}" references to these defaults only; other tools' path arguments do not expand environment variables.

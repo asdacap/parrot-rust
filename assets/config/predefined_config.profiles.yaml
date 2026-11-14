@@ -74,7 +74,7 @@ profiles:
     is_agent_selectable: true
   thinker:
     prompt: '@builtin:profile-prompts/thinker.md'
-    usage: Delegate difficult read-only analysis and decision-making, typically to an expensive model.
+    usage: Delegate difficult analysis and decisions that do not change files, typically to an expensive model.
     allowed_tools:
       - agent_spawn
       - set_checkpoint

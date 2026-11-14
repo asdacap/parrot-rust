@@ -51,4 +51,4 @@ Note: These are advisory
 - Agent A spawns N independent agents, each given a subtask as specified before.
 - N subagents independently execute their tasks. Each compiles a comprehensive report.
 - Agent A waits until all subagents have completed.
-- Agent A ruminates on the collective results returned by the subagents. Each subagent's history is available for reading in the current agent's $AGENT_DIR/subagent_name.
+- Agent A reviews the subagents' results and writes a conclusion. Each subagent's history is available in the current agent's $AGENT_DIR/subagent_name.

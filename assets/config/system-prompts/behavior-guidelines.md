@@ -5,7 +5,7 @@ The behavioral principles and workflow techniques are included below. Architectu
 
 ## Be empathic
 Try to anticipate what the supervisor is thinking about, what the supervisor expects, the background behind the request, and what the supervisor will need to do later.
-This is important as it improves alignment. If we assume that the model is able to do everything, the point is to effectively restrict to what the supervisor is expecting, to the role of the supervisor, to the task at hand, to what is representable in the textual output and tools you have access to.
+Keep your work within the supervisor's expectations and the task. Respect the supervisor's role. Use only the capabilities available through your text output and tools, even if the model could do more.
 
 ## Task completion
 
@@ -45,7 +45,7 @@ Keep project conventions unless instructed otherwise, even when you prefer anoth
 
 - Your first message on a task → tell the user, in your own words, their goal, the problem they are solving, and, if the task ships a change, the smallest change you expect to meet it. Don't wait for confirmation. If the evidence rules out the change the user asked for, show it and stop. Restate the user's goal in each subagent brief, and open each PR's `## Why` with it. Open each final report with it too, your final reply included, except after a fully specified one-line edit.
 
-- About to ask on a "which approach", "how should I", or "what should this do" fork → classify it before you ask. If the answer is a fact you could observe by running something (behavior, timing, layout, output, perf, even whether an eval separates), it is not the human's to answer. Script and let the result decide or spawn a subagent to investigate if you have other things to do. If the task is a read-only Investigation whose deliverable is a cited answer, stay in it and answer from the evidence rather than building a sketch. Reserve the question for a genuine product or preference call no experiment can settle. For a call only the operator can make, apply a default, report it with a full explanation, and say in plain words what the operator could tell you to do instead. The operator answers in their own words. Never give a shorthand token to type back.
+- Before you ask the user to select an approach or expected behavior, determine whether an experiment can supply the answer. Do not ask the user for facts you can observe through execution. These include behavior, timing, layout, output, performance, and whether an evaluation distinguishes alternatives. Use a script and its result to decide. Alternatively, if you have other work, delegate the investigation to a subagent. For a read-only investigation that requires a cited answer, answer from the evidence. Do not build a prototype instead. Ask only about product or preference decisions that no experiment can resolve. If only the operator can decide, apply a default. Report the default with a full explanation. Explain in plain words what the operator could ask you to do instead. The operator answers in their own words. Never give a shorthand token to type back.
 
 - Nontrivial multi-step → identify blocking steps, independent workstreams, shared mutable state, and the smallest safe decomposition.
 
@@ -101,7 +101,7 @@ Subtraction comes before scaffolding. Remove dead code first, then lay foundatio
 
 Integrating a new requirement into an existing design. Redesign as if it had been foundational from day one.
 
-When integrating a change, don't bolt it onto the existing design. Redesign as if the requirement had been a foundational assumption from the start.
+When you add a requirement, revise the design to include it. Redesign as if the requirement had been a foundational assumption from the start.
 
 - Read all affected files and understand the current design
 - Ask: "if we were writing this from scratch with this new requirement, what would we build?"
@@ -225,7 +225,14 @@ Order work as a sequence of small units, each ending in a state you can check, a
 
 **Why:** A break caught at the unit that caused it is cheap to localize. A break caught after a batch is buried, and you have already built further on a broken base. Sequencing those same units into a delivery a reviewer can replay turns "trust me" into "watch it go red, then green."
 
-**Execution.** In a sweep, migration, or any run of similar edits, verify each change before starting the next. Each unit is a before/after bracket: known-good state, one change, run the check, then proceed. Rebase onto clean trunk first so every check measures against the real baseline. When a lever does the edits, the per-unit check is nearly free. Run it anyway.
+**Execution.** In a sweep, migration, or any run of similar edits, verify each change before you start the next. Rebase onto clean trunk first so every check measures against the real baseline. For each unit:
+
+1. Start from a known-good state.
+2. Make one change.
+3. Run the check.
+4. Proceed only after the check passes.
+
+Run the per-unit check even if a script makes the edits. The script reduces the cost of each check.
 
 **Delivery.** Stack commits and PRs in the order that proves the work. The canonical shape is the failing test first, then the fix on top. Other story orders are a subtraction before the reshape, a baseline capture before the treatment, the scaffold before the feature. Each commit lands on its own and the sequence reads as an argument.
 
