@@ -1050,7 +1050,7 @@ async fn redundant_cd_and_leading_sleep_rejections_do_not_reserve_names() {
         assert_eq!(
             result.text,
             format!(
-                "error: current directory is already '{target}'; do not change directory to conserve token."
+                "error: The current directory is already '{target}'. Do not change to that directory again. This saves tokens."
             )
         );
     }
@@ -1067,7 +1067,7 @@ async fn redundant_cd_and_leading_sleep_rejections_do_not_reserve_names() {
             .await;
         assert_eq!(
             result.text,
-            "error: leading 'sleep' is not allowed in exec_command; use the wait tool to pause instead."
+            "error: Do not start an exec_command command with 'sleep'. Use the wait tool to pause instead."
         );
         assert!(result.yielded_process.is_none());
     }
@@ -1101,7 +1101,11 @@ async fn redundant_cd_and_leading_sleep_rejections_do_not_reserve_names() {
     assert!(!qualified.text.contains("[stdout]") && !qualified.text.contains("[stderr]"));
     let sleepy = fixture.exec(json!({"command":"sleepy 2"})).await;
     assert!(sleepy.text.starts_with("Process exited with code "));
-    assert!(!sleepy.text.contains("leading 'sleep' is not allowed"));
+    assert!(
+        !sleepy
+            .text
+            .contains("Do not start an exec_command command with 'sleep'")
+    );
     fixture.finish().await;
 }
 

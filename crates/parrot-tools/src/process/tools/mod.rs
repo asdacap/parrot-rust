@@ -250,10 +250,10 @@ where
                 }
                 if let Some(target) = redundant_cd(&input.command, self.services.workspace.as_ref())
                 {
-                    return self.error(invocation, &format!("current directory is already '{target}'; do not change directory to conserve token."));
+                    return self.error(invocation, &format!("The current directory is already '{target}'. Do not change to that directory again. This saves tokens."));
                 }
                 if leading_sleep(&input.command) {
-                    return self.error(invocation, "leading 'sleep' is not allowed in exec_command; use the wait tool to pause instead.");
+                    return self.error(invocation, "Do not start an exec_command command with 'sleep'. Use the wait tool to pause instead.");
                 }
                 let reminder = (input.command.trim().contains('\n')
                     || input.command.encode_utf16().count() > NAMED_COMMAND_LENGTH)

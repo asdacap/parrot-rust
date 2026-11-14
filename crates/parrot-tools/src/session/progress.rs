@@ -37,7 +37,7 @@ impl Arguments {
             (None, None) if arguments.close => Ok(ProgressUpdate::Close),
             _ => Err(Failure::new(
                 FailureKind::Argument,
-                "progress updates require both steps and total_steps. Closing may omit both counts, but cannot supply only one.",
+                "Progress updates require both steps and total_steps. When you close the report, you can omit both counts. Do not supply only one count.",
             )),
         }
     }

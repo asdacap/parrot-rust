@@ -111,7 +111,9 @@ async fn close_validates_redundant_count_pairs_but_does_not_set_them() {
         r#"{"close":true,"total_steps":3}"#,
     ] {
         let result = text(fixture.invoke(Kind::Progress, json).await);
-        assert!(result.contains("Closing may omit both counts, but cannot supply only one."));
+        assert!(result.contains(
+            "When you close the report, you can omit both counts. Do not supply only one count."
+        ));
     }
     assert!(fixture.calls().is_empty());
     assert_eq!(

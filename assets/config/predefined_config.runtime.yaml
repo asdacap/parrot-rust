@@ -256,7 +256,13 @@ tools:
         name:
           type: string
           minLength: 1
-          description: Agent name or slash-separated path within this user session. Relative paths may traverse child names and 'parent' segments (for example child/grandchild, parent/sibling, or parent/parent/sibling); absolute paths start with /root-name (for example /root-name/child). A bare 'parent' or the parent's friendly name addresses the parent. Sending to any ancestor is disabled when parent sending is disabled. Sending to a non-ancestor with a more permissive security profile is rejected.
+          description: >-
+            Agent name or slash-separated path within this user session.
+            Relative paths can use child names and 'parent' segments. Examples include child/grandchild, parent/sibling, and parent/parent/sibling.
+            Absolute paths start with /root-name, for example /root-name/child.
+            A bare 'parent' or the parent's friendly name addresses the parent.
+            If parent sending is disabled, the tool does not permit messages to any ancestor.
+            The tool rejects messages to a non-ancestor with a more permissive security profile.
         message:
           type: string
           minLength: 1
@@ -289,7 +295,10 @@ tools:
       - name
       additionalProperties: false
   agent_spawn:
-    description: 'Start a child agent in an isolated session. The name identifies the child among this session''s direct children: an existing idle child with the same normalized name is resumed with the new prompt, model, and profile; an existing running child fails the call. Its terminal result is automatically sent to this session.'
+    description: >-
+      Start a child agent in an isolated session. The name identifies a direct child of this session.
+      If an idle child has the same normalized name, the call resumes that child with the new prompt, model, and profile.
+      If that child is running, the call fails. This session automatically receives the child's final result.
     parameters:
       type: object
       properties:
@@ -307,10 +316,16 @@ tools:
         name:
           type: string
           minLength: 1
-          description: 'Required friendly name, unique among this session''s direct children. An existing idle child with this name is resumed instead of creating a new agent; a running child fails the call.'
+          description: >-
+            Required friendly name, unique among this session's direct children.
+            If an idle child has this name, the call resumes that child instead of creating a new agent.
+            If that child is running, the call fails.
         scope:
           type: string
-          description: Optional problem-space scope for the child; omitted or empty inherits the parent's effective scope. Specify this to prevent subagent for doing redundant work with other agent. Ignored when resuming an existing child.
+          description: >-
+            Optional scope for the child's work. If you omit it or supply an empty value, the child inherits the parent's effective scope.
+            Specify the scope so the child does not repeat another agent's work.
+            If the call resumes an existing child, the tool ignores this value.
         fork:
           type: string
           default: empty
@@ -330,7 +345,7 @@ tools:
         path:
           type: string
           minLength: 1
-          description: Path of the existing ile to edit.
+          description: Path of the existing file to edit.
         old_string:
           type: string
           minLength: 1
@@ -348,9 +363,12 @@ tools:
       - new_string
       additionalProperties: false
   exec_command:
-    description: Run a shell command. Command run sandbox by default. Optionally reserve a name unique among this agent session's running processes
-      and yield without stopping it; completed process names can be reused and omitted names are generated.
-      Yielded run will send notification to caller once done.
+    description: >-
+      Run a shell command. Commands run in the sandbox by default.
+      You can reserve a name that is unique among this agent session's running processes.
+      You can return from the call without stopping the command.
+      You can reuse completed process names. If you omit the name, the tool generates one.
+      If the call returns before the command ends, you receive a notification when the command ends.
     parameters:
       type: object
       properties:
@@ -414,11 +432,21 @@ tools:
       - name
   monitor:
     description: |-
-      Start a background monitor whose stdout lines stream to you as notifications while you keep working. Each stdout line is an event; lines arriving within 200ms are batched into one notification; exit ends the watch and reports the exit code. Like exec_command, a running monitor keeps the turn open. Notifications are not replies from the user.
-      For a single notification ("tell me when the build finishes"), use exec_command with run_async: true instead. Use a monitor for one notification per occurrence, such as `tail -f app.log | grep --line-buffered ERROR` or a poll loop that prints one line per new item.
-      Every pipe stage must flush per line (grep --line-buffered, awk fflush()); `| head` delivers nothing until it ends. Only stdout is the event stream, so merge stderr with 2>&1 when the command's own failures matter. In poll loops tolerate transient failures (`|| true`) and poll remote APIs at 30s or slower.
-      Silence is not success: the filter must match every terminal state (for example `Traceback|Error|FAILED|Killed`), not just the happy path. Filter to the lines you would act on; a monitor that emits too many events is stopped automatically.
-      Every monitor is stopped at timeout_ms and you get one notice; start it again to keep watching. Stop it early with interrupt_process using its name.
+      Start a background monitor. You receive stdout lines as notifications while you do other work.
+      Each stdout line is an event. Lines received within 200 milliseconds form one notification.
+      When the monitor exits, you receive its exit code. Like exec_command, an active monitor keeps the turn open.
+      Notifications are not replies from the user.
+      For a single notification ("tell me when the build finishes"), use exec_command with run_async: true instead.
+      Use a monitor for repeated notifications. For example, use `tail -f app.log | grep --line-buffered ERROR` or a poll loop that prints one line per new item.
+      Make each pipe stage flush after each line. Use grep --line-buffered or awk fflush().
+      `| head` delivers nothing until it ends. Only stdout produces events.
+      If you need notifications about the command's own failures, merge stderr with 2>&1.
+      Make poll loops tolerate transient failures with `|| true`. Poll remote APIs at intervals of 30 seconds or more.
+      No output does not prove success. Make the filter match every terminal state, including successful completion and failures.
+      For example, include `Traceback|Error|FAILED|Killed` when applicable. Filter for lines that require action.
+      The system stops a monitor that produces too many events.
+      When timeout_ms expires, the system stops the monitor and sends one notice. Start the monitor again if you need more notifications.
+      To stop it early, call interrupt_process with its name.
     parameters:
       type: object
       properties:
@@ -524,7 +552,8 @@ tools:
       Requires a prompt and output_path ending in .png. Saves the image and returns its absolute path, without attaching
       or displaying it. Existing regular files may be overwritten under the active write-security profile.
       Relative paths resolve within the workspace; absolute paths require permission. Missing authorized parents are created.
-      Omit referenced_image_paths to generate; provide up to five local PNG, JPEG, or WebP files to edit, in reference order.
+      To generate an image, omit referenced_image_paths.
+      To edit an image, supply up to five local PNG, JPEG, or WebP files in reference order.
       Inspect unfamiliar local images with read_image first. References must be single-frame images, at most 10 MiB each
       and 50 MiB total, at most 8192 pixels per dimension and 40000000 pixels. Output is limited to 32 MiB with the same
       dimension and frame limits. Generation may take several minutes, with a ten-minute operation timeout.
@@ -588,7 +617,11 @@ tools:
       - reason
       additionalProperties: false
   progress:
-    description: Report completed steps out of a declared total for this agent. Each update replaces its one progress report and optional current-step label. Active progress blocks normal completion, even at 100%; explicitly close it before finishing. Progress survives interruption and restart. Closing may occur below the total and does not claim success.
+    description: >-
+      Report completed steps out of a declared total for this agent.
+      Each update replaces the agent's one progress report and optional current-step label.
+      An active progress report prevents this turn from finishing. Close the report before you finish, even at 100%.
+      Progress survives interruption and restart. You can close the report below the total. This does not claim success.
     parameters:
       type: object
       properties:
@@ -621,7 +654,9 @@ tools:
       - title
       additionalProperties: false
   set_exit_reminder:
-    description: Set or replace a titled reminder injected before this agent finishes a turn. The agent cannot finish until every exit reminder is cleared with clear_exit_reminder.
+    description: >-
+      Set or replace a reminder with a title. The agent receives the reminder before it finishes the turn.
+      Clear every exit reminder with clear_exit_reminder before the agent can finish.
     parameters:
       type: object
       properties:
@@ -655,7 +690,10 @@ tools:
       type: object
       additionalProperties: false
   wait:
-    description: Wait for incoming activity. Returns early for a new message, completed child-agent, AgentTask graph completion, process completion. Do not use the sleep shell command. Use this wait tool than `sleep` cli.
+    description: >-
+      Wait for incoming activity. The call returns early when a message arrives, a child agent completes,
+      an AgentTask graph completes, or a process completes. Do not use the sleep shell command.
+      Use this tool instead of the `sleep` command.
     parameters:
       type: object
       properties:

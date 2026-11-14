@@ -175,7 +175,7 @@ impl StatusFormatter {
             included += 1;
         }
         if included < entries.len() {
-            write!(report, "\n- {} older entries omitted to stay within 1K tokens; read the live output file for the full output", entries.len() - included).expect("string write");
+            write!(report, "\n- {} older entries omitted to stay within 1K tokens. Read the live output file for the full output.", entries.len() - included).expect("string write");
         }
         for entry in &entries[entries.len() - included..] {
             report.push_str(entry);
