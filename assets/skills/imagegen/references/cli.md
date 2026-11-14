@@ -1,6 +1,6 @@
 # CLI reference (`scripts/image_gen.py`)
 
-This file is for the fallback CLI mode only. Read it when the user explicitly asks to use `scripts/image_gen.py` / CLI / API / model controls, or after the user explicitly confirms that a transparent-output request should use the `gpt-image-1.5` true-transparency fallback path.
+This file is for the fallback CLI mode only. Read it if the user explicitly requests `scripts/image_gen.py`, the CLI, the API, or model controls. Also read it if the user explicitly approves the `gpt-image-1.5` true-transparency fallback for a transparent-output request.
 
 `generate-batch` is a CLI subcommand in this fallback path. It is not a top-level mode of the skill.
 The word `batch` in a user request is not CLI opt-in by itself.

@@ -3,13 +3,13 @@ name: wayfinder
 description: Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets kept as agent tasks in the agent scratch directory, and resolve them one at a time until the way to the destination is clear.
 ---
 
-A loose idea has arrived, too big for one agent session, and wrapped in fog: the way from here to the **destination** isn't visible yet. Wayfinding is about finding that way, not charging at the destination. This skill charts the way as a **shared map** in the agent scratch directory, then works its **decision tickets** (questions whose resolution is a decision, not slices of a build to execute) one at a time until the route is clear.
+Use this skill for work that is too large for one agent session and still has unresolved planning decisions. Record the goal and decisions in a **shared map** in the agent scratch directory. Resolve its **decision tickets** one at a time until you can plan how to reach the **destination**. Each decision ticket asks a question whose answer settles a decision, not an implementation task.
 
-The destination varies per effort, and naming it is the first act of charting: it shapes every ticket. It might be a spec to hand off and iterate on, a decision to lock before planning starts, or a change made in place like a data-structure migration. The map is domain-agnostic: engineering work, course content, whatever fits the shape.
+The destination is the goal of the effort. Define it before you create tickets because it determines their scope. The goal can be a specification, a decision needed before planning, or a change such as a data-structure migration. Use the map for engineering, course content, or other work with unresolved decisions.
 
 ## Plan, don't do
 
-Wayfinder is **planning** by default: each ticket resolves a decision, and the map is done when the way is clear, with nothing left to decide before someone goes and does the thing. The pull to just do the work is usually the signal you've reached the edge of the map and it's time to hand off. An effort can override this in its **Notes**, carrying execution into the map itself, but absent that, produce decisions, not deliverables.
+By default, Wayfinder resolves **planning** decisions, not implementation tasks. The map is complete when no decisions remain before execution. When you can start implementation without further decisions, hand off the map. An effort can explicitly include execution in its **Notes**. Without that override, produce decisions, not deliverables.
 
 ## Refer by name
 
@@ -104,24 +104,24 @@ Every ticket is either **HITL** (human in the loop, worked _with_ a human who sp
 
 ## Fog of war
 
-The map is _deliberately_ incomplete: don't chart what you can't yet see. Beyond the live tickets lies the **fog of war**: the dim view of decisions and investigations you can tell are coming but can't yet pin down, because they hang on questions still open. Resolving a ticket clears the fog ahead of it, graduating whatever's now specifiable into fresh tickets, one at a time, until the way to the destination is clear and no tickets remain.
+Keep the map deliberately incomplete. Record only tickets whose questions you can state precisely. The **fog of war** means decisions and investigations that you expect but cannot yet define because they depend on open questions. After you resolve a ticket, create new tickets for any questions you can now define. Repeat until no decisions remain before execution.
 
-The map's **Not yet specified** section is where that dim view is written down: the suspected question, the area to revisit later. It's the undiscovered frontier _toward_ the destination: everything here is in scope, just not sharp enough to ticket. Write as loosely or as fully as the view allows; it doubles as a signpost for collaborators reading where the effort is headed.
+Use the map's **Not yet specified** section for suspected questions and areas to revisit. Everything in this section is in scope but not yet precise enough for a ticket. Record as much detail as you can to help collaborators understand the expected work.
 
-**Fog or ticket?** The test is whether you can state the question precisely now, _not_ whether you can answer it now.
+**Fog or ticket?** Determine whether you can state the question precisely now, not whether you can answer it now.
 
-- **Ticket when** the question is already sharp, even if it's blocked and you can't act on it yet.
-- **Not yet specified when** you can't yet phrase it that sharply. Don't pre-slice the fog into ticket-sized pieces: it's coarser than a ticket, and one patch may graduate into several tickets, or none, once the frontier reaches it.
+- **Ticket when** the question is precise, even if a dependency prevents work on it now.
+- **Not yet specified when** you cannot yet state the question precisely. Do not divide these areas into ticket-sized pieces in advance. An area may later produce several tickets or none.
 
 **Not yet specified** excludes what's already decided (Decisions so far), what's already a live ticket, and what's out of scope (the next section).
 
 ## Out of scope
 
-Fog only ever gathers _toward_ the destination. The destination fixes the scope, so work beyond it is **out of scope**: it isn't fog, and it doesn't belong in **Not yet specified**. It gets its own **Out of scope** section on the map: work you've consciously ruled out of _this_ effort. Scope, not sharpness, lands it here.
+The destination determines the scope. Record work that you deliberately exclude from this effort in the map's **Out of scope** section. Do not put it in **Not yet specified**. Use scope, not the precision of a question, to select the section.
 
-Out-of-scope work never graduates (the frontier stops at the destination), so it returns only if the destination is redrawn, and then as a fresh effort, not a resumption.
+Out-of-scope work does not become a ticket as decisions are resolved. Return to it only if the destination changes. Treat that return as a new effort, not a resumption.
 
-Ruling something out of scope is a scoping act, not a step on the route. When a ticket that already exists turns out to sit past the destination (mis-scoped in while charting, or exposed by a resolution), **close it** with `Status: out-of-scope` in its ticket file (so it is unambiguously off the frontier) and leave one line in the **Out of scope** section: the gist plus why it's out of scope, linking the ticket file. It stays out of **Decisions so far**, which records the route actually walked; a scope boundary isn't a step on it.
+If an existing ticket is outside the scope, **close it** with `Status: out-of-scope` in its ticket file. This applies whether the original scope was incorrect or a resolution exposed the scope error. The ticket must no longer appear among tickets available for work. Add one line to **Out of scope** with a summary, the reason for exclusion, and a link to the ticket file. Do not add it to **Decisions so far**, which records resolved decisions, not scope exclusions.
 
 ## Invocation
 

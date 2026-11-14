@@ -43,7 +43,7 @@ All of these scripts use network, so when running in the sandbox, request escala
 ## Behavior and Options
 
 - Defaults to direct download for public GitHub repos.
-- If download fails with auth/permission errors, falls back to git sparse checkout.
+- If a download fails because of an authentication or permission error, the script uses git sparse checkout.
 - Aborts if the destination skill directory already exists.
 - Installs into `~/.agents/skills/<skill-name>`.
 - Multiple `--path` values install multiple skills in one run, each named from the path basename unless `--name` is supplied.

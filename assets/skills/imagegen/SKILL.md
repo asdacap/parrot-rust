@@ -104,7 +104,7 @@ Assume the user wants a new image unless they clearly ask to change an existing 
    - If the user's prompt is already specific and detailed, normalize it into a clear spec without adding creative requirements.
    - If the user's prompt is generic, add tasteful augmentation only when it materially improves output quality.
 10. Use the built-in `imagegen` tool by default.
-11. For transparent-output requests, describe the intent in the prompt, inspect the result, and do not promise transparency from automatic background settings.
+11. For transparent-output requests, request transparency in the prompt. Inspect the result. Do not promise that automatic background settings produce transparency.
 12. Inspect outputs and validate: subject, style, composition, text accuracy, and invariants/avoid items.
 13. Iterate with a single targeted change, then re-check.
 14. For preview-only work, choose an authorized `.png` output path and report it; the native result does not render inline automatically.

@@ -124,7 +124,7 @@ Skip Phase A only when the work is genuinely greenfield with no surrounding syst
 
 Run parallel design-sketch candidates with the Phase A grounding artifacts. Pass `references/runner-prompt.md` as each runner's prompt.
 
-Use `agent_spawn` with configured models and available profiles, following the delegation policy. Give each candidate its own git worktree or isolated output directory. Derive 3-6 concrete gradeable criteria for this task before launching candidates. Read every candidate end to end, score each against the criteria, pick a base, and graft the strongest parts of the other candidates into it. Prefer different available models; report any unavailable model diversity.
+Follow the delegation policy. Use `agent_spawn` with configured models and available profiles. Give each candidate its own git worktree or isolated output directory. Derive 3-6 concrete gradeable criteria for this task before launching candidates. Read every candidate end to end, score each against the criteria, pick a base, and graft the strongest parts of the other candidates into it. Prefer different available models; report any unavailable model diversity.
 
 Design it twice. Require at least two structurally distinct candidates before synthesis, even when the first looks sufficient. Whole-shape alternatives, not point fixes inside one shape.
 

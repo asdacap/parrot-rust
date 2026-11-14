@@ -49,7 +49,7 @@ The owner alone reads `summary` for its explicit list of queues and reports thei
 - If the total is zero, omit the progress update. Do not send `0/0` or invent a step. Keep coordinating an open empty queue. A never-populated drained queue needs no report.
 - Once a nonzero report exists, keep it active through open-empty periods. Producers may add items and change the total, so the reported percentage can decrease.
 
-When every selected queue is closed and empty, publish final counts and call `progress` with `close: true`. Reaching the total does not close progress. The counts measure work distribution, not successful completion; still join workers and check their outcomes before declaring their work complete. Closing queue progress does not clear child, task, process, or reminder checks.
+When every selected queue is closed and empty, publish final counts and call `progress` with `close: true`. Reaching the total does not close progress. The counts measure work distribution, not successful completion. Wait for the workers and verify their results before you report that their work is complete. Closing queue progress does not clear child, task, process, or reminder checks.
 
 On intentional stop, report the remaining waiting items and explicitly close progress. Leave queue files intact. Closing the report below its total does not assert success or discard work.
 

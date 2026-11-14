@@ -122,7 +122,7 @@ Revise if any item fails:
 2. Is the phrasing tier-appropriate? (Direct claims can use "because". Inferred claims cannot.)
 3. Did you surface every contradiction you noticed, or quietly pick one?
 4. Does "What We Don't Know" name specific gaps? If it's empty or missing, be suspicious. Historical investigations almost always have gaps.
-5. Did you check any hypothesis embedded in the question against the evidence rather than rubber-stamp it?
+5. Did you compare each hypothesis in the question with the evidence before you accepted it?
 6. Did you cite code as evidence for its own intent? Remove it. Code is mechanics, not motivation.
 7. Is the tone calibrated? A confident-sounding answer on weak evidence is the exact failure this skill exists to prevent.
 
