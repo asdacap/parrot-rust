@@ -387,6 +387,7 @@ async fn observer_drop_does_not_issue_another_pull_or_lose_its_event() {
 async fn unsupported_upgrade_yields_retry_before_opening_http() {
     let (session, wire, http) = setup(
         vec![Err(ws::WebSocketError::Upgrade {
+            retry_after: None,
             status: 426,
             message: "upgrade".into(),
         })],
@@ -688,6 +689,7 @@ async fn suspended_websocket_request_trace_is_cancelled_once_via_shared_call_tra
 async fn websocket_connect_failure_has_allowlisted_trace_and_no_encoded_request_size() {
     let (session, _, _) = setup(
         vec![Err(ws::WebSocketError::Upgrade {
+            retry_after: None,
             status: 426,
             message: "secret-error".into(),
         })],
@@ -806,6 +808,7 @@ async fn websocket_auth_trace_classifies_original_error_without_consuming_it() {
 async fn header_socket_failures_do_not_trigger_native_recovery() {
     for original in [
         Error::Socket(ws::WebSocketError::Upgrade {
+            retry_after: None,
             status: 426,
             message: "credential service upgrade failed".into(),
         }),

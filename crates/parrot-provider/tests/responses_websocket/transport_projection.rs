@@ -383,6 +383,7 @@ impl Connector for FakeConnector {
                     message: "scripted premature close".into(),
                 }),
                 Some("upgrade-429") => Some(WebSocketError::Upgrade {
+                    retry_after: None,
                     status: 429,
                     message: "scripted upgrade".into(),
                 }),

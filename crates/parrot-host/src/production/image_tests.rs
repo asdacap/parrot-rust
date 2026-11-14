@@ -170,6 +170,7 @@ async fn production_image_tool_sanitizes_typed_authentication_and_network_errors
             "ordinary HTTP policy failure".into(),
         )),
         Error::Http(HttpError::Response(HttpFailure {
+            retry_after: None,
             status: 401,
             error_type: String::new(),
             error_code: String::new(),

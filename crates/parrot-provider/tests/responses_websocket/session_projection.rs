@@ -531,6 +531,7 @@ impl ConnectorTrait for Connector {
             .expect("unexpected connector call");
         Box::pin(async move {
             let (socket, response_headers) = outcome.map_err(|status| WebSocketError::Upgrade {
+                retry_after: None,
                 status,
                 message: "scripted unsupported upgrade".into(),
             })?;

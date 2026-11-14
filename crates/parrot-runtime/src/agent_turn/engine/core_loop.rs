@@ -336,6 +336,7 @@ mod tests {
         let provider_error = || {
             sessions::Error::Http(parrot_provider::http_stream::HttpError::Response(
                 parrot_provider::http_stream::HttpFailure {
+                    retry_after: None,
                     status: 503,
                     error_type: "busy".into(),
                     error_code: "retry".into(),

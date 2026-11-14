@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+httpdate = "=1.0.3"
 parrot-media = { path = "../parrot-media" }
 serde = { version = "=1.0.229", features = ["derive"] }
 parrot-core = { path = "../parrot-core" }

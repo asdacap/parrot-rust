@@ -572,3 +572,72 @@ async fn bounded_get_polls_ready_transport_before_precancelled_caller() {
     ));
     assert_eq!(transport.requests.lock().unwrap().len(), 1);
 }
+
+struct CooldownHeadersTransport {
+    inner: FakeTransport,
+    headers: Vec<(String, String)>,
+}
+impl HttpTransport for CooldownHeadersTransport {
+    fn send<'a>(
+        &'a self,
+        request: HttpRequest,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
+        Box::pin(async move {
+            let mut response = self.inner.send(request, cancellation).await?;
+            response.headers = self.headers.clone();
+            Ok(response)
+        })
+    }
+}
+struct UnreadableErrorBody;
+impl ByteStream for UnreadableErrorBody {
+    fn read<'a>(
+        &'a mut self,
+        _: &'a mut [u8],
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<usize, HttpError>> {
+        Box::pin(async { Err(HttpError::Transport("body failed".into())) })
+    }
+}
+
+#[tokio::test]
+async fn error_cooldown_survives_unreadable_body_and_rejects_ambiguous_headers() {
+    for unreadable in [false, true] {
+        for (headers, expected) in [
+            (
+                vec![("rEtRy-AfTeR".into(), "15".into())],
+                Some(Duration::from_secs(15)),
+            ),
+            (
+                vec![
+                    ("Retry-After".into(), "10".into()),
+                    ("retry-after".into(), "15".into()),
+                ],
+                None,
+            ),
+        ] {
+            let body: Box<dyn ByteStream> = if unreadable {
+                Box::new(UnreadableErrorBody)
+            } else {
+                Box::new(BytesBody::new(b"too many requests".to_vec()))
+            };
+            let transport = CooldownHeadersTransport {
+                inner: FakeTransport {
+                    body: Mutex::new(Some(body)),
+                    requests: Mutex::new(Vec::new()),
+                    status: 429,
+                    delay: Duration::ZERO,
+                },
+                headers,
+            };
+            let error = get(&transport, endpoint(), vec![], Duration::ZERO, 1024, &Never)
+                .await
+                .unwrap_err();
+            let HttpError::Response(failure) = error else {
+                panic!("expected structured HTTP error")
+            };
+            assert_eq!(failure.retry_after, expected);
+        }
+    }
+}

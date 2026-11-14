@@ -411,6 +411,7 @@ async fn observe(case: &Case) -> Result<(Value, Value), Error> {
             let (record, connection) = socket();
             let connector = Connector::new(if case.fallback {
                 vec![Connection::Failure(ws::WebSocketError::Upgrade {
+                    retry_after: None,
                     status: 404,
                     message: "missing".into(),
                 })]
@@ -489,6 +490,7 @@ async fn observe(case: &Case) -> Result<(Value, Value), Error> {
                 .map(|_| {
                     Connection::Failure(if case.upgrade_failure {
                         ws::WebSocketError::Upgrade {
+                            retry_after: None,
                             status: 502,
                             message: SENTINEL.into(),
                         }
@@ -569,6 +571,7 @@ async fn observe(case: &Case) -> Result<(Value, Value), Error> {
                 },
                 "wire_protocol" => ws::WebSocketError::Wire(SENTINEL.into()),
                 "websocket_upgrade" => ws::WebSocketError::Upgrade {
+                    retry_after: None,
                     status: 503,
                     message: SENTINEL.into(),
                 },

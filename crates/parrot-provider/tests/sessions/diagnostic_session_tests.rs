@@ -407,6 +407,7 @@ async fn typed_failures_produce_allowlisted_codes_without_error_messages() {
         ),
         (
             Error::Socket(WebSocketError::Upgrade {
+                retry_after: None,
                 status: 429,
                 message: secret(),
             }),

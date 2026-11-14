@@ -84,6 +84,7 @@ mod tests {
         let body = String::from("http body");
         let original = body.as_ptr();
         let error = Error::from(HttpError::Response(HttpFailure {
+            retry_after: None,
             status: 400,
             error_type: "type".into(),
             error_code: "code".into(),

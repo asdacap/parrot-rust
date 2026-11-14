@@ -515,6 +515,7 @@ async fn source_pinned_session_failure_categories_preserve_or_wrap_exact_types()
         },
         WebSocketError::Wire("private-sentinel".into()),
         WebSocketError::Upgrade {
+            retry_after: None,
             status: 503,
             message: "private-sentinel".into(),
         },
@@ -704,6 +705,7 @@ async fn source_pinned_http_limit_error_routes_without_websocket_or_error_replay
         for fallback in [false, true] {
             let outcomes = if fallback {
                 vec![Err(WebSocketError::Upgrade {
+                    retry_after: None,
                     status: 404,
                     message: "missing".into(),
                 })]
@@ -952,6 +954,7 @@ async fn unsupported_upgrade_selects_sticky_http_but_other_status_throws() {
     for status in [404, 405, 426, 403, 500] {
         let (mut session, wire, http, cancel) = setup(
             vec![Err(WebSocketError::Upgrade {
+                retry_after: None,
                 status,
                 message: "upgrade failed".into(),
             })],

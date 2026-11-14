@@ -328,6 +328,7 @@ fn script_failure(name: &str) -> Error {
     };
     let http = |status, code: &str, detail: &str| {
         Error::Http(HttpError::Response(HttpFailure {
+            retry_after: None,
             status,
             error_type: String::new(),
             error_code: code.into(),
@@ -353,6 +354,7 @@ fn script_failure(name: &str) -> Error {
         "cancelled" => Error::Cancelled,
         "websocket" => Error::Socket(WebSocketError::Transport("synthetic websocket drop".into())),
         "upgrade429" => Error::Socket(WebSocketError::Upgrade {
+            retry_after: None,
             status: 429,
             message: "synthetic upgrade rejection".into(),
         }),

@@ -6,6 +6,7 @@ use std::time::Duration;
 
 fn http(status: i32, error_type: &str, code: &str, detail: &str) -> Failure {
     Failure::Http {
+        retry_after: None,
         status,
         error_type: error_type.into(),
         code: code.into(),
@@ -172,7 +173,10 @@ fn stream_failures_share_exactly_five_attempts_and_backoff() {
         Failure::Network,
         Failure::Protocol,
         http(429, "", "", "private-sentinel"),
-        Failure::Upgrade { status: 502 },
+        Failure::Upgrade {
+            retry_after: None,
+            status: 502,
+        },
         Failure::WebSocketTransport,
     ];
     for (index, failure) in failures.iter().enumerate() {
@@ -187,7 +191,10 @@ fn stream_failures_share_exactly_five_attempts_and_backoff() {
     }
     for failure in [
         Failure::WebSocketTransport,
-        Failure::Upgrade { status: 429 },
+        Failure::Upgrade {
+            retry_after: None,
+            status: 429,
+        },
     ] {
         let action = policy.classify(&failure, false).unwrap();
         assert_eq!(action.attempt, 6);
@@ -203,7 +210,13 @@ fn stream_failures_share_exactly_five_attempts_and_backoff() {
 #[test]
 fn http_status_and_upgrade_permanence_are_source_shaped() {
     for status in [0, 200, 400, 401, 404, 405, 426, 428, 430, 499] {
-        for failure in [http(status, "", "", ""), Failure::Upgrade { status }] {
+        for failure in [
+            http(status, "", "", ""),
+            Failure::Upgrade {
+                retry_after: None,
+                status,
+            },
+        ] {
             assert_eq!(
                 RetryPolicy::new(0, 5).classify(&failure, false),
                 Err(failure)
@@ -214,7 +227,10 @@ fn http_status_and_upgrade_permanence_are_source_shaped() {
         for (failure, prefix) in [
             (http(status, "", "", ""), "Provider returned HTTP"),
             (
-                Failure::Upgrade { status },
+                Failure::Upgrade {
+                    retry_after: None,
+                    status,
+                },
                 "WebSocket upgrade returned HTTP",
             ),
         ] {
@@ -571,5 +587,36 @@ fn failure_formatting_and_retry_text_never_include_provider_detail_or_codes() {
         if let Ok(action) = RetryPolicy::new(0, 5).classify(&failure, false) {
             assert!(!action.reason.contains("private-"));
         }
+    }
+}
+
+#[test]
+fn server_cooldowns_preserve_eligibility_visibility_and_independent_budgets() {
+    let mut rate_limit = http(429, "", "", "");
+    let mut overload = http(503, "", "", "");
+    let mut terminal = http(401, "", "", "");
+    for failure in [&mut rate_limit, &mut overload, &mut terminal] {
+        if let Failure::Http { retry_after, .. } = failure {
+            *retry_after = Some(Duration::from_secs(60));
+        }
+    }
+    let mut policy = RetryPolicy::new(4096, 5);
+    assert_eq!(policy.classify(&terminal, false), Err(terminal.clone()));
+    for attempt in 1..=5 {
+        for failure in [&rate_limit, &overload] {
+            let action = policy.classify(failure, false).unwrap();
+            assert_eq!(action.attempt, attempt);
+            assert_eq!(action.delay, Duration::from_secs(60));
+        }
+    }
+    for failure in [&rate_limit, &overload] {
+        assert_eq!(policy.classify(failure, false), Err(failure.clone()));
+        let mut visible = RetryPolicy::new(4096, 5);
+        visible.mark_visible();
+        assert_eq!(visible.classify(failure, false), Err(failure.clone()));
+        assert_eq!(
+            RetryPolicy::new(4096, 5).classify(failure, true),
+            Err(failure.clone())
+        );
     }
 }

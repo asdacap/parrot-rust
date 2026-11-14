@@ -323,6 +323,15 @@ impl RetryStream {
                     }
                     Err(_) => return Err(original),
                 };
+                if tokio::time::Instant::now()
+                    .checked_add(action.delay)
+                    .is_none()
+                    || u64::try_from(action.delay.as_millis()).is_err()
+                {
+                    return Err(Error::Provider(
+                        "Provider retry delay exceeds the supported timer range.".into(),
+                    ));
+                }
                 if action.fallback_http {
                     if !self.session.try_fall_back_to_http().await? {
                         return Err(Error::InvalidOperation(
@@ -379,6 +388,7 @@ pub fn classify_failure(error: &Error) -> Failure {
         Error::Http(error) => match error {
             HttpError::Cancelled => Failure::Cancelled,
             HttpError::ProviderHttp(_) => Failure::Http {
+                retry_after: None,
                 status: 0,
                 error_type: String::new(),
                 code: String::new(),
@@ -386,6 +396,7 @@ pub fn classify_failure(error: &Error) -> Failure {
             },
             HttpError::HeaderTimeout(_) => Failure::HeaderTimeout,
             HttpError::Response(error) => Failure::Http {
+                retry_after: error.retry_after,
                 status: i32::from(error.status),
                 error_type: error.error_type.clone(),
                 code: error.error_code.clone(),
@@ -404,7 +415,12 @@ pub fn classify_failure(error: &Error) -> Failure {
         },
         Error::Socket(error) => match error {
             WebSocketError::Cancelled => Failure::Cancelled,
-            WebSocketError::Upgrade { status, .. } => Failure::Upgrade {
+            WebSocketError::Upgrade {
+                status,
+                retry_after,
+                ..
+            } => Failure::Upgrade {
+                retry_after: *retry_after,
                 status: i32::from(*status),
             },
             WebSocketError::Transport(_) | WebSocketError::TransportFailure { .. } => {

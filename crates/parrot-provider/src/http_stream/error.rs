@@ -3,6 +3,7 @@ use std::{fmt, time::Duration};
 /// Structured non-success HTTP response, retained for provider classifiers.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HttpFailure {
+    pub retry_after: Option<Duration>,
     pub status: u16,
     pub error_type: String,
     pub error_code: String,

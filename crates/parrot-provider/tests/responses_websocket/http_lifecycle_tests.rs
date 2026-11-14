@@ -50,6 +50,7 @@ impl Connector for Unsupported {
         self.0.fetch_add(1, Ordering::SeqCst);
         Box::pin(async {
             Err(WebSocketError::Upgrade {
+                retry_after: None,
                 status: 404,
                 message: "unsupported".into(),
             })

@@ -63,6 +63,7 @@ fn completed() -> Event {
 }
 fn http(status: u16, detail: &str) -> Error {
     Error::Http(HttpError::Response(HttpFailure {
+        retry_after: None,
         status,
         error_type: String::new(),
         error_code: String::new(),

@@ -70,6 +70,7 @@ async fn cancellation_before_terminal_admission_closes_same_turn_as_interrupted_
 fn http_error(body: &str) -> Error {
     Error::Http(parrot_provider::http_stream::HttpError::Response(
         parrot_provider::http_stream::HttpFailure {
+            retry_after: None,
             status: 503,
             error_type: "busy".into(),
             error_code: "retry".into(),

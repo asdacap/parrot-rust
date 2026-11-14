@@ -561,3 +561,48 @@ async fn connect_timeout_cancellation_and_disposal_interrupt_upgrade() {
         server.await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn native_upgrade_errors_preserve_retry_after_without_accepting_duplicates() {
+    for (headers, expected) in [
+        ("rEtRy-AfTeR: 15\r\n", Some(Duration::from_secs(15))),
+        ("Retry-After: 10\r\nRetry-After: 15\r\n", None),
+        ("Retry-After: invalid\r\n", None),
+    ] {
+        let (listener, endpoint) = listener().await;
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            request(&mut stream).await;
+            stream
+                .write_all(
+                    format!("HTTP/1.1 429 Rejected\r\n{headers}Content-Length: 0\r\n\r\n")
+                        .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+        let error = match connector()
+            .connect(
+                &endpoint,
+                &vec![],
+                Some(Duration::from_secs(2)),
+                &Token::default(),
+            )
+            .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("accepted rejected upgrade"),
+        };
+        let WebSocketError::Upgrade {
+            status,
+            retry_after,
+            ..
+        } = error
+        else {
+            panic!("expected upgrade error")
+        };
+        assert_eq!(status, 429);
+        assert_eq!(retry_after, expected);
+        server.await.unwrap();
+    }
+}

@@ -909,6 +909,7 @@ fn fieldless_conversion_preserves_every_payload_and_other_http_variant() {
         HttpError::ProviderHttp("operation cancelled: provider HTTP failure".into()),
         HttpError::Provider("operation cancelled: provider failure".into()),
         HttpError::Response(HttpFailure {
+            retry_after: None,
             status: 503,
             error_type: "busy".into(),
             error_code: "retry".into(),
@@ -1350,4 +1351,91 @@ async fn archived_retries_keep_distinct_requests_responses_and_outcomes() {
     assert_eq!(first.request, second.request);
     stream.close().await.unwrap();
     session.close().await.unwrap();
+}
+
+struct CooldownTransport {
+    wire: Arc<Wire>,
+    failures: Mutex<VecDeque<(u16, String)>>,
+}
+impl HttpTransport for CooldownTransport {
+    fn send<'a>(
+        &'a self,
+        request: HttpRequest,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
+        Box::pin(async move {
+            self.wire.requests.lock().unwrap().push(request);
+            let failure = self.failures.lock().unwrap().pop_front();
+            let (status, headers, body) = match failure {
+                Some((status, cooldown)) => (
+                    status,
+                    vec![("rEtRy-AfTeR".into(), cooldown)],
+                    "{\"error\":{\"message\":\"try later\"}}",
+                ),
+                None => (200, Vec::new(), VALID_CHAT),
+            };
+            Ok(HttpResponse {
+                status,
+                reason: String::new(),
+                headers,
+                body: Box::new(Body {
+                    chunks: VecDeque::from([body.as_bytes().to_vec()]),
+                    wire: self.wire.clone(),
+                }),
+            })
+        })
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn composed_http_retry_after_delays_actual_next_request() {
+    for (failures, expected) in [
+        (vec![(429, "15"), (429, "10")], vec![15000, 10000]),
+        (vec![(503, "15"), (503, "1")], vec![15000, 4000]),
+        (vec![(429, "0")], vec![200]),
+        (vec![(429, "invalid")], vec![200]),
+        (vec![(429, "18446744073709551616")], vec![200]),
+    ] {
+        let wire = Arc::new(Wire::default());
+        let transport = Arc::new(CooldownTransport {
+            wire: wire.clone(),
+            failures: Mutex::new(
+                failures
+                    .into_iter()
+                    .map(|(status, value)| (status, value.into()))
+                    .collect(),
+            ),
+        });
+        let options = CompatibleOptions::new("p", "https://example.test/v1", Arc::new(FixedKey));
+        let provider =
+            OpenAICompatibleProvider::new(options, transport, Arc::new(NoSocket)).unwrap();
+        let retrying = RetryingProvider::new(Arc::new(provider), 5);
+        let mut stream = retrying
+            .open_session()
+            .unwrap()
+            .call(Request {
+                model: "m".into(),
+                messages: vec![Message::user("hello")],
+                ..Request::default()
+            })
+            .unwrap();
+        let cancel = Cancel::never();
+        let start = tokio::time::Instant::now();
+        let mut retries = 0;
+        let mut total_delay = Duration::ZERO;
+        while let Some(event) = stream.next(&cancel).await.unwrap() {
+            if let Event::Retry { retry_after, .. } = event {
+                assert_eq!(retry_after, Duration::from_millis(expected[retries]));
+                assert!(start.elapsed() >= total_delay);
+                assert_eq!(wire.requests.lock().unwrap().len(), retries + 1);
+                total_delay += retry_after;
+                retries += 1;
+            }
+            if wire.requests.lock().unwrap().len() > expected.len() {
+                assert!(start.elapsed() >= total_delay);
+            }
+        }
+        assert_eq!(retries, expected.len());
+        assert_eq!(wire.requests.lock().unwrap().len(), expected.len() + 1);
+    }
 }

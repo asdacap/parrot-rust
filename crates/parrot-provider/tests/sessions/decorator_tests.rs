@@ -275,7 +275,7 @@ async fn lifecycle_and_encrypted_metadata_do_not_block_retry() {
 }
 #[tokio::test(start_paused = true)]
 async fn context_reduction_changes_only_cloned_request() {
-    let failure = Error::Http(HttpError::Response(HttpFailure { status: 400, error_type: "invalid_request_error".into(), error_code: "context_length_exceeded".into(), detail: "Requested token count exceeds the model's maximum context length of 10000 tokens. You requested a total of 14000 tokens: 6000 tokens from the input messages and 8000 tokens for the completion.".into(), response_body: "original".into() }));
+    let failure = Error::Http(HttpError::Response(HttpFailure { retry_after: None,  status: 400, error_type: "invalid_request_error".into(), error_code: "context_length_exceeded".into(), detail: "Requested token count exceeds the model's maximum context length of 10000 tokens. You requested a total of 14000 tokens: 6000 tokens from the input messages and 8000 tokens for the completion.".into(), response_body: "original".into() }));
     let (state, session) = setup(vec![vec![Err(failure)], vec![]], 5);
     let request = Request {
         max_output_tokens: 8000,
@@ -314,6 +314,7 @@ async fn socket_budget_exhaustion_falls_back_then_resets_stream_budget() {
 #[tokio::test(start_paused = true)]
 async fn unsupported_fallback_reports_source_invalid_operation() {
     let original = Error::Socket(WebSocketError::Upgrade {
+        retry_after: None,
         status: 503,
         message: "upgrade".into(),
     });
@@ -451,6 +452,7 @@ async fn cancelled_or_nonretryable_failures_retain_the_exact_original_error() {
         Error::Cancelled,
         Error::Provider("missing key".into()),
         Error::Http(HttpError::Response(HttpFailure {
+            retry_after: None,
             status: 401,
             error_type: "auth".into(),
             error_code: "bad_key".into(),
@@ -692,6 +694,7 @@ fn canonical_completed(input: i32, output: i32, text: &str) -> Event {
 }
 fn canonical_http(status: u16, kind: &str, code: &str, detail: &str) -> Error {
     Error::Http(HttpError::Response(HttpFailure {
+        retry_after: None,
         status,
         error_type: kind.into(),
         error_code: code.into(),
@@ -1004,10 +1007,12 @@ async fn canonical_transient_failures_emit_safe_retry_events_before_waiting() {
             "http500" => canonical_http(500, "", "", "private-sentinel"),
             "http503" => canonical_http(503, "", "", "private-sentinel"),
             "upgrade429" => Error::Socket(WebSocketError::Upgrade {
+                retry_after: None,
                 status: 429,
                 message: "private-sentinel".into(),
             }),
             "upgrade502" => Error::Socket(WebSocketError::Upgrade {
+                retry_after: None,
                 status: 502,
                 message: "private-sentinel".into(),
             }),
@@ -1463,4 +1468,82 @@ async fn canonical_exhausted_websocket_retries_preserve_the_unsupported_session_
     );
     assert_eq!(canonical_calls(&state), 6);
     session.close().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn upgrade_cooldown_survives_retry_budget_exhaustion_and_http_fallback() {
+    let failure = Error::Socket(WebSocketError::Upgrade {
+        retry_after: Some(Duration::from_secs(45)),
+        status: 429,
+        message: "cool down".into(),
+    });
+    let mut attempts = vec![vec![Err(failure)]; 6];
+    attempts.push(vec![Ok(Some(Event::TextDelta("ok".into())))]);
+    let (state, session) = setup(attempts, 5);
+    state.fallback.store(true, Ordering::SeqCst);
+    let mut stream = session.call(req()).unwrap();
+    let cancel = Cancel::default();
+    let start = tokio::time::Instant::now();
+    for attempt in 1..=6 {
+        assert_eq!(
+            retry(stream.next(&cancel).await.unwrap()),
+            Duration::from_secs(45)
+        );
+        assert_eq!(start.elapsed(), Duration::from_secs(45 * (attempt - 1)));
+        assert_eq!(state.requests.lock().unwrap().len(), attempt as usize);
+    }
+    assert_eq!(state.fallbacks.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        stream.next(&cancel).await.unwrap(),
+        Some(Event::TextDelta("ok".into()))
+    );
+    assert_eq!(start.elapsed(), Duration::from_secs(270));
+    assert_eq!(state.requests.lock().unwrap().len(), 7);
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancellation_interrupts_active_server_cooldown_without_another_request() {
+    let failure = Error::Http(HttpError::Response(HttpFailure {
+        retry_after: Some(Duration::from_secs(3600)),
+        status: 429,
+        error_type: String::new(),
+        error_code: String::new(),
+        detail: String::new(),
+        response_body: String::new(),
+    }));
+    let (state, session) = setup(vec![vec![Err(failure)], vec![]], 5);
+    let mut stream = session.call(req()).unwrap();
+    let cancel = Cancel::default();
+    assert_eq!(
+        retry(stream.next(&cancel).await.unwrap()),
+        Duration::from_secs(3600)
+    );
+    let start = tokio::time::Instant::now();
+    let (result, ()) = tokio::join!(stream.next(&cancel), async {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        cancel.cancel();
+    });
+    assert_eq!(result, Err(Error::Cancelled));
+    assert_eq!(start.elapsed(), Duration::from_secs(1));
+    assert_eq!(state.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn unrepresentable_server_cooldown_fails_without_another_request() {
+    let failure = Error::Http(HttpError::Response(HttpFailure {
+        retry_after: Some(Duration::from_secs(u64::MAX)),
+        status: 429,
+        error_type: String::new(),
+        error_code: String::new(),
+        detail: String::new(),
+        response_body: String::new(),
+    }));
+    let (state, session) = setup(vec![vec![Err(failure)], vec![]], 5);
+    let mut stream = session.call(req()).unwrap();
+    assert!(matches!(
+        stream.next(&Cancel::default()).await,
+        Err(Error::Provider(_))
+    ));
+    assert_eq!(state.requests.lock().unwrap().len(), 1);
+    assert_eq!(state.fallbacks.load(Ordering::SeqCst), 0);
 }

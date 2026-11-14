@@ -423,6 +423,7 @@ fn preserved() -> Vec<Error> {
             cause: Box::new(AuthError::Io.into()),
         },
         Error::Socket(WebSocketError::Upgrade {
+            retry_after: None,
             status: 401,
             message: "secret-upgrade".into(),
         }),
@@ -468,6 +469,7 @@ async fn cancellation_and_permanent_provider_errors_do_not_use_the_websocket_ret
 async fn provider_http_exception_is_not_in_the_source_websocket_preserve_whitelist() {
     for kind in KINDS {
         let original = Error::Http(HttpError::Response(HttpFailure {
+            retry_after: None,
             status: 503,
             error_type: "overloaded".into(),
             error_code: String::new(),
