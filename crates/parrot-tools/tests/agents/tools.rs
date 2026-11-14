@@ -394,7 +394,7 @@ fn metadata_and_dynamic_send_description_preserve_configured_parameters() {
     assert!(
         restricted
             .description
-            .contains("Sending to any ancestor is disabled")
+            .contains("You cannot send messages to ancestors.")
     );
     assert_eq!(restricted.parameters_json, configured.parameters_json);
 }

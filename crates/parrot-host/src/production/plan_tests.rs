@@ -2,8 +2,8 @@ use super::*;
 use parrot_provider::sessions::{Completion, Role};
 use std::collections::BTreeSet;
 
-const PLAN_LABEL: &str = "Write the canonical Markdown plan to this exact file: ";
-const TASK_LABEL: &str = "Write the required AgentTask v1 JSON artifact to this exact file: ";
+const PLAN_LABEL: &str = "Write the canonical Markdown plan to the exact path ";
+const TASK_LABEL: &str = "Write the required AgentTask v1 JSON artifact to the exact path ";
 const TASKS: &str = r#"{"schema_version":1,"tasks":[{"name":"implement","description":"Implement the approved change","payload":"Implement the approved change","acceptance_criteria":"The requested behavior works"}]}"#;
 
 fn current_status(request: &Request) -> &str {
@@ -171,10 +171,10 @@ fn agent_directory(fixture: &Fixture, host: &ProductionHost, id: &str) -> PathBu
 fn assert_plan_contract(request: &Request, directory: &std::path::Path) -> (PathBuf, PathBuf) {
     let status = profile_prompt(request, "plan");
     assert!(status.contains("PLAN-PROFILE-MARKER"));
-    assert!(status.contains("schema_version equal to 1 and a nonempty tasks array"));
-    assert!(status.contains("Finish only after writing both canonical files."));
+    assert!(status.contains("schema_version must equal 1. Its tasks array must contain at least one top-level sibling task."));
+    assert!(status.contains("Finish only after you write both canonical files."));
     assert!(status.contains(&format!(
-        "under this plan directory and reference them from the canonical plan: {}.",
+        "under {} and reference them from the canonical plan.",
         directory.display()
     )));
     let plan = artifact_path(status, PLAN_LABEL);

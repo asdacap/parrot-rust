@@ -717,9 +717,7 @@ async fn exec_stderr_summary_counts_inline_lines_without_changing_capture() {
         completed(
             &result.text,
             0,
-            &format!(
-                "s\n[stdout]\n{stdout}\n[stderr]\n<{lines} lines truncated to conserved context>"
-            ),
+            &format!("s\n[stdout]\n{stdout}\n[stderr]\n<{lines} lines omitted to save context>"),
         );
         if !stderr.trim().is_empty() {
             assert!(!result.text.contains(stderr), "{}", result.text);
@@ -788,7 +786,7 @@ async fn exec_stderr_summary_yielded_completion_preserves_live_stderr() {
             completed(
                 output,
                 0,
-                "s\n[stdout]\nanswer\n[stderr]\n<2 lines truncated to conserved context>",
+                "s\n[stdout]\nanswer\n[stderr]\n<2 lines omitted to save context>",
             );
             assert!(!message.text.contains(stderr), "{}", message.text);
         } else {
@@ -1707,7 +1705,7 @@ async fn monitor_case(arguments: Value, interrupt: bool, expected: &[&str]) {
     assert_eq!(
         started.text,
         format!(
-            "Monitor watch started. Each stdout line arrives as a notification while you keep working; a running monitor keeps this turn open. Stop it early with interrupt_process.\nstderr does not produce events and is written to {}",
+            "Monitor watch started. Each stdout line arrives as a notification while you continue your work. A monitor keeps this turn open while it runs. To stop it early, use interrupt_process.\nThe monitor writes stderr to {}. stderr does not produce events.",
             stderr.display()
         )
     );

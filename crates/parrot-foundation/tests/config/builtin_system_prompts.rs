@@ -38,7 +38,7 @@ fn agent_task_guidance_exposes_self_completion_and_durable_assignment_queries() 
     let setter = &tools["set_agent_tasks"].description;
     assert!(setter.contains("one ready ordinary instruction leaf to self"));
     assert!(setter.contains("exact originally sealed response"));
-    assert!(setter.contains("does not stop your owner conversation"));
+    assert!(setter.contains("Your owner conversation continues."));
     let query = &tools["get_agent_tasks"].description;
     for instruction in [
         "assigned_to",
