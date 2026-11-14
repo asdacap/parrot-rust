@@ -18,6 +18,22 @@ pub enum ReasoningKind {
 }
 
 pub use parrot_core::ToolCall;
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct ToolCallReplay {
+    pub id: String,
+    pub thought_signature: String,
+}
+
+#[derive(serde::Deserialize)]
+struct ToolCallExtraContent {
+    google: Option<GoogleSignature>,
+}
+#[derive(serde::Deserialize)]
+struct GoogleSignature {
+    thought_signature: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChatReplay {
     pub provider_id: String,
@@ -25,6 +41,7 @@ pub struct ChatReplay {
     pub protocol: String,
     pub reasoning_content: Option<String>,
     pub reasoning: Option<String>,
+    pub tool_calls: Vec<ToolCallReplay>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChatCompletion {
@@ -92,10 +109,11 @@ struct Assembly {
     id: String,
     name: String,
     arguments: String,
+    thought_signature: Option<String>,
 }
 #[derive(Default)]
 struct State {
-    tools: BTreeMap<i32, Assembly>,
+    tools: BTreeMap<i64, Assembly>,
     finish_seen: bool,
     finish_reason: String,
     input: i32,
@@ -107,7 +125,22 @@ struct State {
 }
 impl State {
     fn complete(&self, provider_id: &str) -> ChatCompletion {
-        let provider_content = if self.reasoning_content.is_empty() && self.reasoning.is_empty() {
+        let tool_calls: Vec<_> = self
+            .tools
+            .values()
+            .filter_map(|call| {
+                call.thought_signature
+                    .as_ref()
+                    .map(|signature| ToolCallReplay {
+                        id: call.id.clone(),
+                        thought_signature: signature.clone(),
+                    })
+            })
+            .collect();
+        let provider_content = if self.reasoning_content.is_empty()
+            && self.reasoning.is_empty()
+            && tool_calls.is_empty()
+        {
             None
         } else {
             Some(ChatReplay {
@@ -117,6 +150,7 @@ impl State {
                 reasoning_content: (!self.reasoning_content.is_empty())
                     .then(|| self.reasoning_content.clone()),
                 reasoning: (!self.reasoning.is_empty()).then(|| self.reasoning.clone()),
+                tool_calls,
             })
         };
         ChatCompletion {
@@ -306,11 +340,39 @@ fn parse_data_text(data: &str, state: &mut ParseState) -> Result<Vec<ChatEvent>,
                         let Some(call) = raw_object(call_raw.get()) else {
                             continue;
                         };
-                        let index = raw_int(&call, "index")?;
-                        let assembly = state.0.tools.entry(index).or_default();
                         let id = raw_string(&call, "id");
+                        let index = if call.contains_key("index") || id.is_empty() {
+                            i64::from(raw_int(&call, "index")?)
+                        } else {
+                            state
+                                .0
+                                .tools
+                                .iter()
+                                .find(|(_, assembly)| assembly.id == id)
+                                .map(|(index, _)| *index)
+                                .unwrap_or_else(|| {
+                                    state
+                                        .0
+                                        .tools
+                                        .last_key_value()
+                                        .map_or(0, |(index, _)| index + 1)
+                                })
+                        };
+                        let assembly = state.0.tools.entry(index).or_default();
                         if !id.is_empty() {
                             assembly.id = id;
+                        }
+                        if let Some(extra) = call.get("extra_content") {
+                            let extra: Option<ToolCallExtraContent> =
+                                serde_json::from_str(extra.get())
+                                    .map_err(ChatStreamError::InvalidJson)?;
+                            if let Some(signature) = extra
+                                .and_then(|extra| extra.google)
+                                .and_then(|google| google.thought_signature)
+                                .filter(|signature| !signature.is_empty())
+                            {
+                                assembly.thought_signature = Some(signature);
+                            }
                         }
                         if let Some(function_raw) = call
                             .get("function")

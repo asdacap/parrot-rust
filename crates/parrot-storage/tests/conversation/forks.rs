@@ -1230,6 +1230,43 @@ async fn original_provider_content_survives_reopen_and_full_fork() {
 }
 
 #[tokio::test]
+async fn gemini_tool_signatures_survive_reopen_and_full_fork() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let replay = r#"{"Version":1,"Protocol":"chat-completions","ToolCalls":[{"Id":"call_weather","ThoughtSignature":"signature-A"}]}"#;
+    let mut assistant = message(MessageRole::Assistant, "");
+    assistant.provider_content = ProviderContent {
+        provider_id: "google".into(),
+        content: replay.into(),
+    };
+    repo.events()
+        .append(event("signed-call", "agent"), Some(assistant))
+        .await
+        .unwrap();
+    repo.events().database().close().await.unwrap();
+    let restored = fixture.repository();
+    fork(
+        &restored,
+        "agent",
+        "child",
+        HistoryForkBoundary::AfterCompletedHistory,
+        "full",
+    )
+    .await
+    .unwrap();
+    for agent in ["agent", "child"] {
+        let restored_items = items(&restored, agent).await;
+        assert_eq!(restored_items.len(), 1);
+        assert_eq!(
+            restored_items[0].message.provider_content.provider_id,
+            "google"
+        );
+        assert_eq!(restored_items[0].message.provider_content.content, replay);
+    }
+    restored.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn original_fallback_compacted_parent_preserves_boundary_parameter_and_worker_survives() {
     let fixture = Fixture::new();
     let repo = fixture.repository();

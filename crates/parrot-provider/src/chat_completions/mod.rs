@@ -9,5 +9,5 @@ pub use request::{
 };
 pub use stream::{
     ChatCompletion, ChatEvent, ChatReplay, ChatStream, ChatStreamError, ParseState,
-    ProviderFailure, ReasoningKind, ToolCall, parse_data,
+    ProviderFailure, ReasoningKind, ToolCall, ToolCallReplay, parse_data,
 };

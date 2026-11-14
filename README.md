@@ -20,6 +20,7 @@ cross-version locking or simultaneous same-workspace safety guarantee**.
 
 - [Installation and platform requirements](docs/operator/installation.md)
 - [Configuration, backups, and rollback](docs/operator/state-and-rollback.md)
+- [Use Gemini with an API key](docs/operator/gemini.md)
 - [CLI Markdown rendering](docs/operator/markdown.md)
 - [Benchmarking agent runs](docs/operator/benchmarking.md)
 - [Design philosophy](docs/design-philosophy.md)

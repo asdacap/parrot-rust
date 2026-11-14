@@ -17,7 +17,7 @@ use parrot_provider::{
         usage::{KimiUsageReporter, OpenCodeGoUsageReporter},
     },
     sessions::{
-        Content, Error, Message, Provider, Request,
+        Content, Error, Event, Message, Provider, Request,
         decorators::{
             RetryingProvider, SubscriptionUsage, UsageCredits, UsageReportingProvider, UsageWindow,
         },
@@ -128,6 +128,17 @@ impl CredentialSources for Credentials {
         Arc::new(FixedCredential(self.0.get(id).cloned().unwrap_or_default()))
     }
 }
+struct EnvironmentCredentials(BTreeMap<String, String>);
+impl CredentialSources for EnvironmentCredentials {
+    fn api_key(&self, _: &str, environment: &str) -> Arc<dyn ApiKeySource> {
+        Arc::new(FixedCredential(
+            self.0.get(environment).cloned().unwrap_or_default(),
+        ))
+    }
+    fn oauth(&self, _: &str) -> Arc<dyn OAuthTokenSource> {
+        Arc::new(FixedCredential(String::new()))
+    }
+}
 struct NoSocket;
 impl Connector for NoSocket {
     fn connect<'a>(
@@ -193,6 +204,7 @@ enum Mode {
     OpenRouter,
     ChatGptModels,
     ChatGptCall,
+    Google,
 }
 struct Transport {
     mode: Mode,
@@ -253,6 +265,10 @@ impl HttpTransport for Transport {
                 Mode::OpenRouter => (200, "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n".into()),
                 Mode::ChatGptModels => (200, r#"{"models":[{"slug":"live","display_name":"Live","context_window":321,"visibility":"list"}]}"#.into()),
                 Mode::ChatGptCall => (200, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".into()),
+                Mode::Google if uri.as_str() == "https://models.dev/api.json" => (200, r#"{"google":{"id":"google","models":{"gemini-fixture":{"id":"gemini-fixture","name":"Gemini Fixture","tool_call":true,"limit":{"context":32768,"output":8192}}}}}"#.into()),
+                Mode::Google if uri.as_str() == "https://generativelanguage.googleapis.com/v1beta/openai/models" => (200, r#"{"data":[{"id":"gemini-fixture"}]}"#.into()),
+                Mode::Google if uri.as_str() == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" && method == HttpMethod::Post => (200, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello from Gemini\"}}]}\n\ndata: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n".into()),
+                Mode::Google => (404, "unexpected fixture endpoint".into()),
             }
             };
             Ok(HttpResponse {
@@ -286,7 +302,7 @@ impl HttpClients for Clients {
 }
 async fn build(
     yaml: &str,
-    credentials: Arc<Credentials>,
+    credentials: Arc<dyn CredentialSources>,
     transport: Arc<Transport>,
 ) -> (ProviderRegistry, Arc<Clients>) {
     let fixture = Fixture::new(yaml);
@@ -356,6 +372,123 @@ async fn build_activates_predefined_openai_with_a_seeded_model_catalogue() {
     assert!(registry.models("openai").iter().any(|m| m.id == "gpt-5.4"));
     assert!(!transport.requests.lock().unwrap().is_empty());
 }
+#[tokio::test]
+async fn predefined_google_discovers_models_and_streams_with_api_key_authentication() {
+    let transport = Transport::new(Mode::Google);
+    let (registry, _) = build(
+        "",
+        Arc::new(EnvironmentCredentials(
+            [("GEMINI_API_KEY".into(), "fixture-gemini-key".into())]
+                .into_iter()
+                .collect(),
+        )),
+        transport.clone(),
+    )
+    .await;
+    let available = registry.available_models(&ACTIVE).await.unwrap();
+    let selected = available
+        .iter()
+        .find(|selected| selected.selector() == "google/gemini-fixture")
+        .expect("the predefined Google provider must discover a Gemini model");
+    assert_eq!(selected.model.name, "Gemini Fixture");
+    assert_eq!(selected.model.context_window, 32768);
+    assert_eq!(selected.model.max_output_tokens, 8192);
+    assert!(selected.model.capabilities.tools);
+    let mut stream = selected
+        .provider
+        .open_session()
+        .unwrap()
+        .call(request(&selected.model.id, 32))
+        .unwrap();
+    let mut text = String::new();
+    let mut completed = false;
+    while let Some(event) = stream.next(&ACTIVE).await.unwrap() {
+        match event {
+            Event::TextDelta(delta) => text.push_str(&delta),
+            Event::Completed(completion) => {
+                assert_eq!(completion.input_tokens, 2);
+                assert_eq!(completion.output_tokens, 3);
+                completed = true;
+            }
+            _ => {}
+        }
+    }
+    stream.close().await.unwrap();
+    assert_eq!(text, "Hello from Gemini");
+    assert!(completed);
+    let requests = transport.requests.lock().unwrap();
+    let google_requests = requests
+        .iter()
+        .filter(|request| {
+            request.endpoint.as_url().host_str() == Some("generativelanguage.googleapis.com")
+        })
+        .collect::<Vec<_>>();
+    assert!(google_requests.iter().any(|request| {
+        request.method == HttpMethod::Get
+            && request.endpoint.as_url().path() == "/v1beta/openai/models"
+    }));
+    let post = google_requests
+        .iter()
+        .find(|request| request.method == HttpMethod::Post)
+        .expect("the selected Google provider must send a chat request");
+    assert_eq!(
+        post.endpoint.as_url().path(),
+        "/v1beta/openai/chat/completions"
+    );
+    let body: serde_json::Value = serde_json::from_slice(&post.body).unwrap();
+    for request in google_requests {
+        assert!(request.headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("authorization") && value == "Bearer fixture-gemini-key"
+        }));
+    }
+    assert_eq!(body["model"], "gemini-fixture");
+    assert_eq!(body["stream"], true);
+    assert_eq!(body["messages"][0]["content"], "hello");
+}
+
+#[tokio::test]
+async fn predefined_google_accepts_a_provider_credential() {
+    let transport = Transport::new(Mode::Google);
+    let (registry, _) = build(
+        "",
+        Credentials::one("google", "stored-fixture-key"),
+        transport.clone(),
+    )
+    .await;
+    let selected = registry.resolve_canonical("google/gemini-fixture").unwrap();
+    drain(selected.provider.as_ref(), request(&selected.model.id, 32))
+        .await
+        .unwrap();
+    assert!(transport.requests.lock().unwrap().iter().any(|request| {
+        request.method == HttpMethod::Post
+            && request.headers.iter().any(|(name, value)| {
+                name.eq_ignore_ascii_case("authorization") && value == "Bearer stored-fixture-key"
+            })
+    }));
+}
+
+#[tokio::test]
+async fn predefined_google_without_a_key_does_not_send_a_request() {
+    let transport = Transport::new(Mode::Google);
+    let (registry, _) = build(
+        "",
+        Arc::new(Credentials(BTreeMap::new())),
+        transport.clone(),
+    )
+    .await;
+    assert!(registry.available_models(&ACTIVE).await.unwrap().is_empty());
+    let selected = registry
+        .resolve_canonical("google/gemini-fixture")
+        .expect("Google must be configured even without credentials");
+    let error = drain(selected.provider.as_ref(), request(&selected.model.id, 32))
+        .await
+        .unwrap_err();
+    assert!(matches!(error, Error::Provider(message) if message.contains("has no API key")));
+    assert!(transport.requests.lock().unwrap().iter().all(|request| {
+        request.endpoint.as_url().host_str() != Some("generativelanguage.googleapis.com")
+    }));
+}
+
 #[tokio::test]
 async fn build_reads_the_models_dev_catalogue_named_by_models_dev_id() {
     let (registry, _) = build(
