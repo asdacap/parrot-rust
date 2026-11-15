@@ -85,7 +85,7 @@ struct CancellingCatalog {
     cancellation: Arc<CancellationSource>,
 }
 
-impl Tools<Vec<u8>> for CancellingCatalog {
+impl Tools for CancellingCatalog {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
         Box::pin(async move {
             self.trace.step("catalog", None)?;
@@ -98,7 +98,7 @@ impl Tools<Vec<u8>> for CancellingCatalog {
         &'a self,
         _request: ToolExecutionRequest,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult<Vec<u8>>>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async { panic!("cancellation after initialization must prevent tool execution") })
     }
 }
@@ -126,7 +126,7 @@ struct JoiningTools {
     joined: Arc<AtomicBool>,
 }
 
-impl Tools<Vec<u8>> for JoiningTools {
+impl Tools for JoiningTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
         Box::pin(async { Ok(ToolCatalog::default()) })
     }
@@ -135,7 +135,7 @@ impl Tools<Vec<u8>> for JoiningTools {
         &'a self,
         request: ToolExecutionRequest,
         cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult<Vec<u8>>>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             let ToolExecutionRequest {
                 calls,
@@ -200,7 +200,7 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
 
 struct CancellingTools(Arc<CancellationSource>);
 
-impl Tools<Vec<u8>> for CancellingTools {
+impl Tools for CancellingTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
         Box::pin(async { Ok(ToolCatalog::default()) })
     }
@@ -209,7 +209,7 @@ impl Tools<Vec<u8>> for CancellingTools {
         &'a self,
         request: ToolExecutionRequest,
         cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult<Vec<u8>>>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             let ToolExecutionRequest {
                 calls,

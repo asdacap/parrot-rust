@@ -4,8 +4,8 @@ use crate::{
     AgentState, BoxFuture, CancellationToken, CompletionBlockerFeedback, ConfigKey,
     ConversationAddition, ConversationEvent, ConversationOrigin, ConversationPersistence,
     ConversationTurn, Error, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message,
-    Outcome, Provider, Role, SkillProvider, States, ToolCallReceipt, ToolResultMetadata, Tools,
-    add_phase_prompt, context, execute_tools, rendering, skills, steer_status,
+    Outcome, Provider, Role, SkillProvider, States, ToolCallReceipt, Tools, add_phase_prompt,
+    context, execute_tools, rendering, skills, steer_status,
 };
 
 /// Supplies the drain loop with runtime-owned lifecycle facts and per-turn work.
@@ -84,10 +84,10 @@ pub async fn open_turn<'a>(
 
 /// Runs one active turn using settings and tools captured at each step.
 /// Activates the published turn returned by `open_turn` before reading agent state.
-pub async fn run_turn<M: ToolResultMetadata>(
+pub async fn run_turn(
     states: &mut dyn States,
     skill_provider: &dyn SkillProvider,
-    tools: &dyn Tools<M>,
+    tools: &dyn Tools,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
     turn: &OpenedTurn<'_>,
@@ -113,9 +113,9 @@ struct TurnServices<'a> {
     publisher: &'a dyn EventPublisher,
 }
 
-async fn execute_turn<M: ToolResultMetadata>(
+async fn execute_turn(
     states: &mut dyn States,
-    tools: &dyn Tools<M>,
+    tools: &dyn Tools,
     services: &TurnServices<'_>,
     opened: &OpenedTurn<'_>,
     cancellation: CancellationToken<'_>,

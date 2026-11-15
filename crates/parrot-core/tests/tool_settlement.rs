@@ -80,7 +80,7 @@ struct PrefixTools {
     observations: Mutex<Vec<Observation>>,
     fail_second: bool,
 }
-impl Tools<Vec<u8>> for PrefixTools {
+impl Tools for PrefixTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
         Box::pin(async { Ok(ToolCatalog::default()) })
     }
@@ -88,7 +88,7 @@ impl Tools<Vec<u8>> for PrefixTools {
         &'a self,
         request: ToolExecutionRequest,
         _: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult<Vec<u8>>>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             self.observations.lock().unwrap().push(Observation {
                 calls: request.calls.iter().map(|call| call.id.clone()).collect(),
@@ -127,43 +127,39 @@ fn calls() -> Vec<ToolCall> {
 }
 
 #[test]
-fn settlement_forwards_opaque_metadata_unchanged_to_conversation_persistence() {
-    for metadata in [None, Some(Vec::new()), Some(vec![0, 255, 128, 1])] {
-        let mut state = State::default();
-        let mut settlement = ToolSettlement::default();
-        settlement
-            .begin_execution(17, vec![calls()[0].clone()])
-            .unwrap();
-        let execution = ToolResult {
-            call_id: "first".into(),
-            tool_name: "read".into(),
-            text: "tool result".into(),
-            metadata: metadata.clone(),
-            ..ToolResult::default()
-        };
-        finish(settlement.record_results(&mut state, std::slice::from_ref(&execution))).unwrap();
-        settlement
-            .complete_execution(std::slice::from_ref(&execution))
-            .unwrap();
-        assert_eq!(state.additions.len(), 1);
-        let addition = &state.additions[0];
-        let ConversationPersistence::ToolResult {
-            assistant_sequence,
-            result,
-            recovered,
-        } = &addition.persistence
-        else {
-            panic!("settlement must persist the tool result");
-        };
-        assert_eq!(*assistant_sequence, 17);
-        assert_eq!(result, &execution);
-        assert_eq!(result.metadata, metadata);
-        assert!(!recovered);
-        assert_eq!(
-            addition.messages[0].contents,
-            [Content::Text("tool result".into())]
-        );
-    }
+fn settlement_records_result_and_provider_message_unchanged() {
+    let mut state = State::default();
+    let mut settlement = ToolSettlement::default();
+    settlement
+        .begin_execution(17, vec![calls()[0].clone()])
+        .unwrap();
+    let execution = ToolResult {
+        call_id: "first".into(),
+        tool_name: "read".into(),
+        text: "tool result".into(),
+        ..ToolResult::default()
+    };
+    finish(settlement.record_results(&mut state, std::slice::from_ref(&execution))).unwrap();
+    settlement
+        .complete_execution(std::slice::from_ref(&execution))
+        .unwrap();
+    assert_eq!(state.additions.len(), 1);
+    let addition = &state.additions[0];
+    let ConversationPersistence::ToolResult {
+        assistant_sequence,
+        result,
+        recovered,
+    } = &addition.persistence
+    else {
+        panic!("settlement must persist the tool result");
+    };
+    assert_eq!(*assistant_sequence, 17);
+    assert_eq!(result, &execution);
+    assert!(!recovered);
+    assert_eq!(
+        addition.messages[0].contents,
+        [Content::Text("tool result".into())]
+    );
 }
 
 #[test]
@@ -245,7 +241,7 @@ fn recovery_constructs_configured_crash_results_and_preserves_existing_terminals
         }),
         ..State::default()
     };
-    finish(ToolSettlement::<Vec<u8>>::default().restore_results(&mut state)).unwrap();
+    finish(ToolSettlement::default().restore_results(&mut state)).unwrap();
     assert_eq!(state.additions.len(), 2);
     let ConversationPersistence::ToolResult {
         result, recovered, ..
