@@ -7,17 +7,25 @@ fn estimate(
     selection: &TurnSelection<Security>,
     request: &Request,
 ) -> ContextSnapshot {
-    fixture
-        .controller()
-        .compactor()
-        .planner()
-        .estimate_selected_context(
-            &selection.model,
-            &request.instructions,
-            &request.tools,
-            &request.messages,
-        )
-        .unwrap()
+    let estimated = parrot_provider::compaction::estimate_input_tokens(
+        &selection.model.canonical_model,
+        &request.instructions,
+        &request.tools,
+        &request
+            .messages
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    ContextSnapshot::estimate(
+        estimated,
+        &fixture
+            .controller()
+            .compactor()
+            .capture_context_configuration(&selection.model),
+    )
 }
 
 #[tokio::test]

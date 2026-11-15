@@ -179,8 +179,6 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                     &backend.broker,
                     backend.event_id.as_ref(),
                 ),
-                prompt: &backend.prompt,
-                cancellation,
             };
             let token = parrot_core::CancellationToken::new(cancellation);
             let turn = parrot_core::open_turn(&hooks, &publisher, token).await?;

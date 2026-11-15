@@ -2,8 +2,6 @@ use super::*;
 
 pub(super) struct RuntimeEventPublisher<'a> {
     pub(super) events: ContextEmitter<'a>,
-    pub(super) prompt: &'a SessionPrompt,
-    pub(super) cancellation: &'a dyn Cancellation,
 }
 
 impl parrot_core::EventPublisher for RuntimeEventPublisher<'_> {
@@ -44,14 +42,6 @@ impl parrot_core::EventPublisher for RuntimeEventPublisher<'_> {
             let turn_id = event.id.clone();
             self.events.emit(event, &cancellation).await?;
             Ok(turn_id)
-        })
-    }
-    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), CoreError>> {
-        adapt_operation(async move {
-            self.prompt
-                .sample_epoch(self.cancellation)
-                .await
-                .map_err(Into::into)
         })
     }
 }

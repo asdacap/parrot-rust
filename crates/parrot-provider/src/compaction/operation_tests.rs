@@ -28,6 +28,145 @@ fn history(effects: &mut Effects) {
 }
 
 #[tokio::test]
+async fn noncontiguous_owned_results_reach_summary_together_without_status_or_transient_messages() {
+    let script = Script::summaries([SummaryResponse::Summary("replacement".into())]);
+    let selected = script.selection();
+    let sessions = ProviderSessions::new();
+    let owner = parrot_core::Message {
+        role: parrot_core::Role::Assistant,
+        tool_calls: vec![parrot_core::ToolCall {
+            id: "call".into(),
+            name: "read".into(),
+            arguments_json: "{}".into(),
+        }],
+        ..message("tool owner")
+    };
+    let result = parrot_core::Message {
+        role: parrot_core::Role::Tool,
+        tool_call_id: "call".into(),
+        provider_id: "native".into(),
+        provider_content: " { \"opaque\" : 1.00 } ".into(),
+        tool_calls: vec![parrot_core::ToolCall {
+            id: "not-a-root-call".into(),
+            name: "read".into(),
+            arguments_json: "{}".into(),
+        }],
+        ..message("tool result")
+    };
+    let previous = parrot_core::Message {
+        role: parrot_core::Role::System,
+        ..message("previous summary")
+    };
+    let mut effects = Effects::default();
+    effects.capture.conversation = ConversationState {
+        summary: Some(parrot_core::ConversationSummary {
+            message: previous.clone(),
+            watermark: 10,
+        }),
+        history: [
+            (11, owner.clone(), None, false),
+            (12, message("old status"), None, true),
+            (13, message("intervening user"), None, false),
+            (14, result.clone(), Some(11), false),
+            (15, message("retained tail"), None, false),
+        ]
+        .into_iter()
+        .map(
+            |(sequence, message, tool_owner_sequence, is_compaction_status)| {
+                ConversationHistoryItem {
+                    sequence,
+                    message,
+                    tool_owner_sequence,
+                    is_compaction_status,
+                }
+            },
+        )
+        .collect(),
+        messages: vec![message("current transient notice")],
+    };
+    let original = effects.capture.conversation.clone();
+    assert!(
+        compactor(1000)
+            .compact(
+                &selected,
+                CompactionRequest::default(),
+                &sessions,
+                &mut effects,
+                &NeverCancelled,
+            )
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let requests = script.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        &requests[0].messages[..4],
+        [previous, owner, result, message("intervening user")]
+    );
+    assert_eq!(requests[0].messages.len(), 5);
+    assert_eq!(effects.capture.conversation, original);
+    sessions.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn orphaned_results_do_not_make_an_incomplete_history_prefix_compactable() {
+    let script = Arc::new(Script::default());
+    let sessions = ProviderSessions::new();
+    let mut effects = Effects::default();
+    let orphan = parrot_core::Message {
+        role: parrot_core::Role::Tool,
+        tool_call_id: "old".into(),
+        ..message("orphan")
+    };
+    let incomplete = parrot_core::Message {
+        role: parrot_core::Role::Assistant,
+        tool_calls: vec![parrot_core::ToolCall {
+            id: "missing".into(),
+            name: "read".into(),
+            arguments_json: "{}".into(),
+        }],
+        ..message("incomplete")
+    };
+    effects.capture.conversation = ConversationState {
+        summary: None,
+        history: vec![
+            ConversationHistoryItem {
+                sequence: 1,
+                message: orphan.clone(),
+                tool_owner_sequence: Some(0),
+                is_compaction_status: false,
+            },
+            ConversationHistoryItem {
+                sequence: 2,
+                message: incomplete.clone(),
+                tool_owner_sequence: None,
+                is_compaction_status: false,
+            },
+        ],
+        messages: vec![orphan, incomplete],
+    };
+    let original = effects.capture.conversation.clone();
+    assert_eq!(
+        compactor(1000)
+            .compact(
+                &script.selection(),
+                CompactionRequest::default(),
+                &sessions,
+                &mut effects,
+                &NeverCancelled,
+            )
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(effects.committed.is_none());
+    assert!(script.requests.lock().unwrap().is_empty());
+    assert_eq!(effects.capture.conversation, original);
+    sessions.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn oversized_tool_input_fits_real_estimates_without_corrupting_metadata() {
     for oversized_arguments in [false, true] {
         let script = Script::summaries([SummaryResponse::Summary("replacement".into())]);

@@ -519,17 +519,25 @@ async fn actual_reported_usage_triggers_compaction_before_consuming_reserved_out
         let final_request = &requests[2];
         assert_eq!(final_request.max_output_tokens, 32_768);
         let selected = runtime.selection.capture().unwrap();
-        let snapshot = fixture
-            .controller()
-            .compactor()
-            .planner()
-            .estimate_selected_context(
-                &selected.model,
-                &final_request.instructions,
-                &final_request.tools,
-                &final_request.messages,
-            )
-            .unwrap();
+        let estimated = parrot_provider::compaction::estimate_input_tokens(
+            &selected.model.canonical_model,
+            &final_request.instructions,
+            &final_request.tools,
+            &final_request
+                .messages
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let snapshot = ContextSnapshot::estimate(
+            estimated,
+            &fixture
+                .controller()
+                .compactor()
+                .capture_context_configuration(&selected.model),
+        );
         assert_eq!(snapshot.trigger_tokens, Some(140_220));
         assert!(!snapshot.exceeds_trigger());
     }

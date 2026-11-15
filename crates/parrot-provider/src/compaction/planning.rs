@@ -1,5 +1,5 @@
 use super::model::{CompactionConfiguration, CompactionGroup, CompactionInput, CompactionPlan};
-use parrot_core::{ContextLimit, Error, PlanningError, ToolDefinition};
+use parrot_core::{Error, PlanningError, ToolDefinition};
 #[cfg(test)]
 use {
     super::model::CompactionHistoryGroup,
@@ -7,68 +7,28 @@ use {
 };
 
 impl CompactionConfiguration {
-    pub fn resolve_policy(&self) -> CompactionPolicy {
-        CompactionPolicy::resolve(
-            self.context.context_limit.as_ref(),
-            self.target.as_ref(),
-            self.context.model.context_window,
-            self.context.model.calculate_input_limit(),
-            self.context.trigger_percent,
-            self.target_percent,
-            self.context.model.calculate_output_reserved_input_limit(),
-        )
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct CompactionPolicy {
-    pub trigger_tokens: Option<i64>,
-    pub target_tokens: Option<i64>,
-}
-
-impl CompactionPolicy {
-    pub fn resolve(
-        context_limit: Option<&ContextLimit>,
-        target_context_size: Option<&ContextLimit>,
-        context_window: i32,
-        input_limit: i32,
-        trigger_percent: i32,
-        target_percent: i32,
-        output_reserved_input_limit: Option<i64>,
-    ) -> Self {
-        let trigger_tokens = match context_limit {
-            Some(limit) => cap_tokens(limit.resolve_tokens(context_window), input_limit),
-            None => {
-                (input_limit > 0).then(|| i64::from(input_limit) * i64::from(trigger_percent) / 100)
+    pub fn calculate_target_tokens(&self) -> Option<i64> {
+        let context = &self.context;
+        let input_limit = context.model.calculate_input_limit();
+        let cap_tokens = |tokens: Option<i64>| {
+            if input_limit > 0 {
+                tokens.map(|tokens| tokens.min(i64::from(input_limit)))
+            } else {
+                tokens
             }
         };
-        let target_tokens = match target_context_size {
-            Some(target) => cap_tokens(target.resolve_tokens(context_window), input_limit),
-            None if context_limit.is_none() => {
-                (input_limit > 0).then(|| i64::from(input_limit) * i64::from(target_percent) / 100)
-            }
-            None => trigger_tokens.map(|trigger| {
-                (trigger / 100)
-                    .wrapping_mul(i64::from(target_percent))
-                    .wrapping_add((trigger % 100) * i64::from(target_percent) / 100)
-            }),
-        };
-        let trigger_tokens = match (trigger_tokens, output_reserved_input_limit) {
-            (Some(trigger), Some(safe_input_limit)) => Some(trigger.min(safe_input_limit)),
-            (trigger, _) => trigger,
-        };
-        Self {
-            trigger_tokens,
-            target_tokens,
+        match self.target.as_ref() {
+            Some(target) => cap_tokens(target.resolve_tokens(context.model.context_window)),
+            None if context.context_limit.is_none() => (input_limit > 0)
+                .then(|| i64::from(input_limit) * i64::from(self.target_percent) / 100),
+            None => context
+                .calculate_unreserved_trigger_tokens()
+                .map(|trigger| {
+                    (trigger / 100)
+                        .wrapping_mul(i64::from(self.target_percent))
+                        .wrapping_add((trigger % 100) * i64::from(self.target_percent) / 100)
+                }),
         }
-    }
-}
-
-fn cap_tokens(tokens: Option<i64>, input_limit: i32) -> Option<i64> {
-    if input_limit > 0 {
-        tokens.map(|tokens| tokens.min(i64::from(input_limit)))
-    } else {
-        tokens
     }
 }
 
@@ -82,7 +42,7 @@ impl CompactionPlan {
             input,
             definitions,
             configuration,
-            configuration.resolve_policy().target_tokens,
+            configuration.calculate_target_tokens(),
         )
     }
 

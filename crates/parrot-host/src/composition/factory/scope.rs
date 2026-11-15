@@ -1226,13 +1226,9 @@ where
             let agent_relative = scratch.root().strip_prefix(root.path()).map_err(child)?;
             let filenames = production_filename_generator();
             let blobs = Arc::new(
-                ToolOutputBlobStore::for_session(
-                    root,
-                    agent_relative.join("blobs"),
-                    filenames,
-                )
-                .map_err(child)?
-                .with_path_variables(environment.materialize().clone()),
+                ToolOutputBlobStore::for_session(root, agent_relative.join("blobs"), filenames)
+                    .map_err(child)?
+                    .with_path_variables(environment.materialize().clone()),
             );
             let output = Arc::new(AgentOutput::open(scratch.root()).map_err(io_child)?);
             let log = Arc::new(ScopeLog {

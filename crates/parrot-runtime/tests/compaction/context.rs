@@ -414,6 +414,7 @@ struct Events {
     committed: Mutex<Vec<Event>>,
     fail_finished: AtomicBool,
     fail_saving: AtomicBool,
+    fail_status: AtomicBool,
 }
 impl Events {
     fn new(history: AgentHistoryView) -> Self {
@@ -423,6 +424,7 @@ impl Events {
             committed: Mutex::new(Vec::new()),
             fail_finished: AtomicBool::new(false),
             fail_saving: AtomicBool::new(false),
+            fail_status: AtomicBool::new(false),
         }
     }
 }
@@ -496,6 +498,9 @@ impl ContextEvents for Events {
                     .any(|value| value.id == event.value().id)
             );
             self.committed.lock().unwrap().push(event.value().clone());
+            if event.value().has_agent_notice() && self.fail_status.load(Ordering::Relaxed) {
+                return Err(ContextError::Operation("status publication failed".into()));
+            }
             self.publish(event.into_value(), cancellation).await
         })
     }
