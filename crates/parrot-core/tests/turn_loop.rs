@@ -87,11 +87,16 @@ const RUNAWAY_NOTICE: &str = "configured runaway notice";
 struct MemoryTurnHooks {
     model: String,
     turn_ids: Arc<Mutex<Vec<String>>>,
+    activation_error: Option<Error>,
+    fail_at: Option<&'static str>,
 }
 
 impl parrot_core::TurnHooks for MemoryTurnHooks {
     fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<TurnModel, Error>> {
         Box::pin(async move {
+            if self.fail_at == Some("open") {
+                return Err(Error::failed("open"));
+            }
             Ok(TurnModel {
                 selector: self.model.clone(),
                 alias_icon: None,
@@ -100,7 +105,8 @@ impl parrot_core::TurnHooks for MemoryTurnHooks {
     }
     fn activate_conversation_turn(&self, turn_id: &str) -> BoxFuture<'_, Result<(), Error>> {
         self.turn_ids.lock().unwrap().push(turn_id.to_owned());
-        Box::pin(async { Ok(()) })
+        let result = self.activation_error.clone().map_or(Ok(()), Err);
+        Box::pin(async move { result })
     }
     fn begin_step(&self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Ok(()) })
@@ -112,6 +118,8 @@ struct MemoryTurnLifecycle<'a> {
     tools: &'a dyn Tools,
     provider: &'a dyn Provider,
     publisher: &'a MemoryEventPublisher,
+    single_turn: bool,
+    opened: bool,
 }
 
 impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
@@ -120,33 +128,93 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
     }
     fn has_ready_turn(&mut self) -> BoxFuture<'_, Result<bool, Error>> {
         Box::pin(async move {
+            if self.single_turn {
+                return Ok(!self.opened);
+            }
             let turn = self.states.get_last_turn().await?;
             Ok(turn.as_ref().is_some_and(ConversationTurn::needs_response)
                 || self.states.has_pending_input().await?)
         })
     }
-    fn run_turn<'a>(
+    fn open_turn<'a>(
         &'a mut self,
         cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Outcome, Error>> {
+    ) -> BoxFuture<'a, Result<Box<dyn parrot_core::Turn + 'a>, Error>> {
         Box::pin(async move {
             let hooks = MemoryTurnHooks {
                 model: self.states.model.clone(),
                 turn_ids: self.states.turn_ids.clone(),
+                activation_error: self.states.activation_error.clone(),
+                fail_at: self.states.fail_at,
             };
-            let start_event_id =
-                parrot_core::TurnEngine::open_turn(&hooks, self.publisher, cancellation).await?;
+            let model = parrot_core::TurnHooks::begin_conversation_turn(&hooks).await?;
+            let start_event_id = self
+                .publisher
+                .report_turn_started(&model, cancellation)
+                .await?;
             let skills = MemorySkills::new(self.states);
-            parrot_core::TurnEngine::run_turn(
-                self.states,
-                &skills,
-                self.tools,
-                self.provider,
-                self.publisher,
-                &start_event_id,
-                cancellation,
-            )
-            .await
+            self.opened = true;
+            Ok(Box::new(MemoryTurn {
+                states: self.states,
+                tools: self.tools,
+                provider: self.provider,
+                publisher: self.publisher,
+                hooks,
+                skills,
+                start_event_id,
+            }) as Box<dyn parrot_core::Turn>)
+        })
+    }
+}
+
+struct MemoryTurn<'a> {
+    states: &'a mut MemoryState,
+    tools: &'a dyn Tools,
+    provider: &'a dyn Provider,
+    publisher: &'a MemoryEventPublisher,
+    hooks: MemoryTurnHooks,
+    skills: MemorySkills,
+    start_event_id: String,
+}
+
+impl parrot_core::Turn for MemoryTurn<'_> {
+    fn borrow_services(&mut self) -> parrot_core::TurnServices<'_> {
+        parrot_core::TurnServices {
+            start_event_id: &self.start_event_id,
+            states: self.states,
+            skills: &self.skills,
+            tools: self.tools,
+            provider: self.provider,
+            publisher: self.publisher,
+            hooks: &self.hooks,
+        }
+    }
+    fn dispose<'a>(
+        &'a mut self,
+        result: &'a Result<Outcome, Error>,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            let mut pending = true;
+            std::future::poll_fn(|cx| {
+                if std::mem::take(&mut pending) {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                } else {
+                    Poll::Ready(())
+                }
+            })
+            .await;
+            let result = match result {
+                Ok(Outcome::Completed(answer)) => Ok(Outcome::Completed(answer.clone())),
+                Ok(Outcome::BudgetExhausted(notice)) => {
+                    Ok(Outcome::BudgetExhausted(notice.clone()))
+                }
+                Err(error) => Err(error.clone()),
+            };
+            self.states
+                .disposed_turns
+                .push((self.start_event_id.clone(), result));
+            self.states.disposal_error.clone().map_or(Ok(()), Err)
         })
     }
 }
@@ -166,6 +234,8 @@ async fn run(
         tools,
         provider,
         publisher: &publisher,
+        single_turn: false,
+        opened: false,
     };
     parrot_core::TurnEngine::run(&mut lifecycle, cancellation).await
 }
@@ -180,23 +250,15 @@ async fn run_turn(
         events: states.events.clone(),
         started_turns: states.started_turns.clone(),
     };
-    let hooks = MemoryTurnHooks {
-        model: states.model.clone(),
-        turn_ids: states.turn_ids.clone(),
-    };
-    let start_event_id =
-        parrot_core::TurnEngine::open_turn(&hooks, &publisher, cancellation).await?;
-    let skills = MemorySkills::new(states);
-    parrot_core::TurnEngine::run_turn(
+    let mut lifecycle = MemoryTurnLifecycle {
         states,
-        &skills,
         tools,
         provider,
-        &publisher,
-        &start_event_id,
-        cancellation,
-    )
-    .await
+        publisher: &publisher,
+        single_turn: true,
+        opened: false,
+    };
+    parrot_core::TurnEngine::run(&mut lifecycle, cancellation).await
 }
 
 struct ThreadWake(thread::Thread);
@@ -506,6 +568,9 @@ struct MemoryState {
     started_turns: Arc<Mutex<Vec<TurnModel>>>,
     turn_ids: Arc<Mutex<Vec<String>>>,
     closed_turns: Vec<ConversationAddition>,
+    disposed_turns: Vec<(String, Result<Outcome, Error>)>,
+    activation_error: Option<Error>,
+    disposal_error: Option<Error>,
     usage_totals: parrot_core::UsageTotals,
     skill_rows: Vec<(Skill, SkillContent)>,
     steers_after_results: VecDeque<String>,
@@ -544,6 +609,7 @@ struct MemoryState {
     budget: AgentState,
     budget_read_error: Option<Error>,
     budget_write_error: Option<Error>,
+    budget_write_error_after: usize,
     budget_writes: usize,
     compaction: Arc<Mutex<MemoryCompaction>>,
 }
@@ -596,6 +662,9 @@ impl MemoryState {
             started_turns: Arc::default(),
             turn_ids: Arc::new(Mutex::new(Vec::new())),
             closed_turns: Vec::new(),
+            disposed_turns: Vec::new(),
+            activation_error: None,
+            disposal_error: None,
             usage_totals: parrot_core::UsageTotals::default(),
             skill_rows: Vec::new(),
             steers_after_results: VecDeque::new(),
@@ -679,6 +748,7 @@ impl MemoryState {
             budget: AgentState::default(),
             budget_read_error: None,
             budget_write_error: None,
+            budget_write_error_after: 0,
             budget_writes: 0,
             compaction,
         };
@@ -1009,7 +1079,9 @@ impl States for MemoryState {
     fn set_agent_state(&mut self, state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.budget_writes += 1;
-            if let Some(error) = &self.budget_write_error {
+            if self.budget_writes > self.budget_write_error_after
+                && let Some(error) = &self.budget_write_error
+            {
                 return Err(error.clone());
             }
             let mut compaction = self.compaction.lock().unwrap();

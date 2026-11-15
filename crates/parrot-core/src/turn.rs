@@ -3,18 +3,14 @@
 use crate::{
     AgentState, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConversationAddition,
     ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationTurn, Error,
-    ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, OpenedTurn, Outcome,
-    Provider, Role, SkillProvider, States, ToolCallReceipt, Tools, TurnEngine, TurnHooks,
-    TurnLifecycle, context, execute_tools, rendering, skills, steer_status,
+    ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome, Provider, Role,
+    SkillProvider, States, ToolCallReceipt, Tools, TurnEngine, TurnHooks, TurnLifecycle,
+    TurnServices, context, execute_tools, rendering, skills, steer_status,
 };
 
-impl OpenedTurn<'_> {
-    pub fn start_event_id(&self) -> &str {
-        &self.start_event_id
-    }
-}
-
-struct TurnServices<'a> {
+struct ExecutionServices<'a> {
+    start_event_id: &'a str,
+    hooks: &'a dyn TurnHooks,
     skills: &'a dyn SkillProvider,
     provider: &'a dyn Provider,
     publisher: &'a dyn EventPublisher,
@@ -23,8 +19,7 @@ struct TurnServices<'a> {
 async fn execute_turn(
     states: &mut dyn States,
     tools: &dyn Tools,
-    services: &TurnServices<'_>,
-    opened: &OpenedTurn<'_>,
+    services: &ExecutionServices<'_>,
     cancellation: CancellationToken<'_>,
     state: &mut AgentState,
 ) -> Result<Outcome, Error> {
@@ -43,7 +38,7 @@ async fn execute_turn(
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
-        opened.hooks.begin_step().await?;
+        services.hooks.begin_step().await?;
         let options = states.get_config(ConfigKey::Turn).await?.into_turn()?;
         let catalog = tools.capture_catalog().await?;
         if cancellation.is_cancelled() {
@@ -231,7 +226,7 @@ async fn execute_turn(
                 .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::from_response(&response)],
                     persistence: ConversationPersistence::CloseTurn {
-                        start_event_id: opened.start_event_id().to_owned(),
+                        start_event_id: services.start_event_id.to_owned(),
                         finish_reason: response.finish_reason.clone(),
                         usage,
                     },
@@ -284,51 +279,14 @@ impl TurnEngine {
             if !lifecycle.has_ready_turn().await? {
                 return Ok(Outcome::Completed(answer));
             }
-            match lifecycle.run_turn(token).await? {
+            let mut turn = lifecycle.open_turn(token).await?;
+            let result = run_opened_turn(turn.borrow_services(), token).await;
+            turn.dispose(&result).await?;
+            match result? {
                 Outcome::Completed(completed) => answer = completed,
                 exhausted @ Outcome::BudgetExhausted(_) => return Ok(exhausted),
             }
         }
-    }
-
-    /// Prepares the turn and publishes its start event before runtime activation.
-    /// The returned turn retains the published ID even if activation later fails.
-    pub async fn open_turn<'a>(
-        hooks: &'a dyn TurnHooks,
-        publisher: &dyn EventPublisher,
-        cancellation: CancellationToken<'_>,
-    ) -> Result<OpenedTurn<'a>, Error> {
-        let model = hooks.begin_conversation_turn().await?;
-        let start_event_id = publisher.report_turn_started(&model, cancellation).await?;
-        Ok(OpenedTurn {
-            start_event_id,
-            hooks,
-        })
-    }
-
-    /// Runs one active turn using settings and tools captured at each step.
-    /// Activates the published turn returned by `open_turn` before reading agent state.
-    pub async fn run_turn(
-        states: &mut dyn States,
-        skill_provider: &dyn SkillProvider,
-        tools: &dyn Tools,
-        provider: &dyn Provider,
-        publisher: &dyn EventPublisher,
-        turn: &OpenedTurn<'_>,
-        cancellation: CancellationToken<'_>,
-    ) -> Result<Outcome, Error> {
-        turn.hooks
-            .activate_conversation_turn(turn.start_event_id())
-            .await?;
-        let mut state = states.get_agent_state().await?;
-        let services = TurnServices {
-            skills: skill_provider,
-            provider,
-            publisher,
-        };
-        let result = execute_turn(states, tools, &services, turn, cancellation, &mut state).await;
-        states.set_agent_state(state).await?;
-        result
     }
 
     /// Records an interrupted assistant turn through the same generic conversation operation.
@@ -351,6 +309,26 @@ impl TurnEngine {
             .await?;
         Ok(receipt.inserted.then_some(content))
     }
+}
+
+async fn run_opened_turn(
+    turn: TurnServices<'_>,
+    cancellation: CancellationToken<'_>,
+) -> Result<Outcome, Error> {
+    turn.hooks
+        .activate_conversation_turn(turn.start_event_id)
+        .await?;
+    let mut state = turn.states.get_agent_state().await?;
+    let services = ExecutionServices {
+        start_event_id: turn.start_event_id,
+        hooks: turn.hooks,
+        skills: turn.skills,
+        provider: turn.provider,
+        publisher: turn.publisher,
+    };
+    let result = execute_turn(turn.states, turn.tools, &services, cancellation, &mut state).await;
+    turn.states.set_agent_state(state).await?;
+    result
 }
 
 /// Records a phase prompt only when it flips the agent state's final-phase marker:

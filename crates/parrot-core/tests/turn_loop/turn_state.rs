@@ -596,3 +596,103 @@ fn state_write_failures_stop_before_provider_invocation_and_take_precedence() {
         assert!(state.provider.requests.lock().unwrap().is_empty());
     }
 }
+
+#[test]
+fn core_disposes_each_completed_turn_with_its_published_identity() {
+    let mut state = MemoryState::new([
+        Reply::final_response("first answer"),
+        Reply::final_response("second answer"),
+    ]);
+    state.enqueue_message(Delivery::Queue, "second question");
+    assert_eq!(state.run(), Ok(Outcome::Completed("second answer".into())));
+    assert_eq!(
+        state.disposed_turns,
+        [
+            (
+                "turn-start-0".into(),
+                Ok(Outcome::Completed("first answer".into()))
+            ),
+            (
+                "turn-start-1".into(),
+                Ok(Outcome::Completed("second answer".into()))
+            ),
+        ]
+    );
+}
+
+#[test]
+fn core_disposes_budget_exhaustion_without_opening_the_next_turn() {
+    let mut state = MemoryState::new([]);
+    state.maximum = 0;
+    state.enqueue_message(Delivery::Queue, "next question");
+    let expected = Ok(Outcome::BudgetExhausted(RUNAWAY_NOTICE.into()));
+    assert_eq!(state.run(), expected);
+    assert_eq!(state.disposed_turns, [("turn-start-0".into(), expected)]);
+    assert_eq!(state.pending_messages.len(), 1);
+}
+
+#[test]
+fn core_disposes_activation_state_and_provider_failures() {
+    for stage in ["activation", "state_read", "state_write", "invoke"] {
+        let mut state = MemoryState::new([Reply::final_response("unreachable")]);
+        let error = Error::failed(stage);
+        match stage {
+            "activation" => state.activation_error = Some(error.clone()),
+            "state_read" => state.budget_read_error = Some(error.clone()),
+            "state_write" => state.budget_write_error = Some(error.clone()),
+            "invoke" => state.fail_at = Some("invoke"),
+            _ => unreachable!(),
+        }
+        assert_eq!(state.run(), Err(error.clone()));
+        assert_eq!(state.disposed_turns, [("turn-start-0".into(), Err(error))]);
+        assert_eq!(state.started_turns.lock().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn core_disposes_when_saving_state_after_execution_fails() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    state.budget_write_error = Some(Error::failed("final save"));
+    state.budget_write_error_after = 1;
+    assert_eq!(state.run(), Err(Error::failed("final save")));
+    assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
+    assert_eq!(state.closed_turns.len(), 1);
+    assert_eq!(
+        state.disposed_turns,
+        [("turn-start-0".into(), Err(Error::failed("final save")))]
+    );
+}
+
+#[test]
+fn disposal_errors_stop_draining_and_take_precedence_over_execution() {
+    for activation_error in [None, Some(Error::failed("activation"))] {
+        let mut state = MemoryState::new([Reply::final_response("answer")]);
+        state.enqueue_message(Delivery::Queue, "next question");
+        state.activation_error = activation_error.clone();
+        state.disposal_error = Some(Error::failed("dispose"));
+        assert_eq!(state.run(), Err(Error::failed("dispose")));
+        let expected = activation_error.map_or(Ok(Outcome::Completed("answer".into())), Err);
+        assert_eq!(state.disposed_turns, [("turn-start-0".into(), expected)]);
+        assert_eq!(state.started_turns.lock().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn core_does_not_dispose_when_no_turn_was_opened() {
+    let mut idle = MemoryState::new([]);
+    idle.pending_messages.clear();
+    idle.last_turn = None;
+    assert_eq!(idle.run(), Ok(Outcome::Completed(String::new())));
+    assert!(idle.disposed_turns.is_empty());
+
+    let mut cancelled = MemoryState::new([]);
+    cancelled.cancellation.cancel();
+    assert_eq!(cancelled.run(), Err(Error::cancelled()));
+    assert!(cancelled.disposed_turns.is_empty());
+
+    let mut unopened = MemoryState::new([]);
+    unopened.fail_at = Some("open");
+    assert_eq!(unopened.run(), Err(Error::failed("open")));
+    assert!(unopened.started_turns.lock().unwrap().is_empty());
+    assert!(unopened.disposed_turns.is_empty());
+}

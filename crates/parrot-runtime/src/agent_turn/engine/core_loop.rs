@@ -137,15 +137,16 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
         })
     }
 
-    fn run_turn<'a>(
+    fn open_turn<'a>(
         &'a mut self,
         cancellation: parrot_core::CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<parrot_core::Outcome, CoreError>> {
+    ) -> BoxFuture<'a, Result<Box<dyn parrot_core::Turn + 'a>, CoreError>> {
         Box::pin(async move {
             let cancellation: &dyn Cancellation = &cancellation;
-            let binding = TurnBinding::new();
+            let binding = Arc::new(TurnBinding::new());
             let backend = self.backend;
-            let mut states = RuntimeStates::bind(backend, &binding, self.cancellation, self.work);
+            let states =
+                RuntimeStates::bind(backend, binding.clone(), self.cancellation, self.work);
             let tool_events = ContextEmitter::new(
                 &backend.history,
                 backend.publisher.as_ref(),
@@ -164,14 +165,14 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                 sessions: &backend.sessions,
                 usage: &backend.usage,
                 capture: backend.selection.as_ref(),
-                binding: &binding,
-                events: &tool_events,
+                binding: binding.clone(),
+                events: Box::new(tool_events),
                 interrupted_result: &backend.notices.interrupted_result,
                 captured: std::sync::Mutex::new(None),
             };
             let hooks = RuntimeTurnHooks {
                 backend,
-                binding: &binding,
+                binding: binding.clone(),
                 cancellation: self.cancellation,
             };
             let publisher = RuntimeEventPublisher {
@@ -182,10 +183,15 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                     backend.event_id.as_ref(),
                 ),
             };
-            let token = parrot_core::CancellationToken::new(cancellation);
-            let turn = parrot_core::TurnEngine::open_turn(&hooks, &publisher, token).await?;
+            let model = parrot_core::TurnHooks::begin_conversation_turn(&hooks).await?;
+            let start_event_id = parrot_core::EventPublisher::report_turn_started(
+                &publisher,
+                &model,
+                parrot_core::CancellationToken::new(cancellation),
+            )
+            .await?;
             let provider = RuntimeProvider {
-                binding: &binding,
+                binding: binding.clone(),
                 state: &backend.state,
                 prompt: &backend.prompt,
                 status: backend.status.as_ref(),
@@ -208,39 +214,73 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                 skills: backend.skills.as_ref(),
                 cancellation: self.cancellation,
             };
-            let result = parrot_core::TurnEngine::run_turn(
-                &mut states,
-                &skills,
-                &tools,
-                &provider,
-                &publisher,
-                &turn,
-                token,
-            )
-            .await;
+            Ok(Box::new(RuntimeTurn {
+                backend,
+                failed_key: &mut self.failed_key,
+                start_event_id,
+                states,
+                tools,
+                hooks,
+                publisher,
+                provider,
+                skills,
+            }) as Box<dyn parrot_core::Turn>)
+        })
+    }
+}
+
+struct RuntimeTurn<'a, S: AccessSnapshot + 'static> {
+    backend: &'a RuntimeBackend<S>,
+    failed_key: &'a mut Option<TurnKey>,
+    start_event_id: String,
+    states: RuntimeStates<'a, S>,
+    tools: RuntimeTools<'a, S>,
+    hooks: RuntimeTurnHooks<'a, S>,
+    publisher: RuntimeEventPublisher<'a>,
+    provider: RuntimeProvider<'a, S>,
+    skills: RuntimeSkillProvider<'a>,
+}
+
+impl<S: AccessSnapshot + 'static> parrot_core::Turn for RuntimeTurn<'_, S> {
+    fn borrow_services(&mut self) -> parrot_core::TurnServices<'_> {
+        parrot_core::TurnServices {
+            start_event_id: &self.start_event_id,
+            states: &mut self.states,
+            skills: &self.skills,
+            tools: &self.tools,
+            provider: &self.provider,
+            publisher: &self.publisher,
+            hooks: &self.hooks,
+        }
+    }
+
+    fn dispose<'a>(
+        &'a mut self,
+        result: &'a Result<parrot_core::Outcome, CoreError>,
+    ) -> BoxFuture<'a, Result<(), CoreError>> {
+        Box::pin(async move {
+            let backend = self.backend;
             backend.skills.end_turn().await;
             let key = TurnKey {
                 agent_session_id: backend.history.agent_session_id().to_owned(),
-                start_event_id: turn.start_event_id().to_owned(),
+                start_event_id: self.start_event_id.clone(),
             };
             match result {
                 Ok(parrot_core::Outcome::Completed(completed)) => {
                     backend
                         .activity
                         .turn_finished(&key.start_event_id, "completed", None);
-                    backend.activity.assistant_message(&completed);
-                    Ok(parrot_core::Outcome::Completed(completed))
+                    backend.activity.assistant_message(completed);
                 }
                 Ok(parrot_core::Outcome::BudgetExhausted(notice)) => {
-                    self.failed_key = Some(key);
+                    *self.failed_key = Some(key);
                     backend.fail(notice.clone(), String::new()).await?;
-                    Ok(parrot_core::Outcome::BudgetExhausted(notice))
                 }
-                Err(error) => {
-                    self.failed_key = Some(key);
-                    Err(error)
+                Err(_) => {
+                    *self.failed_key = Some(key);
                 }
             }
+            Ok(())
         })
     }
 }
@@ -302,8 +342,8 @@ pub(super) async fn interrupt<S>(
 where
     S: AccessSnapshot + 'static,
 {
-    let binding = TurnBinding::new();
-    let mut states = RuntimeStates::bind(backend, &binding, &NeverCancelled, work);
+    let binding = Arc::new(TurnBinding::new());
+    let mut states = RuntimeStates::bind(backend, binding, &NeverCancelled, work);
     if let Some(message) = parrot_core::TurnEngine::interrupt_turn(&mut states, &key.start_event_id)
         .await
         .map_err(TurnError::Core)?

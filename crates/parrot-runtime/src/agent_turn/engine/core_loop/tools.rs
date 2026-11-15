@@ -24,8 +24,8 @@ pub(super) struct RuntimeTools<'a, S: AccessSnapshot + 'static> {
     pub(super) sessions: &'a ProviderSessions,
     pub(super) usage: &'a SessionUsageRecorder,
     pub(super) capture: &'a dyn SelectionSource<S>,
-    pub(super) binding: &'a TurnBinding<S>,
-    pub(super) events: &'a dyn ContextEvents,
+    pub(super) binding: Arc<TurnBinding<S>>,
+    pub(super) events: Box<dyn ContextEvents + 'a>,
     pub(super) interrupted_result: &'a str,
     pub(super) captured: std::sync::Mutex<Option<CapturedTools<ToolSnapshot<S>>>>,
 }
@@ -107,7 +107,7 @@ where
                 prompt: self.prompt,
                 sessions: self.sessions,
                 status: status.as_ref(),
-                events: self.events,
+                events: self.events.as_ref(),
                 usage: self.usage,
             };
             let selection = &selection;

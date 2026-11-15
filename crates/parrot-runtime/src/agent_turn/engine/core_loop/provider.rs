@@ -7,7 +7,7 @@ use parrot_provider::sessions::{Completion, EventStream, Request, Session};
 use parrot_storage::conversation::ConversationOrigin;
 
 pub(super) struct RuntimeProvider<'a, S: AccessSnapshot> {
-    pub(super) binding: &'a TurnBinding<S>,
+    pub(super) binding: Arc<TurnBinding<S>>,
     pub(super) state: &'a Mutex<State>,
     pub(super) prompt: &'a SessionPrompt,
     pub(super) status: &'a dyn TurnStatus<S>,

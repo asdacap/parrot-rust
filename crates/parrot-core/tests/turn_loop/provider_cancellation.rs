@@ -58,23 +58,26 @@ fn entry_cancellation_reaches_inflight_provider_and_awaits_cleanup() {
     let waker = Waker::from(Arc::new(ThreadWake(thread::current())));
     let mut context = Context::from_waker(&waker);
     state.budget = AgentState::default();
-    let mut running = std::pin::pin!(run(
-        &mut state,
-        &tools,
-        &provider,
-        CancellationToken::new(&source),
-    ));
-    assert!(running.as_mut().poll(&mut context).is_pending());
-    assert!(provider.entered.load(Ordering::SeqCst));
-    source.cancel();
-    assert!(running.as_mut().poll(&mut context).is_pending());
-    assert!(!provider.cleaned.load(Ordering::SeqCst));
+    {
+        let mut running = std::pin::pin!(run(
+            &mut state,
+            &tools,
+            &provider,
+            CancellationToken::new(&source),
+        ));
+        assert!(running.as_mut().poll(&mut context).is_pending());
+        assert!(provider.entered.load(Ordering::SeqCst));
+        source.cancel();
+        assert!(running.as_mut().poll(&mut context).is_pending());
+        assert!(!provider.cleaned.load(Ordering::SeqCst));
+        assert_eq!(finish(running), Err(Error::cancelled()));
+        assert!(provider.cleaned.load(Ordering::SeqCst));
+        assert!(!provider.estimates.cancellation.is_cancelled());
+    }
     assert_eq!(
-        running.as_mut().poll(&mut context),
-        Poll::Ready(Err(Error::cancelled()))
+        state.disposed_turns,
+        [("turn-start-0".into(), Err(Error::cancelled()))]
     );
-    assert!(provider.cleaned.load(Ordering::SeqCst));
-    assert!(!provider.estimates.cancellation.is_cancelled());
 }
 
 #[test]

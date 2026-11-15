@@ -16,7 +16,7 @@ pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) usage: &'a SessionUsageRecorder,
     pub(super) event_id: &'a Arc<dyn Fn() -> String + Send + Sync>,
     pub(super) events: ContextEmitter<'a>,
-    pub(super) binding: &'a TurnBinding<S>,
+    pub(super) binding: Arc<TurnBinding<S>>,
     pub(super) cancellation: &'a dyn Cancellation,
     pub(super) work: &'a dyn DrainWork,
 }
@@ -24,7 +24,7 @@ pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
 impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
     pub(super) fn bind(
         backend: &'a RuntimeBackend<S>,
-        binding: &'a TurnBinding<S>,
+        binding: Arc<TurnBinding<S>>,
         cancellation: &'a dyn Cancellation,
         work: &'a dyn DrainWork,
     ) -> Self {

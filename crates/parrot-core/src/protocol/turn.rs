@@ -1,5 +1,7 @@
 use super::message::{ProviderResponse, Reasoning};
-use super::{BoxFuture, CancellationToken, Error};
+use super::{
+    BoxFuture, CancellationToken, Error, EventPublisher, Provider, SkillProvider, States, Tools,
+};
 
 /// Drives turn execution and records turn lifecycle effects through core contracts.
 pub struct TurnEngine;
@@ -87,11 +89,36 @@ pub trait TurnLifecycle: Send {
     fn has_scheduled_work(&self) -> bool;
     /// Reports whether a turn awaits a response or pending input remains.
     fn has_ready_turn(&mut self) -> BoxFuture<'_, Result<bool, Error>>;
-    /// Runs one turn, including its open and finish effects.
-    fn run_turn<'a>(
+    /// Prepares and publishes a turn before core activates and executes it.
+    /// An opening failure returns no turn and does not require disposal.
+    fn open_turn<'a>(
         &'a mut self,
         cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Outcome, Error>>;
+    ) -> BoxFuture<'a, Result<Box<dyn Turn + 'a>, Error>>;
+}
+
+/// Owns one published turn and its runtime resources until execution finishes.
+pub trait Turn: Send {
+    /// Borrows the services core uses throughout this turn's execution.
+    fn borrow_services(&mut self) -> TurnServices<'_>;
+    /// Releases resources and records the result after execution, including errors.
+    /// Core awaits disposal once before propagating the result. Disposal errors take precedence.
+    /// Dropping the execution future does not perform asynchronous disposal.
+    fn dispose<'a>(
+        &'a mut self,
+        result: &'a Result<Outcome, Error>,
+    ) -> BoxFuture<'a, Result<(), Error>>;
+}
+
+/// Borrows the published identity and services needed to execute one turn.
+pub struct TurnServices<'a> {
+    pub start_event_id: &'a str,
+    pub states: &'a mut dyn States,
+    pub skills: &'a dyn SkillProvider,
+    pub tools: &'a dyn Tools,
+    pub provider: &'a dyn Provider,
+    pub publisher: &'a dyn EventPublisher,
+    pub hooks: &'a dyn TurnHooks,
 }
 
 /// Receives core's lifecycle notifications independently of conversation storage.
@@ -102,10 +129,4 @@ pub trait TurnHooks: Send + Sync {
     fn activate_conversation_turn(&self, start_event_id: &str) -> BoxFuture<'_, Result<(), Error>>;
     /// Captures settings for the next step without changing in-flight operations.
     fn begin_step(&self) -> BoxFuture<'_, Result<(), Error>>;
-}
-
-/// A published turn start whose runtime activation occurs when `run_turn` begins.
-pub struct OpenedTurn<'a> {
-    pub(crate) start_event_id: String,
-    pub(crate) hooks: &'a dyn TurnHooks,
 }

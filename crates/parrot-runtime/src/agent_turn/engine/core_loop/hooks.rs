@@ -4,7 +4,7 @@ use parrot_provider::routing::aliases::{ModelAliasIconColor, ResolvedModelSelect
 
 pub(super) struct RuntimeTurnHooks<'a, S: AccessSnapshot + 'static> {
     pub(super) backend: &'a RuntimeBackend<S>,
-    pub(super) binding: &'a TurnBinding<S>,
+    pub(super) binding: Arc<TurnBinding<S>>,
     pub(super) cancellation: &'a dyn Cancellation,
 }
 

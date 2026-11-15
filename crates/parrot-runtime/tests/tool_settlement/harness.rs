@@ -192,8 +192,8 @@ impl Harness {
             sessions: &self.sessions,
             usage: &self.usage,
             capture,
-            binding: &binding,
-            events: &self.events,
+            binding: Arc::new(binding),
+            events: Box::new(ContextPublisher(self.events.0.clone())),
             interrupted_result: &self.interrupted_result,
             captured: std::sync::Mutex::new(None),
         };
