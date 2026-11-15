@@ -876,13 +876,6 @@ where
         _cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Self::Selection, LifecycleError>> {
         Box::pin(async move {
-            let mut guard = self.state.lock().await;
-            let state = &mut *guard;
-            state
-                .tool_conversation
-                .restore_results(&mut state.conversation)
-                .await
-                .map_err(|error| error.lifecycle_error())?;
             self.selection
                 .capture()
                 .map_err(|error| error.lifecycle_error())
@@ -998,13 +991,6 @@ where
     ) -> BoxFuture<'_, Result<i64, LifecycleError>> {
         let message_id = message_id.to_owned();
         Box::pin(async move {
-            let mut guard = self.state.lock().await;
-            let state = &mut *guard;
-            state
-                .tool_conversation
-                .restore_results(&mut state.conversation)
-                .await
-                .map_err(|error| error.lifecycle_error())?;
             if let Some(input) = self
                 .history
                 .repository()

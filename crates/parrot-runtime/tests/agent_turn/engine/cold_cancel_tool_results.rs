@@ -1,13 +1,16 @@
 use super::*;
 
 #[tokio::test]
-async fn saved_canceled_checkpoint_closes_unfinished_tools_without_activating_provider_or_tools() {
+async fn saved_canceled_checkpoint_leaves_unfinished_tools_to_the_next_turn() {
     let fixture = Fixture::new();
     let store = fixture.recovery_store().await;
     let original = fixture
         .save_cancelable_execution(store.as_ref(), ExecutionPhase::Canceled)
         .await;
-    let provider = Scripted::default();
+    let provider = Scripted::new(vec![
+        Step::complete("settled answer"),
+        Step::complete("later answer"),
+    ]);
     let tools = Arc::new(Tools::default());
     let parent = Arc::new(RecoveryParent::default());
     let runtime = fixture
@@ -73,37 +76,17 @@ async fn saved_canceled_checkpoint_closes_unfinished_tools_without_activating_pr
         saved.terminal.as_ref().unwrap().outcome,
         ExecutionOutcome::Canceled
     );
-    let terminals = fixture
-        .history
-        .tool_terminals_of_calls(vec!["first-crashed".into(), "second-crashed".into()])
-        .await
-        .unwrap();
-    assert_eq!(terminals.len(), 2);
-    assert!(terminals.iter().all(|terminal| {
-        terminal.status == parrot_storage::events::ToolExecutionStatus::Error
-            && terminal
-                .content()
-                .contains("The process crashed before the tool completed.")
-    }));
-    let tool_results: Vec<_> = fixture
-        .history
-        .conversation()
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|item| item.message.role == MessageRole::Tool)
-        .collect();
-    assert_eq!(tool_results.len(), 2);
+    let calls = vec!["first-crashed".to_string(), "second-crashed".to_string()];
     assert!(
-        tool_results
-            .iter()
-            .all(|item| item.sequence <= saved.terminal.as_ref().unwrap().recovery_watermark)
+        fixture
+            .history
+            .tool_terminals_of_calls(calls.clone())
+            .await
+            .unwrap()
+            .is_empty()
     );
     let events = fixture.events().await;
-    assert_eq!(
-        events.iter().filter(|event| event.has_tool_error()).count(),
-        2
-    );
+    assert!(!events.iter().any(|event| event.has_tool_error()));
     assert!(
         !events
             .iter()
@@ -111,7 +94,6 @@ async fn saved_canceled_checkpoint_closes_unfinished_tools_without_activating_pr
     );
     assert!(provider.requests.lock().unwrap().is_empty());
     assert_eq!(tools.executions.load(Ordering::SeqCst), 0);
-    assert_eq!(tools.materializations.load(Ordering::SeqCst), 0);
     assert_eq!(parent.messages.lock().unwrap().len(), 1);
     assert_eq!(
         bounded(
@@ -130,18 +112,81 @@ async fn saved_canceled_checkpoint_closes_unfinished_tools_without_activating_pr
         store.load().await.unwrap().unwrap().execution.unwrap(),
         saved
     );
-    assert_eq!(fixture.events().await.len(), events.len());
-    assert_eq!(
+    assert!(
         fixture
             .history
-            .tool_terminals_of_calls(vec!["first-crashed".into(), "second-crashed".into()])
+            .tool_terminals_of_calls(calls.clone())
             .await
-            .unwrap(),
-        terminals
+            .unwrap()
+            .is_empty()
     );
+    assert_eq!(fixture.events().await.len(), events.len());
     assert!(provider.requests.lock().unwrap().is_empty());
     assert_eq!(tools.executions.load(Ordering::SeqCst), 0);
-    assert_eq!(tools.materializations.load(Ordering::SeqCst), 0);
-    assert_eq!(parent.messages.lock().unwrap().len(), 1);
+    let later = runtime
+        .session
+        .enqueue_execution(
+            vec![ConversationPart::text("later question")],
+            "later-message".into(),
+            None,
+            None,
+            Arc::new(NeverCancelled),
+        )
+        .unwrap();
+    assert_eq!(
+        bounded(later.join()).await.unwrap(),
+        Execution::succeeded("settled answer")
+    );
+    let requests = provider.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    let crash = "The process crashed before the tool completed.";
+    for call in ["first-crashed", "second-crashed"] {
+        assert!(
+            requests[0]
+                .messages
+                .iter()
+                .any(|message| message.tool_call_id == call && message.content().contains(crash)),
+            "the request must carry the crash result for {call}"
+        );
+    }
+    let batch_index = requests[0]
+        .messages
+        .iter()
+        .position(|message| message.content().contains("unfinished tool requests"))
+        .expect("the dangling batch stays in the request");
+    let first_result_index = requests[0]
+        .messages
+        .iter()
+        .position(|message| message.tool_call_id == "first-crashed")
+        .expect("the crash result follows the batch");
+    let input_index = requests[0]
+        .messages
+        .iter()
+        .position(|message| message.content().contains("later question"))
+        .expect("the next input joins the same request");
+    assert!(batch_index < first_result_index && first_result_index < input_index);
+    let terminals = fixture
+        .history
+        .tool_terminals_of_calls(calls)
+        .await
+        .unwrap();
+    assert_eq!(terminals.len(), 2);
+    assert!(terminals.iter().all(|terminal| {
+        terminal.status == parrot_storage::events::ToolExecutionStatus::Error
+            && terminal
+                .content()
+                .contains("The process crashed before the tool completed.")
+    }));
+    let events = fixture.events().await;
+    assert_eq!(
+        events.iter().filter(|event| event.has_tool_error()).count(),
+        2
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| event.has_tool_started() || event.has_tool_execution_started())
+    );
+    assert_eq!(tools.executions.load(Ordering::SeqCst), 0);
     runtime.close().await;
 }
