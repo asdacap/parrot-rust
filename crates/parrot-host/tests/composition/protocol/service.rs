@@ -1201,14 +1201,12 @@ async fn question_calls_use_real_broker_preserve_options_order_and_map_errors() 
                             },
                         ],
                         multiple: true,
-                        custom: false,
                     },
                     QuestionDefinition {
                         header: "Reason".into(),
                         prompt: "Explain".into(),
                         options: vec![],
                         multiple: false,
-                        custom: true,
                     },
                 ],
                 active().as_ref(),
@@ -1232,9 +1230,8 @@ async fn question_calls_use_real_broker_preserve_options_order_and_map_errors() 
             pending.questions[0].header.as_str(),
             pending.questions[0].prompt.as_str(),
             pending.questions[0].multiple,
-            pending.questions[0].custom
         ),
-        ("Decision", "Pick colours", true, false)
+        ("Decision", "Pick colours", true)
     );
     assert_eq!(
         pending.questions[0]
@@ -1311,7 +1308,6 @@ async fn question_calls_use_real_broker_preserve_options_order_and_map_errors() 
                     prompt: "Reject me".into(),
                     options: vec![],
                     multiple: false,
-                    custom: true,
                 }],
                 active().as_ref(),
             )
@@ -2708,7 +2704,6 @@ async fn question_timeout_presence_preserves_source_rows_without_wall_clock_timi
                             description: "".into(),
                         }],
                         multiple: false,
-                        custom: false,
                     }],
                     active().as_ref(),
                 )

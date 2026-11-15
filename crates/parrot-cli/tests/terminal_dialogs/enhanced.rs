@@ -662,7 +662,6 @@ async fn question_arrival_wakes_input_and_remote_close_prevents_late_reply() {
         rpc.wait(|state| state.sent.len() == 1).await;
         rpc.wait(|state| state.question_lists > 0).await;
         let mut pending = question("answer-me", "First answer");
-        pending.questions[0].custom = false;
         pending.questions[0].options = vec![wire::QuestionOption {
             label: "Blue".into(),
             ..Default::default()

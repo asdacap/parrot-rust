@@ -67,23 +67,19 @@ where
             };
             let questions: Vec<_> = wire
                 .into_iter()
-                .map(|question| {
-                    let custom = question.custom.unwrap_or(question.options.is_none());
-                    QuestionDefinition {
-                        header: question.header.unwrap_or_default(),
-                        prompt: question.prompt.unwrap_or_default(),
-                        options: question
-                            .options
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|option| QuestionOption {
-                                label: option.label,
-                                description: option.description,
-                            })
-                            .collect(),
-                        multiple: question.multiple,
-                        custom,
-                    }
+                .map(|question| QuestionDefinition {
+                    header: question.header.unwrap_or_default(),
+                    prompt: question.prompt.unwrap_or_default(),
+                    options: question
+                        .options
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|option| QuestionOption {
+                            label: option.label,
+                            description: option.description,
+                        })
+                        .collect(),
+                    multiple: question.multiple,
                 })
                 .collect();
             match self

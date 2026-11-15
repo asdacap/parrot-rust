@@ -1110,7 +1110,6 @@ mod tests {
                     description: "description".into(),
                     ..Default::default()
                 }],
-                custom: false,
                 multiple: false,
                 ..Default::default()
             }],

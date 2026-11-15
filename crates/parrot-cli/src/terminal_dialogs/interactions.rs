@@ -614,7 +614,7 @@ async fn collect_question_answers(
         } else {
             format!("{}\n{}", question.header, question.prompt)
         };
-        let direct_custom = question.options.is_empty() && question.custom;
+        let direct_custom = question.options.is_empty();
         let mut selected_indexes = std::collections::HashSet::new();
         let mut custom_answer = None;
         loop {
@@ -631,7 +631,7 @@ async fn collect_question_answers(
                     )
                 })
                 .collect();
-            if question.custom && custom_answer.is_none() {
+            if custom_answer.is_none() {
                 choices.push(DialogOption::new(
                     CUSTOM,
                     "Custom answer",

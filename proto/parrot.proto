@@ -424,12 +424,12 @@ message PendingQuestion {
 }
 
 message QuestionDefinition {
-  reserved 1;
+  reserved 1, 6;
+  reserved "custom";
   string header = 2;
   string prompt = 3;
   repeated QuestionOption options = 4;
   bool multiple = 5;
-  bool custom = 6;
 }
 
 message QuestionOption {

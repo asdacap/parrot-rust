@@ -513,9 +513,6 @@ tools:
               multiple:
                 type: boolean
                 description: Whether the user may select more than one answer.
-              custom:
-                type: boolean
-                description: Whether the user may supply a custom answer.
             required:
             - prompt
             additionalProperties: false

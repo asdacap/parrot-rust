@@ -17,7 +17,6 @@ pub struct QuestionDefinition {
     pub prompt: String,
     pub options: Vec<QuestionOption>,
     pub multiple: bool,
-    pub custom: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -125,7 +125,7 @@ fn wait_default_limits_and_strict_integer_shapes() {
 
 #[test]
 fn question_options_preserve_labels_and_descriptions() {
-    let questions = parse_questions(r#"{"questions":[{"header":"Palette","prompt":"Pick","options":["Blue",{"label":"Red","description":"warm"}],"multiple":true,"custom":true}]}"#).unwrap();
+    let questions = parse_questions(r#"{"questions":[{"header":"Palette","prompt":"Pick","options":["Blue",{"label":"Red","description":"warm"}],"multiple":true}]}"#).unwrap();
     let question = &questions[0];
     assert_eq!(question.header.as_deref(), Some("Palette"));
     assert_eq!(
@@ -142,7 +142,6 @@ fn question_options_preserve_labels_and_descriptions() {
         ]
     );
     assert!(question.multiple);
-    assert_eq!(question.custom, Some(true));
 }
 
 #[test]

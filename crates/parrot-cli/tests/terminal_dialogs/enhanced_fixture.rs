@@ -984,7 +984,6 @@ pub fn question(id: &str, prompt: &str) -> wire::PendingQuestion {
         questions: vec![wire::QuestionDefinition {
             header: "Question".into(),
             prompt: prompt.into(),
-            custom: true,
             ..Default::default()
         }],
         ..Default::default()

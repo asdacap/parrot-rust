@@ -85,7 +85,7 @@ async fn question_maps_schema_input_into_actual_broker_and_formats_label_reply()
     let broker = broker();
     let tool = question_tool(broker.clone());
     let task = tokio::spawn(async move {
-        tool.invoke(invocation(r#"{"questions":[{"header":"Palette","prompt":"Pick a colour","options":["Blue",{"label":"Red","description":"warm"}],"multiple":true,"custom":true}]}"#), context(&NEVER)).await
+        tool.invoke(invocation(r#"{"questions":[{"header":"Palette","prompt":"Pick a colour","options":["Blue",{"label":"Red","description":"warm"}],"multiple":true}]}"#), context(&NEVER)).await
     });
     wait_pending(&broker).await;
     let pending = broker.pending();
@@ -95,7 +95,7 @@ async fn question_maps_schema_input_into_actual_broker_and_formats_label_reply()
     assert_eq!(questions[0].options[0].label, "Blue");
     assert_eq!(questions[0].options[0].description, "");
     assert_eq!(questions[0].options[1].description, "warm");
-    assert!(questions[0].multiple && questions[0].custom);
+    assert!(questions[0].multiple);
     broker
         .reply(
             &pending[0].id,
@@ -117,7 +117,7 @@ async fn ordered_answers_preserve_question_and_supplied_selection_order() {
     let broker = broker();
     let tool = question_tool(broker.clone());
     let task = tokio::spawn(async move {
-        tool.invoke(invocation(r#"{"questions":[{"prompt":"First","options":["Red","Blue"],"multiple":true,"custom":true},{"prompt":"Second"}]}"#), context(&NEVER)).await
+        tool.invoke(invocation(r#"{"questions":[{"prompt":"First","options":["Red","Blue"],"multiple":true},{"prompt":"Second"}]}"#), context(&NEVER)).await
     });
     wait_pending(&broker).await;
     let pending = broker.pending();
@@ -137,23 +137,19 @@ async fn ordered_answers_preserve_question_and_supplied_selection_order() {
 }
 
 #[tokio::test]
-async fn custom_default_distinguishes_absent_null_and_empty_options() {
-    for (arguments, expected) in [
-        (r#"{"questions":[{"prompt":"Pick"}]}"#, true),
-        (r#"{"questions":[{"prompt":"Pick","options":null}]}"#, true),
-        (
-            r#"{"questions":[{"prompt":"Pick","options":["Blue"]}]}"#,
-            false,
-        ),
+async fn optionless_questions_register_and_the_removed_custom_flag_is_rejected() {
+    for arguments in [
+        r#"{"questions":[{"prompt":"Pick"}]}"#,
+        r#"{"questions":[{"prompt":"Pick","options":null}]}"#,
+        r#"{"questions":[{"prompt":"Pick","options":[]}]}"#,
     ] {
         let broker = broker();
         let tool = question_tool(broker.clone());
-        let arguments = arguments.to_owned();
         let task =
-            tokio::spawn(async move { tool.invoke(invocation(&arguments), context(&NEVER)).await });
+            tokio::spawn(async move { tool.invoke(invocation(arguments), context(&NEVER)).await });
         wait_pending(&broker).await;
         let pending = broker.pending();
-        assert_eq!(pending[0].questions[0].custom, expected);
+        assert!(pending[0].questions[0].options.is_empty());
         broker.reject(&pending[0].id).unwrap();
         assert_eq!(
             task.await.unwrap().unwrap(),
@@ -161,15 +157,16 @@ async fn custom_default_distinguishes_absent_null_and_empty_options() {
         );
     }
     for arguments in [
-        r#"{"questions":[{"prompt":"Pick","custom":false}]}"#,
-        r#"{"questions":[{"prompt":"Pick","options":[]}]}"#,
+        r#"{"questions":[{"prompt":"Pick","custom":true}]}"#,
+        r#"{"questions":[{"prompt":"Pick","options":["Blue"],"custom":false}]}"#,
     ] {
-        assert_eq!(
-            question_tool(broker())
-                .invoke(invocation(arguments), context(&NEVER))
-                .await
-                .unwrap(),
-            "error: question requires options or custom answers"
+        let error = question_tool(broker())
+            .invoke(invocation(arguments), context(&NEVER))
+            .await
+            .unwrap();
+        assert!(
+            error.starts_with("error: unknown question property: custom"),
+            "{error}"
         );
     }
 }

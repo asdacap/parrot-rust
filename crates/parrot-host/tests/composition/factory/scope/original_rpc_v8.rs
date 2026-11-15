@@ -976,14 +976,12 @@ async fn actual_broker_preserves_ordered_questions_options_multiple_flags_and_or
                 })
                 .collect(),
             multiple: true,
-            custom: false,
         },
         QuestionDefinition {
             header: "Second".into(),
             prompt: "Explain".into(),
             options: vec![],
             multiple: false,
-            custom: true,
         },
     ];
     let questions = user.questions.clone();
@@ -1010,7 +1008,6 @@ async fn actual_broker_preserves_ordered_questions_options_multiple_flags_and_or
         assert_eq!(actual.header, expected.header);
         assert_eq!(actual.prompt, expected.prompt);
         assert_eq!(actual.multiple, expected.multiple);
-        assert_eq!(actual.custom, expected.custom);
         assert_eq!(
             actual
                 .options
@@ -1171,7 +1168,6 @@ async fn actual_factory_question_timeout_projection_preserves_exact_750_zero_and
                         prompt: "Choose a color".into(),
                         options: vec![],
                         multiple: false,
-                        custom: true,
                     }],
                     &NeverCancelled,
                 )

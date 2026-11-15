@@ -114,7 +114,7 @@ async fn compacted_full_fork_pending_interactions_process_wait_and_same_session_
         tool_reply(
             "t76-combined-question",
             "question",
-            json!({"questions":[{"prompt":"t76-combined-proceed?","custom":true}]}),
+            json!({"questions":[{"prompt":"t76-combined-proceed?"}]}),
         ),
         None,
     );

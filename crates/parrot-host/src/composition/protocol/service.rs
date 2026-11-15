@@ -817,7 +817,6 @@ pub fn map_question(
                 header: question.header,
                 prompt: question.prompt,
                 multiple: question.multiple,
-                custom: question.custom,
                 options: question
                     .options
                     .into_iter()

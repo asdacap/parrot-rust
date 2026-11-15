@@ -1328,7 +1328,6 @@ fn questions(header: &str) -> Vec<QuestionDefinition> {
             description: String::new(),
         }],
         multiple: false,
-        custom: false,
     }]
 }
 

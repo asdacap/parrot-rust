@@ -129,7 +129,6 @@ fn question() -> QuestionDefinition {
             },
         ],
         multiple: false,
-        custom: true,
     }
 }
 fn answer() -> QuestionReply {
@@ -176,11 +175,7 @@ fn question_validation_preserves_source_literals_and_boundaries() {
     );
     let mut q = question();
     q.options.clear();
-    q.custom = false;
-    assert_eq!(
-        validate_questions(&[q]).unwrap_err().message,
-        "question requires options or custom answers"
-    );
+    assert!(validate_questions(&[q]).is_ok());
     let mut q = question();
     q.multiple = true;
     assert!(
@@ -681,7 +676,6 @@ async fn source_observed_option_flags_are_not_selection_constraints() {
     let token = Token::default();
     let mut first = question();
     first.multiple = false;
-    first.custom = false;
     let mut second = first.clone();
     second.options[0].label = "First".into();
     let mut wait = Box::pin(broker.ask(vec![first, second], &token));
