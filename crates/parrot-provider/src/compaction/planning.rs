@@ -9,7 +9,7 @@ use {
 impl CompactionConfiguration {
     pub fn calculate_target_tokens(&self) -> Option<i64> {
         let context = &self.context;
-        let input_limit = context.model.calculate_input_limit();
+        let input_limit = context.calculate_input_limit();
         let cap_tokens = |tokens: Option<i64>| {
             if input_limit > 0 {
                 tokens.map(|tokens| tokens.min(i64::from(input_limit)))
@@ -18,7 +18,7 @@ impl CompactionConfiguration {
             }
         };
         match self.target.as_ref() {
-            Some(target) => cap_tokens(target.resolve_tokens(context.model.context_window)),
+            Some(target) => cap_tokens(target.resolve_tokens(context.context_window)),
             None if context.context_limit.is_none() => (input_limit > 0)
                 .then(|| i64::from(input_limit) * i64::from(self.target_percent) / 100),
             None => context
@@ -57,7 +57,7 @@ impl CompactionPlan {
             return Ok(None);
         };
         let mut keep = groups.len() - 1;
-        let input_limit = configuration.context.model.calculate_input_limit();
+        let input_limit = configuration.context.calculate_input_limit();
         if let Some(index) = groups[..keep].iter().position(|group| !group.is_complete) {
             keep = index;
         }

@@ -11,8 +11,8 @@ use crate::{
     sessions::ProviderSessions,
 };
 use parrot_core::{
-    CompactionRequest, Content, ContextConfiguration, ContextModel, ContextSnapshot, Error,
-    Message, NeverCancelled, PlanningError, Role, ToolDefinition, join_status_offering,
+    CompactionRequest, Content, ContextConfiguration, ContextSnapshot, Error, Message,
+    NeverCancelled, PlanningError, Role, ToolDefinition, join_status_offering,
 };
 use parrot_domain::{contracts::async_ops::Cancellation, values::config::ModelProfiles};
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -51,12 +51,10 @@ impl Compactor {
         selected: &ResolvedModelSelection,
     ) -> ContextConfiguration {
         ContextConfiguration {
-            model: ContextModel {
-                canonical_model: selected.canonical_model.selector(),
-                context_window: selected.canonical_model.model.context_window,
-                maximum_input_tokens: selected.canonical_model.model.max_input_tokens,
-                maximum_output_tokens: selected.canonical_model.model.max_output_tokens,
-            },
+            canonical_model: selected.canonical_model.selector(),
+            context_window: selected.canonical_model.model.context_window,
+            maximum_input_tokens: selected.canonical_model.model.max_input_tokens,
+            maximum_output_tokens: selected.canonical_model.model.max_output_tokens,
             trigger_percent: self.settings.trigger_percent,
             context_limit: selected.context_limit().map(Into::into),
         }

@@ -43,7 +43,7 @@ pub(super) async fn fit_compaction(
             definitions,
             &input.messages,
         )?;
-        if tokens > i64::from(configuration.context.model.calculate_input_limit()) {
+        if tokens > i64::from(configuration.context.calculate_input_limit()) {
             return Err(CompactionFailure::NoSafeBoundary.into());
         }
         return Ok(None);

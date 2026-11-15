@@ -3,8 +3,8 @@ use super::{
     planning::{group_messages, is_complete},
 };
 use parrot_core::{
-    Content, ContextConfiguration, ContextLimit, ContextModel, Error, ErrorCode, ErrorDetail,
-    ErrorKind, Message, PlanningError, Role, ToolCall,
+    Content, ContextConfiguration, ContextLimit, Error, ErrorCode, ErrorDetail, ErrorKind, Message,
+    PlanningError, Role, ToolCall,
 };
 
 fn message(tokens: i64) -> Message {
@@ -29,12 +29,10 @@ fn input(costs: &[i64]) -> CompactionInput {
 fn configuration() -> CompactionConfiguration {
     CompactionConfiguration {
         context: ContextConfiguration {
-            model: ContextModel {
-                canonical_model: "provider/model".into(),
-                context_window: 1000,
-                maximum_input_tokens: 1000,
-                maximum_output_tokens: 1,
-            },
+            canonical_model: "provider/model".into(),
+            context_window: 1000,
+            maximum_input_tokens: 1000,
+            maximum_output_tokens: 1,
             trigger_percent: 90,
             context_limit: None,
         },
@@ -148,9 +146,9 @@ fn raw_targets_preserve_override_unknown_window_and_output_reservation_rules() {
     ] {
         let mut configuration = configuration();
         configuration.context.context_limit = limit;
-        configuration.context.model.context_window = window;
-        configuration.context.model.maximum_input_tokens = capacity;
-        configuration.context.model.maximum_output_tokens = output;
+        configuration.context.context_window = window;
+        configuration.context.maximum_input_tokens = capacity;
+        configuration.context.maximum_output_tokens = output;
         configuration.target = target;
         assert_eq!(
             configuration.context.calculate_trigger_tokens(),

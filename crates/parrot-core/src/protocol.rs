@@ -22,7 +22,7 @@ pub use cancellation::{Cancellation, CancellationToken, Cancelled, NeverCancelle
 pub use compaction::{CompactionFailure, CompactionRequest, PlanningError};
 pub use config::{ConfigKey, ConfigValue, PromptTemplate};
 pub use context::{
-    ContextCompaction, ContextConfiguration, ContextLimit, ContextModel, ContextReminderCheckpoint,
+    ContextCompaction, ContextConfiguration, ContextLimit, ContextReminderCheckpoint,
     ContextSnapshot, OutputTokenError, RequestStatistic,
 };
 pub use conversation::{

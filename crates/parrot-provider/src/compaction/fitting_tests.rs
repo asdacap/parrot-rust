@@ -5,8 +5,7 @@ use super::{
     *,
 };
 use parrot_core::{
-    CompactionFailure, Content, ContextConfiguration, ContextModel, Error, Message, NeverCancelled,
-    Role,
+    CompactionFailure, Content, ContextConfiguration, Error, Message, NeverCancelled, Role,
 };
 use std::sync::{
     Arc,
@@ -16,12 +15,10 @@ use std::sync::{
 fn configuration(limit: i32) -> CompactionConfiguration {
     CompactionConfiguration {
         context: ContextConfiguration {
-            model: ContextModel {
-                canonical_model: "test/model".into(),
-                context_window: limit,
-                maximum_input_tokens: limit,
-                maximum_output_tokens: 1,
-            },
+            canonical_model: "test/model".into(),
+            context_window: limit,
+            maximum_input_tokens: limit,
+            maximum_output_tokens: 1,
             trigger_percent: 90,
             context_limit: None,
         },

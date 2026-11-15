@@ -47,10 +47,10 @@ pub(crate) async fn prepare_request(
     let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
     let max_output_tokens = state
         .last_request_statistic
-        .calculate_maximum_output_tokens(&configuration.model, estimate)?;
+        .calculate_maximum_output_tokens(&configuration, estimate)?;
     Ok(PreparedRequest {
         estimated_input_tokens: estimate,
-        model_selector: configuration.model.canonical_model,
+        model_selector: configuration.canonical_model,
         request: ProviderRequest {
             model: options.model.clone(),
             instructions,
@@ -84,7 +84,7 @@ async fn prepare_context_epoch(
     let mut context = ContextSnapshot::estimate(estimate, &configuration);
     if context.requires_compaction(
         &state.last_request_statistic,
-        &configuration.model.canonical_model,
+        &configuration.canonical_model,
     ) {
         let compacted = compact_context(
             states,

@@ -1,4 +1,4 @@
-use parrot_core::{ContextModel, OutputTokenError, RequestStatistic};
+use parrot_core::{ContextConfiguration, OutputTokenError, RequestStatistic};
 use parrot_provider::compaction::{CompactionSettings, Compactor, estimate_input_tokens};
 mod context;
 mod execution;
@@ -126,6 +126,16 @@ fn model(context: i32) -> ProviderModel {
         variant: None,
     }
 }
+fn configuration(selected: &ProviderModel) -> ContextConfiguration {
+    ContextConfiguration {
+        canonical_model: "provider/model".into(),
+        context_window: selected.model.context_window,
+        maximum_input_tokens: selected.model.max_input_tokens,
+        maximum_output_tokens: selected.model.max_output_tokens,
+        trigger_percent: 90,
+        context_limit: None,
+    }
+}
 fn select(selected: &ProviderModel) -> ResolvedModelSelection {
     let registry = Arc::new(
         ProviderRegistry::new(
@@ -217,15 +227,8 @@ fn original_output_budget_rows() {
         selected.model.max_output_tokens = output;
         selected.model.max_input_tokens = input;
         assert_eq!(
-            RequestStatistic::default().calculate_maximum_output_tokens(
-                &ContextModel {
-                    canonical_model: "provider/model".into(),
-                    context_window: selected.model.context_window,
-                    maximum_input_tokens: selected.model.max_input_tokens,
-                    maximum_output_tokens: selected.model.max_output_tokens,
-                },
-                estimate
-            ),
+            RequestStatistic::default()
+                .calculate_maximum_output_tokens(&configuration(&selected), estimate),
             Ok(expected)
         );
     }
@@ -244,15 +247,7 @@ fn original_actual_usage_five_percent_rows() {
             expected_input
         );
         let output = budget
-            .calculate_maximum_output_tokens(
-                &ContextModel {
-                    canonical_model: "provider/model".into(),
-                    context_window: selected.model.context_window,
-                    maximum_input_tokens: selected.model.max_input_tokens,
-                    maximum_output_tokens: selected.model.max_output_tokens,
-                },
-                estimate,
-            )
+            .calculate_maximum_output_tokens(&configuration(&selected), estimate)
             .unwrap();
         assert_eq!(output, expected_output);
         assert!(expected_input + i64::from(output) + (expected_input + 19) / 20 <= 180000);
@@ -278,26 +273,10 @@ fn compaction_boundaries_preserve_full_requested_output_and_request_headroom() {
         let budget = RequestStatistic::default();
         let requested = if output > 0 { output } else { 32 * 1024 };
         assert_eq!(
-            budget.calculate_maximum_output_tokens(
-                &ContextModel {
-                    canonical_model: "provider/model".into(),
-                    context_window: selected.model.context_window,
-                    maximum_input_tokens: selected.model.max_input_tokens,
-                    maximum_output_tokens: selected.model.max_output_tokens,
-                },
-                trigger
-            ),
+            budget.calculate_maximum_output_tokens(&configuration(&selected), trigger),
             Ok(requested)
         );
-        let above = budget.calculate_maximum_output_tokens(
-            &ContextModel {
-                canonical_model: "provider/model".into(),
-                context_window: selected.model.context_window,
-                maximum_input_tokens: selected.model.max_input_tokens,
-                maximum_output_tokens: selected.model.max_output_tokens,
-            },
-            trigger + 1,
-        );
+        let above = budget.calculate_maximum_output_tokens(&configuration(&selected), trigger + 1);
         if output == 1 {
             assert_eq!(above, Err(OutputTokenError::NoOutputCapacity));
         } else {
@@ -322,15 +301,7 @@ fn original_exhausted_capacity_rows_exact_messages() {
         let mut budget = RequestStatistic::default();
         budget.observe_usage("provider/model", 1000, actual);
         assert_eq!(
-            budget.calculate_maximum_output_tokens(
-                &ContextModel {
-                    canonical_model: "provider/model".into(),
-                    context_window: selected.model.context_window,
-                    maximum_input_tokens: selected.model.max_input_tokens,
-                    maximum_output_tokens: selected.model.max_output_tokens,
-                },
-                1000
-            ),
+            budget.calculate_maximum_output_tokens(&configuration(&selected), 1000),
             Err(expected)
         );
         let message = if expected == OutputTokenError::InputLimitExceeded {
