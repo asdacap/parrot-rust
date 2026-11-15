@@ -256,7 +256,10 @@ pub fn locate_configured(
 ) -> io::Result<ConfiguredProcessRunner> {
     #[cfg(target_os = "linux")]
     {
-        let executable = locator.locate("bwrap").unwrap_or_default();
+        let executable = locator
+            .locate("bwrap")
+            .filter(|path| path.is_absolute())
+            .unwrap_or_default();
         let sandbox = crate::sandbox::linux::LinuxBubblewrapSandbox::new(&executable, false)?
             .with_device_paths(device_paths);
         Ok(ProcessRunner::new(sandbox, gate))

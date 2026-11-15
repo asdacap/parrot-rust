@@ -151,7 +151,9 @@ Keep the target directory and feature selection consistent between runs. Atomic
 compaction-artifact fixtures use `std::env::temp_dir()`. Ensure that `TMPDIR` is
 on a local filesystem supporting atomic rename exchange, not an NFS mount. Keep
 that path short. Native host fixtures append session and listener names that must
-fit within the platform's Unix socket path limit. Production artifact quarantine
+fit within the platform's Unix socket path limit. `nix develop` points `TMPDIR` at
+`/tmp/nix-shell.XXXXXXXX`, which is long enough to overflow that limit, so run the
+native suites with `TMPDIR=/tmp`. Production artifact quarantine
 also requires atomic rename exchange. This test setup does not establish NFS
 support.
 Additional native-platform and package-smoke gates are listed in

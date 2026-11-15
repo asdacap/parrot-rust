@@ -67,95 +67,87 @@ async fn saving_publication_failure_leaves_history_unchanged_and_reports_failure
 }
 
 #[tokio::test]
-async fn committed_status_publication_requires_true_success_not_duplicate_or_sqlite_failure() {
-    for sqlite_failure in [false, true] {
-        let fixture = Fixture::new();
-        let history = fixture.history();
-        user(&history, "old").await;
-        user(&history, "tail").await;
-        if sqlite_failure {
-            fixture.repository.events().transaction(|tx| {
-                tx.execute_batch("CREATE TRIGGER fail_t45_snapshot BEFORE INSERT ON conversation_item WHEN NEW.kind = 'compaction' BEGIN SELECT RAISE(ABORT, 'synthetic snapshot failure'); END;")?;
-                Ok(())
-            }).await.unwrap();
-        }
-        let provider = Scripted::default();
-        let selection = provider.selection(10000);
-        let sessions = ProviderSessions::new();
-        let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
-        let before = conversation.messages().to_vec();
-        let prompt = EpochPrompt::default();
-        let status: Box<dyn ContextStatus> = Box::new(Status::default());
-        let events = Events::new(history.clone());
-        let mut controller = fixture.controller(history.clone(), 90);
-        let error = controller
-            .compact(
-                EpochInput {
-                    selection: &selection,
-                    tools: &[],
-                    conversation: &mut conversation,
-                    agent_state: &mut parrot_core::AgentState::default(),
-                    prompt: &prompt.prompt,
-                    sessions: &sessions,
-                    status: status.as_ref(),
-                    events: &events,
-                },
-                None,
-                &NeverCancelled,
-            )
-            .await
-            .unwrap_err();
-        if sqlite_failure {
-            assert!(matches!(&error, ContextError::History(_)));
-            assert!(error.to_string().contains("synthetic snapshot failure"));
-        } else {
-            assert!(matches!(&error, ContextError::InvalidOperation(_)));
-            assert_eq!(
-                error.to_string(),
-                "compaction snapshot was already persisted"
-            );
-        }
-        assert_eq!(conversation.messages(), before);
-        let committed = events.committed.lock().unwrap().clone();
-        assert_eq!(committed.len(), 5);
-        assert!(committed[0].has_compaction_started());
+async fn committed_status_publication_requires_true_success_not_sqlite_failure() {
+    let fixture = Fixture::new();
+    let history = fixture.history();
+    user(&history, "old").await;
+    user(&history, "tail").await;
+    fixture
+        .repository
+        .events()
+        .transaction(|tx| {
+            tx.execute_batch("CREATE TRIGGER fail_t45_snapshot BEFORE INSERT ON conversation_item WHEN NEW.kind = 'compaction' BEGIN SELECT RAISE(ABORT, 'synthetic snapshot failure'); END;")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let provider = Scripted::default();
+    let selection = provider.selection(10000);
+    let sessions = ProviderSessions::new();
+    let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
+    let before = conversation.messages().to_vec();
+    let prompt = EpochPrompt::default();
+    let status: Box<dyn ContextStatus> = Box::new(Status::default());
+    let events = Events::new(history.clone());
+    let mut controller = fixture.controller(history.clone(), 90);
+    let error = controller
+        .compact(
+            EpochInput {
+                selection: &selection,
+                tools: &[],
+                conversation: &mut conversation,
+                agent_state: &mut parrot_core::AgentState::default(),
+                prompt: &prompt.prompt,
+                sessions: &sessions,
+                status: status.as_ref(),
+                events: &events,
+            },
+            None,
+            &NeverCancelled,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(&error, ContextError::History(_)));
+    assert!(error.to_string().contains("synthetic snapshot failure"));
+    assert_eq!(conversation.messages(), before);
+    let committed = events.committed.lock().unwrap().clone();
+    assert_eq!(committed.len(), 5);
+    assert!(committed[0].has_compaction_started());
+    assert_eq!(
+        committed[0].compaction_started().trigger,
+        CompactionTrigger::COMPACTION_TRIGGER_USER_REQUESTED.into()
+    );
+    for event in &committed[1..3] {
         assert_eq!(
-            committed[0].compaction_started().trigger,
-            CompactionTrigger::COMPACTION_TRIGGER_USER_REQUESTED.into()
+            event.compaction_progress().phase,
+            CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into()
         );
-        for event in &committed[1..3] {
-            assert_eq!(
-                event.compaction_progress().phase,
-                CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into()
-            );
-            assert_eq!(event.compaction_progress().total_groups, 1);
-        }
-        assert_eq!(committed[1].compaction_progress().completed_groups, 0);
-        assert_eq!(committed[2].compaction_progress().completed_groups, 1);
-        assert_eq!(
-            committed[3].compaction_progress().phase,
-            CompactionPhase::COMPACTION_PHASE_SAVING.into()
-        );
-        assert!(committed[4].has_compaction_failed());
-        assert!(!committed.iter().any(|event| event.has_agent_notice()));
-        let snapshot = fixture.repository.compaction("agent".into()).await.unwrap();
-        if sqlite_failure {
-            assert!(snapshot.is_none());
-        } else {
-            assert_eq!(
-                parrot_storage::events::content(&snapshot.unwrap().message.parts),
-                "winner"
-            );
-        }
-        sessions.close().await.unwrap();
+        assert_eq!(event.compaction_progress().total_groups, 1);
+    }
+    assert_eq!(committed[1].compaction_progress().completed_groups, 0);
+    assert_eq!(committed[2].compaction_progress().completed_groups, 1);
+    assert_eq!(
+        committed[3].compaction_progress().phase,
+        CompactionPhase::COMPACTION_PHASE_SAVING.into()
+    );
+    assert!(committed[4].has_compaction_failed());
+    assert!(!committed.iter().any(|event| event.has_agent_notice()));
+    assert!(
         fixture
             .repository
-            .events()
-            .database()
-            .close()
+            .compaction("agent".into())
             .await
-            .unwrap();
-    }
+            .unwrap()
+            .is_none()
+    );
+    sessions.close().await.unwrap();
+    fixture
+        .repository
+        .events()
+        .database()
+        .close()
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

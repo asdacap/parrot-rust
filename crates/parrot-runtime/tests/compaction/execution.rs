@@ -634,16 +634,16 @@ async fn summary_compaction_archives_real_provider_request_and_raw_response() {
         request.messages,
         vec![
             SummaryMessage {
-                role: "system".into(),
-                content: "Sum.".into()
-            },
-            SummaryMessage {
                 role: "user".into(),
                 content: "private old input".into()
             },
             SummaryMessage {
                 role: "assistant".into(),
                 content: "private old answer".into()
+            },
+            SummaryMessage {
+                role: "user".into(),
+                content: "<system-update>\nSum.\n</system-update>".into()
             },
         ]
     );
@@ -705,7 +705,7 @@ async fn summary_request_uses_actual_templates_profiles_model_and_retained_histo
     assert_eq!((result.retained_messages, result.watermark), (1, 2));
     let requests = fixture.requests();
     assert_eq!(requests.len(), 1);
-    assert_eq!(texts(&requests[0]), ["Sum.", "old input", "old answer"]);
+    assert_eq!(texts(&requests[0]), ["old input", "old answer", "Sum."]);
     assert_eq!(requests[0].model, "model");
     assert_eq!(requests[0].max_output_tokens, 77);
     assert!(requests[0].instructions.is_empty() && requests[0].tools.is_empty());
@@ -780,14 +780,14 @@ async fn chunk_budget_folds_in_order_carrying_only_previous_summary() {
     );
     let requests = fixture.requests();
     assert_eq!(requests.len(), 3);
-    assert_eq!(texts(&requests[0]), ["Sum.", history[0].content()]);
+    assert_eq!(texts(&requests[0]), [history[0].content(), "Sum."]);
     assert_eq!(
         texts(&requests[1]),
-        ["Sum.", "S:first", history[1].content()]
+        ["S:first", history[1].content(), "Sum."]
     );
     assert_eq!(
         texts(&requests[2]),
-        ["Sum.", "S:second", history[2].content()]
+        ["S:second", history[2].content(), "Sum."]
     );
     for request in &requests {
         assert!(
@@ -855,11 +855,11 @@ async fn empty_summary_halves_odd_group_count_without_losing_or_reordering_any_g
     assert_eq!(
         requests.iter().map(texts).collect::<Vec<_>>(),
         vec![
-            vec!["Sum.", "a", "b", "c"],
-            vec!["Sum.", "a", "b"],
-            vec!["Sum.", "a"],
-            vec!["Sum.", "S:A", "b"],
-            vec!["Sum.", "S:AB", "c"],
+            vec!["a", "b", "c", "Sum."],
+            vec!["a", "b", "Sum."],
+            vec!["a", "Sum."],
+            vec!["S:A", "b", "Sum."],
+            vec!["S:AB", "c", "Sum."],
         ]
     );
     assert_eq!(fixture.state.stream_closes.load(Ordering::SeqCst), 5);
@@ -885,11 +885,11 @@ async fn recursive_fold_keeps_assistant_and_all_tool_results_in_one_atomic_group
         .unwrap();
     assert_eq!(result.watermark, 3);
     let requests = fixture.requests();
-    assert_eq!(requests[1].messages[1..], history[..2]);
-    assert_eq!(requests[2].messages[2..], history[2..3]);
+    assert_eq!(requests[1].messages[..2], history[..2]);
+    assert_eq!(requests[2].messages[1..2], history[2..3]);
     assert_eq!(
-        requests[1].messages[1].tool_calls[0].id,
-        requests[1].messages[2].tool_call_id
+        requests[1].messages[0].tool_calls[0].id,
+        requests[1].messages[1].tool_call_id
     );
     fixture.close().await;
 }
@@ -996,9 +996,9 @@ async fn missing_completion_subdivides_successfully_without_using_deltas() {
     assert_eq!(
         fixture.requests().iter().map(texts).collect::<Vec<_>>(),
         [
-            vec!["Sum.", "a", "b"],
-            vec!["Sum.", "a"],
-            vec!["Sum.", "S:A", "b"],
+            vec!["a", "b", "Sum."],
+            vec!["a", "Sum."],
+            vec!["S:A", "b", "Sum."],
         ]
     );
     assert_eq!(fixture.state.stream_closes.load(Ordering::SeqCst), 3);

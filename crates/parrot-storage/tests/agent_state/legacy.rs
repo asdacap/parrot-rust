@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 fn encode_legacy(snapshot: &AgentStateSnapshot) -> Value {
     let mut value = serde_json::to_value(snapshot).unwrap();
     value["schema_version"] = json!(1);
+    value.as_object_mut().unwrap().remove("core");
     value["tasks"].as_object_mut().unwrap().remove("migration");
     for call in value["tasks"]["accepted_calls"].as_array_mut().unwrap() {
         let receipt = call.as_object_mut().unwrap().remove("receipt").unwrap();

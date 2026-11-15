@@ -4,6 +4,7 @@ pub fn rewrite_snapshot_as_version_one(path: &Path, ordinary_tasks: &[usize]) {
     let mut snapshot: serde_json::Value =
         serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     snapshot["schema_version"] = 1.into();
+    snapshot.as_object_mut().unwrap().remove("core");
     let graph = snapshot["tasks"].as_object_mut().unwrap();
     graph.remove("migration");
     for call in graph["accepted_calls"].as_array_mut().unwrap() {

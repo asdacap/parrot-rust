@@ -411,7 +411,26 @@ impl Default for Status {
         }
     }
 }
-impl ContextStatus for Status {}
+impl ContextStatus for Status {
+    fn slots<'a>(
+        &'a self,
+        _: &'a ContextSnapshot,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
+        Box::pin(async {
+            Ok([(
+                parrot_core::StatusKey::new("fixture"),
+                parrot_core::StatusOffer {
+                    hash: "fixture-hash".into(),
+                    text: self.fitted.clone(),
+                    is_auto_update: false,
+                },
+            )]
+            .into_iter()
+            .collect())
+        })
+    }
+}
 struct Events {
     history: AgentHistoryView,
     published: Mutex<Vec<Event>>,

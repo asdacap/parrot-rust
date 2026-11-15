@@ -321,7 +321,7 @@ async fn later_promoted_input_after_pass_capture_is_not_swallowed_by_terminal_pe
         let paused = Arc::new(CompletionPauseState {
             inner: store.clone(),
             gate: gate.clone(),
-            first: AtomicBool::new(true),
+            active_loads: AtomicUsize::new(0),
             fail_terminal: AtomicBool::new(false),
         });
         let mut step = Step::complete("original answer");

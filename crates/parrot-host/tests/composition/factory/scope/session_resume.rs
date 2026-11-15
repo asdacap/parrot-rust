@@ -1794,19 +1794,23 @@ async fn json_identity_lineage_and_status_survive_retirement_name_reuse_and_root
         )
         .unwrap();
     assert_eq!((version, tables), (10, 5));
-    let records = database.prepare(
-        "SELECT status_slots FROM conversation_item WHERE agent_session=?1 AND status_slots IS NOT NULL ORDER BY sequence",
-    ).unwrap().query_map([&root_id], |row| row.get::<_, String>(0)).unwrap()
-        .collect::<Result<Vec<_>, _>>().unwrap();
+    let status_messages = database
+        .prepare(
+            "SELECT count(*) FROM conversation_item WHERE agent_session=?1 AND role='system' ORDER BY sequence",
+        )
+        .unwrap()
+        .query_row([&root_id], |row| row.get::<_, i64>(0))
+        .unwrap();
     assert_eq!(
-        records.len(),
-        1,
+        status_messages, 1,
         "reselecting build and reopening must not duplicate unchanged status"
     );
-    let standing: serde_json::Value = serde_json::from_str(records[0].as_str()).unwrap();
+    let saved: AgentStateSnapshot =
+        serde_json::from_slice(&std::fs::read(state_path(&user, &restored)).unwrap()).unwrap();
+    let standing = saved.core.unwrap().standing_statuses;
     assert!(
-        standing.as_object().unwrap().contains_key("profile:build"),
-        "the retained assembly stands for the build profile: {standing}"
+        standing.keys().any(|key| key.as_str() == "profile:build"),
+        "the retained assembly stands for the build profile: {standing:?}"
     );
     println!("SCHEMA13_SESSION_ROOT={}", selected.path().display());
 }
