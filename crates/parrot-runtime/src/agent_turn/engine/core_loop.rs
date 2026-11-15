@@ -13,6 +13,8 @@ mod hooks;
 use hooks::RuntimeTurnHooks;
 mod states;
 use states::RuntimeStates;
+mod skills;
+use skills::RuntimeSkillProvider;
 mod tools;
 use tools::RuntimeTools;
 
@@ -202,9 +204,20 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                     backend.event_id.as_ref(),
                 ),
             };
-            let result =
-                parrot_core::run_turn(&mut states, &tools, &provider, &publisher, &turn, token)
-                    .await;
+            let skills = RuntimeSkillProvider {
+                skills: backend.skills.as_ref(),
+                cancellation: self.cancellation,
+            };
+            let result = parrot_core::run_turn(
+                &mut states,
+                &skills,
+                &tools,
+                &provider,
+                &publisher,
+                &turn,
+                token,
+            )
+            .await;
             backend.skills.end_turn().await;
             let key = TurnKey {
                 agent_session_id: backend.history.agent_session_id().to_owned(),

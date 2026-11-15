@@ -30,6 +30,11 @@ pub(super) struct RuntimeTools<'a, S: AccessSnapshot + 'static> {
     pub(super) captured: std::sync::Mutex<Option<CapturedTools<ToolSnapshot<S>>>>,
 }
 
+struct InvocationResult {
+    result: ToolResult,
+    yielded_process: Option<YieldedShellProcess>,
+}
+
 struct InvocationResources<'a, S: AccessSnapshot + 'static> {
     history: &'a AgentHistoryView,
     usage: &'a SessionUsageRecorder,
@@ -41,7 +46,7 @@ struct InvocationResources<'a, S: AccessSnapshot + 'static> {
     cancellation: &'a dyn Cancellation,
 }
 
-impl<S> parrot_core::Tools<YieldedShellProcess> for RuntimeTools<'_, S>
+impl<S> parrot_core::Tools for RuntimeTools<'_, S>
 where
     S: AccessSnapshot + 'static,
 {
@@ -74,7 +79,7 @@ where
         &'a self,
         request: parrot_core::ToolExecutionRequest,
         cancellation: parrot_core::CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult<YieldedShellProcess>>, CoreError>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, CoreError>> {
         adapt_operation(async move {
             let selection = self.binding.capture_selection()?;
             let snapshot = {
@@ -91,6 +96,9 @@ where
             let status = self.status.bind(&selection);
             let mut guard = self.state.lock().await;
             let state = &mut *guard;
+            if request.starts_batch {
+                state.tool_conversation.reset_pending();
+            }
             let resources = TurnResources {
                 history: self.history,
                 conversation: &mut state.conversation,
@@ -120,10 +128,14 @@ where
                 .as_ref()
                 .expect("execution budget was initialized")
                 .clone();
-            if request.cancel_remaining || cancellation.is_cancelled() {
-                return Ok(request.calls.iter().map(|call| self.cancel(call)).collect());
-            }
-            if !Self::parallel_safe(snapshot, assistant_sequence, first, &self.config.templates) {
+            let results = if request.cancel_remaining || cancellation.is_cancelled() {
+                request.calls.iter().map(|call| self.cancel(call)).collect()
+            } else if !Self::parallel_safe(
+                snapshot,
+                assistant_sequence,
+                first,
+                &self.config.templates,
+            ) {
                 let invocation = InvocationResources {
                     history: resources.history,
                     usage: resources.usage,
@@ -134,61 +146,75 @@ where
                     image_budget,
                     cancellation,
                 };
-                return self
-                    .invoke(invocation, Some(resources), first, None)
-                    .await
-                    .map(|result| vec![result]);
-            }
-            let mut executions = InvocationBatch::new();
-            let mut admitted = 0;
-            for (index, call) in request.calls.iter().enumerate() {
-                if cancellation.is_cancelled()
-                    || (index > 0
-                        && !Self::parallel_safe(
+                vec![
+                    self.invoke(invocation, Some(resources), first, None)
+                        .await?,
+                ]
+            } else {
+                let mut executions = InvocationBatch::new();
+                let mut admitted = 0;
+                for (index, call) in request.calls.iter().enumerate() {
+                    if cancellation.is_cancelled()
+                        || (index > 0
+                            && !Self::parallel_safe(
+                                snapshot,
+                                assistant_sequence,
+                                call,
+                                &self.config.templates,
+                            ))
+                    {
+                        break;
+                    }
+                    let launched = Arc::new(AtomicBool::new(false));
+                    executions.push(self.invoke(
+                        InvocationResources {
+                            history: resources.history,
+                            usage: resources.usage,
+                            selection,
                             snapshot,
+                            capture,
                             assistant_sequence,
-                            call,
-                            &self.config.templates,
-                        ))
-                {
-                    break;
+                            image_budget: image_budget.clone(),
+                            cancellation,
+                        },
+                        None,
+                        call,
+                        Some(launched.clone()),
+                    ));
+                    executions.wait_for_launch(&launched).await;
+                    admitted += 1;
                 }
-                let launched = Arc::new(AtomicBool::new(false));
-                executions.push(self.invoke(
-                    InvocationResources {
-                        history: resources.history,
-                        usage: resources.usage,
-                        selection,
-                        snapshot,
-                        capture,
-                        assistant_sequence,
-                        image_budget: image_budget.clone(),
-                        cancellation,
-                    },
-                    None,
-                    call,
-                    Some(launched.clone()),
-                ));
-                executions.wait_for_launch(&launched).await;
-                admitted += 1;
-            }
-            let mut results: Vec<_> = executions
-                .join()
-                .await
-                .into_iter()
-                .collect::<Result<_, _>>()?;
-            if cancellation.is_cancelled()
-                || results
-                    .iter()
-                    .any(|result| result.status == ToolStatus::Cancelled)
-            {
-                results.extend(
-                    request.calls[admitted..]
+                let mut results: Vec<_> = executions
+                    .join()
+                    .await
+                    .into_iter()
+                    .collect::<Result<_, _>>()?;
+                if cancellation.is_cancelled()
+                    || results
                         .iter()
-                        .map(|call| self.cancel(call)),
-                );
-            }
-            Ok(results)
+                        .any(|result| result.result.status == ToolStatus::Cancelled)
+                {
+                    results.extend(
+                        request.calls[admitted..]
+                            .iter()
+                            .map(|call| self.cancel(call)),
+                    );
+                }
+                results
+            };
+            Ok(results
+                .into_iter()
+                .map(|execution| {
+                    if let Some(process) = execution.yielded_process {
+                        state.tool_conversation.retain_yielded_process(
+                            assistant_sequence,
+                            execution.result.call_id.clone(),
+                            process,
+                        );
+                    }
+                    execution.result
+                })
+                .collect())
         })
     }
 }

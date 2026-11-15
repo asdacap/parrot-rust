@@ -2,7 +2,6 @@ use super::config::{ConfigKey, ConfigValue};
 use super::context::ContextSnapshot;
 use super::conversation::ConversationState;
 use super::message::{ConversationTurn, InputAdmission, PromotedInput};
-use super::skill::{Skill, SkillContent, SkillReference};
 use super::turn::AgentState;
 use super::{BoxFuture, Error};
 
@@ -66,23 +65,6 @@ pub trait States: Send + Sync {
         _admission: InputAdmission,
     ) -> BoxFuture<'_, Result<Vec<PromotedInput>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.promote_pending_inputs")) })
-    }
-    /// Retrieves skill metadata in one batch without reading instruction bodies.
-    /// Returns one result per reference in the supplied order, preserving backing-store
-    /// precedence and name/path matching semantics.
-    fn resolve_skill_references<'a>(
-        &'a self,
-        _references: &'a [SkillReference],
-    ) -> BoxFuture<'a, Result<Vec<Option<Skill>>, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.resolve_skill_references")) })
-    }
-    /// Reads the selected record's complete instruction body or unavailable diagnostic.
-    /// Does not format prompt text, update turn deduplication, or record context.
-    fn read_skill_content<'a>(
-        &'a self,
-        _skill: &'a Skill,
-    ) -> BoxFuture<'a, Result<SkillContent, Error>> {
-        Box::pin(async { Err(Error::unsupported("States.read_skill_content")) })
     }
     /// Reads the token totals the states side recorded for the current turn,
     /// for the terminal TurnEnded event assembled by core at close time.

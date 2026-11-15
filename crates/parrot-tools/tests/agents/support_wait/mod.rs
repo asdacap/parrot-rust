@@ -671,10 +671,7 @@ impl Harness {
         .await;
         let runtime_config = RuntimeConfig {
             agent_state: store.clone(),
-            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
-                disable_max_turns: false,
-                ..Default::default()
-            },
+            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig::default(),
             identity: SessionIdentity {
                 session_id,
                 name: "main".into(),

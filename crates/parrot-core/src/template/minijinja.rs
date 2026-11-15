@@ -4,7 +4,7 @@
 //! the private environment has native builtins but no loader or ambient callbacks.
 //! Fuel bounds instructions, not time or memory. Without output, cancellation can
 //! only be observed after native evaluation completes or exhausts its fuel.
-use crate::{CancellationToken, Error};
+use crate::{CancellationToken, Error, MiniJinjaPromptTemplateEngine};
 use minijinja::{
     AutoEscape, Environment, UndefinedBehavior, syntax::SyntaxConfig, value::Value as NativeValue,
 };
@@ -16,22 +16,6 @@ const RECURSION_LIMIT: usize = 500;
 
 #[cfg(test)]
 mod tests;
-
-/// An owned compiled template. Each call creates a fresh native evaluation state.
-///
-/// The API deliberately cannot accept host objects, functions or MiniJinja values.
-///
-/// ```compile_fail
-/// use parrot_core::{CancellationToken, template::MiniJinjaPromptTemplateEngine};
-/// use minijinja::value::Value;
-/// fn host_values(engine: &MiniJinjaPromptTemplateEngine, cancellation: CancellationToken<'_>) {
-///     engine.render(&Value::from(42), cancellation);
-/// }
-/// ```
-pub struct MiniJinjaPromptTemplateEngine {
-    name: String,
-    environment: Environment<'static>,
-}
 
 impl MiniJinjaPromptTemplateEngine {
     /// Compiles native Jinja synchronously, with path-prefixed native diagnostics.

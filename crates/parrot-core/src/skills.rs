@@ -1,19 +1,11 @@
 use crate::{
     CancellationToken, ConfigKey, Content, DerivedContext, Error, PromotedInput, PromptTemplate,
-    Skill, SkillContent, SkillReference, States,
+    Skill, SkillContent, SkillMention, SkillProvider, SkillReference, States,
 };
 use std::{collections::HashSet, sync::Arc};
 
 const MAXIMUM_SKILL_BYTES: usize = 8 * 1024;
 const MAXIMUM_TURN_BYTES: usize = 1024 * 1024;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SkillMention {
-    pub name: String,
-    pub path: Option<String>,
-    /// UTF-16 code-unit offset within the input text.
-    pub position: usize,
-}
 
 #[derive(Default)]
 pub(crate) struct SkillPreparation {
@@ -24,6 +16,7 @@ impl SkillPreparation {
     pub async fn prepare(
         &mut self,
         states: &mut dyn States,
+        skill_provider: &dyn SkillProvider,
         inputs: &[PromotedInput],
         cancellation: CancellationToken<'_>,
     ) -> Result<DerivedContext, Error> {
@@ -53,7 +46,7 @@ impl SkillPreparation {
                     .iter()
                     .map(|(reference, _)| reference.clone())
                     .collect::<Vec<_>>();
-                let records = states.resolve_skill_references(&references).await?;
+                let records = skill_provider.resolve_skill_references(&references).await?;
                 for (record, (_, position)) in records.into_iter().zip(mentions) {
                     if let Some(skill) = record
                         && self.selected_ids.insert(skill.id.clone())
@@ -93,7 +86,7 @@ impl SkillPreparation {
             if cancellation.is_cancelled() {
                 return Err(Error::cancelled());
             }
-            match states.read_skill_content(&skill).await? {
+            match skill_provider.read_skill_content(&skill).await? {
                 SkillContent::Text(content) => rendering.selected(preparation, &skill, &content)?,
                 SkillContent::Unavailable(message) => {
                     rendering.diagnostic(preparation, &skill.name, &message)?;

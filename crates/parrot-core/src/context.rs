@@ -1,4 +1,7 @@
-use crate::{ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, RequestStatistic};
+use crate::{
+    ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, OutputTokenError,
+    RequestStatistic,
+};
 mod compaction_request;
 mod preparation;
 mod status;
@@ -216,12 +219,6 @@ impl RequestStatistic {
         }
         Ok(output)
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum OutputTokenError {
-    InputLimitExceeded,
-    NoOutputCapacity,
 }
 
 impl fmt::Display for OutputTokenError {

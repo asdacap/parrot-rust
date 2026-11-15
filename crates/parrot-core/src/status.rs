@@ -1,20 +1,16 @@
 use crate::{
     AgentState, CancellationToken, ConfigKey, ContextSnapshot, ConversationAddition,
     ConversationEvent, ConversationOrigin, ConversationPersistence, Error, Message, Provider,
-    ProviderRequest, Role, States, ToolDefinition, context::fit_status,
+    ProviderRequest, Role, States, StatusKey, StatusOffering, StatusStanding, ToolDefinition,
+    context::fit_status,
 };
-use std::{collections::BTreeMap, fmt};
+use std::fmt;
 
 /// The notice text that records one injected status message. Status steering and
 /// compaction both persist a status under this notice.
 pub(crate) fn status_notice(content: &str) -> String {
     format!("Status prompt injected\n{content}")
 }
-
-/// Names one status slot of a conversation. Keys are stable across engine restarts
-/// and iterate in string order so status assembly stays deterministic.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
-pub struct StatusKey(String);
 
 impl StatusKey {
     pub fn new(value: impl Into<String>) -> Self {
@@ -31,23 +27,6 @@ impl fmt::Display for StatusKey {
         formatter.write_str(&self.0)
     }
 }
-
-/// One offered status slot. The source computes the hash over its own inputs, so
-/// the core steers without re-rendering anything and a meaning-preserving re-render
-/// of unchanged inputs can be suppressed at the source.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StatusOffer {
-    pub hash: String,
-    pub text: String,
-    pub is_auto_update: bool,
-}
-
-/// The status slots offered to the core for one assembly, in fixed slot order.
-pub type StatusOffering = BTreeMap<StatusKey, StatusOffer>;
-
-/// Cumulative identities of the status slots delivered to the conversation,
-/// read from the latest persisted status message.
-pub type StatusStanding = BTreeMap<StatusKey, String>;
 
 /// Returns whether the core should steer a new status assembly at a safe point.
 /// Non-auto slots never trigger steering on their own. A new conversation has
@@ -150,7 +129,8 @@ pub async fn steer_status(
 
 #[cfg(test)]
 mod tests {
-    use super::{StatusKey, StatusOffer, StatusOffering, StatusStanding, status_steering_needed};
+    use super::{StatusKey, StatusOffering, StatusStanding, status_steering_needed};
+    use crate::StatusOffer;
 
     fn offering(entries: &[(&str, &str, bool)]) -> StatusOffering {
         entries

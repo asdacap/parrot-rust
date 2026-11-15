@@ -1,5 +1,6 @@
 use parrot_core::{
-    BoxFuture, ConfigKey, ConfigValue, Error, ErrorCode, Provider, ProviderRequest, States,
+    BoxFuture, ConfigKey, ConfigValue, Error, ErrorCode, Provider, ProviderRequest, Skill,
+    SkillProvider, States,
 };
 use std::{
     future::Future,
@@ -22,6 +23,26 @@ impl States for UnavailableState {
     fn get_config(&self, _: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
         Box::pin(async { Err(Error::unsupported("configuration")) })
     }
+}
+
+struct UnavailableSkills;
+
+impl SkillProvider for UnavailableSkills {}
+
+#[test]
+fn unsupported_skill_operations_return_errors_without_requiring_states() {
+    let skills: &dyn SkillProvider = &UnavailableSkills;
+    let references = finish(skills.resolve_skill_references(&[])).unwrap_err();
+    assert_eq!(references.code, ErrorCode::InvalidOperation);
+    assert!(references.message.contains("resolve_skill_references"));
+    let skill = Skill {
+        id: "selected".into(),
+        name: "selected".into(),
+        path: "skills/selected/SKILL.md".into(),
+    };
+    let content = finish(skills.read_skill_content(&skill)).unwrap_err();
+    assert_eq!(content.code, ErrorCode::InvalidOperation);
+    assert!(content.message.contains("read_skill_content"));
 }
 
 struct UnavailableProvider;

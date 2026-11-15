@@ -1,4 +1,3 @@
-use parrot_domain::protocol::messages::parrot::YieldedShellProcess;
 use parrot_storage::conversation::ConversationOrigin;
 
 use super::*;
@@ -67,8 +66,7 @@ pub struct Harness {
     pub interrupted_result: String,
     pub selection: TurnSelection<Security>,
     pub capture: Arc<Selection>,
-    pub state: parrot_runtime::agent_turn::tool_conversation::ToolConversation,
-    pub settlement: parrot_core::ToolSettlement<YieldedShellProcess>,
+    pub settlement: parrot_core::ToolSettlement,
     pub publisher: Arc<Publisher>,
     pub activity: Arc<AgentSessionActivity>,
     pub diagnostics: Arc<Diagnostics>,
@@ -128,13 +126,6 @@ impl Harness {
         let snapshot = ToolSnapshot::document(factory.materialize().unwrap()).unwrap();
         let selection = selection(&Scripted::default());
         let capture = Arc::new(Selection(Mutex::new(selection.clone())));
-        let state = parrot_runtime::agent_turn::tool_conversation::ToolConversation::new(
-            fixture.history.clone(),
-            publisher.clone(),
-            Arc::new(id),
-            templates.as_ref(),
-        )
-        .unwrap();
         let interrupted_result = templates
             .render("agent-session.interrupted-result", &[], &NeverCancelled)
             .unwrap();
@@ -170,7 +161,6 @@ impl Harness {
             interrupted_result,
             selection,
             capture,
-            state,
             settlement: parrot_core::ToolSettlement::default(),
             publisher,
             activity,
@@ -187,7 +177,7 @@ impl Harness {
         request: ToolExecutionChunk,
         capture: &dyn SelectionSource<Security>,
         cancellation: &dyn Cancellation,
-    ) -> Result<Vec<parrot_core::ToolResult<YieldedShellProcess>>, TurnError> {
+    ) -> Result<Vec<parrot_core::ToolResult>, TurnError> {
         let binding = TurnBinding::new();
         binding.bind(self.selection.clone());
         let tools = RuntimeTools {
@@ -238,13 +228,14 @@ impl Harness {
     }
     pub async fn record_results(
         &mut self,
-        results: &[parrot_core::ToolResult<YieldedShellProcess>],
+        results: &[parrot_core::ToolResult],
     ) -> Result<(), TurnError> {
+        let state = self.runtime_state.get_mut();
         self.settlement
             .record_results(
                 &mut SettlementStates {
-                    tools: &mut self.state,
-                    conversation: &mut self.runtime_state.get_mut().conversation,
+                    tools: &mut state.tool_conversation,
+                    conversation: &mut state.conversation,
                 },
                 results,
             )
@@ -253,7 +244,7 @@ impl Harness {
     }
     pub async fn complete_execution(
         &mut self,
-        results: &[parrot_core::ToolResult<YieldedShellProcess>],
+        results: &[parrot_core::ToolResult],
     ) -> Result<(), TurnError> {
         self.settlement
             .complete_execution(results)
@@ -262,9 +253,11 @@ impl Harness {
     pub async fn restore(&mut self, fixture: &Fixture) -> Result<(), TurnError> {
         fixture.fresh_batches.lock().unwrap().clear();
         self.settlement.reset_pending();
-        self.state.reset_pending();
-        self.state
-            .restore_results(&mut self.runtime_state.get_mut().conversation)
+        let state = self.runtime_state.get_mut();
+        state.tool_conversation.reset_pending();
+        state
+            .tool_conversation
+            .restore_results(&mut state.conversation)
             .await
     }
     pub async fn run(
@@ -307,14 +300,19 @@ impl Harness {
                 }
                 self.complete_execution(&completed).await?;
             }
-            self.state
-                .restore_results(&mut self.runtime_state.get_mut().conversation)
+            let state = self.runtime_state.get_mut();
+            state
+                .tool_conversation
+                .restore_results(&mut state.conversation)
                 .await
         }
         .await;
         if result.is_err() {
             self.settlement.reset_pending();
-            self.state.reset_pending();
+            self.runtime_state
+                .get_mut()
+                .tool_conversation
+                .reset_pending();
         }
         result
     }

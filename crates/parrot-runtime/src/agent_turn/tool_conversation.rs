@@ -2,7 +2,7 @@ use super::{engine::Publisher, services::TurnError};
 use parrot_core::{
     BoxFuture, ConfigKey, ConfigValue, ConversationAddition, ConversationPersistence,
     ConversationReceipt, Error, PromptTemplate, States, ToolCall, ToolRecovery, ToolResult,
-    ToolResultMetadata, ToolSettlement, ToolStatus,
+    ToolSettlement, ToolStatus,
 };
 use parrot_domain::{
     contracts::storage::Committed,
@@ -21,7 +21,7 @@ use parrot_storage::{
 use std::{collections::HashMap, sync::Arc};
 
 pub struct ToolConversation {
-    settlement: ToolSettlement<Vec<u8>>,
+    settlement: ToolSettlement,
     backing: ToolBacking,
 }
 
@@ -31,6 +31,7 @@ struct ToolBacking {
     event_id: Arc<dyn Fn() -> String + Send + Sync>,
     crash_template: Arc<PromptTemplate>,
     error_template: Arc<PromptTemplate>,
+    yielded_processes: HashMap<(i64, String), YieldedShellProcess>,
 }
 
 struct ToolState<'a> {
@@ -55,6 +56,7 @@ impl ToolConversation {
             backing: ToolBacking {
                 history,
                 publisher,
+                yielded_processes: HashMap::new(),
                 event_id,
                 crash_template: templates
                     .get_template("agent-session.crashed-tool-result")
@@ -68,6 +70,18 @@ impl ToolConversation {
 
     pub fn reset_pending(&mut self) {
         self.settlement.reset_pending();
+        self.backing.yielded_processes.clear();
+    }
+
+    pub(crate) fn retain_yielded_process(
+        &mut self,
+        assistant_sequence: i64,
+        call_id: String,
+        process: YieldedShellProcess,
+    ) {
+        self.backing
+            .yielded_processes
+            .insert((assistant_sequence, call_id), process);
     }
 
     pub async fn restore_results(
@@ -176,7 +190,7 @@ impl ToolBacking {
             .into_iter()
             .map(|terminal| (terminal.tool_call_id.clone(), terminal))
             .collect::<HashMap<_, _>>();
-        let results: Vec<ToolResult<Vec<u8>>> = assistant
+        let results: Vec<ToolResult> = assistant
             .message
             .tool_calls
             .iter()
@@ -194,7 +208,6 @@ impl ToolBacking {
                     },
                     text,
                     error_message: String::new(),
-                    metadata: None,
                 }
             })
             .collect();
@@ -218,7 +231,7 @@ impl ToolBacking {
     }
 
     async fn commit_addition(
-        &self,
+        &mut self,
         addition: &ConversationAddition,
     ) -> Result<ToolCommit, TurnError> {
         match &addition.persistence {
@@ -245,12 +258,9 @@ impl ToolBacking {
                             tool_call_id: result.call_id.clone(),
                             tool_name: result.tool_name.clone(),
                             result: Some(result.text.clone()),
-                            yielded_process: result
-                                .metadata
-                                .as_deref()
-                                .map(<YieldedShellProcess as ToolResultMetadata>::decode)
-                                .transpose()
-                                .map_err(TurnError::Core)?
+                            yielded_process: self
+                                .yielded_processes
+                                .remove(&(*assistant_sequence, result.call_id.clone()))
                                 .into(),
                             ..ToolFinished::new()
                         }),

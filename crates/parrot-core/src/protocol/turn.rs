@@ -1,4 +1,5 @@
 use super::message::{ProviderResponse, Reasoning};
+use super::{BoxFuture, CancellationToken, Error};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Outcome {
@@ -53,8 +54,6 @@ pub struct TurnOptions {
     pub reasoning: Option<Reasoning>,
     pub provider_preferences: String,
     pub include_router_metadata: bool,
-    /// Turns off the provider-request limit entirely.
-    pub disable_max_turns: bool,
 }
 /// Consolidates the agent-local state that survives across turns and restarts.
 /// Core reads this state at turn start and reloads it after provider and tool effects.
@@ -77,4 +76,33 @@ pub struct AgentState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TurnFlags {
     pub final_phase: bool,
+}
+
+/// Supplies the drain loop with runtime-owned lifecycle facts and per-turn work.
+pub trait TurnLifecycle: Send {
+    /// Reports whether runtime-owned work is scheduled and must run before another turn.
+    fn has_scheduled_work(&self) -> bool;
+    /// Reports whether a turn awaits a response or pending input remains.
+    fn has_ready_turn(&mut self) -> BoxFuture<'_, Result<bool, Error>>;
+    /// Runs one turn, including its open and finish effects.
+    fn run_turn<'a>(
+        &'a mut self,
+        cancellation: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<Outcome, Error>>;
+}
+
+/// Receives core's lifecycle notifications independently of conversation storage.
+pub trait TurnHooks: Send + Sync {
+    /// Captures the initial model selection and notifies provider sessions before publication.
+    fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<crate::TurnModel, Error>>;
+    /// Starts runtime activity and prepares the prompt epoch and skill snapshot after publication.
+    fn activate_conversation_turn(&self, start_event_id: &str) -> BoxFuture<'_, Result<(), Error>>;
+    /// Captures settings for the next step without changing in-flight operations.
+    fn begin_step(&self) -> BoxFuture<'_, Result<(), Error>>;
+}
+
+/// A published turn start whose runtime activation occurs when `run_turn` begins.
+pub struct OpenedTurn<'a> {
+    pub(crate) start_event_id: String,
+    pub(crate) hooks: &'a dyn TurnHooks,
 }

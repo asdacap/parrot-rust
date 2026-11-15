@@ -130,7 +130,7 @@ fn empty_execution_output_errors_without_recording_or_repeating_work() {
 }
 
 #[test]
-fn complete_fresh_tool_results_reach_state_without_rewriting_metadata() {
+fn complete_fresh_tool_results_reach_state_unchanged() {
     let mut state = MemoryState::new([
         Reply::with_tool_calls(vec![ToolCall {
             id: "image-process".into(),
@@ -145,7 +145,6 @@ fn complete_fresh_tool_results_reach_state_without_rewriting_metadata() {
         status: ToolStatus::Finished,
         text: "raw result \n\ttext".into(),
         error_message: String::new(),
-        metadata: Some(vec![0, 255, 128, 1]),
     };
     state
         .tools
@@ -187,7 +186,7 @@ fn core_passes_each_recording_receipt_and_turn_flags_into_execution() {
 
 struct EchoTools;
 
-impl Tools<Vec<u8>> for EchoTools {
+impl Tools for EchoTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
         Box::pin(async { Ok(ToolCatalog::default()) })
     }
@@ -196,7 +195,7 @@ impl Tools<Vec<u8>> for EchoTools {
         &'a self,
         request: ToolExecutionRequest,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult<Vec<u8>>>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             let ToolExecutionRequest {
                 calls,

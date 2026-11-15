@@ -274,10 +274,7 @@ impl Fixture {
         let runtime_config = RuntimeConfig {
             agent_state: store.clone(),
             tool_execution: tool_execution_config(&self.history, templates.clone(), erased.clone()),
-            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
-                disable_max_turns: false,
-                ..Default::default()
-            },
+            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig::default(),
             identity: SessionIdentity {
                 session_id: "agent".into(),
                 name: "test".into(),

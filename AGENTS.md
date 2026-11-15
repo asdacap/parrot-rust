@@ -10,6 +10,9 @@ method is already obvious.
 - If a domain type has a trait, always use the trait rather than the implementation. Do not downcast to implementation.
 - No two domain traits per implementation please.
 - Dependency injection.
+- Other crates interact with `parrot-core` only through its protocol contracts.
+  Declare every public core type and trait in `crates/parrot-core/src/protocol/` or `protocol.rs`.
+  Keep implementation types private. Root re-exports and core entry points may expose these contracts.
 - Prefer rich domain objects rather than anemic domain models.
   - For example, if something is agent session specific, create an instance per agent session and store in the same
   scope as the agent session.
@@ -158,5 +161,6 @@ changes. Do not use broad cleanup commands.
 
 ## Nomenclature
 
+- Use "context" only for an LLM's conversation history, as defined in [GLOSSARY.md](GLOSSARY.md#conversation-language). Use specific names for other state or information.
 - A user-conversation-turn is from first message to final message.
 - A step is one provider request and its response.

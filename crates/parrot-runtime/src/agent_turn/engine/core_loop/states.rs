@@ -6,11 +6,9 @@ use parrot_domain::values::agent_state::AgentStateUpdate;
 pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) history: &'a AgentHistoryView,
     pub(super) agent_state: &'a dyn AgentStateStore,
-    pub(super) disable_max_turns: bool,
     pub(super) activity: &'a dyn SessionActivity,
     pub(super) state: &'a Mutex<State>,
     pub(super) prompt: &'a SessionPrompt,
-    pub(super) skills: &'a dyn TurnSkills,
     pub(super) status: &'a dyn TurnStatus<S>,
     pub(super) completion_sources: &'a [Arc<dyn CompletionStateSource>],
     pub(super) templates: &'a PromptTemplateCatalog,
@@ -33,11 +31,9 @@ impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
         Self {
             history: &backend.history,
             agent_state: backend.agent_state.as_ref(),
-            disable_max_turns: backend.disable_max_turns,
             activity: backend.activity.as_ref(),
             state: &backend.state,
             prompt: &backend.prompt,
-            skills: backend.skills.as_ref(),
             status: backend.status.as_ref(),
             completion_sources: &backend.completion_sources,
             templates: &backend.templates,
@@ -277,7 +273,6 @@ where
                         reasoning: selection.model.canonical_model.reasoning(),
                         provider_preferences: String::new(),
                         include_router_metadata: false,
-                        disable_max_turns: self.disable_max_turns,
                     }))
                 }
                 ConfigKey::Context => {
@@ -434,28 +429,6 @@ where
                 });
             }
             Ok(inputs)
-        })
-    }
-    fn resolve_skill_references<'a>(
-        &'a self,
-        references: &'a [parrot_core::SkillReference],
-    ) -> BoxFuture<'a, Result<Vec<Option<parrot_core::Skill>>, CoreError>> {
-        adapt_operation(async move {
-            self.skills
-                .get_skills(references, self.cancellation)
-                .await
-                .map_err(TurnError::from)
-        })
-    }
-    fn read_skill_content<'a>(
-        &'a self,
-        skill: &'a parrot_core::Skill,
-    ) -> BoxFuture<'a, Result<parrot_core::SkillContent, CoreError>> {
-        adapt_operation(async move {
-            self.skills
-                .read_skill_content(skill, self.cancellation)
-                .await
-                .map_err(TurnError::from)
         })
     }
     fn read_usage_totals(&self) -> BoxFuture<'_, Result<parrot_core::UsageTotals, CoreError>> {

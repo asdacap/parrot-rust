@@ -235,10 +235,7 @@ impl BudgetRuntime {
                 templates.clone(),
                 publisher.clone(),
             ),
-            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
-                disable_max_turns: false,
-                ..Default::default()
-            },
+            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig::default(),
             identity: SessionIdentity {
                 session_id: "agent".into(),
                 name: "budget-test".into(),

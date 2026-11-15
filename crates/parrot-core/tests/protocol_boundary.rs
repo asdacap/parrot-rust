@@ -1,12 +1,16 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-fn read_sources(directory: &Path, sources: &mut Vec<String>) {
+fn read_sources(directory: &Path, sources: &mut Vec<(PathBuf, String)>) {
     for entry in fs::read_dir(directory).unwrap() {
         let path = entry.unwrap().path();
         if path.is_dir() {
             read_sources(&path, sources);
         } else if path.extension().is_some_and(|extension| extension == "rs") {
-            sources.push(fs::read_to_string(path).unwrap());
+            let source = fs::read_to_string(&path).unwrap();
+            sources.push((path, source));
         }
     }
 }
@@ -20,7 +24,7 @@ fn public_traits_are_limited_to_services_and_cancellation() {
     );
     let mut traits = sources
         .iter()
-        .flat_map(|source| source.lines())
+        .flat_map(|(_, source)| source.lines())
         .filter_map(|line| line.trim().strip_prefix("pub trait "))
         .map(|declaration| declaration.split([':', '<', ' ']).next().unwrap())
         .collect::<Vec<_>>();
@@ -31,8 +35,8 @@ fn public_traits_are_limited_to_services_and_cancellation() {
             "Cancellation",
             "EventPublisher",
             "Provider",
+            "SkillProvider",
             "States",
-            "ToolResultMetadata",
             "Tools",
             "TurnHooks",
             "TurnLifecycle"
@@ -47,7 +51,7 @@ fn public_functions_do_not_accept_callback_contracts() {
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
         &mut sources,
     );
-    for source in sources {
+    for (_, source) in sources {
         let mut lines = source.lines();
         while let Some(line) = lines.next() {
             let line = line.trim();
@@ -67,4 +71,31 @@ fn public_functions_do_not_accept_callback_contracts() {
             );
         }
     }
+}
+
+#[test]
+fn public_types_are_declared_in_protocol() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut sources = Vec::new();
+    read_sources(&root, &mut sources);
+    let mut violations = Vec::new();
+    for (path, source) in sources {
+        if path == root.join("protocol.rs") || path.starts_with(root.join("protocol")) {
+            continue;
+        }
+        for (line, declaration) in source.lines().enumerate() {
+            let declaration = declaration.trim();
+            if ["pub struct ", "pub enum ", "pub trait ", "pub type "]
+                .iter()
+                .any(|prefix| declaration.starts_with(prefix))
+            {
+                violations.push(format!("{}:{}: {declaration}", path.display(), line + 1));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "public core types must be declared in protocol:\n{}",
+        violations.join("\n")
+    );
 }

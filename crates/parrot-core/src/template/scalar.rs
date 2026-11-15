@@ -2,19 +2,13 @@
 //!
 //! Scalar insertion is deliberately opaque: values are appended exactly once and are never
 //! parsed as another template. Scriban parsing/evaluation belongs to a different engine.
-use crate::{CancellationToken, Error};
+use crate::{CancellationToken, Error, ScalarPromptTemplateEngine};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum Part {
+pub(crate) enum Part {
     Literal(String),
     Argument(String),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ScalarPromptTemplateEngine {
-    path: String,
-    parts: Vec<Part>,
 }
 
 impl ScalarPromptTemplateEngine {

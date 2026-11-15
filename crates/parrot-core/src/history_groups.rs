@@ -1,30 +1,11 @@
+use crate::{HistoryGroup, HistoryGroupMember};
 use std::collections::BTreeMap;
-
-/// The facts that decide causal grouping for one durable history row. Compaction and
-/// storage forks both reduce their row types to this view before grouping.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct HistoryGroupMember {
-    pub sequence: i64,
-    pub tool_owner_sequence: Option<i64>,
-    pub is_compaction_status: bool,
-    pub is_assistant: bool,
-    pub tool_call_ids: Vec<String>,
-    pub tool_result_call_id: Option<String>,
-}
 
 impl HistoryGroupMember {
     /// A causal group starts here only when an assistant issues tool calls.
     pub fn makes_tool_calls(&self) -> bool {
         self.is_assistant && !self.tool_call_ids.is_empty()
     }
-}
-
-/// One causal group: an owner row plus the tool results answering its calls.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct HistoryGroup {
-    pub owner_sequence: i64,
-    pub member_sequences: Vec<i64>,
-    pub is_complete: bool,
 }
 
 /// Groups rows that own history rows with their tool-result children, sorted by
