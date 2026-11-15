@@ -1,13 +1,13 @@
 use parrot_core::{
-    AgentState, BoxFuture, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConfigValue,
-    Content, ContextConfiguration, ContextModel, ContextSnapshot, ConversationAddition,
-    ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationReceipt,
-    ConversationTurn, DerivedContext, Error, ErrorCode, ErrorKind, EventPublisher, FinishReason,
-    InputAdmission, Message, Outcome, PromotedInput, PromptTemplate, Provider, ProviderRequest,
-    ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States,
-    StatusKey, StatusOffer, StatusOffering, StatusStanding, ToolCall, ToolCallReceipt, ToolCatalog,
-    ToolDefinition, ToolExecutionRequest, ToolResult, ToolStatus, Tools, TurnFlags, TurnModel,
-    TurnOptions, parse_skill_mentions,
+    AgentState, BoxFuture, Cancellation, CancellationToken, CompletionBlockerFeedback, ConfigKey,
+    ConfigValue, Content, ContextConfiguration, ContextModel, ContextSnapshot,
+    ConversationAddition, ConversationEvent, ConversationOrigin, ConversationPersistence,
+    ConversationReceipt, ConversationTurn, DerivedContext, Error, ErrorCode, ErrorKind,
+    EventPublisher, FinishReason, InputAdmission, Message, Outcome, PromotedInput, PromptTemplate,
+    Provider, ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent,
+    SkillMention, SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding,
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult,
+    ToolStatus, Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -49,17 +49,12 @@ mod tool_execution;
 #[path = "turn_loop/turn_state.rs"]
 mod turn_state;
 
-#[path = "compaction/support.rs"]
-mod compaction_support;
-
 use cancellation::CancellationSource;
 use compaction_dependencies::MemoryCompaction;
 
 struct MemoryEventPublisher {
     events: Arc<Mutex<Vec<ConversationEvent>>>,
     started_turns: Arc<Mutex<Vec<TurnModel>>>,
-    compacting: Arc<AtomicBool>,
-    compaction: Arc<Mutex<MemoryCompaction>>,
 }
 
 impl EventPublisher for MemoryEventPublisher {
@@ -83,61 +78,6 @@ impl EventPublisher for MemoryEventPublisher {
             let turn_id = format!("turn-start-{}", started.len());
             started.push(model.clone());
             Ok(turn_id)
-        })
-    }
-    fn on_epoch_started(&self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Ok(()) })
-    }
-    fn report_compaction_started(&self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.compacting.store(true, Ordering::SeqCst);
-            Ok(())
-        })
-    }
-    fn report_compaction_failed(&self, message: String) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.compacting.store(false, Ordering::SeqCst);
-            self.compaction.lock().unwrap().failures.push(message);
-            Ok(())
-        })
-    }
-    fn report_compaction_finished(&self) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.compacting.store(false, Ordering::SeqCst);
-            Ok(())
-        })
-    }
-    fn report_compaction_saving<'a>(
-        &'a self,
-        _: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async move {
-            let mut compaction = self.compaction.lock().unwrap();
-            compaction.saving_count += 1;
-            match &compaction.saving_error {
-                Some(error) => Err(error.clone()),
-                None => Ok(()),
-            }
-        })
-    }
-    fn report_compaction_progress<'a, 'c>(
-        &'a self,
-        progress: parrot_core::CompactionProgress,
-        _: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<(), Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            self.compaction
-                .lock()
-                .unwrap()
-                .effects
-                .progress
-                .lock()
-                .unwrap()
-                .push(progress);
-            Ok(())
         })
     }
 }
@@ -218,8 +158,6 @@ async fn run(
     let publisher = MemoryEventPublisher {
         events: states.events.clone(),
         started_turns: states.started_turns.clone(),
-        compacting: states.compacting.clone(),
-        compaction: states.compaction.clone(),
     };
     let mut lifecycle = MemoryTurnLifecycle {
         states,
@@ -239,8 +177,6 @@ async fn run_turn(
     let publisher = MemoryEventPublisher {
         events: states.events.clone(),
         started_turns: states.started_turns.clone(),
-        compacting: states.compacting.clone(),
-        compaction: states.compaction.clone(),
     };
     let hooks = MemoryTurnHooks {
         model: states.model.clone(),
@@ -428,7 +364,6 @@ struct MemoryProvider {
     requests: Arc<Mutex<Vec<ProviderRequest>>>,
     request: Arc<Mutex<MemoryRequestData>>,
     compaction: Arc<Mutex<MemoryCompaction>>,
-    compacting: Arc<AtomicBool>,
     cancellation: Arc<CancellationSource>,
 }
 impl Provider for MemoryProvider {
@@ -438,14 +373,6 @@ impl Provider for MemoryProvider {
         definitions: &[ToolDefinition],
         messages: &[Message],
     ) -> Result<i64, Error> {
-        if self.compacting.load(Ordering::SeqCst) {
-            return self
-                .compaction
-                .lock()
-                .unwrap()
-                .effects
-                .estimate_context_tokens(instructions, definitions, messages);
-        }
         self.trace.step("estimate", *self.fail_at.lock().unwrap())?;
         let mut request = self.request.lock().unwrap();
         let tokens = request
@@ -462,18 +389,36 @@ impl Provider for MemoryProvider {
         });
         Ok(tokens)
     }
-    fn summarize<'a, 'c>(
+
+    fn compact<'a, 'c>(
         &'a self,
-        request: ProviderRequest,
+        request: parrot_core::CompactionRequest,
         cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<parrot_core::SummaryResponse, Error>>
+    ) -> BoxFuture<'a, Result<Option<Message>, Error>>
     where
         'c: 'a,
     {
-        let provider = self.compaction.lock().unwrap().provider.clone();
-        Box::pin(
-            async move { parrot_core::Provider::summarize(&provider, request, cancellation).await },
-        )
+        Box::pin(async move {
+            cancellation.check().map_err(|_| Error::cancelled())?;
+            self.trace.step("compact", *self.fail_at.lock().unwrap())?;
+            let mut compaction = self.compaction.lock().unwrap();
+            compaction.requests.push(request);
+            let result = compaction.replies.pop_front().unwrap_or(Ok(None));
+            if let Some(context) = compaction.contexts.pop_front() {
+                let mut request = self.request.lock().unwrap();
+                request.messages = context.messages;
+                request.context = context.state;
+            }
+            if let Some(state) = compaction.effect_state_on_call.take() {
+                compaction.effect_state = Some(state);
+            } else if result.as_ref().is_ok_and(Option::is_some) {
+                let mut state = compaction.saved_state.clone();
+                state.last_request_statistic.reset();
+                compaction.effect_state = Some(state);
+            }
+            compaction.results.push(result.clone());
+            result
+        })
     }
 
     fn invoke<'a, 'c>(
@@ -586,10 +531,6 @@ struct MemoryState {
     cancellation: Arc<CancellationSource>,
     unlimited: bool,
     maximum: i32,
-    compaction_plan: Option<parrot_core::CompactionPlan>,
-    summary_provider: compaction_support::Provider,
-    recorded_compactions: Vec<Result<Option<parrot_core::CompactionResult>, Error>>,
-    fitted_statuses: Vec<String>,
     status_offering: StatusOffering,
     next_status_offering: Option<StatusOffering>,
     status_steered: Vec<String>,
@@ -601,9 +542,20 @@ struct MemoryState {
     budget_write_error: Option<Error>,
     budget_writes: usize,
     compaction: Arc<Mutex<MemoryCompaction>>,
-    compacting: Arc<AtomicBool>,
 }
 impl MemoryState {
+    fn compact_with(&mut self, text: &str) {
+        self.compaction
+            .lock()
+            .unwrap()
+            .replies
+            .push_back(Ok(Some(Message {
+                role: Role::System,
+                contents: vec![Content::Text(text.into())],
+                ..Message::default()
+            })));
+    }
+
     fn prompts(&self) -> std::sync::MutexGuard<'_, MemoryPromptData> {
         self.prompts.lock().unwrap()
     }
@@ -635,7 +587,6 @@ impl MemoryState {
         }));
         let cancellation = Arc::new(CancellationSource::default());
         let compaction = Arc::new(Mutex::new(MemoryCompaction::default()));
-        let compacting = Arc::new(AtomicBool::new(false));
         let mut state = Self {
             events: Arc::default(),
             started_turns: Arc::default(),
@@ -649,7 +600,6 @@ impl MemoryState {
             request: request.clone(),
             prompts: Arc::default(),
             skill_templates: Arc::new(Mutex::new([
-                (ConfigKey::OversizedToolGroupTemplate, "{path}".into()),
                 (
                     ConfigKey::TruncatedToolCallTemplate,
                     "truncated tool calls".into(),
@@ -697,7 +647,6 @@ impl MemoryState {
                 requests: Arc::default(),
                 request,
                 compaction: compaction.clone(),
-                compacting: compacting.clone(),
                 cancellation: cancellation.clone(),
             },
             completion_blocker_feedback: Vec::new(),
@@ -718,10 +667,6 @@ impl MemoryState {
             cancellation,
             unlimited: false,
             maximum: 10,
-            compaction_plan: None,
-            summary_provider: compaction_support::Provider::new([]),
-            recorded_compactions: Vec::new(),
-            fitted_statuses: Vec::new(),
             status_offering: StatusOffering::default(),
             next_status_offering: None,
             status_steered: Vec::new(),
@@ -733,7 +678,6 @@ impl MemoryState {
             budget_write_error: None,
             budget_writes: 0,
             compaction,
-            compacting,
         };
         state.enqueue_message(Delivery::Queue, "question");
         state
@@ -853,8 +797,11 @@ impl MemoryState {
         tools: &dyn Tools<Vec<u8>>,
         provider: &dyn Provider,
     ) -> Result<Outcome, Error> {
-        *self.compaction.lock().unwrap() =
-            MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
+        self.compaction
+            .lock()
+            .unwrap()
+            .contexts
+            .extend(self.compactions.drain(..));
         self.budget.restart();
         let source = self.cancellation.clone();
         finish(run(
@@ -863,20 +810,6 @@ impl MemoryState {
             provider,
             CancellationToken::new(source.as_ref()),
         ))
-    }
-    fn run_with_compaction(&mut self, compaction: &mut MemoryCompaction) -> Result<Outcome, Error> {
-        std::mem::swap(&mut *self.compaction.lock().unwrap(), compaction);
-        self.budget.restart();
-        let tools = self.tools.clone();
-        let provider = self.provider.clone();
-        let result = finish(run(
-            self,
-            &tools,
-            &provider,
-            CancellationToken::new(provider.cancellation.as_ref()),
-        ));
-        std::mem::swap(&mut *self.compaction.lock().unwrap(), compaction);
-        result
     }
 }
 impl States for MemoryState {
@@ -1022,9 +955,6 @@ impl States for MemoryState {
                         self.request().context.configuration.clone(),
                     ))
                 }
-                ConfigKey::Compaction => Ok(ConfigValue::Compaction(
-                    self.compaction.lock().unwrap().configuration.clone(),
-                )),
                 key => {
                     self.trace.step("render_template", self.fail_at)?;
                     let templates = self.skill_templates.lock().unwrap();
@@ -1070,7 +1000,13 @@ impl States for MemoryState {
             if let Some(error) = &self.budget_read_error {
                 return Err(error.clone());
             }
-            Ok(self.budget.clone())
+            Ok(self
+                .compaction
+                .lock()
+                .unwrap()
+                .effect_state
+                .clone()
+                .unwrap_or_else(|| self.budget.clone()))
         })
     }
     fn set_agent_state(&mut self, state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
@@ -1079,6 +1015,9 @@ impl States for MemoryState {
             if let Some(error) = &self.budget_write_error {
                 return Err(error.clone());
             }
+            let mut compaction = self.compaction.lock().unwrap();
+            compaction.saved_state = state.clone();
+            compaction.effect_state = None;
             self.budget = state;
             Ok(())
         })
@@ -1089,55 +1028,27 @@ impl States for MemoryState {
             Ok(self.prompts().exit_blockers.pop_front().unwrap_or_default())
         })
     }
-    fn write_to_scratch<'a, 'c>(
-        &'a self,
-        contents: &'a [u8],
-        cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            finish(
-                self.compaction
-                    .lock()
-                    .unwrap()
-                    .effects
-                    .write_to_scratch(contents, cancellation),
-            )
-        })
-    }
 
     fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, Error>> {
         Box::pin(async move {
             self.step("instruction_state")?;
-            let compacting = self.compacting.load(Ordering::SeqCst);
-            if !compacting {
-                self.trace.step("render", self.fail_at)?;
-            }
+            self.trace.step("render", self.fail_at)?;
             let request_index = self.provider.requests.lock().unwrap().len();
             let fresh = self.last_capture_request != Some(request_index);
             let instructions = if fresh {
                 let rendered_instructions = {
                     let mut request = self.request();
-                    if let Some(rendered) = (!compacting)
-                        .then(|| request.renderings.pop_front())
-                        .flatten()
-                    {
+                    if let Some(rendered) = request.renderings.pop_front() {
                         request.instructions = rendered.instructions;
                         request.context.configuration.model.maximum_output_tokens =
                             rendered.maximum_output_tokens;
                         request.messages = rendered.messages;
                     }
-                    if !compacting {
-                        let instructions = request.instructions.clone();
-                        request.rendered_instructions.push(instructions.clone());
-                    }
+                    let instructions = request.instructions.clone();
+                    request.rendered_instructions.push(instructions.clone());
                     request.instructions.clone()
                 };
-                if !compacting {
-                    self.last_capture_request = Some(request_index);
-                }
+                self.last_capture_request = Some(request_index);
                 rendered_instructions
             } else {
                 self.request().instructions.clone()
@@ -1236,17 +1147,8 @@ impl States for MemoryState {
     ) -> BoxFuture<'_, Result<parrot_core::ConversationState, Error>> {
         Box::pin(async move {
             self.trace.step("conversation", self.fail_at)?;
-            let (messages, first_sequence) = if let Some(plan) = &self.compaction_plan {
-                (
-                    plan.groups
-                        .iter()
-                        .flat_map(|group| group.messages.clone())
-                        .collect::<Vec<_>>(),
-                    plan.watermark - plan.keep_group_from as i64 + 1,
-                )
-            } else {
-                (self.request().messages.clone(), 1)
-            };
+            let messages = self.request().messages.clone();
+            let first_sequence = 1;
             let mut owners = std::collections::BTreeMap::new();
             let history = messages
                 .into_iter()
@@ -1270,28 +1172,6 @@ impl States for MemoryState {
                 history,
                 messages: self.request().messages.clone(),
             })
-        })
-    }
-    fn finalize_compaction(
-        &mut self,
-        result: Result<Option<parrot_core::FittedCompaction>, Error>,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async move {
-            self.compacting.store(false, Ordering::SeqCst);
-            self.step("compact")?;
-            self.recorded_compactions.push(
-                result
-                    .clone()
-                    .map(|result| result.map(|fitted| fitted.result)),
-            );
-            if let Some(fitted) = result? {
-                self.fitted_statuses.push(fitted.status);
-            }
-            if let Some(compacted) = self.compactions.pop_front() {
-                self.request().messages = compacted.messages;
-                self.request().context = compacted.state;
-            }
-            Ok(())
         })
     }
 }
@@ -1593,13 +1473,8 @@ fn oversized_requests_compact_once_until_a_successful_response_resets_the_guard(
         Reply::TooLarge("second"),
         Reply::final_response("answer"),
     ]);
-    state.compaction_plan = Some(compaction_support::plan(&["original group", "tail"]));
-    state.summary_provider.replies.lock().unwrap().push_back(Ok(
-        parrot_core::SummaryResponse::Summary("first summary".into()),
-    ));
-    state.summary_provider.replies.lock().unwrap().push_back(Ok(
-        parrot_core::SummaryResponse::Summary("second summary".into()),
-    ));
+    state.compact_with("first summary");
+    state.compact_with("second summary");
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(
         state
@@ -1616,10 +1491,7 @@ fn oversized_requests_compact_once_until_a_successful_response_resets_the_guard(
 #[test]
 fn a_second_oversized_failure_propagates_without_repeating_compaction() {
     let mut state = MemoryState::new([Reply::TooLarge("first"), Reply::TooLarge("second")]);
-    state.compaction_plan = Some(compaction_support::plan(&["original group", "tail"]));
-    state.summary_provider.replies.lock().unwrap().push_back(Ok(
-        parrot_core::SummaryResponse::Summary("core summary".into()),
-    ));
+    state.compact_with("core summary");
     assert_eq!(state.run(), Err(request_too_large("second")));
     assert_eq!(
         state
@@ -1637,8 +1509,8 @@ fn a_second_oversized_failure_propagates_without_repeating_compaction() {
 fn compaction_that_does_not_reduce_context_returns_the_original_provider_error() {
     let mut state = MemoryState::new([Reply::TooLarge("original")]);
     assert_eq!(state.run(), Err(request_too_large("original")));
-    assert_eq!(state.request().rendered_instructions.len(), 1);
-    assert_eq!(state.trace.values().last().unwrap(), "compact");
+    assert_eq!(state.compaction.lock().unwrap().requests.len(), 1);
+    assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
 }
 
 #[test]
@@ -1657,14 +1529,7 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
         .prompts()
         .exit_blockers
         .push_back(vec!["work remains".into()]);
-    state.compaction_plan = Some(compaction_support::plan(&["original group", "tail"]));
-    state.summary_provider.replies.lock().unwrap().push_back(Ok(
-        parrot_core::SummaryResponse::Summary("core summary".into()),
-    ));
-    *state.compaction.lock().unwrap() = MemoryCompaction::new(
-        state.compaction_plan.clone(),
-        state.summary_provider.clone(),
-    );
+    state.compact_with("core summary");
     let tools = state.tools.clone();
     let provider = state.provider.clone();
     let options = TurnOptions {
@@ -2011,15 +1876,15 @@ impl Provider for EchoProvider {
         self.0
             .estimate_input_tokens(instructions, definitions, messages)
     }
-    fn summarize<'a, 'c>(
+    fn compact<'a, 'c>(
         &'a self,
-        request: ProviderRequest,
+        request: parrot_core::CompactionRequest,
         cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<parrot_core::SummaryResponse, Error>>
+    ) -> BoxFuture<'a, Result<Option<Message>, Error>>
     where
         'c: 'a,
     {
-        self.0.summarize(request, cancellation)
+        self.0.compact(request, cancellation)
     }
 
     fn invoke<'a, 'c>(
@@ -2214,41 +2079,19 @@ fn fixed_error_metadata_and_original_oversized_error_survive_core_recovery() {
 }
 
 #[test]
-fn oversized_recovery_invokes_core_summary_requests_and_records_the_result_before_retrying() {
+fn oversized_recovery_requests_complete_compaction_before_retrying() {
     let mut state = MemoryState::new([
         Reply::TooLarge("oversized"),
         Reply::final_response("answer"),
     ]);
-    state.compaction_plan = Some(compaction_support::plan(&[
-        "original group",
-        "retained tail",
-    ]));
-    state.summary_provider.replies.lock().unwrap().push_back(Ok(
-        parrot_core::SummaryResponse::Summary("core summary".into()),
-    ));
+    state.compact_with("committed summary");
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    let requests = state.summary_provider.requests.lock().unwrap();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].model, "summary-model");
-    assert_eq!(
-        requests[0].messages[0],
-        compaction_support::message("original group")
-    );
-    assert!(requests[0].tools.is_empty());
-    let result = state.recorded_compactions[0]
-        .as_ref()
-        .unwrap()
-        .as_ref()
-        .unwrap();
-    assert_eq!(
-        result.summary.contents,
-        [Content::Text("prefix:core summary".into())]
-    );
+    assert_eq!(state.compaction.lock().unwrap().requests.len(), 1);
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
     let trace = state.trace.values();
-    let recorded = trace.iter().position(|step| step == "compact").unwrap();
+    let compacted = trace.iter().position(|step| step == "compact").unwrap();
     assert_eq!(
-        trace[recorded + 1..]
+        trace[compacted + 1..]
             .iter()
             .filter(|step| *step == "invoke")
             .count(),
@@ -2257,24 +2100,23 @@ fn oversized_recovery_invokes_core_summary_requests_and_records_the_result_befor
 }
 
 #[test]
-fn failed_core_summary_is_recorded_before_propagation_without_retrying_the_turn_request() {
+fn failed_compaction_propagates_without_retrying_the_turn_request() {
     let mut state = MemoryState::new([Reply::TooLarge("oversized")]);
-    state.compaction_plan = Some(compaction_support::plan(&["original group", "tail"]));
     let error = Error {
         detail: None,
         kind: ErrorKind::Failed,
         code: ErrorCode::Http,
-        message: "summary provider failed".into(),
+        message: "compaction provider failed".into(),
         response_body: "opaque response body".into(),
     };
     state
-        .summary_provider
-        .replies
+        .compaction
         .lock()
         .unwrap()
+        .replies
         .push_back(Err(error.clone()));
     assert_eq!(state.run(), Err(error.clone()));
-    assert_eq!(state.recorded_compactions, [Err(error)]);
+    assert_eq!(state.compaction.lock().unwrap().results, [Err(error)]);
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
     assert_eq!(state.trace.values().last().unwrap(), "compact");
 }

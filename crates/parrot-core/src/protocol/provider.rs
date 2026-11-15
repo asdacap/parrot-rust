@@ -1,4 +1,3 @@
-use super::compaction::SummaryResponse;
 use super::{
     BoxFuture, CancellationToken, Error, Message, ProviderRequest, ProviderResponse, ToolCatalog,
     ToolDefinition, ToolResultMetadata,
@@ -45,18 +44,6 @@ pub trait Provider: Send + Sync {
     ) -> Result<i64, Error> {
         Err(Error::unsupported("Provider.estimate_input_tokens"))
     }
-    /// Collects a private summary stream without publishing its generated content.
-    fn summarize<'a, 'c>(
-        &'a self,
-        _request: ProviderRequest,
-        _cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<SummaryResponse, Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async { Err(Error::unsupported("Provider.summarize")) })
-    }
-
     /// Invokes the request and joins stream cleanup before returning, including
     /// after errors or cancellation. Returns the last positive input-token usage
     /// observed during the invocation on either success or failure.

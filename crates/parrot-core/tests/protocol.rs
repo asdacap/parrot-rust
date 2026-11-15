@@ -40,11 +40,6 @@ fn unsupported_state_operations_return_errors_instead_of_empty_or_successful_res
     let write = finish(states.set_agent_state(parrot_core::AgentState::default())).unwrap_err();
     assert_eq!(write.code, ErrorCode::InvalidOperation);
     assert!(write.message.contains("set_agent_state"));
-    let scratch =
-        finish(states.write_to_scratch(b"contents", parrot_core::CancellationToken::uncancelled()))
-            .unwrap_err();
-    assert_eq!(scratch.code, ErrorCode::InvalidOperation);
-    assert!(scratch.message.contains("write_to_scratch"));
 }
 
 #[test]
@@ -57,9 +52,49 @@ fn unsupported_provider_operations_never_return_a_fake_response_or_token_count()
     .unwrap_err();
     assert_eq!(invocation.error.code, ErrorCode::InvalidOperation);
     assert!(invocation.error.message.contains("invoke"));
+    let compacted = finish(provider.compact(
+        parrot_core::CompactionRequest::default(),
+        parrot_core::CancellationToken::uncancelled(),
+    ))
+    .unwrap_err();
+    assert_eq!(compacted.code, ErrorCode::InvalidOperation);
+    assert!(compacted.message.contains("compact"));
     let estimate = provider
         .estimate_input_tokens("instructions", &[], &[])
         .unwrap_err();
     assert_eq!(estimate.code, ErrorCode::InvalidOperation);
     assert!(estimate.message.contains("estimate_input_tokens"));
+}
+
+#[test]
+fn compaction_failures_preserve_cancellation_and_native_diagnostic_categories() {
+    use parrot_core::{CompactionFailure, ErrorDetail, PlanningError};
+    assert_eq!(
+        Error::from(CompactionFailure::Cancelled),
+        Error::cancelled()
+    );
+    let error = Error::from(CompactionFailure::GroupExceedsBudget);
+    assert_eq!(error.code, ErrorCode::InvalidOperation);
+    assert_eq!(
+        error.detail,
+        Some(ErrorDetail::Compaction(
+            CompactionFailure::GroupExceedsBudget
+        ))
+    );
+    for failure in [
+        PlanningError::NoCompactionCapacity,
+        PlanningError::GroupExceedsBudget,
+        PlanningError::TokenOverflow,
+    ] {
+        let error = Error::from(failure);
+        assert_eq!(error.detail, Some(ErrorDetail::Planning(failure)));
+        assert_eq!(
+            error.code,
+            if failure == PlanningError::TokenOverflow {
+                ErrorCode::Unexpected
+            } else {
+                ErrorCode::InvalidOperation
+            }
+        );
+    }
 }

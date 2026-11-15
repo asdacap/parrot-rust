@@ -1,5 +1,4 @@
 use super::Error;
-use super::compaction::CompactionConfiguration;
 use super::context::ContextConfiguration;
 use super::turn::TurnOptions;
 use std::sync::Arc;
@@ -9,11 +8,9 @@ use std::sync::Arc;
 pub enum ConfigKey {
     Turn,
     Context,
-    Compaction,
     SkillUnavailableTemplate,
     SkillSelectedTemplate,
     SkillTooLargeTemplate,
-    OversizedToolGroupTemplate,
     FinalRequestTemplate,
     RestoredToolsTemplate,
     InterruptedTemplate,
@@ -27,7 +24,6 @@ pub enum ConfigKey {
 pub enum ConfigValue {
     Turn(TurnOptions),
     Context(ContextConfiguration),
-    Compaction(CompactionConfiguration),
     PromptTemplate(Arc<PromptTemplate>),
 }
 
@@ -42,12 +38,6 @@ impl ConfigValue {
         match self {
             Self::Context(value) => Ok(value),
             _ => Err(Error::failed("expected context configuration")),
-        }
-    }
-    pub fn into_compaction(self) -> Result<CompactionConfiguration, Error> {
-        match self {
-            Self::Compaction(value) => Ok(value),
-            _ => Err(Error::failed("expected compaction configuration")),
         }
     }
     pub fn into_prompt_template(self) -> Result<Arc<PromptTemplate>, Error> {

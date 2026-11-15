@@ -1,7 +1,6 @@
 //! Turn orchestration with core-owned provider, tool, state, and event contracts.
 
 pub mod budget;
-pub mod compaction;
 mod context;
 mod context_additions;
 mod context_epoch;

@@ -118,3 +118,67 @@ pub enum ErrorDetail {
     Planning(PlanningError),
     Compaction(CompactionFailure),
 }
+
+impl fmt::Display for CompactionFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Cancelled => "The operation was canceled.",
+            Self::GroupExceedsBudget => {
+                "A complete conversation group exceeds the compaction input budget."
+            }
+            Self::InputLimitExceeded | Self::FittedInputLimitExceeded => {
+                "The compacted conversation exceeds the selected model input limit."
+            }
+            Self::NoSafeBoundary => {
+                "The conversation has no safe compaction boundary before the input limit."
+            }
+            Self::NoSummary(reason) => reason,
+        })
+    }
+}
+
+impl std::error::Error for CompactionFailure {}
+
+impl From<CompactionFailure> for Error {
+    fn from(failure: CompactionFailure) -> Self {
+        if failure == CompactionFailure::Cancelled {
+            return Self::cancelled();
+        }
+        let message = failure.to_string();
+        Self {
+            code: ErrorCode::InvalidOperation,
+            detail: Some(ErrorDetail::Compaction(failure)),
+            ..Self::failed(message)
+        }
+    }
+}
+
+impl fmt::Display for PlanningError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::NoCompactionCapacity => {
+                "The selected model leaves no room for a compaction request."
+            }
+            Self::GroupExceedsBudget => {
+                "A complete conversation group exceeds the compaction input budget."
+            }
+            Self::TokenOverflow => "Token estimate overflow.",
+        })
+    }
+}
+
+impl std::error::Error for PlanningError {}
+
+impl From<PlanningError> for Error {
+    fn from(error: PlanningError) -> Self {
+        Self {
+            code: if error == PlanningError::TokenOverflow {
+                ErrorCode::Unexpected
+            } else {
+                ErrorCode::InvalidOperation
+            },
+            detail: Some(ErrorDetail::Planning(error)),
+            ..Self::failed(error.to_string())
+        }
+    }
+}

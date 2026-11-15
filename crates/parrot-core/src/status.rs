@@ -1,7 +1,7 @@
 use crate::{
     AgentState, CancellationToken, ConfigKey, ContextSnapshot, ConversationAddition,
     ConversationEvent, ConversationOrigin, ConversationPersistence, Error, Message, Provider,
-    ProviderRequest, Role, States, ToolDefinition, compaction::fit_status,
+    ProviderRequest, Role, States, ToolDefinition, context::fit_status,
 };
 use std::{collections::BTreeMap, fmt};
 

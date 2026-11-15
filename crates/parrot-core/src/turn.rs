@@ -189,16 +189,9 @@ async fn execute_turn<M: ToolResultMetadata>(
                 rendering::render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
             add_phase_prompt(states, state, &content, true).await?;
         }
-        let prepared = context::prepare_request(
-            states,
-            state,
-            provider,
-            publisher,
-            definitions,
-            &options,
-            cancellation,
-        )
-        .await?;
+        let prepared =
+            context::prepare_request(states, state, provider, definitions, &options, cancellation)
+                .await?;
         let attempt = state.count_request();
         states.set_agent_state(state.clone()).await?;
         let invoked = provider.invoke(prepared.request, cancellation).await;
@@ -221,7 +214,6 @@ async fn execute_turn<M: ToolResultMetadata>(
                     states,
                     state,
                     provider,
-                    publisher,
                     definitions,
                     crate::CompactionRequest::default(),
                     cancellation,
@@ -299,7 +291,6 @@ async fn execute_turn<M: ToolResultMetadata>(
                     states,
                     state,
                     provider,
-                    publisher,
                     definitions,
                     request,
                     cancellation,

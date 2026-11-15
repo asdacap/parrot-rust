@@ -1,13 +1,12 @@
 use crate::{
-    AgentState, CancellationToken, ConfigKey, ContextSnapshot, Error, EventPublisher, Provider,
-    States, ToolDefinition, context::compact_context,
+    AgentState, CancellationToken, ConfigKey, ContextSnapshot, Error, Provider, States,
+    ToolDefinition, context::compact_context,
 };
 
 pub async fn prepare_context_epoch(
     states: &mut dyn States,
     state: &mut AgentState,
     provider: &dyn Provider,
-    publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
     cancellation: CancellationToken<'_>,
 ) -> Result<String, Error> {
@@ -30,7 +29,6 @@ pub async fn prepare_context_epoch(
             states,
             state,
             provider,
-            publisher,
             definitions,
             crate::CompactionRequest::default(),
             cancellation,
