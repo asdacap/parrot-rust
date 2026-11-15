@@ -59,7 +59,10 @@ fn event(id: &str) -> Event {
 }
 fn snapshot(summary: &str, watermark: i64) -> CompactionSnapshot {
     CompactionSnapshot {
-        summary: summary.into(),
+        message: parrot_storage::conversation::ConversationMessage::text(
+            parrot_storage::conversation::MessageRole::System,
+            summary,
+        ),
         watermark,
     }
 }
@@ -263,7 +266,10 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(context.snapshot.summary, "second summary");
+    assert_eq!(
+        parrot_storage::events::content(&context.snapshot.message.parts),
+        "second summary"
+    );
     assert_eq!(
         repo.read_compaction_status_sequence("agent".into(), covered)
             .await

@@ -2,6 +2,7 @@
 //! Registered leaf tools exercise production catalog filtering and execution.
 use super::*;
 use parrot_domain::contracts::async_ops::{Cancelled, Clock};
+use parrot_provider::compaction::{CompactionSettings, Compactor};
 use parrot_runtime::active_work::status::RuntimeStatus;
 use parrot_runtime::active_work::status::StatusQuery;
 use std::time::{Instant, SystemTime};
@@ -221,14 +222,7 @@ impl BudgetRuntime {
             templates.clone(),
         )
         .unwrap();
-        let blobs = CompactionGroupBlobStore::for_session(
-            fixture.repository.events().database().selected_root(),
-            "scratch",
-            Arc::new(Names),
-        )
-        .unwrap();
-        let context =
-            ContextController::new(compactor, fixture.history.clone(), blobs, templates.clone());
+        let context = ContextController::new(compactor, fixture.history.clone());
         let store = crate::agent_state_support::test_agent_state_store(
             &fixture.path.join("agent-state"),
             "agent",
@@ -449,11 +443,16 @@ async fn actual_requests_reserve_source_headroom_for_unknown_and_known_context_w
             assert_eq!(requests.len(), 1);
             let request = &requests[0];
             let selected = runtime.selection.capture().unwrap();
-            let estimated = CompactionPlanner::estimate_input_tokens(
+            let estimated = parrot_provider::compaction::estimate_input_tokens(
                 &selected.model.canonical_model,
                 &request.instructions,
                 &request.tools,
-                &request.messages,
+                &request
+                    .messages
+                    .iter()
+                    .cloned()
+                    .map(Into::into)
+                    .collect::<Vec<_>>(),
             )
             .unwrap();
             let headroom = (estimated + 19) / 20;
@@ -517,17 +516,25 @@ async fn actual_reported_usage_triggers_compaction_before_consuming_reserved_out
         let final_request = &requests[2];
         assert_eq!(final_request.max_output_tokens, 32_768);
         let selected = runtime.selection.capture().unwrap();
-        let snapshot = fixture
-            .controller()
-            .compactor()
-            .planner()
-            .estimate_selected_context(
-                &selected.model,
-                &final_request.instructions,
-                &final_request.tools,
-                &final_request.messages,
-            )
-            .unwrap();
+        let estimated = parrot_provider::compaction::estimate_input_tokens(
+            &selected.model.canonical_model,
+            &final_request.instructions,
+            &final_request.tools,
+            &final_request
+                .messages
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let snapshot = ContextSnapshot::estimate(
+            estimated,
+            &fixture
+                .controller()
+                .compactor()
+                .capture_context_configuration(&selected.model),
+        );
         assert_eq!(snapshot.trigger_tokens, Some(140_220));
         assert!(!snapshot.exceeds_trigger());
     }

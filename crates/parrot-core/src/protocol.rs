@@ -19,11 +19,7 @@ mod tool;
 mod turn;
 
 pub use cancellation::{Cancellation, CancellationToken, Cancelled, NeverCancelled};
-pub use compaction::{
-    CompactionConfiguration, CompactionFailure, CompactionGroup, CompactionHistoryGroup,
-    CompactionInput, CompactionPlan, CompactionPolicy, CompactionProgress, CompactionRequest,
-    CompactionResult, FittedCompaction, PlanningError, SummaryResponse,
-};
+pub use compaction::{CompactionFailure, CompactionRequest, PlanningError};
 pub use config::{ConfigKey, ConfigValue, PromptTemplate};
 pub use context::{
     ContextCompaction, ContextConfiguration, ContextLimit, ContextModel, ContextReminderCheckpoint,

@@ -1,7 +1,7 @@
 //! Durable compaction snapshots and their explicitly associated status message.
 use super::{
-    CompactionContext, CompactionSnapshot, ConversationMessage, ConversationPart,
-    ConversationRepository, EventError, MessageRole,
+    CompactionContext, CompactionSnapshot, ConversationMessage, ConversationRepository, EventError,
+    MessageRole,
 };
 use crate::events::{projection, record, timestamp};
 use parrot_domain::protocol::messages::parrot::Event;
@@ -16,33 +16,54 @@ pub(super) fn save_snapshot(
     snapshot: &CompactionSnapshot,
     at: &str,
 ) -> Result<i64, EventError> {
-    tx.execute("INSERT INTO conversation_item (agent_session, kind, origin, role, tool_call_id, compaction_watermark, created_at) VALUES (?1, 'compaction', 'system', 'system', '', ?2, ?3);", params![agent, snapshot.watermark, at])?;
+    let message = &snapshot.message;
+    tx.execute("INSERT INTO conversation_item (agent_session, kind, origin, role, tool_call_id, compaction_watermark, created_at, provider_id, provider_content) VALUES (?1, 'compaction', ?2, ?3, ?4, ?5, ?6, ?7, ?8);", params![agent, message.origin.as_str(), message.role.as_str(), message.tool_call_id, snapshot.watermark, at, message.provider_content.provider_id, message.provider_content.content])?;
     let sequence = tx.last_insert_rowid();
-    projection::insert_parts(
-        tx,
-        "conversation_part",
-        "item_sequence",
-        sequence,
-        &[ConversationPart::text(snapshot.summary.clone())],
-    )?;
+    projection::insert_message_parts(tx, sequence, message)?;
     Ok(sequence)
 }
 pub fn read_snapshot(
     tx: &Transaction<'_>,
     agent: &str,
 ) -> Result<Option<CompactionSnapshot>, EventError> {
-    Ok(tx
+    let row = tx
         .query_row(
-            "SELECT (SELECT text FROM conversation_part WHERE item_sequence = item.sequence AND position = 0 AND kind = 'text'), compaction_watermark FROM conversation_item AS item WHERE agent_session = ?1 AND kind = 'compaction' ORDER BY sequence DESC LIMIT 1;",
+            "SELECT sequence, compaction_watermark, origin, role, tool_call_id, final_phase, provider_id, provider_content FROM conversation_item WHERE agent_session = ?1 AND kind = 'compaction' ORDER BY sequence DESC LIMIT 1;",
             [agent],
             |row| {
-                Ok(CompactionSnapshot {
-                    summary: row.get(0)?,
-                    watermark: row.get(1)?,
-                })
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, bool>(5)?,
+                    super::ProviderContent {
+                        provider_id: row.get(6)?,
+                        content: row.get(7)?,
+                    },
+                ))
             },
         )
-        .optional()?)
+        .optional()?;
+    row.map(
+        |(sequence, watermark, origin, role, call, final_phase, provider)| {
+            let item = super::reads::read_message(
+                tx,
+                sequence,
+                &origin,
+                &role,
+                call,
+                final_phase,
+                provider,
+            )?;
+            Ok(CompactionSnapshot {
+                message: item.message,
+                watermark,
+            })
+        },
+    )
+    .transpose()
 }
 impl ConversationRepository {
     pub async fn save_compaction(

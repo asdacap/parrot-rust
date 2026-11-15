@@ -285,9 +285,12 @@ async fn compacted_full_fork_pending_interactions_process_wait_and_same_session_
     }));
     let compacted = compacted.unwrap();
     let forked = forked.unwrap();
-    assert!(compacted.snapshot.summary.contains("t76-combined-summary"));
+    assert!(
+        parrot_storage::events::content(&compacted.snapshot.message.parts)
+            .contains("t76-combined-summary")
+    );
     assert!(compacted.snapshot.watermark > 0);
-    assert_eq!(forked.snapshot.summary, compacted.snapshot.summary);
+    assert_eq!(forked.snapshot.message, compacted.snapshot.message);
     assert_eq!(forked.snapshot.watermark, 0);
     assert!(
         child_request

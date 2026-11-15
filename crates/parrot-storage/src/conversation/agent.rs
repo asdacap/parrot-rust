@@ -332,41 +332,35 @@ impl AgentConversation {
         }
     }
     pub async fn materialize(&self, item: ConversationItem) -> Result<ModelMessage, EventError> {
-        materialize(&self.history, item).await
+        materialize(&self.history, item.message).await
     }
 }
 async fn materialize(
     history: &AgentHistoryView,
-    mut item: ConversationItem,
+    mut message: ConversationMessage,
 ) -> Result<ModelMessage, EventError> {
-    item.message.retain_model_parts();
+    message.retain_model_parts();
     Ok(ModelMessage {
-        role: item.message.role,
-        contents: history.materialize(item.message.parts).await?,
-        tool_calls: item.message.tool_calls,
-        tool_call_id: item.message.tool_call_id,
-        provider_content: item.message.provider_content,
+        role: message.role,
+        contents: history.materialize(message.parts).await?,
+        tool_calls: message.tool_calls,
+        tool_call_id: message.tool_call_id,
+        provider_content: message.provider_content,
     })
 }
 async fn restore(history: &AgentHistoryView) -> Result<Vec<ModelMessage>, EventError> {
     let mut messages = Vec::new();
     let items = if let Some(context) = history.compaction_history().await? {
-        messages.push(ModelMessage {
-            role: MessageRole::System,
-            contents: vec![ModelContent::Text(context.snapshot.summary)],
-            tool_calls: vec![],
-            tool_call_id: String::new(),
-            provider_content: ProviderContent::default(),
-        });
+        messages.push(materialize(history, context.snapshot.message).await?);
         if let Some(status) = context.status {
-            messages.push(materialize(history, status).await?);
+            messages.push(materialize(history, status.message).await?);
         }
         context.tail
     } else {
         history.conversation().await?
     };
     for item in items {
-        messages.push(materialize(history, item).await?);
+        messages.push(materialize(history, item.message).await?);
     }
     Ok(messages)
 }

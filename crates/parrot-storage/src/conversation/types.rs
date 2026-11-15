@@ -6,6 +6,36 @@ pub use crate::events::{
 use std::path::PathBuf;
 
 impl ConversationMessage {
+    pub fn from_compaction(message: parrot_core::Message) -> Result<Self, super::EventError> {
+        let role = match message.role {
+            parrot_core::Role::System => MessageRole::System,
+            parrot_core::Role::User => MessageRole::User,
+            parrot_core::Role::Assistant => MessageRole::Assistant,
+            parrot_core::Role::Tool => MessageRole::Tool,
+        };
+        let parts = message
+            .contents
+            .into_iter()
+            .map(|content| match content {
+                parrot_core::Content::Text(text) => Ok(ConversationPart::Text(text)),
+                parrot_core::Content::Image { .. } => Err(super::EventError::Invalid(
+                    "compaction replacements cannot introduce unadmitted images".into(),
+                )),
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
+            origin: role.origin(),
+            role,
+            parts,
+            tool_calls: message.tool_calls,
+            tool_call_id: message.tool_call_id,
+            provider_content: ProviderContent {
+                provider_id: message.provider_id,
+                content: message.provider_content,
+            },
+        })
+    }
+
     pub(super) fn retain_model_parts(&mut self) {
         if self.role == MessageRole::Tool {
             self.parts
@@ -63,7 +93,7 @@ pub struct HistoryForkSource {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompactionSnapshot {
-    pub summary: String,
+    pub message: ConversationMessage,
     pub watermark: i64,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -56,8 +56,8 @@ pub struct TurnOptions {
     pub include_router_metadata: bool,
 }
 /// Consolidates the agent-local state that survives across turns and restarts.
-/// Core owns every field: it reads the state at turn start and saves it after the
-/// turn returns, even on error. The states side persists what core saves.
+/// Core reads this state at turn start and reloads it after provider and tool effects.
+/// The states side persists complete values core saves, including after a turn fails.
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentState {

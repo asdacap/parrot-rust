@@ -186,6 +186,57 @@ async fn last_visible_turn_retains_tools_candidates_and_trailing_notices_after_l
 }
 
 #[tokio::test]
+async fn compaction_restoration_preserves_native_fields_already_present_in_storage() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    repo.save_compaction(
+        "agent".into(),
+        CompactionSnapshot {
+            message: parrot_storage::conversation::ConversationMessage::text(
+                parrot_storage::conversation::MessageRole::System,
+                String::new(),
+            ),
+            watermark: 0,
+        },
+    )
+    .await
+    .unwrap();
+    repo.events()
+        .transaction(|tx| {
+            tx.execute(
+                "UPDATE conversation_item SET role = 'assistant', provider_id = 'native', provider_content = '{\"continuation\":\"opaque-token\"}' WHERE kind = 'compaction';",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let history = repo
+        .bind_agent_history(
+            "agent".into(),
+            Arc::new(Projection::new(
+                "agent",
+                repo.events().database().selected_root().clone(),
+            )),
+        )
+        .unwrap();
+    let mut conversation = AgentConversation::new(history).await.unwrap();
+    let replacement = &conversation.messages()[0];
+    assert_eq!(replacement.role, MessageRole::Assistant);
+    assert_eq!(replacement.provider_content.provider_id, "native");
+    assert_eq!(
+        replacement.provider_content.content,
+        r#"{"continuation":"opaque-token"}"#
+    );
+    assert_eq!(replacement.content(), "");
+    let expected = conversation.messages();
+    conversation.add(model(MessageRole::User, "transient"));
+    conversation.reload().await.unwrap();
+    assert_eq!(conversation.messages(), expected);
+    repo.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn last_visible_turn_keeps_compacted_context_when_no_user_remains_visible() {
     let fixture = Fixture::new();
     let repo = fixture.repository();
@@ -209,7 +260,10 @@ async fn last_visible_turn_keeps_compacted_context_when_no_user_remains_visible(
         .append_compaction_status(
             event("compacted", "agent"),
             CompactionSnapshot {
-                summary: "visible summary".into(),
+                message: parrot_storage::conversation::ConversationMessage::text(
+                    parrot_storage::conversation::MessageRole::System,
+                    "visible summary",
+                ),
                 watermark: before.sequence,
             },
             "visible status".into(),
@@ -422,7 +476,10 @@ async fn agent_conversation_reload_discards_memory_and_restores_sqlite_compactio
         .append_compaction_status(
             event("compact", "agent"),
             CompactionSnapshot {
-                summary: "summary".into(),
+                message: parrot_storage::conversation::ConversationMessage::text(
+                    parrot_storage::conversation::MessageRole::System,
+                    "summary",
+                ),
                 watermark,
             },
             "status".into(),

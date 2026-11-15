@@ -2,9 +2,12 @@ use crate::{
     ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, OutputTokenError,
     RequestStatistic,
 };
+mod compaction_request;
 mod preparation;
+mod status;
 pub use preparation::compact_context;
 pub(crate) use preparation::prepare_request;
+pub(crate) use status::fit_status;
 
 use crate::{Error, ErrorCode, ErrorKind};
 use std::fmt;
@@ -109,16 +112,7 @@ impl ContextSnapshot {
                     as i32
             }
         });
-        let trigger_tokens = crate::compaction::CompactionPolicy::resolve(
-            configuration.context_limit.as_ref(),
-            None,
-            context_limit,
-            input_limit,
-            configuration.trigger_percent,
-            0,
-            configuration.model.calculate_output_reserved_input_limit(),
-        )
-        .trigger_tokens;
+        let trigger_tokens = configuration.calculate_trigger_tokens();
         let mut trigger_percent = configuration.trigger_percent;
         if configuration.context_limit.is_some()
             && context_limit > 0
@@ -248,6 +242,36 @@ impl From<OutputTokenError> for Error {
             message: value.to_string(),
             response_body: String::new(),
             detail: None,
+        }
+    }
+}
+
+impl ContextConfiguration {
+    /// Resolves the configured context threshold before output-token reservation.
+    pub fn calculate_unreserved_trigger_tokens(&self) -> Option<i64> {
+        let input_limit = self.model.calculate_input_limit();
+        match self.context_limit.as_ref() {
+            Some(limit) => {
+                let tokens = limit.resolve_tokens(self.model.context_window);
+                if input_limit > 0 {
+                    tokens.map(|tokens| tokens.min(i64::from(input_limit)))
+                } else {
+                    tokens
+                }
+            }
+            None => (input_limit > 0)
+                .then(|| i64::from(input_limit) * i64::from(self.trigger_percent) / 100),
+        }
+    }
+
+    /// Resolves the effective context threshold, including reserved output capacity.
+    pub fn calculate_trigger_tokens(&self) -> Option<i64> {
+        match (
+            self.calculate_unreserved_trigger_tokens(),
+            self.model.calculate_output_reserved_input_limit(),
+        ) {
+            (Some(trigger), Some(safe_input_limit)) => Some(trigger.min(safe_input_limit)),
+            (trigger, _) => trigger,
         }
     }
 }

@@ -1,5 +1,6 @@
 //! Test-only composition: real SQLite/JSONL, RuntimeBackend, AgentSession,
 //! native tool execution and WaitService. This is not the production P08 adapter.
+use parrot_provider::compaction::{CompactionSettings, Compactor};
 use std::{
     collections::{BTreeMap, VecDeque},
     future::Future,
@@ -46,7 +47,7 @@ use parrot_runtime::{
         provider_call::{OutputWriter, ProviderActivity},
         services::*,
     },
-    compaction::{CompactionSettings, Compactor, ContextController, ContextStatus},
+    compaction::{ContextController, ContextStatus},
     event_broker::EventBroker,
     prompt_context::{PromptResult, SystemPrompt},
     tool_settlement::{
@@ -55,7 +56,7 @@ use parrot_runtime::{
     },
 };
 use parrot_storage::{
-    artifacts::{compaction::CompactionGroupBlobStore, output_blobs::ToolOutputBlobStore},
+    artifacts::output_blobs::ToolOutputBlobStore,
     conversation::{AgentHistoryView, ConversationRepository},
     database::SessionDatabase,
     diagnostics::{DiagnosticEvent, FailureKind},
@@ -633,12 +634,7 @@ impl Harness {
             templates.clone(),
         )
         .unwrap();
-        let context = ContextController::new(
-            compactor,
-            history.clone(),
-            CompactionGroupBlobStore::for_session(&root, "scratch", Arc::new(Names)).unwrap(),
-            templates.clone(),
-        );
+        let context = ContextController::new(compactor, history.clone());
         let broker = Arc::new(EventBroker::new());
         let publisher: Arc<parrot_runtime::agent_turn::engine::Publisher> = broker.clone();
         let reminders = Arc::new(

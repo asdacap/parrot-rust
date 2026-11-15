@@ -1,4 +1,4 @@
-use super::{CompletionBlockerFeedback, Content, FinishReason, Message, Role};
+use super::{CompletionBlockerFeedback, FinishReason, Message};
 
 /// Captures the persisted summary and history used to assemble provider messages.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -14,11 +14,7 @@ impl ConversationState {
     pub fn assemble_messages(&self) -> Vec<Message> {
         let mut messages = Vec::new();
         if let Some(summary) = &self.summary {
-            messages.push(Message {
-                role: Role::System,
-                contents: vec![Content::Text(summary.content.clone())],
-                ..Message::default()
-            });
+            messages.push(summary.message.clone());
             if let Some(sequence) = summary.status_sequence
                 && let Some(status) = self.history.iter().find(|item| item.sequence == sequence)
             {
@@ -37,7 +33,7 @@ impl ConversationState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConversationSummary {
-    pub content: String,
+    pub message: Message,
     pub watermark: i64,
     /// Identifies this summary's status message in the history tail, if present.
     pub status_sequence: Option<i64>,

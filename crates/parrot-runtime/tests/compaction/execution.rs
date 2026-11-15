@@ -1,14 +1,14 @@
-use crate::group_messages;
+use crate::{raw_conversation, request_tokens};
 use parrot_domain::{
-    contracts::{
-        async_ops::{BoxFuture, Cancellation},
-        filenames::FilenameGenerator,
-        paths::{RootOrigin, SelectedSessionRoot},
-    },
+    contracts::async_ops::{BoxFuture, Cancellation},
     protocol::messages::parrot::CompactionProgressEvent,
     values::config::{ModelProfileConfig, ModelProfiles},
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_provider::compaction::{
+    CompactionEffects, CompactionEvent, CompactionSettings, Compactor, ContextCapture,
+    ReplacementCommit,
+};
 use parrot_provider::{
     catalogs::Model,
     http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
@@ -26,11 +26,7 @@ use parrot_provider::{
         provider::{ApiKeySource, CompatibleOptions, OpenAICompatibleProvider},
     },
 };
-use parrot_runtime::compaction::{
-    CompactionError, CompactionObserver, CompactionResources, CompactionResult, CompactionSettings,
-    Compactor, PlanningError, PlanningInput,
-};
-use parrot_storage::artifacts::compaction::CompactionGroupBlobStore;
+use parrot_runtime::compaction::CompactionObserver;
 use std::{
     collections::{BTreeMap, VecDeque},
     fs,
@@ -180,15 +176,126 @@ impl CompactionObserver for Observer {
         })
     }
 }
-struct Names(AtomicUsize);
-impl FilenameGenerator for Names {
-    fn next_filename(&self) -> String {
-        format!("group-{}-arse.dat", self.0.fetch_add(1, Ordering::SeqCst))
+pub(crate) struct Effects<'a> {
+    pub(crate) history: &'a [Message],
+    pub(crate) instructions: &'a str,
+    pub(crate) status: &'a str,
+    pub(crate) observer: &'a dyn CompactionObserver,
+    pub(crate) replacement: Option<ReplacementCommit>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ObservedResult {
+    pub(crate) history: Vec<Message>,
+    pub(crate) summary: Message,
+    pub(crate) retained_messages: usize,
+    pub(crate) watermark: i64,
+}
+
+impl Effects<'_> {
+    pub(crate) fn result(&self, message: parrot_core::Message) -> ObservedResult {
+        let replacement = self
+            .replacement
+            .as_ref()
+            .expect("returned replacement was committed");
+        assert_eq!(replacement.message, message);
+        let retained: Vec<_> = self
+            .history
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index as i64 + 1 > replacement.watermark)
+            .map(|(_, message)| message.clone())
+            .collect();
+        let summary: Message = message.into();
+        let mut history = vec![summary.clone(), Message::system(&replacement.status)];
+        history.extend(retained.iter().cloned());
+        ObservedResult {
+            history,
+            summary,
+            retained_messages: retained.len(),
+            watermark: replacement.watermark,
+        }
     }
 }
+
+fn core_error(error: Error) -> parrot_core::Error {
+    let code = parrot_provider::sessions::diagnostic_session::failure_code(&error);
+    if code == parrot_core::ErrorCode::Cancelled {
+        return parrot_core::Error::cancelled();
+    }
+    parrot_core::Error {
+        code,
+        response_body: error.response_body().into(),
+        ..parrot_core::Error::failed(error.to_string())
+    }
+}
+
+impl CompactionEffects for Effects<'_> {
+    fn capture_context<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<ContextCapture, parrot_core::Error>> {
+        Box::pin(async move {
+            cancellation
+                .check()
+                .map_err(|_| parrot_core::Error::cancelled())?;
+            Ok(ContextCapture {
+                instructions: self.instructions.into(),
+                conversation: raw_conversation(self.history),
+            })
+        })
+    }
+    fn offer_status<'a>(
+        &'a self,
+        _: parrot_core::ContextSnapshot,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<parrot_core::StatusOffering, parrot_core::Error>> {
+        Box::pin(async move {
+            let mut offering = parrot_core::StatusOffering::default();
+            offering.insert(
+                parrot_core::StatusKey::new("status"),
+                parrot_core::StatusOffer {
+                    hash: String::new(),
+                    text: self.status.into(),
+                    is_auto_update: false,
+                },
+            );
+            Ok(offering)
+        })
+    }
+    fn commit_replacement<'a>(
+        &'a mut self,
+        replacement: ReplacementCommit,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), parrot_core::Error>> {
+        Box::pin(async move {
+            assert!(self.replacement.is_none(), "one replacement per operation");
+            self.replacement = Some(replacement);
+            Ok(())
+        })
+    }
+    fn publish<'a>(
+        &'a self,
+        event: CompactionEvent,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), parrot_core::Error>> {
+        Box::pin(async move {
+            match event {
+                CompactionEvent::Retry(event) => self.observer.observe(&event, cancellation).await.map_err(core_error),
+                CompactionEvent::Progress(progress) => self.observer.observe_progress(CompactionProgressEvent {
+                    phase: parrot_domain::protocol::messages::parrot::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
+                    completed_groups: progress.completed_groups as u64,
+                    total_groups: progress.total_groups as u64,
+                    ..CompactionProgressEvent::new()
+                }, cancellation).await.map_err(core_error),
+                _ => Ok(()),
+            }
+        })
+    }
+}
+
 struct Fixture {
     path: PathBuf,
-    blobs: CompactionGroupBlobStore,
     state: Arc<State>,
     selection: ResolvedModelSelection,
     sessions: ProviderSessions,
@@ -204,13 +311,6 @@ impl Fixture {
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
         fs::create_dir_all(path.join("agent/blobs")).unwrap();
-        let root = SelectedSessionRoot::new(path.clone(), RootOrigin::Current).unwrap();
-        let blobs = CompactionGroupBlobStore::for_session(
-            &root,
-            "agent",
-            Arc::new(Names(AtomicUsize::new(0))),
-        )
-        .unwrap();
         let state = Arc::new(State::default());
         *state.scripts.lock().unwrap() = scripts.into();
         let provider: Arc<dyn Provider> = Arc::new(FakeProvider(state.clone()));
@@ -231,7 +331,6 @@ impl Fixture {
             .unwrap();
         Self {
             path,
-            blobs,
             selection,
             sessions: ProviderSessions::new(),
             token: Arc::new(Token::default()),
@@ -247,27 +346,24 @@ impl Fixture {
         &mut self,
         compactor: &Compactor,
         history: &[Message],
-    ) -> Result<Option<CompactionResult>, CompactionError> {
-        let groups = group_messages(history);
-        compactor
+    ) -> Result<Option<ObservedResult>, parrot_core::Error> {
+        let mut effects = Effects {
+            history,
+            instructions: "instructions",
+            status: "status",
+            observer: &self.observer,
+            replacement: None,
+        };
+        let replacement = compactor
             .compact(
                 &self.selection,
-                None,
-                &PlanningInput {
-                    instructions: "instructions",
-                    tools: &[],
-                    groups: &groups,
-                    base_watermark: 0,
-                    fixed_message: &Message::system("status"),
-                },
-                CompactionResources {
-                    blobs: &mut self.blobs,
-                    sessions: &self.sessions,
-                    observer: &self.observer,
-                    cancellation: self.token.as_ref(),
-                },
+                parrot_core::CompactionRequest::default(),
+                &self.sessions,
+                &mut effects,
+                self.token.as_ref(),
             )
-            .await
+            .await?;
+        Ok(replacement.map(|message| effects.result(message)))
     }
     fn requests(&self) -> Vec<Request> {
         self.state.requests.lock().unwrap().clone()
@@ -305,11 +401,11 @@ fn retry() -> Result<Event, Error> {
     })
 }
 fn compactor(input_budget: i32) -> Compactor {
-    configured_compactor(input_budget, "{path}", ModelProfiles::new(&BTreeMap::new()))
+    configured_compactor(input_budget, "[...]", ModelProfiles::new(&BTreeMap::new()))
 }
 fn configured_compactor(input_budget: i32, notice: &str, profiles: ModelProfiles) -> Compactor {
     let yaml = format!(
-        "prompt_templates:\n  compaction.summary-instructions:\n    template: 'Sum.'\n  compaction.summary-prefix:\n    template: 'S:'\n  compaction.oversized-tool-group-notice:\n    template: '{notice}'\n"
+        "prompt_templates:\n  compaction.summary-instructions:\n    template: 'Sum.'\n  compaction.summary-prefix:\n    template: 'S:'\n  compaction.truncated-group-notice:\n    template: '{notice}'\n    allowed_arguments: []\n    required_arguments: []\n"
     );
     let environment = [
         ("HOME", "/tmp/t45-config/home"),
@@ -584,7 +680,7 @@ async fn summary_request_uses_actual_templates_profiles_model_and_retained_histo
             ..ModelProfileConfig::default()
         },
     )]));
-    let compactor = configured_compactor(1, "{path}", profiles);
+    let compactor = configured_compactor(1, "[...]", profiles);
     let mut fixture = Fixture::new(1000, vec![vec![done("actual summary")]]);
     let history = vec![
         Message::user("old input"),
@@ -694,7 +790,7 @@ async fn chunk_budget_folds_in_order_carrying_only_previous_summary() {
     );
     for request in &requests {
         assert!(
-            parrot_runtime::compaction::CompactionPlanner::estimate_input_tokens(
+            request_tokens(
                 &fixture.selection.canonical_model,
                 &request.instructions,
                 &request.tools,
@@ -786,7 +882,7 @@ async fn recursive_fold_keeps_assistant_and_all_tool_results_in_one_atomic_group
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(result.watermark, 2);
+    assert_eq!(result.watermark, 3);
     let requests = fixture.requests();
     assert_eq!(requests[1].messages[1..], history[..2]);
     assert_eq!(requests[2].messages[2..], history[2..3]);
@@ -863,7 +959,7 @@ async fn empty_completion_reports_metadata_and_reasoning_bytes_without_content()
         )
         .await
         .unwrap_err();
-    assert!(matches!(error, CompactionError::InvalidOperation(_)));
+    assert_eq!(error.code, parrot_core::ErrorCode::InvalidOperation);
     assert_eq!(
         error.to_string(),
         "The compaction provider completed with empty assistant text (finish reason: \"length\"; assistant text length: 0 UTF-8 bytes; provider input tokens: 123; provider output tokens: 456). Reasoning delta length: 21 UTF-8 bytes."
@@ -1011,9 +1107,7 @@ async fn retry_observer_is_awaited_and_observer_failure_closes_stream() {
         )
         .await
         .unwrap_err();
-    assert!(
-        matches!(error, CompactionError::Provider(Error::Io(ref text)) if text == "publication failed")
-    );
+    assert!(error == core_error(Error::Io("publication failed".into())));
     assert_eq!(
         *fixture.state.audit.lock().unwrap(),
         ["next", "retry-start", "retry-finish", "close"]
@@ -1028,7 +1122,7 @@ async fn cancellation_before_call_and_during_retry_is_joined_without_more_events
     let history = [Message::user("a"), Message::user("tail")];
     assert!(matches!(
         fixture.compact(&compactor(500), &history).await,
-        Err(CompactionError::Cancelled)
+        Err(error) if error.kind == parrot_core::ErrorKind::Cancelled
     ));
     assert!(fixture.requests().is_empty());
     fixture.close().await;
@@ -1036,7 +1130,7 @@ async fn cancellation_before_call_and_during_retry_is_joined_without_more_events
     fixture.observer.cancel = Some(fixture.token.clone());
     assert!(matches!(
         fixture.compact(&compactor(500), &history).await,
-        Err(CompactionError::Provider(Error::Cancelled))
+        Err(error) if error.kind == parrot_core::ErrorKind::Cancelled
     ));
     assert_eq!(fixture.state.stream_closes.load(Ordering::SeqCst), 1);
     assert_eq!(
@@ -1054,9 +1148,7 @@ async fn stream_failure_is_preserved_and_disposal_failure_is_not_silenced() {
         .compact(&compactor(500), &history)
         .await
         .unwrap_err();
-    assert!(
-        matches!(error, CompactionError::Provider(Error::Io(ref text)) if text == "stream failure")
-    );
+    assert!(error == core_error(Error::Io("stream failure".into())));
     assert_eq!(
         fixture
             .state
@@ -1076,17 +1168,15 @@ async fn stream_failure_is_preserved_and_disposal_failure_is_not_silenced() {
         .compact(&compactor(500), &history)
         .await
         .unwrap_err();
-    assert!(
-        matches!(error, CompactionError::Provider(Error::Io(ref text)) if text == "dispose failure")
-    );
+    assert!(error == core_error(Error::Io("dispose failure".into())));
     fixture.close().await;
 }
 
 #[tokio::test]
-async fn actual_oversized_tool_group_persists_image_path_and_real_notice_path() {
-    let mut fixture = Fixture::new(1000, vec![vec![done("spilled summary")]]);
+async fn oversized_tool_group_truncates_summary_input_without_mutating_source_or_writing_files() {
+    let mut fixture = Fixture::new(1000, vec![vec![done("truncated summary")]]);
     let mut history = tool_group(&"result-🦜".repeat(1000));
-    let image = fixture.path.join("image.bin");
+    let image = fixture.path.join("missing-image.bin");
     let text = history[1].content().to_owned();
     history[1].set_contents(vec![
         Content::text(text),
@@ -1100,89 +1190,121 @@ async fn actual_oversized_tool_group_persists_image_path_and_real_notice_path() 
         .unwrap()
         .unwrap();
     assert_eq!(history, original);
-    let files = fixture.blob_files();
-    assert_eq!(files.len(), 1);
-    assert_eq!(files[0].file_name().unwrap(), "group-0.json");
-    let artifact: serde_json::Value =
-        serde_json::from_slice(&fs::read(&files[0]).unwrap()).unwrap();
-    assert_eq!(artifact["messages"][0]["role"], "Assistant");
-    assert_eq!(
-        artifact["messages"][0]["tool_calls"][0]["arguments_json"],
-        "{\"x\":1}"
-    );
-    assert_eq!(artifact["messages"][1]["tool_call_id"], "call");
-    assert_eq!(
-        artifact["messages"][1]["contents"][0]["text"],
-        history[1].content()
-    );
-    assert_eq!(
-        artifact["messages"][1]["contents"][1]["path"],
-        image.to_str().unwrap()
-    );
-    assert_eq!(
-        artifact["messages"][1]["contents"][1]["media_type"],
-        "image/test"
-    );
+    assert!(fixture.blob_files().is_empty());
+    assert!(!image.exists());
     let requests = fixture.requests();
-    assert_eq!(texts(&requests[0]), ["Sum.", files[0].to_str().unwrap()]);
-    assert_eq!(requests[0].messages[1].role, Role::System);
-    assert_eq!((result.watermark, result.retained_messages), (1, 1));
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    assert_eq!(request.messages[0].tool_calls, history[0].tool_calls);
+    assert_eq!(request.messages[1].role, Role::Tool);
+    assert_eq!(request.messages[1].tool_call_id, "call");
+    let clipped = request.messages[1].content();
+    assert!(clipped.ends_with("[...]"));
+    assert!(
+        history[1]
+            .content()
+            .starts_with(clipped.trim_end_matches("[...]"))
+    );
+    assert!(clipped.len() < history[1].content().len());
+    assert!(
+        request
+            .messages
+            .iter()
+            .flat_map(Message::contents)
+            .all(|content| !matches!(content, Content::Image { .. }))
+    );
+    assert!(
+        request_tokens(
+            &fixture.selection.canonical_model,
+            &request.instructions,
+            &request.tools,
+            &request.messages
+        )
+        .unwrap()
+            <= 500
+    );
+    assert_eq!((result.watermark, result.retained_messages), (2, 1));
     assert_eq!(result.history[2], history[2]);
     fixture.close().await;
 }
 
 #[tokio::test]
-async fn real_path_notice_that_does_not_fit_fails_after_blob_publication_before_provider_call() {
+async fn truncation_notice_that_cannot_fit_fails_before_provider_call_without_writing_files() {
     let mut fixture = Fixture::new(1000, vec![]);
     let mut history = tool_group(&"x".repeat(4000));
     history.push(Message::user("tail"));
+    let original = history.clone();
     let error = fixture
         .compact(
             &configured_compactor(
                 100,
-                &format!("{}{{path}}", "notice".repeat(100)),
+                &"notice".repeat(100),
                 ModelProfiles::new(&BTreeMap::new()),
             ),
             &history,
         )
         .await
         .unwrap_err();
-    assert!(matches!(
-        error,
-        CompactionError::Planning(PlanningError::GroupExceedsBudget)
-    ));
-    assert_eq!(fixture.blob_files().len(), 1);
+    assert_eq!(
+        error.detail,
+        Some(parrot_core::ErrorDetail::Compaction(
+            parrot_core::CompactionFailure::GroupExceedsBudget
+        ))
+    );
+    assert_eq!(history, original);
+    assert!(fixture.blob_files().is_empty());
     assert!(fixture.requests().is_empty());
     fixture.close().await;
 }
 
 #[tokio::test]
-async fn earlier_eligible_spill_is_persisted_before_later_ineligible_group_is_rejected() {
-    let mut fixture = Fixture::new(1000, vec![]);
+async fn oversized_tool_and_user_groups_are_bounded_without_mutating_source_or_writing_files() {
+    let mut fixture = Fixture::new(1000, vec![vec![done("first")], vec![done("final")]]);
     let mut history = tool_group(&"x".repeat(4000));
-    history.extend([Message::user("y".repeat(4000)), Message::user("tail")]);
-    let error = fixture
+    history.extend([Message::user("🦜".repeat(4000)), Message::user("tail")]);
+    let original = history.clone();
+    let result = fixture
         .compact(&compactor(500), &history)
         .await
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        CompactionError::Planning(PlanningError::GroupExceedsBudget)
-    ));
-    let files = fixture.blob_files();
-    assert_eq!(files.len(), 1);
-    let artifact: serde_json::Value =
-        serde_json::from_slice(&fs::read(&files[0]).unwrap()).unwrap();
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.summary.content(), "S:final");
+    assert_eq!(history, original);
+    assert!(fixture.blob_files().is_empty());
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].messages[0].tool_calls, history[0].tool_calls);
     assert_eq!(
-        artifact["messages"][1]["contents"][0]["text"],
-        "x".repeat(4000)
+        requests[0].messages[1].tool_call_id,
+        history[1].tool_call_id
     );
-    assert!(fixture.requests().is_empty());
+    let clipped_user = requests[1]
+        .messages
+        .iter()
+        .find(|message| message.role == Role::User)
+        .unwrap()
+        .content();
+    assert!(clipped_user.ends_with("[...]"));
+    assert!(
+        history[2]
+            .content()
+            .starts_with(clipped_user.trim_end_matches("[...]"))
+    );
+    assert!(requests.iter().all(|request| {
+        request_tokens(
+            &fixture.selection.canonical_model,
+            &request.instructions,
+            &request.tools,
+            &request.messages,
+        )
+        .unwrap()
+            <= 500
+    }));
     fixture.close().await;
 }
 
 #[tokio::test]
-async fn preceding_summary_can_force_a_later_tool_group_to_spill_once() {
+async fn preceding_summary_can_force_later_tool_summary_input_to_be_truncated() {
     let mut fixture = Fixture::new(
         1000,
         vec![vec![done(&"s".repeat(240))], vec![done("final")]],
@@ -1190,41 +1312,76 @@ async fn preceding_summary_can_force_a_later_tool_group_to_spill_once() {
     let mut history = vec![Message::user("x".repeat(320))];
     history.extend(tool_group(&"y".repeat(240)));
     history.push(Message::user("tail"));
-    // Each raw group fits alone. First + second do not; the resulting summary
-    // makes the second raw group too large, while its actual path notice fits.
-    let compactor = compactor(140);
-    let raw = group_messages(&history);
-    assert!(raw[..2].iter().all(|group| {
-        let messages = std::iter::once(Message::system("Sum."))
-            .chain(group.messages.iter().cloned())
+    let original = history.clone();
+    for group in [&history[..1], &history[1..3]] {
+        let messages = group
+            .iter()
+            .cloned()
+            .chain([Message::system("Sum.")])
             .collect::<Vec<_>>();
-        parrot_runtime::compaction::CompactionPlanner::estimate_input_tokens(
-            &fixture.selection.canonical_model,
-            "",
-            &[],
-            &messages,
-        )
-        .unwrap()
-            <= 140
-    }));
+        assert!(
+            request_tokens(&fixture.selection.canonical_model, "", &[], &messages).unwrap() <= 140
+        );
+    }
     let result = fixture
-        .compact(&compactor, &history)
+        .compact(&compactor(140), &history)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(result.summary.content(), "S:final");
-    let files = fixture.blob_files();
-    assert_eq!(files.len(), 1);
+    assert_eq!(history, original);
+    assert!(fixture.blob_files().is_empty());
     let requests = fixture.requests();
     assert_eq!(requests.len(), 2);
     assert_eq!(
-        texts(&requests[1]),
-        [
-            "Sum.",
-            &format!("S:{}", "s".repeat(240)),
-            files[0].to_str().unwrap()
-        ]
+        requests[1].messages[0].content(),
+        format!("S:{}", "s".repeat(240))
     );
+    assert_eq!(requests[1].messages[1].tool_calls, history[1].tool_calls);
+    assert_eq!(
+        requests[1].messages[2].tool_call_id,
+        history[2].tool_call_id
+    );
+    let clipped = requests[1].messages[2].content();
+    assert!(clipped.ends_with("[...]"));
+    assert!(
+        history[2]
+            .content()
+            .starts_with(clipped.trim_end_matches("[...]"))
+    );
+    assert!(requests.iter().all(|request| {
+        request_tokens(
+            &fixture.selection.canonical_model,
+            &request.instructions,
+            &request.tools,
+            &request.messages,
+        )
+        .unwrap()
+            <= 140
+    }));
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn irreducible_tool_metadata_fails_without_rewriting_arguments_or_publishing_files() {
+    let mut fixture = Fixture::new(1000, vec![]);
+    let mut history = tool_group("result");
+    history[0].tool_calls[0].arguments_json = serde_json::to_string(&"🦜".repeat(1000)).unwrap();
+    history.push(Message::user("tail"));
+    let original = history.clone();
+    let error = fixture
+        .compact(&compactor(100), &history)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.detail,
+        Some(parrot_core::ErrorDetail::Compaction(
+            parrot_core::CompactionFailure::GroupExceedsBudget
+        ))
+    );
+    assert_eq!(history, original);
+    assert!(fixture.requests().is_empty());
+    assert!(fixture.blob_files().is_empty());
     fixture.close().await;
 }
 
@@ -1281,15 +1438,16 @@ async fn provider_response_body_stays_concrete_and_does_not_traverse_wrapped_cau
             )
             .await
             .unwrap_err();
-        assert_eq!(error.response_body(), expected_body);
-        assert!(matches!(error, CompactionError::Provider(actual) if actual == provider_error));
+        assert_eq!(error.response_body, expected_body);
+        assert_eq!(error, core_error(provider_error));
         assert_eq!(fixture.state.stream_closes.load(Ordering::SeqCst), 1);
         fixture.close().await;
     }
 }
 
 #[tokio::test]
-async fn cancelled_compaction_stops_before_provider_call_and_spill_persists_the_image_path() {
+async fn cancelled_compaction_stops_before_provider_call_and_oversized_images_are_omitted_only_from_summary_input()
+ {
     let mut fixture = Fixture::new(1000, vec![]);
     let mut history = tool_group(&"oversized".repeat(1000));
     history.push(Message::user("tail"));
@@ -1298,11 +1456,11 @@ async fn cancelled_compaction_stops_before_provider_call_and_spill_persists_the_
         .compact(&compactor(500), &history)
         .await
         .unwrap_err();
-    assert!(matches!(error, CompactionError::Cancelled));
+    assert_eq!(error.kind, parrot_core::ErrorKind::Cancelled);
     assert!(fixture.blob_files().is_empty() && fixture.requests().is_empty());
     fixture.close().await;
 
-    let mut fixture = Fixture::new(1000, vec![vec![done("spilled summary")]]);
+    let mut fixture = Fixture::new(1000, vec![vec![done("truncated summary")]]);
     let image = fixture.path.join("missing.png");
     history[1].set_contents(vec![Content::image_file(
         image.to_str().unwrap(),
@@ -1310,25 +1468,101 @@ async fn cancelled_compaction_stops_before_provider_call_and_spill_persists_the_
         2,
         2,
     )]);
+    let original = history.clone();
     fixture
         .compact(&compactor(500), &history)
         .await
         .unwrap()
         .unwrap();
-    let files = fixture.blob_files();
-    assert_eq!(files.len(), 1);
-    let artifact: serde_json::Value =
-        serde_json::from_slice(&fs::read(&files[0]).unwrap()).unwrap();
-    assert_eq!(
-        artifact["messages"][1]["contents"][0]["path"],
-        image.to_str().unwrap()
-    );
-    assert_eq!(fixture.requests().len(), 1);
+    assert_eq!(history, original);
+    assert!(fixture.blob_files().is_empty());
+    let requests = fixture.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].messages[1].tool_call_id, "call");
+    assert_eq!(requests[0].messages[1].content(), "[...]");
+    assert!(!image.exists());
     fixture.close().await;
 }
 
 #[tokio::test]
-async fn no_safe_progress_does_not_open_provider_or_write_blob() {
+async fn complete_tool_results_stay_together_and_incomplete_calls_prevent_compaction() {
+    let history = [
+        Message::assistant(
+            "",
+            vec![
+                ToolCall {
+                    id: "a".into(),
+                    name: "read".into(),
+                    arguments_json: "{}".into(),
+                },
+                ToolCall {
+                    id: "b".into(),
+                    name: "read".into(),
+                    arguments_json: "{}".into(),
+                },
+            ],
+        ),
+        Message::tool_result("b", "second"),
+        Message::tool_result("a", "first"),
+        Message::user("next"),
+        Message::tool_result("orphan", "later"),
+    ];
+    let mut fixture = Fixture::new(1000, vec![vec![done("summary")]]);
+    let result = fixture
+        .compact(&compactor(500), &history)
+        .await
+        .unwrap()
+        .unwrap();
+    let requests = fixture.requests();
+    assert_eq!(&requests[0].messages[..3], &history[..3]);
+    assert_eq!(result.history.last().unwrap(), &history[4]);
+    assert_eq!(result.watermark, 4);
+    fixture.close().await;
+    let mut fixture = Fixture::new(1000, vec![]);
+    assert!(
+        fixture
+            .compact(&compactor(500), &history[..2])
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(fixture.requests().is_empty());
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn retained_native_replay_reaches_the_next_provider_request_unchanged() {
+    let mut tail = Message::assistant("", vec![]);
+    tail.provider_id = "provider".into();
+    tail.provider_content = "opaque continuation bytes".into();
+    let history = [Message::user("old input"), tail.clone()];
+    let mut fixture = Fixture::new(1000, vec![vec![done("summary")], vec![done("answer")]]);
+    let result = fixture
+        .compact(&compactor(500), &history)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.history.last().unwrap(), &tail);
+    let session = fixture
+        .sessions
+        .get(fixture.selection.canonical_model.provider.clone())
+        .await
+        .unwrap();
+    let mut stream = session
+        .call(Request {
+            messages: result.history,
+            ..Request::default()
+        })
+        .unwrap();
+    while stream.next(fixture.token.as_ref()).await.unwrap().is_some() {}
+    stream.close().await.unwrap();
+    let requests = fixture.requests();
+    assert_eq!(requests[1].messages.last().unwrap(), &tail);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn no_safe_progress_does_not_open_provider_or_write_group_files() {
     for history in [
         vec![],
         vec![Message::user("only")],

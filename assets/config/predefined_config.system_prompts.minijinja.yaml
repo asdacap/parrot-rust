@@ -363,6 +363,10 @@ prompt_templates:
     template: 'This tool-call group was too large for compaction and was written out in full as JSON at {path}.'
     allowed_arguments: [path]
     required_arguments: [path]
+  compaction.truncated-group-notice:
+    template: '[Content truncated for compaction.]'
+    allowed_arguments: []
+    required_arguments: []
   context.agent-path-environment:
     engine: minijinja
     template: |-

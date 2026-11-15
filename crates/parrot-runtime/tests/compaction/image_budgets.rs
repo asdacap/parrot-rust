@@ -1,6 +1,7 @@
 //! Literal image-budget rows from the reviewed original CompactorAndContextTests.
 use super::*;
-use crate::group_messages;
+use crate::execution::Effects;
+use crate::{estimate_context, message_tokens, request_tokens};
 use parrot_provider::sessions::{Message, Role};
 
 #[tokio::test]
@@ -21,23 +22,17 @@ async fn original_image_file_size_rows_do_not_change_estimate_or_trigger() {
                 1,
             )],
         );
-        let tokens = CompactionPlanner::estimate_tokens(
-            &selection.canonical_model,
-            std::slice::from_ref(&message),
-        )
-        .unwrap();
+        let tokens =
+            message_tokens(&selection.canonical_model, std::slice::from_ref(&message)).unwrap();
         assert_eq!(tokens, 4104);
         assert!(tokens > 1000);
         let history = vec![message; 4];
         assert_eq!(
-            CompactionPlanner::estimate_tokens(&selection.canonical_model, &history).unwrap(),
+            message_tokens(&selection.canonical_model, &history).unwrap(),
             4 * tokens
         );
         assert!(
-            !controller
-                .compactor()
-                .planner()
-                .estimate_selected_context(&selection, "", &[], &history)
+            !estimate_context(controller.compactor(), &selection, "", &[], &history)
                 .unwrap()
                 .exceeds_trigger()
         );
@@ -67,30 +62,29 @@ async fn original_openai_image_context_56_and_150_rows_keep_absolute_trigger_and
     let image = Content::image_file("/not-read.png", "image/png", 1200, 1200);
     let message = Message::new(Role::User, vec![image]);
     let history = vec![message.clone(); 56];
-    let snapshot = controller
-        .compactor()
-        .planner()
-        .estimate_selected_context(&selection, "", &[], &history)
-        .unwrap();
+    let snapshot = estimate_context(controller.compactor(), &selection, "", &[], &history).unwrap();
     assert_eq!(snapshot.estimated_tokens - 56 * 8 - 4, 97048);
     assert!(!snapshot.exceeds_trigger());
     assert!(
-        controller
-            .compactor()
-            .planner()
-            .estimate_selected_context(&selection, "", &[], &vec![message; 150])
-            .unwrap()
-            .exceeds_trigger()
+        estimate_context(
+            controller.compactor(),
+            &selection,
+            "",
+            &[],
+            &vec![message; 150]
+        )
+        .unwrap()
+        .exceeds_trigger()
     );
     let unknown = provider.selection_model(1050000, "unknown");
     assert_eq!(
-        CompactionPlanner::estimate_tokens(&unknown.canonical_model, &history).unwrap() - 56 * 8,
+        message_tokens(&unknown.canonical_model, &history).unwrap() - 56 * 8,
         229376
     );
     let fallback = Scripted::default().selection_model(1050000, "gpt-6-astra");
     assert_eq!(
-        CompactionPlanner::estimate_tokens(&fallback.canonical_model, &history).unwrap(),
-        CompactionPlanner::estimate_tokens(&unknown.canonical_model, &history).unwrap()
+        message_tokens(&fallback.canonical_model, &history).unwrap(),
+        message_tokens(&unknown.canonical_model, &history).unwrap()
     );
     assert!(provider.image_reads.lock().unwrap().is_empty());
     fixture
@@ -115,8 +109,6 @@ async fn original_openai_image_cost_retention_and_summary_chunk_assertions() {
     std::fs::write(&path, [1]).unwrap();
     let image = Content::image_file(path.to_string_lossy(), "image/png", 400, 400);
     let messages = vec![Message::new(Role::User, vec![image]); 8];
-    let groups = group_messages(&messages);
-    let fixed = Message::user("fixed");
     let templates = templates();
     let compactor = Compactor::new(
         CompactionSettings {
@@ -131,35 +123,27 @@ async fn original_openai_image_cost_retention_and_summary_chunk_assertions() {
         templates,
     )
     .unwrap();
-    let mut blobs = CompactionGroupBlobStore::for_session(
-        fixture.repository.events().database().selected_root(),
-        "scratch",
-        Arc::new(Names),
-    )
-    .unwrap();
     let sessions = ProviderSessions::new();
     let events = Events::new(history);
-    let result = compactor
+    let mut effects = Effects {
+        history: &messages,
+        instructions: "",
+        status: "fixed",
+        observer: &events,
+        replacement: None,
+    };
+    let replacement = compactor
         .compact(
             &selection,
-            None,
-            &PlanningInput {
-                instructions: "",
-                tools: &[],
-                groups: &groups,
-                base_watermark: 0,
-                fixed_message: &fixed,
-            },
-            CompactionResources {
-                blobs: &mut blobs,
-                sessions: &sessions,
-                observer: &events,
-                cancellation: &NeverCancelled,
-            },
+            parrot_core::CompactionRequest::default(),
+            &sessions,
+            &mut effects,
+            &NeverCancelled,
         )
         .await
         .unwrap()
         .unwrap();
+    let result = effects.result(replacement);
     assert_eq!(result.retained_messages, 1);
     assert_eq!(
         result
@@ -172,20 +156,11 @@ async fn original_openai_image_cost_retention_and_summary_chunk_assertions() {
             .count(),
         1
     );
-    assert!(
-        CompactionPlanner::estimate_input_tokens(
-            &selection.canonical_model,
-            "",
-            &[],
-            &result.history
-        )
-        .unwrap()
-            <= 500
-    );
+    assert!(request_tokens(&selection.canonical_model, "", &[], &result.history).unwrap() <= 500);
     let requests = provider.requests.lock().unwrap().clone();
     assert!(requests.len() > 1);
     assert!(requests.iter().all(|request| {
-        CompactionPlanner::estimate_input_tokens(
+        request_tokens(
             &selection.canonical_model,
             &request.instructions,
             &request.tools,

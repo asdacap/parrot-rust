@@ -19,16 +19,11 @@ fn compact_tools_trigger_one_compaction_after_the_entire_batch_is_recorded() {
         Reply::with_tool_calls(calls),
         Reply::final_response("answer"),
     ]);
-    state.compaction_plan = Some(compaction_support::plan(&["original", "retained"]));
-    state.summary_provider =
-        compaction_support::Provider::new([parrot_core::SummaryResponse::Summary(
-            "tool-triggered summary".into(),
-        )]);
+    state.compact_with("tool-triggered summary");
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.applied_results.len(), 3);
-    assert_eq!(state.summary_provider.requests.lock().unwrap().len(), 1);
-    assert_eq!(state.recorded_compactions.len(), 1);
+    assert_eq!(state.compaction.lock().unwrap().results.len(), 1);
     let trace = state.trace.values();
     assert!(
         trace
@@ -41,10 +36,19 @@ fn compact_tools_trigger_one_compaction_after_the_entire_batch_is_recorded() {
 
 #[test]
 fn core_reads_compact_tool_targets_from_the_provider_call() {
-    for (arguments, reduced) in [
-        (r#"{"target_context_size":"1"}"#, true),
-        (r#"{"target_context_size":"1%"}"#, false),
-        (r#"{"target_context_size":"10k"}"#, true),
+    for (arguments, target) in [
+        (
+            r#"{"target_context_size":"1"}"#,
+            parrot_core::ContextLimit::Tokens(1),
+        ),
+        (
+            r#"{"target_context_size":"1%"}"#,
+            parrot_core::ContextLimit::Percentage(1),
+        ),
+        (
+            r#"{"target_context_size":"10k"}"#,
+            parrot_core::ContextLimit::Tokens(10000),
+        ),
     ] {
         let mut state = MemoryState::new([
             Reply::with_tool_calls(vec![ToolCall {
@@ -54,31 +58,11 @@ fn core_reads_compact_tool_targets_from_the_provider_call() {
             }]),
             Reply::final_response("answer"),
         ]);
-        state.compaction_plan = Some(compaction_support::plan(&["original", "retained"]));
-        state.summary_provider =
-            compaction_support::Provider::new([parrot_core::SummaryResponse::Summary(
-                "targeted summary".into(),
-            )]);
-        let mut compaction = MemoryCompaction::new(
-            state.compaction_plan.clone(),
-            state.summary_provider.clone(),
-        );
-        compaction.configuration.context.model.context_window = 0;
-
-        assert_eq!(
-            state.run_with_compaction(&mut compaction),
-            Ok(Outcome::Completed("answer".into()))
-        );
-        assert_eq!(
-            state.summary_provider.requests.lock().unwrap().len(),
-            usize::from(reduced)
-        );
-        assert_eq!(state.recorded_compactions.len(), 1);
-        assert_eq!(
-            state.recorded_compactions[0].as_ref().unwrap().is_some(),
-            reduced
-        );
-        assert!(compaction.configuration.target.is_none());
+        state.compact_with("targeted summary");
+        assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+        let compaction = state.compaction.lock().unwrap();
+        assert_eq!(compaction.requests.len(), 1);
+        assert_eq!(compaction.requests[0].target, Some(target));
     }
 }
 
@@ -110,8 +94,7 @@ fn unsuccessful_compact_tools_do_not_trigger_compaction() {
             }]);
 
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-        assert!(state.recorded_compactions.is_empty());
-        assert!(state.summary_provider.requests.lock().unwrap().is_empty());
+        assert!(state.compaction.lock().unwrap().requests.is_empty());
     }
 }
 
@@ -134,7 +117,7 @@ fn invalid_compact_arguments_do_not_trigger_compaction() {
         ]);
 
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-        assert!(state.recorded_compactions.is_empty());
+        assert!(state.compaction.lock().unwrap().requests.is_empty());
     }
 }
 
@@ -150,5 +133,5 @@ fn ordinary_tool_results_do_not_trigger_compaction() {
     ]);
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert!(state.recorded_compactions.is_empty());
+    assert!(state.compaction.lock().unwrap().requests.is_empty());
 }

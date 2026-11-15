@@ -234,7 +234,10 @@ async fn facts_replay_tree_request_history_original_literals(effort: Option<&str
         .save_compaction(
             "main".into(),
             CompactionSnapshot {
-                summary: "summary".into(),
+                message: parrot_storage::conversation::ConversationMessage::text(
+                    parrot_storage::conversation::MessageRole::System,
+                    "summary",
+                ),
                 watermark: 1,
             },
         )

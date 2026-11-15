@@ -51,7 +51,9 @@ use std::sync::{
 };
 use tokio::sync::Mutex;
 
+mod compaction;
 mod core_loop;
+use compaction::RuntimeCompactionEffects;
 
 pub type Publisher = dyn EventPublisher<Event = Event, Error = BrokerError>;
 
@@ -116,7 +118,7 @@ pub struct RuntimeBackend<S: AccessSnapshot + 'static> {
     prompt: SessionPrompt,
     conversation: ConversationReadView,
     materialized_tools: std::sync::Mutex<Option<ToolSnapshot<S>>>,
-    compactor: crate::compaction::Compactor,
+    compactor: parrot_provider::compaction::Compactor,
     notices: Notices,
     execution_activity: std::sync::Mutex<Option<i64>>,
 }
@@ -222,11 +224,21 @@ where
                     .messages()
                     .iter()
                     .map(provider_message)
+                    .map(Into::into)
                     .collect::<Vec<_>>();
-                self.compactor
-                    .planner()
-                    .estimate_selected_context(&selection.model, instructions, &tools, &messages)
-                    .map_err(TurnError::Planning)
+                let estimated = parrot_provider::compaction::estimate_input_tokens(
+                    &selection.model.canonical_model,
+                    instructions,
+                    &tools,
+                    &messages,
+                )
+                .map_err(TurnError::Core)?;
+                Ok::<_, TurnError>(parrot_core::ContextSnapshot::estimate(
+                    estimated,
+                    &self
+                        .compactor
+                        .capture_context_configuration(&selection.model),
+                ))
             })
             .await??;
         Ok(super::observation::ObservedContext { selection, context })
@@ -249,11 +261,13 @@ where
         target: Option<&crate::compaction::ContextSize>,
         cancellation: &dyn Cancellation,
     ) -> Result<crate::compaction::ContextCompactionResult, TurnError> {
-        let mut guard = self.state.lock().await;
-        let state = &mut *guard;
-        state.restore_agent_state(self.agent_state.as_ref()).await?;
-        let snapshot = self.snapshot(selection)?;
-        let definitions = snapshot.definitions().to_vec();
+        cancellation.check().map_err(|_| TurnError::Cancelled)?;
+        self.state
+            .lock()
+            .await
+            .restore_agent_state(self.agent_state.as_ref())
+            .await?;
+        let definitions = self.snapshot(selection)?.definitions().to_vec();
         let status = self.status.bind(selection);
         let events = ContextEmitter::new(
             &self.history,
@@ -261,25 +275,60 @@ where
             &self.broker,
             self.event_id.as_ref(),
         );
-        state
-            .context
+        let estimate = || async {
+            let mut guard = self.state.lock().await;
+            let state = &mut *guard;
+            state
+                .context
+                .estimate_context(
+                    EpochInput {
+                        selection: &selection.model,
+                        tools: &definitions,
+                        conversation: &mut state.conversation,
+                        agent_state: &mut state.agent_state,
+                        prompt: &self.prompt,
+                        sessions: &self.sessions,
+                        status: status.as_ref(),
+                        events: &events,
+                    },
+                    cancellation,
+                )
+                .await
+        };
+        let before = estimate().await?;
+        if before.input_limit <= 0 {
+            return Ok(crate::compaction::ContextCompactionResult {
+                context: before,
+                reduced: false,
+            });
+        }
+        let mut effects = RuntimeCompactionEffects {
+            state: &self.state,
+            prompt: &self.prompt,
+            selection: &selection.model,
+            status: status.as_ref(),
+            events,
+        };
+        let replacement = self
+            .compactor
             .compact(
-                EpochInput {
-                    selection: &selection.model,
-                    tools: &definitions,
-                    conversation: &mut state.conversation,
-                    agent_state: &mut state.agent_state,
-                    prompt: &self.prompt,
-                    sessions: &self.sessions,
-                    status: status.as_ref(),
-                    events: &events,
+                &selection.model,
+                parrot_core::CompactionRequest {
+                    target: target.map(Into::into),
+                    tools: definitions.clone(),
                 },
-                target,
+                &self.sessions,
+                &mut effects,
                 cancellation,
             )
             .await
-            .map_err(TurnError::Context)
+            .map_err(TurnError::Core)?;
+        Ok(crate::compaction::ContextCompactionResult {
+            context: estimate().await?,
+            reduced: replacement.is_some(),
+        })
     }
+
     fn event(&self) -> Event {
         Event {
             id: (self.event_id)(),

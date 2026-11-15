@@ -1,4 +1,5 @@
 use parrot_core::{ContextModel, OutputTokenError, RequestStatistic};
+use parrot_provider::compaction::{CompactionSettings, Compactor, estimate_input_tokens};
 mod context;
 mod execution;
 
@@ -26,21 +27,61 @@ use std::{
     },
 };
 
-pub(crate) fn group_messages(messages: &[Message]) -> Vec<CompactionGroup<'_>> {
-    let converted: Vec<_> = messages.iter().cloned().map(Into::into).collect();
-    let mut offset = 0;
-    parrot_core::compaction::group_messages(&converted)
-        .into_iter()
-        .map(|group| {
-            let start = offset;
-            offset += group.messages.len();
-            CompactionGroup {
-                messages: &messages[start..offset],
-                end_watermark: group.end_watermark,
-                is_complete: group.is_complete,
+pub(crate) fn raw_conversation(messages: &[Message]) -> parrot_core::ConversationState {
+    let mut owners = BTreeMap::new();
+    let history = messages
+        .iter()
+        .enumerate()
+        .map(|(index, message)| {
+            let sequence = index as i64 + 1;
+            let tool_owner_sequence = owners.get(&message.tool_call_id).copied();
+            for call in &message.tool_calls {
+                owners.insert(call.id.clone(), sequence);
+            }
+            parrot_core::ConversationHistoryItem {
+                sequence,
+                tool_owner_sequence,
+                is_compaction_status: false,
+                message: message.clone().into(),
             }
         })
-        .collect()
+        .collect();
+    parrot_core::ConversationState {
+        summary: None,
+        history,
+    }
+}
+
+pub(crate) fn message_tokens(
+    selected: &ProviderModel,
+    messages: &[Message],
+) -> Result<i64, parrot_core::Error> {
+    let messages: Vec<_> = messages.iter().cloned().map(Into::into).collect();
+    estimate_input_tokens(selected, "", &[], &messages).map(|tokens| tokens - 4)
+}
+
+pub(crate) fn request_tokens(
+    selected: &ProviderModel,
+    instructions: &str,
+    tools: &[Tool],
+    messages: &[Message],
+) -> Result<i64, parrot_core::Error> {
+    let messages: Vec<_> = messages.iter().cloned().map(Into::into).collect();
+    estimate_input_tokens(selected, instructions, tools, &messages)
+}
+
+pub(crate) fn estimate_context(
+    compactor: &Compactor,
+    selected: &ResolvedModelSelection,
+    instructions: &str,
+    tools: &[Tool],
+    messages: &[Message],
+) -> Result<ContextSnapshot, parrot_core::Error> {
+    let tokens = request_tokens(&selected.canonical_model, instructions, tools, messages)?;
+    Ok(ContextSnapshot::estimate(
+        tokens,
+        &compactor.capture_context_configuration(selected),
+    ))
 }
 
 struct ImageProvider {
@@ -99,8 +140,8 @@ fn select(selected: &ProviderModel) -> ResolvedModelSelection {
         .resolve("provider/model")
         .unwrap()
 }
-fn planner(trigger: i32, target: i32, input: i32) -> CompactionPlanner {
-    CompactionPlanner::new(
+fn compactor(trigger: i32, target: i32, input: i32) -> Compactor {
+    Compactor::new(
         CompactionSettings {
             trigger_percent: trigger,
             target_percent: target,
@@ -110,8 +151,11 @@ fn planner(trigger: i32, target: i32, input: i32) -> CompactionPlanner {
             summary_prefix: "Summary: ".into(),
         },
         ModelProfiles::new(&BTreeMap::new()),
+        context::templates(),
     )
+    .unwrap()
 }
+
 fn call(id: &str) -> ToolCall {
     ToolCall {
         id: id.into(),
@@ -228,9 +272,8 @@ fn compaction_boundaries_preserve_full_requested_output_and_request_headroom() {
     ] {
         let mut selected = model(context);
         selected.model.max_output_tokens = output;
-        let snapshot = planner(100, 30, 60000)
-            .estimate_selected_context(&select(&selected), "", &[], &[])
-            .unwrap();
+        let snapshot =
+            estimate_context(&compactor(100, 30, 60000), &select(&selected), "", &[], &[]).unwrap();
         let trigger = snapshot.trigger_tokens.unwrap();
         let budget = RequestStatistic::default();
         let requested = if output > 0 { output } else { 32 * 1024 };
@@ -308,9 +351,14 @@ fn original_context_usage_rows_strict_boundary() {
         (0, "", 4, None, false),
         (-10, "", 4, None, false),
     ] {
-        let snapshot = planner(50, 30, 60000)
-            .estimate_selected_context(&select(&model(limit)), instructions, &[], &[])
-            .unwrap();
+        let snapshot = estimate_context(
+            &compactor(50, 30, 60000),
+            &select(&model(limit)),
+            instructions,
+            &[],
+            &[],
+        )
+        .unwrap();
         assert_eq!(snapshot.estimated_tokens, estimate);
         assert_eq!(snapshot.context_limit, limit);
         assert_eq!(snapshot.usage_percent, usage);
@@ -336,10 +384,7 @@ fn image_estimation_calls_real_provider_api_without_loading_missing_file() {
             Content::image_file("does-not-exist", "image/png", 200, 100),
         ],
     );
-    assert_eq!(
-        CompactionPlanner::estimate_tokens(&selected, &[message]).unwrap(),
-        2 + 123 + 8
-    );
+    assert_eq!(message_tokens(&selected, &[message]).unwrap(), 2 + 123 + 8);
     assert_eq!(provider.calculations.load(Ordering::Relaxed), 1);
 }
 #[test]
@@ -359,35 +404,13 @@ fn actual_selected_policy_and_override_preserve_total_window() {
     let selected = ModelRouter::new(registry, routing)
         .resolve("small")
         .unwrap();
-    let snapshot = planner(90, 30, 60000)
-        .estimate_selected_context(&selected, "", &[], &[])
-        .unwrap();
+    let snapshot = estimate_context(&compactor(90, 30, 60000), &selected, "", &[], &[]).unwrap();
     assert_eq!(snapshot.context_limit, 1000);
     assert_eq!(snapshot.input_limit, 1000);
     assert_eq!(snapshot.trigger_percent, 40);
     assert!(snapshot.has_context_limit_override);
 }
 
-#[test]
-fn groups_only_capture_contiguous_tool_results_and_keep_order() {
-    let history = [
-        Message::assistant("", vec![call("a"), call("b")]),
-        Message::tool_result("b", "second"),
-        Message::tool_result("a", "first"),
-        Message::user("next"),
-        Message::tool_result("orphan", "later"),
-    ];
-    let groups = group_messages(&history);
-    assert_eq!(
-        groups.iter().map(|g| g.messages.len()).collect::<Vec<_>>(),
-        vec![3, 1, 1]
-    );
-    assert!(groups[0].is_complete);
-    assert_eq!(groups[0].messages[1].tool_call_id, "b");
-    assert_eq!(groups[2].end_watermark, 3);
-    let incomplete = group_messages(&history[..2]);
-    assert!(!incomplete[0].is_complete);
-}
 #[test]
 fn retained_budget_preserves_reservation_lifecycle() {
     let budget = RetainedAgentBudget::new(1);
@@ -446,26 +469,29 @@ fn o200k_base_text_totals_preserve_image_and_request_overhead() {
         parameters_json: "{}".into(),
     }];
     assert_eq!(
-        CompactionPlanner::estimate_tokens(&selected, &history).unwrap(),
+        message_tokens(&selected, &history).unwrap(),
         (6 + 123 + 8) + (4 + 1 + 1 + 1 + 8) + (3 + 1 + 8)
     );
     assert_eq!(provider.calculations.load(Ordering::Relaxed), 1);
     assert_eq!(
-        CompactionPlanner::estimate_input_tokens(&selected, "Hello, world!", &tools, &history)
-            .unwrap(),
+        request_tokens(&selected, "Hello, world!", &tools, &history).unwrap(),
         4 + (1 + 6 + 1 + 12) + 164 + 4
     );
     let selection = select(&selected);
-    let planner = planner(50, 30, 600);
-    let boundary = planner
-        .estimate_selected_context(&selection, "Hello, world!", &tools, &history)
-        .unwrap();
+    let compactor = compactor(50, 30, 600);
+    let boundary =
+        estimate_context(&compactor, &selection, "Hello, world!", &tools, &history).unwrap();
     assert_eq!(boundary.estimated_tokens, 192);
     assert_eq!(boundary.trigger_tokens, Some(192));
     assert!(!boundary.exceeds_trigger());
-    let above = planner
-        .estimate_selected_context(&selection, "Hello, world! Hello", &tools, &history)
-        .unwrap();
+    let above = estimate_context(
+        &compactor,
+        &selection,
+        "Hello, world! Hello",
+        &tools,
+        &history,
+    )
+    .unwrap();
     assert_eq!(above.estimated_tokens, 193);
     assert!(above.exceeds_trigger());
 }

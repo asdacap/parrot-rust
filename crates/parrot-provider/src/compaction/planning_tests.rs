@@ -1,8 +1,10 @@
+use super::{
+    model::{CompactionConfiguration, CompactionInput, CompactionPlan},
+    planning::{group_messages, is_complete},
+};
 use parrot_core::{
-    CompactionConfiguration, CompactionGroup, CompactionInput, CompactionPlan, Content,
-    ContextConfiguration, ContextLimit, ContextModel, Error, ErrorCode, ErrorDetail, ErrorKind,
-    Message, PlanningError, Role, ToolCall,
-    compaction::{CompactionPolicy, group_messages, is_complete},
+    Content, ContextConfiguration, ContextLimit, ContextModel, Error, ErrorCode, ErrorDetail,
+    ErrorKind, Message, PlanningError, Role, ToolCall,
 };
 
 fn message(tokens: i64) -> Message {
@@ -69,14 +71,14 @@ fn select(input: &CompactionInput, target: Option<i64>) -> Result<Option<Compact
 
 #[test]
 fn raw_targets_preserve_override_unknown_window_and_output_reservation_rules() {
-    for (limit, target, window, capacity, reserved, expected_trigger, expected_target) in [
-        (None, None, 1000, 800, None, Some(720), Some(240)),
+    for (limit, target, window, capacity, output, expected_trigger, expected_target) in [
+        (None, None, 1000, 800, 1, Some(720), Some(240)),
         (
             Some(ContextLimit::Percentage(20)),
             None,
             1000,
             800,
-            None,
+            1,
             Some(200),
             Some(60),
         ),
@@ -85,7 +87,7 @@ fn raw_targets_preserve_override_unknown_window_and_output_reservation_rules() {
             None,
             1000,
             800,
-            None,
+            1,
             Some(800),
             Some(240),
         ),
@@ -94,7 +96,7 @@ fn raw_targets_preserve_override_unknown_window_and_output_reservation_rules() {
             Some(ContextLimit::Percentage(20)),
             1000,
             800,
-            None,
+            1,
             Some(100),
             Some(200),
         ),
@@ -103,7 +105,7 @@ fn raw_targets_preserve_override_unknown_window_and_output_reservation_rules() {
             None,
             0,
             800,
-            None,
+            1,
             None,
             None,
         ),
@@ -112,7 +114,7 @@ fn raw_targets_preserve_override_unknown_window_and_output_reservation_rules() {
             Some(ContextLimit::Percentage(20)),
             0,
             800,
-            None,
+            1,
             Some(720),
             None,
         ),
@@ -121,7 +123,7 @@ fn raw_targets_preserve_override_unknown_window_and_output_reservation_rules() {
             None,
             1000,
             800,
-            Some(500),
+            475,
             Some(500),
             Some(240),
         ),
@@ -130,7 +132,7 @@ fn raw_targets_preserve_override_unknown_window_and_output_reservation_rules() {
             Some(ContextLimit::Tokens(700)),
             1000,
             800,
-            Some(500),
+            475,
             Some(500),
             Some(700),
         ),
@@ -139,22 +141,22 @@ fn raw_targets_preserve_override_unknown_window_and_output_reservation_rules() {
             None,
             0,
             0,
-            None,
+            1,
             Some(i64::MAX),
             Some(2_767_011_611_056_432_742),
         ),
     ] {
-        let policy = CompactionPolicy::resolve(
-            limit.as_ref(),
-            target.as_ref(),
-            window,
-            capacity,
-            90,
-            30,
-            reserved,
+        let mut configuration = configuration();
+        configuration.context.context_limit = limit;
+        configuration.context.model.context_window = window;
+        configuration.context.model.maximum_input_tokens = capacity;
+        configuration.context.model.maximum_output_tokens = output;
+        configuration.target = target;
+        assert_eq!(
+            configuration.context.calculate_trigger_tokens(),
+            expected_trigger
         );
-        assert_eq!(policy.trigger_tokens, expected_trigger);
-        assert_eq!(policy.target_tokens, expected_target);
+        assert_eq!(configuration.calculate_target_tokens(), expected_target);
     }
 }
 
@@ -278,11 +280,5 @@ fn grouping_preserves_contiguous_tool_results_and_exact_call_identity() {
     );
     assert!(is_complete(&groups[0].messages));
     assert!(!is_complete(&messages[..2]));
-    assert!(
-        CompactionGroup {
-            messages: groups[0].messages.clone(),
-            is_complete: groups[0].is_complete
-        }
-        .can_spill()
-    );
+    assert!(groups[0].is_complete);
 }

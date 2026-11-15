@@ -418,7 +418,10 @@ async fn compacted_original_boundary_fails_deferred_task_without_creating_a_work
                 ..Default::default()
             },
             parrot_storage::conversation::CompactionSnapshot {
-                summary: "later owner summary".into(),
+                message: parrot_storage::conversation::ConversationMessage::text(
+                    parrot_storage::conversation::MessageRole::System,
+                    "later owner summary",
+                ),
                 watermark: last,
             },
             "later status".into(),

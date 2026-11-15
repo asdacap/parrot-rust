@@ -129,14 +129,11 @@ fn oversized_compaction_retries_prepare_and_read_fresh_context_and_messages() {
         Reply::TooLarge("oversized"),
         Reply::final_response("answer"),
     ]);
-    state.compaction_plan = Some(compaction_support::plan(&["original group", "tail"]));
-    state.summary_provider.replies.lock().unwrap().push_back(Ok(
-        parrot_core::SummaryResponse::Summary("core summary".into()),
-    ));
-    let before = vec![
-        compaction_support::message("original group"),
-        compaction_support::message("tail"),
-    ];
+    state.compact_with("committed summary");
+    let before = vec![Message {
+        contents: vec![Content::Text("uncompacted messages".into())],
+        ..Message::default()
+    }];
     let after = vec![Message {
         role: Role::System,
         contents: vec![Content::Text("compacted summary".into())],

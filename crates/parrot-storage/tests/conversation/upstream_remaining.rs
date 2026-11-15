@@ -584,7 +584,10 @@ async fn original_compaction_only_history_is_present() {
     repo.append_compaction_status(
         event("status", "source"),
         CompactionSnapshot {
-            summary: "dependency summary".into(),
+            message: parrot_storage::conversation::ConversationMessage::text(
+                parrot_storage::conversation::MessageRole::System,
+                "dependency summary",
+            ),
             watermark: compacted,
         },
         "dependency status".into(),
@@ -620,8 +623,8 @@ async fn original_compaction_only_history_is_present() {
     assert_eq!(
         compaction
             .as_ref()
-            .map(|value| value.snapshot.summary.as_str()),
-        Some("dependency summary")
+            .map(|value| parrot_storage::events::content(&value.snapshot.message.parts)),
+        Some("dependency summary".to_owned())
     );
     // source-line:626
     assert_eq!(

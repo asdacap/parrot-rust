@@ -62,6 +62,9 @@ impl CompactionRequest {
                 ContextLimit::parse(&text)
             })
             .transpose()?;
-        Ok(Self { target })
+        Ok(Self {
+            target,
+            tools: Vec::new(),
+        })
     }
 }

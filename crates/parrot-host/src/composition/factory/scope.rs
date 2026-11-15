@@ -31,6 +31,7 @@ use parrot_foundation::{
     config::{Configuration, runtime::AgentTaskForkHistoryMode},
     template_catalog::PromptTemplateCatalog,
 };
+use parrot_provider::compaction::{CompactionSettings, Compactor};
 use parrot_provider::{
     http_stream::HttpError,
     image_generation::{ImageGenerationRequest, ImageGenerationResult},
@@ -70,10 +71,7 @@ use parrot_runtime::{
         AgentIdentity, ChildError, ChildResult, Operation, PreparedScope, Scope, ScopeFactory,
         ScopeParts, ServiceRegistration, SessionAdapter, SnapshotPublisher,
     },
-    compaction::{
-        CompactionSettings, Compactor, ContextController, ContextError, ContextResult,
-        ContextStatus, StatusOffering,
-    },
+    compaction::{ContextController, ContextError, ContextResult, ContextStatus, StatusOffering},
     interactions::{AgentAskIdentity, AgentAsks},
     plan_mode::{ModeResult, UserSessionModes},
     prompt_context::{
@@ -86,7 +84,7 @@ use parrot_runtime::{
     tool_settlement::{SharedSecurity, ToolExecutionConfig, ToolFactory, ToolInventory},
 };
 use parrot_storage::{
-    artifacts::{compaction::CompactionGroupBlobStore, output_blobs::ToolOutputBlobStore},
+    artifacts::output_blobs::ToolOutputBlobStore,
     diagnostics::{DiagnosticEvent, DiagnosticSeverity},
     events::NeverCancelled,
     progress::FileProgressStore,
@@ -1228,17 +1226,10 @@ where
             let agent_relative = scratch.root().strip_prefix(root.path()).map_err(child)?;
             let filenames = production_filename_generator();
             let blobs = Arc::new(
-                ToolOutputBlobStore::for_session(
-                    root,
-                    agent_relative.join("blobs"),
-                    filenames.clone(),
-                )
-                .map_err(child)?
-                .with_path_variables(environment.materialize().clone()),
+                ToolOutputBlobStore::for_session(root, agent_relative.join("blobs"), filenames)
+                    .map_err(child)?
+                    .with_path_variables(environment.materialize().clone()),
             );
-            let compaction_blobs =
-                CompactionGroupBlobStore::for_session(root, agent_relative, filenames)
-                    .map_err(child)?;
             let output = Arc::new(AgentOutput::open(scratch.root()).map_err(io_child)?);
             let log = Arc::new(ScopeLog {
                 user: self.user.clone(),
@@ -1527,12 +1518,7 @@ where
                         tool_execution,
                         prompt,
                         skills: skills.skills,
-                        context: ContextController::new(
-                            compactor,
-                            prepared.history.clone(),
-                            compaction_blobs,
-                            self.user.templates.clone(),
-                        ),
+                        context: ContextController::new(compactor, prepared.history.clone()),
                         status: status.clone(),
                         completion_sources: vec![completion],
                         templates: self.user.templates.clone(),

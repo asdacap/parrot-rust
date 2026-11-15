@@ -1,67 +1,26 @@
 use crate::{
-    AgentState, CancellationToken, ConfigKey, ContextCompaction, Error, EventPublisher, Provider,
-    ProviderRequest, States, ToolDefinition, TurnOptions,
-    compaction::{compact_conversation, prepare_compaction},
+    AgentState, CancellationToken, ConfigKey, ContextCompaction, Error, Provider, ProviderRequest,
+    States, ToolDefinition, TurnOptions,
 };
 
-/// Compacts context, finalizes the result, and resets request statistics after a reduction.
+/// Requests provider-owned compaction and reloads its state effects before returning.
 pub async fn compact_context(
     states: &mut dyn States,
     state: &mut AgentState,
     provider: &dyn Provider,
-    publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
-    request: crate::CompactionRequest,
+    mut request: crate::CompactionRequest,
     cancellation: CancellationToken<'_>,
 ) -> Result<ContextCompaction, Error> {
-    let mut configuration = states
-        .get_config(ConfigKey::Compaction)
-        .await?
-        .into_compaction()?;
-    if let Some(target) = request.target {
-        configuration.target = Some(target);
-    }
-    let input =
-        prepare_compaction(states, provider, publisher, definitions, &configuration).await?;
-    let compacted = compact_conversation(
-        &input,
-        definitions,
-        &configuration,
-        states,
-        provider,
-        publisher,
-        cancellation,
-    )
-    .await;
+    request.tools = definitions.to_vec();
     states.set_agent_state(state.clone()).await?;
-    let compacted = match compacted {
-        Ok(Some(fitted)) => publisher
-            .report_compaction_saving(cancellation)
-            .await
-            .map(|()| Some(fitted)),
-        result => result,
-    };
-    let reduced = compacted.as_ref().is_ok_and(|fitted| fitted.is_some());
-    let recorded = states.finalize_compaction(compacted).await;
+    let compacted = provider.compact(request, cancellation).await;
     *state = states.get_agent_state().await?;
-    if reduced && recorded.is_ok() {
-        state.last_request_statistic.reset();
-    }
-    match recorded {
-        Ok(()) => {
-            publisher.report_compaction_finished().await?;
-            Ok(ContextCompaction {
-                instructions: input.instructions,
-                reduced,
-            })
-        }
-        Err(error) => {
-            publisher
-                .report_compaction_failed(error.to_string())
-                .await?;
-            Err(error)
-        }
-    }
+    let reduced = compacted?.is_some();
+    Ok(ContextCompaction {
+        instructions: states.capture_system_prompt().await?,
+        reduced,
+    })
 }
 
 pub(crate) struct PreparedRequest {
@@ -74,20 +33,12 @@ pub(crate) async fn prepare_request(
     states: &mut dyn States,
     state: &mut AgentState,
     provider: &dyn Provider,
-    publisher: &dyn EventPublisher,
     definitions: &[ToolDefinition],
     options: &TurnOptions,
     cancellation: CancellationToken<'_>,
 ) -> Result<PreparedRequest, Error> {
-    let instructions = crate::prepare_context_epoch(
-        states,
-        state,
-        provider,
-        publisher,
-        definitions,
-        cancellation,
-    )
-    .await?;
+    let instructions =
+        crate::prepare_context_epoch(states, state, provider, definitions, cancellation).await?;
     let messages = states.read_conversation_state().await?.assemble_messages();
     let configuration = states
         .get_config(ConfigKey::Context)

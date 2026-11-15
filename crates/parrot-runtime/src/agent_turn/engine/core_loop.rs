@@ -45,7 +45,7 @@ impl<S: AccessSnapshot> TurnBinding<S> {
     }
 }
 
-fn adapt_operation<'a, T: Send + 'a>(
+pub(super) fn adapt_operation<'a, T: Send + 'a>(
     operation: impl std::future::Future<Output = Result<T, TurnError>> + Send + 'a,
 ) -> BoxFuture<'a, Result<T, CoreError>> {
     Box::pin(async move { operation.await.map_err(Into::into) })
@@ -181,14 +181,15 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                     &backend.broker,
                     backend.event_id.as_ref(),
                 ),
-                prompt: &backend.prompt,
-                state: &backend.state,
-                cancellation,
             };
             let token = parrot_core::CancellationToken::new(cancellation);
             let turn = parrot_core::open_turn(&hooks, &publisher, token).await?;
             let provider = RuntimeProvider {
                 binding: &binding,
+                state: &backend.state,
+                prompt: &backend.prompt,
+                status: backend.status.as_ref(),
+                compactor: &backend.compactor,
                 sessions: &backend.sessions,
                 history: &backend.history,
                 publisher: backend.publisher.as_ref(),
@@ -322,7 +323,7 @@ mod tests {
             TurnError::Cancelled,
             TurnError::Service("cancelled is only message text".into()),
             TurnError::Provider(sessions::Error::Cancelled),
-            TurnError::Planning(crate::compaction::PlanningError::GroupExceedsBudget),
+            TurnError::Planning(parrot_core::PlanningError::GroupExceedsBudget),
             TurnError::ProviderCall(provider_call::ProviderCallError::Output(
                 std::io::Error::from(std::io::ErrorKind::PermissionDenied),
             )),

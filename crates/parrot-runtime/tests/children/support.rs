@@ -3,7 +3,6 @@ use crate::tool_execution_support::tool_execution_config;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
-        filenames::FilenameGenerator,
         paths::{ResolvedRead, RootOrigin, SelectedSessionRoot},
         security::{AccessSnapshot, RestrictableAccessSnapshot},
     },
@@ -11,6 +10,7 @@ use parrot_domain::{
     values::config::ModelProfiles,
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_provider::compaction::{CompactionSettings, Compactor};
 use parrot_provider::{
     catalogs::Model,
     routing::{
@@ -34,7 +34,6 @@ use parrot_runtime::{
     prompt_context::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
-    artifacts::compaction::CompactionGroupBlobStore,
     conversation::{AgentHistoryView, ConversationMessage, ConversationRepository, MessageRole},
     database::SessionDatabase,
     events::{ConversationPart, EventRepository, NeverCancelled},
@@ -175,12 +174,7 @@ pub fn templates() -> Arc<PromptTemplateCatalog> {
     .collect();
     Arc::new(PromptTemplateCatalog::from_content("", &env).unwrap().1)
 }
-struct Names;
-impl FilenameGenerator for Names {
-    fn next_filename(&self) -> String {
-        format!("{}.dat", id())
-    }
-}
+
 /// Every retained scope uses one real selected-root SQLite repository and its own JSONL projection.
 pub struct Histories {
     pub path: PathBuf,
@@ -252,13 +246,7 @@ impl Histories {
             templates.clone(),
         )
         .unwrap();
-        let blobs = CompactionGroupBlobStore::for_session(
-            self.repository.events().database().selected_root(),
-            "scratch",
-            Arc::new(Names),
-        )
-        .unwrap();
-        ContextController::new(compactor, history, blobs, templates)
+        ContextController::new(compactor, history)
     }
     pub async fn append(&self, history: &AgentHistoryView, text: &str) {
         let mut event = Event::new();

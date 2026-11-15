@@ -95,27 +95,14 @@ fn raw_and_calibrated_triggers_compact_and_keep_sampled_instructions() {
             ..Message::default()
         }];
         let compacted_state = state.request().context.clone();
-        state.compaction_plan = Some(compaction_support::plan(&["original", "retained"]));
-        state.summary_provider =
-            compaction_support::Provider::new([parrot_core::SummaryResponse::Summary(
-                "automatic summary".into(),
-            )]);
+        state.compact_with("automatic summary");
         state.compactions.push_back(CompactedContext {
             messages: messages.clone(),
             state: compacted_state,
         });
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
         assert_eq!(state.request().rendered_instructions, ["core request"]);
-        assert_eq!(state.summary_provider.requests.lock().unwrap().len(), 1);
-        let compacted = state.recorded_compactions[0]
-            .as_ref()
-            .unwrap()
-            .as_ref()
-            .unwrap();
-        assert_eq!(
-            compacted.summary.contents,
-            [Content::Text("prefix:automatic summary".into())]
-        );
+        assert_eq!(state.compaction.lock().unwrap().requests.len(), 1);
         let requests = state.provider.requests.lock().unwrap();
         assert_eq!(requests[0].instructions, "core request");
         assert_eq!(requests[0].messages, messages);
@@ -130,7 +117,7 @@ fn raw_and_calibrated_triggers_compact_and_keep_sampled_instructions() {
 }
 
 #[test]
-fn separate_context_reads_use_compaction_configuration_and_calibration() {
+fn separate_context_reads_use_updated_configuration_and_calibration() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.request().context.configuration.model.context_window = 1000;
     state
@@ -147,11 +134,7 @@ fn separate_context_reads_use_compaction_configuration_and_calibration() {
     let mut compacted = state.request().context.clone();
     compacted.configuration.model.context_window = 2000;
     compacted.configuration.model.maximum_output_tokens = 200;
-    state.compaction_plan = Some(compaction_support::plan(&["original", "retained"]));
-    state.summary_provider =
-        compaction_support::Provider::new([parrot_core::SummaryResponse::Summary(
-            "summary".into(),
-        )]);
+    state.compact_with("summary");
     state.compactions.push_back(CompactedContext {
         messages: vec![Message {
             role: Role::System,
@@ -162,7 +145,7 @@ fn separate_context_reads_use_compaction_configuration_and_calibration() {
     });
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.recorded_compactions.len(), 1);
+    assert_eq!(state.compaction.lock().unwrap().results.len(), 1);
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].max_output_tokens,
         200
@@ -170,22 +153,20 @@ fn separate_context_reads_use_compaction_configuration_and_calibration() {
 }
 
 #[test]
-fn automatic_summary_failure_is_recorded_before_context_preparation_stops() {
+fn automatic_compaction_failure_stops_before_provider_invocation() {
     let mut state = MemoryState::new([Reply::final_response("not invoked")]);
     state.prime_context(490);
     state.request().estimated_input_tokens = 901;
-    state.compaction_plan = Some(compaction_support::plan(&["original", "retained"]));
-    let error = Error::failed("automatic summary failed");
+    let error = Error::failed("automatic compaction failed");
     state
-        .summary_provider
-        .replies
+        .compaction
         .lock()
         .unwrap()
+        .replies
         .push_back(Err(error.clone()));
-
     assert_eq!(state.run(), Err(error.clone()));
-    assert_eq!(state.summary_provider.requests.lock().unwrap().len(), 1);
-    assert_eq!(state.recorded_compactions, [Err(error)]);
+    assert_eq!(state.compaction.lock().unwrap().requests.len(), 1);
+    assert_eq!(state.compaction.lock().unwrap().results, [Err(error)]);
     assert!(state.provider.requests.lock().unwrap().is_empty());
     assert_eq!(state.trace.values().last().unwrap(), "compact");
 }
@@ -203,7 +184,7 @@ fn equality_at_the_raw_trigger_does_not_compact_or_discard_requested_output() {
     state.request().context.configuration.trigger_percent = 80;
     state.request().estimated_input_tokens = 800;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert!(state.recorded_compactions.is_empty());
+    assert!(state.compaction.lock().unwrap().requests.is_empty());
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].max_output_tokens,
         100
@@ -253,7 +234,7 @@ fn unknown_context_uses_output_configuration_without_inventing_reminder_or_compa
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.request().estimated_input_tokens = i64::MAX;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert!(state.recorded_compactions.is_empty());
+    assert!(state.compaction.lock().unwrap().requests.is_empty());
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].max_output_tokens,
         32768

@@ -3,7 +3,7 @@ use super::context::ContextSnapshot;
 use super::conversation::ConversationState;
 use super::message::{ConversationTurn, InputAdmission, PromotedInput};
 use super::turn::AgentState;
-use super::{BoxFuture, CancellationToken, Error};
+use super::{BoxFuture, Error};
 
 /// Owns conversation effects, input readiness, and durable turn transitions.
 /// Mutations receive their input from the caller rather than retrieving staged input.
@@ -45,17 +45,6 @@ pub trait States: Send + Sync {
     fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.collect_completion_blockers")) })
     }
-    /// Writes the supplied bytes to agent-local scratch storage and returns the saved path.
-    fn write_to_scratch<'a, 'c>(
-        &'a self,
-        _contents: &'a [u8],
-        _cancellation: CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, Error>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async { Err(Error::unsupported("States.write_to_scratch")) })
-    }
     /// Captures the complete provider-rendered system prompt and native request bindings.
     fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, Error>> {
         Box::pin(async { Err(Error::unsupported("States.capture_system_prompt")) })
@@ -86,12 +75,5 @@ pub trait States: Send + Sync {
     /// Core assembles provider-visible messages from these facts.
     fn read_conversation_state(&self) -> BoxFuture<'_, Result<ConversationState, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_conversation_state")) })
-    }
-    /// Persists the fitted compaction and refreshes the live conversation, or propagates its failure.
-    fn finalize_compaction(
-        &mut self,
-        _result: Result<Option<crate::FittedCompaction>, Error>,
-    ) -> BoxFuture<'_, Result<(), Error>> {
-        Box::pin(async { Err(Error::unsupported("States.finalize_compaction")) })
     }
 }

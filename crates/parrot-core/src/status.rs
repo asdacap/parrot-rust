@@ -2,7 +2,7 @@ use crate::{
     AgentState, CancellationToken, ConfigKey, ContextSnapshot, ConversationAddition,
     ConversationEvent, ConversationOrigin, ConversationPersistence, Error, Message, Provider,
     ProviderRequest, Role, States, StatusKey, StatusOffering, StatusStanding, ToolDefinition,
-    compaction::fit_status,
+    context::fit_status,
 };
 use std::fmt;
 

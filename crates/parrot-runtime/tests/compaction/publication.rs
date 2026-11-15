@@ -138,7 +138,10 @@ async fn committed_status_publication_requires_true_success_not_duplicate_or_sql
         if sqlite_failure {
             assert!(snapshot.is_none());
         } else {
-            assert_eq!(snapshot.unwrap().summary, "winner");
+            assert_eq!(
+                parrot_storage::events::content(&snapshot.unwrap().message.parts),
+                "winner"
+            );
         }
         sessions.close().await.unwrap();
         fixture
@@ -149,4 +152,79 @@ async fn committed_status_publication_requires_true_success_not_duplicate_or_sql
             .await
             .unwrap();
     }
+}
+
+#[tokio::test]
+async fn committed_status_publication_failure_preserves_replacement_without_resetting_calibration()
+{
+    let fixture = Fixture::new();
+    let history = fixture.history();
+    user(&history, "old").await;
+    user(&history, "tail").await;
+    let provider = Scripted::default();
+    let selection = provider.selection(10000);
+    let sessions = ProviderSessions::new();
+    let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
+    let mut prompt = EpochPrompt::default();
+    prompt
+        .agent_state
+        .last_request_statistic
+        .observe_usage("scripted/model", 100, 1000);
+    let calibration = prompt.agent_state.last_request_statistic.clone();
+    let status = Status::default();
+    let events = Events::new(history.clone());
+    events.fail_status.store(true, Ordering::Relaxed);
+    let mut controller = fixture.controller(history.clone(), 90);
+    let error = controller
+        .compact_epoch(
+            input(
+                &selection,
+                &mut conversation,
+                &mut prompt,
+                &sessions,
+                &status,
+                &events,
+            ),
+            None,
+            &NeverCancelled,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, ContextError::Operation(_)));
+    assert_eq!(error.to_string(), "status publication failed");
+    assert_eq!(prompt.agent_state.last_request_statistic, calibration);
+    assert!(
+        history
+            .repository()
+            .compaction("agent".into())
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(
+        AgentConversation::new(history).await.unwrap().messages(),
+        conversation.messages()
+    );
+    let published = events.published.lock().unwrap().clone();
+    assert_eq!(
+        published
+            .iter()
+            .filter(|event| event.has_compaction_failed())
+            .count(),
+        1
+    );
+    assert!(
+        !published
+            .iter()
+            .any(|event| event.has_compaction_finished())
+    );
+    assert!(!published.iter().any(|event| event.has_agent_notice()));
+    sessions.close().await.unwrap();
+    fixture
+        .repository
+        .events()
+        .database()
+        .close()
+        .await
+        .unwrap();
 }

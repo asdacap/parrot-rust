@@ -473,3 +473,102 @@ async fn provider_failure_keeps_snapshot_absent_budget_calibration_and_top_level
             .unwrap();
     }
 }
+
+#[tokio::test]
+async fn oversized_durable_history_is_truncated_only_in_summary_requests_without_group_files() {
+    let fixture = Fixture::new();
+    let history = fixture.history();
+    let source = "🦜".repeat(5000);
+    user(&history, &source).await;
+    user(&history, "tail").await;
+    let before = history.conversation().await.unwrap();
+    let provider = Scripted::default();
+    let selection = provider.selection(10000);
+    let sessions = ProviderSessions::new();
+    let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
+    let mut prompt = EpochPrompt::default();
+    let status = Status::default();
+    let events = Events::new(history.clone());
+    let catalog = templates();
+    let notice = catalog
+        .render("compaction.truncated-group-notice", &[], &NeverCancelled)
+        .unwrap();
+    let compactor = Compactor::new(
+        CompactionSettings {
+            trigger_percent: 90,
+            target_percent: 30,
+            maximum_input_tokens: 2000,
+            summary_output_tokens: 100,
+            summary_instructions: String::new(),
+            summary_prefix: String::new(),
+        },
+        ModelProfiles::new(&BTreeMap::new()),
+        catalog,
+    )
+    .unwrap();
+    let mut controller = ContextController::new(compactor, history.clone());
+    let result = controller
+        .compact_epoch(
+            input(
+                &selection,
+                &mut conversation,
+                &mut prompt,
+                &sessions,
+                &status,
+                &events,
+            ),
+            None,
+            &NeverCancelled,
+        )
+        .await
+        .unwrap();
+    assert!(result.reduced);
+    assert_eq!(
+        &history.conversation().await.unwrap()[..before.len()],
+        before.as_slice()
+    );
+    let requests = provider.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    let request = &requests[0];
+    let clipped = request
+        .messages
+        .iter()
+        .find(|message| message.role == sessions::Role::User)
+        .unwrap()
+        .content();
+    assert!(clipped.ends_with(&notice));
+    assert!(source.starts_with(clipped.strip_suffix(&notice).unwrap()));
+    assert!(clipped.len() < source.len());
+    assert!(
+        crate::request_tokens(
+            &selection.canonical_model,
+            &request.instructions,
+            &request.tools,
+            &request.messages
+        )
+        .unwrap()
+            <= 2000
+    );
+    assert_eq!(
+        std::fs::read_dir(fixture.path.join("scratch/blobs"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert!(
+        history
+            .repository()
+            .compaction("agent".into())
+            .await
+            .unwrap()
+            .is_some()
+    );
+    sessions.close().await.unwrap();
+    fixture
+        .repository
+        .events()
+        .database()
+        .close()
+        .await
+        .unwrap();
+}

@@ -39,7 +39,10 @@ async fn repository_workflows_keep_current_schema_after_reopen() {
         .save_compaction(
             "agent".into(),
             CompactionSnapshot {
-                summary: "the summary".into(),
+                message: parrot_storage::conversation::ConversationMessage::text(
+                    parrot_storage::conversation::MessageRole::System,
+                    "the summary",
+                ),
                 watermark: 0,
             },
         )

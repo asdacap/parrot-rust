@@ -178,6 +178,19 @@ pub fn project(
     at: &str,
 ) -> Result<ConversationItem, EventError> {
     let (sequence, final_phase) = insert_conversation_item(tx, agent, message, at)?;
+    insert_message_parts(tx, sequence, message)?;
+    Ok(ConversationItem {
+        sequence,
+        message: message.clone(),
+        final_phase,
+    })
+}
+
+pub(crate) fn insert_message_parts(
+    tx: &Transaction<'_>,
+    sequence: i64,
+    message: &ConversationMessage,
+) -> Result<(), EventError> {
     insert_parts(
         tx,
         "conversation_part",
@@ -198,9 +211,5 @@ pub fn project(
             ],
         )?;
     }
-    Ok(ConversationItem {
-        sequence,
-        message: message.clone(),
-        final_phase,
-    })
+    Ok(())
 }
