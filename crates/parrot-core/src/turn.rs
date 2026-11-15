@@ -4,9 +4,9 @@ use crate::{
     AgentState, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConversationAddition,
     ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationTurn, Error,
     ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome, PromotedInput,
-    Provider, Role, SkillProvider, States, ToolCallReceipt, Tools, TurnEngine, TurnHooks,
-    TurnLifecycle, TurnServices, context, rendering, skills, status::steer_status,
-    tool_settlement::execute_tools,
+    Provider, Role, SkillProvider, States, ToolCallReceipt, ToolDefinition, Tools, TurnEngine,
+    TurnHooks, TurnLifecycle, TurnOptions, TurnServices, context, rendering, skills,
+    status::steer_status, tool_settlement::execute_tools,
 };
 
 /// Drives one opened turn with its runtime services, per-turn budget state and
@@ -18,8 +18,7 @@ struct AgentTurn<'a> {
     skill_provider: &'a dyn SkillProvider,
     provider: &'a dyn Provider,
     publisher: &'a dyn EventPublisher,
-    state: AgentState,
-    compacted_oversized: bool,
+    agent_state: AgentState,
     skill_preparation: skills::SkillPreparation,
 }
 
@@ -30,23 +29,27 @@ impl AgentTurn<'_> {
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
-        self.state.begin_turn();
-        if self.state.final_phase {
+
+        self.agent_state.begin_turn();
+
+        if self.agent_state.final_phase {
             let restored =
                 rendering::render_template(self.states, ConfigKey::RestoredToolsTemplate, &[])
                     .await?;
             self.add_phase_prompt(&restored, false).await?;
         }
+
+        let mut compacted_oversized = false;
+
         loop {
             if cancellation.is_cancelled() {
                 return Err(Error::cancelled());
             }
+
             self.hooks.begin_step().await?;
+
             let options = self.states.get_config(ConfigKey::Turn).await?.into_turn()?;
             let catalog = self.tools.capture_catalog().await?;
-            if cancellation.is_cancelled() {
-                return Err(Error::cancelled());
-            }
             let turn = self.states.get_last_turn().await?;
             let admission = if turn.as_ref().is_some_and(ConversationTurn::needs_response) {
                 InputAdmission::SteersOnly
@@ -54,6 +57,7 @@ impl AgentTurn<'_> {
                 InputAdmission::SteersOrNextQueued
             };
             let inputs = self.states.promote_pending_inputs(admission).await?;
+
             for input in &inputs {
                 self.states
                     .add_conversation_messages(ConversationAddition {
@@ -62,8 +66,10 @@ impl AgentTurn<'_> {
                     })
                     .await?;
             }
+
             self.add_skill_prompt(&inputs, cancellation).await?;
-            let Some(flags) = self.state.admit(options.maximum_requests) else {
+
+            let Some(flags) = self.agent_state.admit(options.maximum_requests) else {
                 return self.exhaust_budget().await;
             };
             let definitions = if flags.final_phase {
@@ -71,52 +77,53 @@ impl AgentTurn<'_> {
             } else {
                 &catalog.normal
             };
+
             steer_status(
                 self.states,
-                &mut self.state,
+                &mut self.agent_state,
                 self.provider,
                 definitions,
                 cancellation,
             )
             .await?;
+
             if flags.final_phase {
                 let content =
                     rendering::render_template(self.states, ConfigKey::FinalRequestTemplate, &[])
                         .await?;
                 self.add_phase_prompt(&content, true).await?;
             }
-            let prepared = context::prepare_request(
-                self.states,
-                &mut self.state,
-                self.provider,
-                definitions,
-                &options,
-                cancellation,
-            )
-            .await?;
-            let attempt = self.state.count_request();
-            self.states.set_agent_state(self.state.clone()).await?;
+
+            let prepared = self
+                .prepare_request(definitions, &options, cancellation)
+                .await?;
+
+            let attempt = self.agent_state.count_request();
+            self.states
+                .set_agent_state(self.agent_state.clone())
+                .await?;
+
             let invoked = self.provider.invoke(prepared.request, cancellation).await;
+
             let input_tokens = match &invoked {
                 Ok(response) => Some(response.input_tokens),
                 Err(error) => error.input_tokens,
             };
             if let Some(input_tokens) = input_tokens {
-                self.state.last_request_statistic.observe_usage(
+                self.agent_state.last_request_statistic.observe_usage(
                     &prepared.model_selector,
                     prepared.estimated_input_tokens,
                     input_tokens,
                 );
             }
+
             let response = match invoked.map_err(|error| error.error) {
                 Ok(response) => response,
-                Err(error)
-                    if error.kind == ErrorKind::RequestTooLarge && !self.compacted_oversized =>
-                {
-                    self.compacted_oversized = true;
+                Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
+                    compacted_oversized = true;
                     if !context::compact_context(
                         self.states,
-                        &mut self.state,
+                        &mut self.agent_state,
                         self.provider,
                         definitions,
                         crate::CompactionRequest {
@@ -134,7 +141,8 @@ impl AgentTurn<'_> {
                 }
                 Err(error) => return Err(error),
             };
-            self.compacted_oversized = false;
+            compacted_oversized = false;
+
             let retry_reason = if response.finish_reason == FinishReason::Length
                 && !response.tool_calls.is_empty()
             {
@@ -146,6 +154,7 @@ impl AgentTurn<'_> {
             } else {
                 None
             };
+
             if let Some(key) = retry_reason {
                 let content = rendering::render_template(self.states, key, &[]).await?;
                 self.states
@@ -162,6 +171,7 @@ impl AgentTurn<'_> {
                     .await?;
                 continue;
             }
+
             if !response.tool_calls.is_empty() {
                 let recorded = self
                     .states
@@ -173,6 +183,7 @@ impl AgentTurn<'_> {
                         },
                     })
                     .await?;
+
                 self.publisher
                     .publish(
                         ConversationEvent::ToolRequestReceived {
@@ -181,10 +192,13 @@ impl AgentTurn<'_> {
                         cancellation,
                     )
                     .await?;
+
                 let receipt = ToolCallReceipt {
                     assistant_sequence: recorded.sequence,
                 };
-                self.states.set_agent_state(self.state.clone()).await?;
+                self.states
+                    .set_agent_state(self.agent_state.clone())
+                    .await?;
                 let compaction_request = execute_tools(
                     self.states,
                     self.tools,
@@ -194,11 +208,12 @@ impl AgentTurn<'_> {
                     cancellation,
                 )
                 .await?;
-                self.state = self.states.get_agent_state().await?;
+                self.agent_state = self.states.get_agent_state().await?;
+
                 if let Some(request) = compaction_request {
                     context::compact_context(
                         self.states,
-                        &mut self.state,
+                        &mut self.agent_state,
                         self.provider,
                         definitions,
                         request,
@@ -206,12 +221,16 @@ impl AgentTurn<'_> {
                     )
                     .await?;
                 }
-                if flags.final_phase && !self.state.try_extend_settlement() {
+
+                if flags.final_phase && !self.agent_state.try_extend_settlement() {
                     return self.exhaust_budget().await;
                 }
+
                 continue;
             }
+
             let messages = self.states.collect_completion_blockers().await?;
+
             if !messages.is_empty() {
                 let mut additions = vec![Message::from_response(&response)];
                 additions.extend(
@@ -219,6 +238,7 @@ impl AgentTurn<'_> {
                         .iter()
                         .map(|message| Message::text(Role::System, message)),
                 );
+
                 self.states
                     .add_conversation_messages(ConversationAddition {
                         messages: additions,
@@ -230,10 +250,14 @@ impl AgentTurn<'_> {
                         ),
                     })
                     .await?;
-                self.state.restart();
+
+                self.agent_state.restart();
+
                 continue;
             }
+
             let usage = self.states.read_usage_totals().await?;
+
             self.states
                 .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::from_response(&response)],
@@ -243,6 +267,7 @@ impl AgentTurn<'_> {
                     },
                 })
                 .await?;
+
             return Ok(Outcome::Completed(response.assistant_text));
         }
     }
@@ -258,9 +283,11 @@ impl AgentTurn<'_> {
             .skill_preparation
             .prepare(self.states, self.skill_provider, inputs, cancellation)
             .await?;
+
         if skill_prompt.content.is_empty() {
             return Ok(());
         }
+
         self.states
             .add_conversation_messages(ConversationAddition {
                 messages: vec![Message::text(Role::User, skill_prompt.content)],
@@ -273,11 +300,13 @@ impl AgentTurn<'_> {
                 },
             })
             .await?;
+
         for path in skill_prompt.loaded_paths {
             self.publisher
                 .publish(ConversationEvent::SkillLoaded { path }, cancellation)
                 .await?;
         }
+
         Ok(())
     }
 
@@ -285,9 +314,10 @@ impl AgentTurn<'_> {
     /// the final-provider-request prompt is recorded once, and the tool-availability
     /// restore is recorded only while the marker stands. A repeat records nothing.
     async fn add_phase_prompt(&mut self, content: &str, final_phase: bool) -> Result<(), Error> {
-        if self.state.final_phase == final_phase {
+        if self.agent_state.final_phase == final_phase {
             return Ok(());
         }
+
         let (kind, notice) = if final_phase {
             (
                 "final_provider_request_prompt",
@@ -299,6 +329,7 @@ impl AgentTurn<'_> {
                 "Tool availability restored prompt injected",
             )
         };
+
         self.states
             .add_conversation_messages(ConversationAddition {
                 messages: vec![Message::text(Role::System, content)],
@@ -311,8 +342,28 @@ impl AgentTurn<'_> {
                 },
             })
             .await?;
-        self.state.final_phase = final_phase;
+
+        self.agent_state.final_phase = final_phase;
+
         Ok(())
+    }
+
+    /// Prepares the next provider request against the current conversation state.
+    async fn prepare_request(
+        &mut self,
+        definitions: &[ToolDefinition],
+        options: &TurnOptions,
+        cancellation: CancellationToken<'_>,
+    ) -> Result<context::PreparedRequest, Error> {
+        context::prepare_request(
+            self.states,
+            &mut self.agent_state,
+            self.provider,
+            definitions,
+            options,
+            cancellation,
+        )
+        .await
     }
 
     /// Renders the terminal notice core records when the invocation budget runs out.
@@ -324,7 +375,7 @@ impl AgentTurn<'_> {
 
     /// Persists the agent state after execution, including failures.
     async fn record_state(self) -> Result<(), Error> {
-        self.states.set_agent_state(self.state).await
+        self.states.set_agent_state(self.agent_state).await
     }
 }
 
@@ -370,8 +421,7 @@ async fn run_opened_turn(
         skill_provider: turn.skills,
         provider: turn.provider,
         publisher: turn.publisher,
-        state,
-        compacted_oversized: false,
+        agent_state: state,
         skill_preparation: skills::SkillPreparation::default(),
     };
     let result = agent.run(cancellation).await;
@@ -438,16 +488,15 @@ mod tests {
             skill_provider: &UnusedSkills,
             provider: &UnusedProvider,
             publisher: &UnusedPublisher,
-            state: AgentState::default(),
-            compacted_oversized: false,
+            agent_state: AgentState::default(),
             skill_preparation: crate::skills::SkillPreparation::default(),
         };
         finish(agent.add_phase_prompt("final", true)).unwrap();
         finish(agent.add_phase_prompt("duplicate", true)).unwrap();
-        assert!(agent.state.final_phase);
+        assert!(agent.agent_state.final_phase);
         finish(agent.add_phase_prompt("restored", false)).unwrap();
         finish(agent.add_phase_prompt("duplicate restore", false)).unwrap();
-        assert!(!agent.state.final_phase);
+        assert!(!agent.agent_state.final_phase);
         drop(agent);
         assert_eq!(
             *states.additions.lock().unwrap(),

@@ -4,6 +4,7 @@ use crate::{
 mod compaction_request;
 mod preparation;
 mod status;
+pub(crate) use preparation::PreparedRequest;
 pub(crate) use preparation::compact_context;
 pub(crate) use preparation::prepare_request;
 pub(crate) use status::fit_status;
