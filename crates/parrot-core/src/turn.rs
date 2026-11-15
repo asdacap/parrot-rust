@@ -1,12 +1,11 @@
 //! Turn engine: drains ready turns and drives one turn from input to settlement.
 
 use crate::{
-    AgentState, CancellationToken, CompletionBlockerFeedback, ConfigKey, ContextSnapshot,
-    ConversationAddition, ConversationEvent, ConversationOrigin, ConversationPersistence,
-    ConversationTurn, Error, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message,
-    OpenedTurn, Outcome, Provider, Role, SkillProvider, States, ToolCallReceipt, ToolDefinition,
-    Tools, TurnEngine, TurnHooks, TurnLifecycle, context, context::compact_context, execute_tools,
-    rendering, skills, steer_status,
+    AgentState, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConversationAddition,
+    ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationTurn, Error,
+    ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, OpenedTurn, Outcome,
+    Provider, Role, SkillProvider, States, ToolCallReceipt, Tools, TurnEngine, TurnHooks,
+    TurnLifecycle, context, execute_tools, rendering, skills, steer_status,
 };
 
 impl OpenedTurn<'_> {
@@ -36,7 +35,7 @@ async fn execute_turn(
     if state.final_phase {
         let restored =
             rendering::render_template(states, ConfigKey::RestoredToolsTemplate, &[]).await?;
-        TurnEngine::add_phase_prompt(states, state, &restored, false).await?;
+        add_phase_prompt(states, state, &restored, false).await?;
     }
     let mut compacted_oversized = false;
     let mut skills = skills::SkillPreparation::default();
@@ -100,7 +99,7 @@ async fn execute_turn(
         if flags.final_phase {
             let content =
                 rendering::render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
-            TurnEngine::add_phase_prompt(states, state, &content, true).await?;
+            add_phase_prompt(states, state, &content, true).await?;
         }
         let prepared = context::prepare_request(
             states,
@@ -352,87 +351,132 @@ impl TurnEngine {
             .await?;
         Ok(receipt.inserted.then_some(content))
     }
+}
 
-    /// Records a phase prompt only when it flips the agent state's final-phase marker:
-    /// the final-provider-request prompt is recorded once, and the tool-availability
-    /// restore is recorded only while the marker stands. A repeat records nothing.
-    pub async fn add_phase_prompt(
-        states: &mut dyn States,
-        state: &mut AgentState,
-        content: &str,
-        final_phase: bool,
-    ) -> Result<(), Error> {
-        if state.final_phase == final_phase {
-            return Ok(());
-        }
-        let (kind, notice) = if final_phase {
-            (
-                "final_provider_request_prompt",
-                "Final provider request prompt injected",
-            )
-        } else {
-            (
-                "tool_availability_restored_prompt",
-                "Tool availability restored prompt injected",
-            )
-        };
-        states
-            .add_conversation_messages(ConversationAddition {
-                messages: vec![Message::text(Role::System, content)],
-                persistence: ConversationPersistence::Append {
-                    origin: ConversationOrigin::System,
-                    event: ConversationEvent::Notice {
-                        kind: kind.into(),
-                        notice: notice.into(),
-                    },
+/// Records a phase prompt only when it flips the agent state's final-phase marker:
+/// the final-provider-request prompt is recorded once, and the tool-availability
+/// restore is recorded only while the marker stands. A repeat records nothing.
+async fn add_phase_prompt(
+    states: &mut dyn States,
+    state: &mut AgentState,
+    content: &str,
+    final_phase: bool,
+) -> Result<(), Error> {
+    if state.final_phase == final_phase {
+        return Ok(());
+    }
+    let (kind, notice) = if final_phase {
+        (
+            "final_provider_request_prompt",
+            "Final provider request prompt injected",
+        )
+    } else {
+        (
+            "tool_availability_restored_prompt",
+            "Tool availability restored prompt injected",
+        )
+    };
+    states
+        .add_conversation_messages(ConversationAddition {
+            messages: vec![Message::text(Role::System, content)],
+            persistence: ConversationPersistence::Append {
+                origin: ConversationOrigin::System,
+                event: ConversationEvent::Notice {
+                    kind: kind.into(),
+                    notice: notice.into(),
                 },
-            })
-            .await?;
-        state.final_phase = final_phase;
-        Ok(())
+            },
+        })
+        .await?;
+    state.final_phase = final_phase;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        AgentState, BoxFuture, Content, ConversationAddition, ConversationPersistence,
+        ConversationReceipt, Error, States,
+    };
+    use std::sync::Mutex;
+    use std::task::{Context, Poll, Waker};
+
+    fn finish<F: std::future::Future>(future: F) -> F::Output {
+        let mut context = Context::from_waker(Waker::noop());
+        let mut future = std::pin::pin!(future);
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(result) => result,
+            Poll::Pending => panic!("phase effects resolve immediately"),
+        }
     }
 
-    pub async fn prepare_context_epoch(
-        states: &mut dyn States,
-        state: &mut AgentState,
-        provider: &dyn Provider,
-        definitions: &[ToolDefinition],
-        cancellation: CancellationToken<'_>,
-    ) -> Result<String, Error> {
-        if cancellation.is_cancelled() {
-            return Err(Error::cancelled());
+    /// Records every phase addition.
+    #[derive(Default)]
+    struct RecordingState {
+        additions: Mutex<Vec<String>>,
+    }
+
+    impl States for RecordingState {
+        fn get_config(
+            &self,
+            _: crate::ConfigKey,
+        ) -> BoxFuture<'_, Result<crate::ConfigValue, Error>> {
+            Box::pin(async { Err(Error::unsupported("configuration")) })
         }
-        let mut instructions = states.capture_system_prompt().await?;
-        let mut messages = states.read_conversation_state().await?.assemble_messages();
-        let mut configuration = states
-            .get_config(ConfigKey::Context)
-            .await?
-            .into_context()?;
-        let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
-        let mut context = ContextSnapshot::estimate(estimate, &configuration);
-        if context.requires_compaction(
-            &state.last_request_statistic,
-            &configuration.model.canonical_model,
-        ) {
-            let compacted = compact_context(
-                states,
-                state,
-                provider,
-                definitions,
-                crate::CompactionRequest::default(),
-                cancellation,
-            )
-            .await?;
-            instructions = compacted.instructions;
-            messages = states.read_conversation_state().await?.assemble_messages();
-            configuration = states
-                .get_config(ConfigKey::Context)
-                .await?
-                .into_context()?;
-            let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
-            context = ContextSnapshot::estimate(estimate, &configuration);
-            context.ensure_input_fits()?;
+        fn add_conversation_messages(
+            &mut self,
+            addition: ConversationAddition,
+        ) -> BoxFuture<'_, Result<ConversationReceipt, Error>> {
+            Box::pin(async move {
+                let ConversationPersistence::Append { .. } = addition.persistence else {
+                    return Err(Error::unsupported("unexpected persistence"));
+                };
+                let Content::Text(text) = &addition.messages[0].contents[0] else {
+                    return Err(Error::unsupported("unexpected content"));
+                };
+                self.additions.lock().unwrap().push(text.clone());
+                Ok(ConversationReceipt::default())
+            })
         }
-        Ok(instructions)
+    }
+
+    #[test]
+    fn a_phase_prompt_records_only_when_it_flips_the_durable_marker() {
+        let mut states = RecordingState::default();
+        let mut state = AgentState::default();
+        finish(super::add_phase_prompt(
+            &mut states,
+            &mut state,
+            "final",
+            true,
+        ))
+        .unwrap();
+        finish(super::add_phase_prompt(
+            &mut states,
+            &mut state,
+            "duplicate",
+            true,
+        ))
+        .unwrap();
+        assert!(state.final_phase);
+        finish(super::add_phase_prompt(
+            &mut states,
+            &mut state,
+            "restored",
+            false,
+        ))
+        .unwrap();
+        finish(super::add_phase_prompt(
+            &mut states,
+            &mut state,
+            "duplicate restore",
+            false,
+        ))
+        .unwrap();
+        assert!(!state.final_phase);
+        assert_eq!(
+            *states.additions.lock().unwrap(),
+            ["final".to_owned(), "restored".to_owned()]
+        );
     }
 }
