@@ -294,9 +294,7 @@ async fn oversized_recovery_uses_the_shared_core_summary_without_publishing_priv
     );
     let snapshot = fixture.history.compaction_history().await.unwrap().unwrap();
     assert!(
-        snapshot
-            .snapshot
-            .summary
+        parrot_storage::events::content(&snapshot.snapshot.message.parts)
             .contains("oversized durable summary")
     );
     assert!(

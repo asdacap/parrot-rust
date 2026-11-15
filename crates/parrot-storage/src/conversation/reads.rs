@@ -26,7 +26,7 @@ fn parse_role(value: &str) -> Result<MessageRole, EventError> {
         ))),
     }
 }
-fn read_message(
+pub(super) fn read_message(
     tx: &Transaction<'_>,
     sequence: i64,
     origin: &str,

@@ -379,7 +379,7 @@ fn initialize_fork(
             tx,
             destination,
             &CompactionSnapshot {
-                summary: snapshot.summary.clone(),
+                message: snapshot.message.clone(),
                 watermark: 0,
             },
             &at,

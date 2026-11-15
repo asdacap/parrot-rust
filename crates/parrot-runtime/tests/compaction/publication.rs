@@ -138,7 +138,10 @@ async fn committed_status_publication_requires_true_success_not_duplicate_or_sql
         if sqlite_failure {
             assert!(snapshot.is_none());
         } else {
-            assert_eq!(snapshot.unwrap().summary, "winner");
+            assert_eq!(
+                parrot_storage::events::content(&snapshot.unwrap().message.parts),
+                "winner"
+            );
         }
         sessions.close().await.unwrap();
         fixture

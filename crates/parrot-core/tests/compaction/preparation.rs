@@ -236,7 +236,10 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
     status_item.is_compaction_status = true;
     let raw = ConversationState {
         summary: Some(ConversationSummary {
-            content: "previous summary".into(),
+            message: Message {
+                role: Role::System,
+                ..message("previous summary")
+            },
             watermark: 10,
         }),
         history: vec![

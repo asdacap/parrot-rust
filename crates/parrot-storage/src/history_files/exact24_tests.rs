@@ -291,7 +291,10 @@ async fn delegated24_promoted_input_compaction_and_destination_fork_jsonl() {
         .append_compaction_status(
             event("compaction", "parent"),
             CompactionSnapshot {
-                summary: "saved summary".into(),
+                message: crate::conversation::ConversationMessage::text(
+                    crate::conversation::MessageRole::System,
+                    "saved summary",
+                ),
                 watermark,
             },
             "status".into(),

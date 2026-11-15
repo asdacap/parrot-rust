@@ -366,8 +366,19 @@ impl ContextController {
             .repository()
             .compaction(self.history.agent_session_id().into())
             .await?;
-        Ok(snapshot.map(|snapshot| parrot_core::ConversationSummary {
-            content: snapshot.summary,
+        let Some(snapshot) = snapshot else {
+            return Ok(None);
+        };
+        let message = snapshot.message;
+        let message = ModelMessage {
+            role: message.role,
+            contents: self.history.materialize(message.parts).await?,
+            tool_calls: message.tool_calls,
+            tool_call_id: message.tool_call_id,
+            provider_content: message.provider_content,
+        };
+        Ok(Some(parrot_core::ConversationSummary {
+            message: provider_message(&message).into(),
             watermark: snapshot.watermark,
         }))
     }
@@ -410,7 +421,10 @@ impl ContextController {
                 .append_compaction_status(
                     published.clone(),
                     CompactionSnapshot {
-                        summary: compacted.summary.content().into(),
+                        message:
+                            parrot_storage::conversation::ConversationMessage::from_compaction(
+                                compacted.summary.into(),
+                            )?,
                         watermark: compacted.watermark,
                     },
                     status,

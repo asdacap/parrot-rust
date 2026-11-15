@@ -496,7 +496,10 @@ async fn raw_conversation_snapshot_keeps_flat_tail_status_and_latest_active_chec
     let first = assistant(&repo, "agent", "first", "set_checkpoint").await;
     let latest = assistant(&repo, "agent", "latest", "set_checkpoint").await;
     let snapshot = CompactionSnapshot {
-        summary: "archived summary".into(),
+        message: parrot_storage::conversation::ConversationMessage::text(
+            parrot_storage::conversation::MessageRole::System,
+            "archived summary",
+        ),
         watermark: archived,
     };
     repo.append_compaction_status(
@@ -586,7 +589,10 @@ async fn completed_checkpoints_keep_latest_before_and_active_compaction_boundary
     repo.save_compaction(
         "agent".into(),
         CompactionSnapshot {
-            summary: "summary".into(),
+            message: parrot_storage::conversation::ConversationMessage::text(
+                parrot_storage::conversation::MessageRole::System,
+                "summary",
+            ),
             watermark: second,
         },
     )
@@ -601,7 +607,10 @@ async fn completed_checkpoints_keep_latest_before_and_active_compaction_boundary
     repo.save_compaction(
         "agent".into(),
         CompactionSnapshot {
-            summary: "newer lower watermark".into(),
+            message: parrot_storage::conversation::ConversationMessage::text(
+                parrot_storage::conversation::MessageRole::System,
+                "newer lower watermark",
+            ),
             watermark: 0,
         },
     )
@@ -786,7 +795,10 @@ async fn fallback_only_for_absent_effective_history_and_empty_selection_is_noop(
     repo.save_compaction(
         "compact-only".into(),
         CompactionSnapshot {
-            summary: "summary".into(),
+            message: parrot_storage::conversation::ConversationMessage::text(
+                parrot_storage::conversation::MessageRole::System,
+                "summary",
+            ),
             watermark: 7,
         },
     )
@@ -815,7 +827,10 @@ async fn fallback_only_for_absent_effective_history_and_empty_selection_is_noop(
     assert_eq!(
         effective.snapshot,
         Some(CompactionSnapshot {
-            summary: "summary".into(),
+            message: parrot_storage::conversation::ConversationMessage::text(
+                parrot_storage::conversation::MessageRole::System,
+                "summary"
+            ),
             watermark: 0
         })
     );
@@ -846,7 +861,10 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
     repo.save_compaction(
         "agent".into(),
         CompactionSnapshot {
-            summary: "summary".into(),
+            message: parrot_storage::conversation::ConversationMessage::text(
+                parrot_storage::conversation::MessageRole::System,
+                "summary",
+            ),
             watermark: old,
         },
     )
@@ -880,7 +898,10 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
         assert_eq!(
             effective.snapshot,
             Some(CompactionSnapshot {
-                summary: "summary".into(),
+                message: parrot_storage::conversation::ConversationMessage::text(
+                    parrot_storage::conversation::MessageRole::System,
+                    "summary"
+                ),
                 watermark: 0
             })
         );
@@ -1092,6 +1113,81 @@ async fn original_full_fork_copies_settled_batches_and_checkpoints_both_paramete
 }
 
 #[tokio::test]
+async fn opaque_compaction_replacement_survives_reopen_effective_history_and_forks() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    let covered = append(&repo, "agent", message(MessageRole::User, "covered")).await;
+    let replacement = ConversationMessage {
+        origin: ConversationOrigin::Model,
+        role: MessageRole::Assistant,
+        parts: Vec::new(),
+        tool_calls: Vec::new(),
+        tool_call_id: String::new(),
+        provider_content: ProviderContent {
+            provider_id: "native".into(),
+            content: "{ \"continuation\": \"opaque-token\" }".into(),
+        },
+    };
+    repo.append_compaction_status(
+        event("native-compaction", "agent"),
+        CompactionSnapshot {
+            message: replacement.clone(),
+            watermark: covered,
+        },
+        "status".into(),
+    )
+    .await
+    .unwrap();
+    let checkpoint = assistant(&repo, "agent", "checkpoint", "set_checkpoint").await;
+    settle(&repo, "agent", checkpoint, "checkpoint").await;
+    append(&repo, "agent", message(MessageRole::User, "retained")).await;
+    repo.events().database().close().await.unwrap();
+
+    let reopened = fixture.repository();
+    let snapshot = reopened.compaction("agent".into()).await.unwrap().unwrap();
+    assert_eq!(snapshot.message, replacement);
+    assert_eq!(snapshot.watermark, covered);
+    let effective = reopened
+        .effective_conversation_groups("agent".into())
+        .await
+        .unwrap();
+    assert_eq!(effective.snapshot.unwrap(), snapshot);
+    assert!(matches!(
+        reopened.agent_history("agent".into()).await.unwrap()[1],
+        AgentHistoryEntry::Compaction { ref summary, .. } if summary.is_empty()
+    ));
+    for (selection, child) in [("full", "full-child"), ("handoff", "named-child")] {
+        fork(
+            &reopened,
+            "agent",
+            child,
+            HistoryForkBoundary::AfterCompletedHistory,
+            selection,
+        )
+        .await
+        .unwrap();
+        let context = reopened.compaction_history(child.into()).await.unwrap();
+        if selection == "full" {
+            let context = context.unwrap();
+            assert_eq!(context.snapshot.message, replacement);
+            assert_eq!(context.snapshot.watermark, 0);
+            assert_eq!(single_text(&context.status.unwrap()), "status");
+        } else {
+            assert!(context.is_none());
+            let copied = items(&reopened, child).await;
+            assert_eq!(copied[0].message.tool_calls[0].id, "checkpoint");
+            assert_eq!(single_text(copied.last().unwrap()), "retained");
+            assert!(
+                copied
+                    .iter()
+                    .all(|item| { item.message.provider_content.provider_id != "native" })
+            );
+        }
+    }
+    reopened.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn original_full_fork_copies_effective_compaction_state_both_parameters() {
     for use_safe_prefix in [false, true] {
         let fixture = Fixture::new();
@@ -1107,7 +1203,10 @@ async fn original_full_fork_copies_effective_compaction_state_both_parameters() 
             repo.append_compaction_status(
                 event("status", "agent"),
                 CompactionSnapshot {
-                    summary: "effective summary".into(),
+                    message: parrot_storage::conversation::ConversationMessage::text(
+                        parrot_storage::conversation::MessageRole::System,
+                        "effective summary"
+                    ),
                     watermark: 1
                 },
                 "effective status".into()
@@ -1140,7 +1239,10 @@ async fn original_full_fork_copies_effective_compaction_state_both_parameters() 
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(context.snapshot.summary, "effective summary");
+        assert_eq!(
+            parrot_storage::events::content(&context.snapshot.message.parts),
+            "effective summary"
+        );
         assert_eq!(context.snapshot.watermark, 0);
         assert_eq!(
             context.status.unwrap().message.parts,
@@ -1299,7 +1401,10 @@ async fn original_fallback_compacted_parent_preserves_boundary_parameter_and_wor
     repo.append_compaction_status(
         event("summary", "parent"),
         CompactionSnapshot {
-            summary: "later parent summary".into(),
+            message: parrot_storage::conversation::ConversationMessage::text(
+                parrot_storage::conversation::MessageRole::System,
+                "later parent summary",
+            ),
             watermark,
         },
         "later status".into(),

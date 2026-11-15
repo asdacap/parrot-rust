@@ -144,7 +144,10 @@ async fn latest_assistant_is_session_scoped_and_ignores_trailing_non_model_messa
     repo.save_compaction(
         "agent".into(),
         CompactionSnapshot {
-            summary: "summary".into(),
+            message: parrot_storage::conversation::ConversationMessage::text(
+                parrot_storage::conversation::MessageRole::System,
+                "summary",
+            ),
             watermark: latest.sequence,
         },
     )
@@ -269,7 +272,10 @@ async fn agent_history_orders_structured_messages_and_retains_compactions() {
         repo.save_compaction(
             "agent".into(),
             CompactionSnapshot {
-                summary: "summary one".into(),
+                message: parrot_storage::conversation::ConversationMessage::text(
+                    parrot_storage::conversation::MessageRole::System,
+                    "summary one"
+                ),
                 watermark: 1
             }
         )
@@ -283,7 +289,10 @@ async fn agent_history_orders_structured_messages_and_retains_compactions() {
         repo.save_compaction(
             "agent".into(),
             CompactionSnapshot {
-                summary: "summary two".into(),
+                message: parrot_storage::conversation::ConversationMessage::text(
+                    parrot_storage::conversation::MessageRole::System,
+                    "summary two"
+                ),
                 watermark: 2
             }
         )
@@ -327,7 +336,10 @@ async fn agent_history_orders_structured_messages_and_retains_compactions() {
             .save_compaction(
                 "agent".into(),
                 CompactionSnapshot {
-                    summary: "duplicate".into(),
+                    message: parrot_storage::conversation::ConversationMessage::text(
+                        parrot_storage::conversation::MessageRole::System,
+                        "duplicate"
+                    ),
                     watermark: 2
                 }
             )
@@ -577,7 +589,10 @@ async fn merged_request_history_stably_interleaves_independent_cursors_and_optio
     repo.save_compaction(
         "agent".into(),
         CompactionSnapshot {
-            summary: "summary".into(),
+            message: parrot_storage::conversation::ConversationMessage::text(
+                parrot_storage::conversation::MessageRole::System,
+                "summary",
+            ),
             watermark: first_message.sequence,
         },
     )
@@ -752,7 +767,10 @@ async fn compaction_tail_excludes_all_associated_status_items_not_just_current_s
         repo.save_compaction(
             "agent".into(),
             CompactionSnapshot {
-                summary: summary.into(),
+                message: parrot_storage::conversation::ConversationMessage::text(
+                    parrot_storage::conversation::MessageRole::System,
+                    summary,
+                ),
                 watermark,
             },
         )

@@ -24,7 +24,10 @@ async fn latest_request_recovery_leaves_older_unfinished_calls_untouched() {
         .save_compaction(
             "agent".into(),
             parrot_storage::conversation::CompactionSnapshot {
-                summary: "compacted history".into(),
+                message: parrot_storage::conversation::ConversationMessage::text(
+                    parrot_storage::conversation::MessageRole::System,
+                    "compacted history",
+                ),
                 watermark: latest,
             },
         )

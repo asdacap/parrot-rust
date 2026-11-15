@@ -11,7 +11,7 @@ pub struct ConversationState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConversationSummary {
-    pub content: String,
+    pub message: Message,
     pub watermark: i64,
 }
 
