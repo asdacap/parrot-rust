@@ -1,6 +1,6 @@
 //! Real storage false/error paths must never create a committed status publication.
 use super::*;
-use parrot_domain::protocol::messages::parrot::CompactionPhase;
+use parrot_domain::protocol::messages::parrot::{CompactionPhase, CompactionTrigger};
 
 #[tokio::test]
 async fn saving_publication_failure_leaves_history_unchanged_and_reports_failure() {
@@ -119,6 +119,10 @@ async fn committed_status_publication_requires_true_success_not_duplicate_or_sql
         let committed = events.committed.lock().unwrap().clone();
         assert_eq!(committed.len(), 5);
         assert!(committed[0].has_compaction_started());
+        assert_eq!(
+            committed[0].compaction_started().trigger,
+            CompactionTrigger::COMPACTION_TRIGGER_USER_REQUESTED.into()
+        );
         for event in &committed[1..3] {
             assert_eq!(
                 event.compaction_progress().phase,

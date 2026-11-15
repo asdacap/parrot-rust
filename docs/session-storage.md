@@ -20,10 +20,11 @@ Named forks copy only the selected checkpoint tail, without the earlier snapshot
 Usage history refers to conversation sequence numbers. `history.jsonl` is a
 derived view, not a recovery authority.
 
-The provider owns compaction execution and initiates its lifecycle events. Runtime
-atomically persists the supplied replacement and associated status, then reloads
-the live conversation. A returned replacement is already finalized. An event
-publication failure after commit does not roll back that replacement.
+The provider owns compaction execution and initiates its lifecycle events, and the
+started event records the origin of the run. Runtime atomically persists the
+supplied replacement and associated status, then reloads the live conversation. A
+returned replacement is already finalized. An event publication failure after
+commit does not roll back that replacement.
 
 Oversized summary input is truncated in memory with an omission notice. Compaction
 does not create group files, delete authoritative source messages, or remove

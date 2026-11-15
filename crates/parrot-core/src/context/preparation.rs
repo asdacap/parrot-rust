@@ -91,7 +91,10 @@ async fn prepare_context_epoch(
             state,
             provider,
             definitions,
-            crate::CompactionRequest::default(),
+            crate::CompactionRequest {
+                trigger: crate::CompactionTrigger::Automatic,
+                ..Default::default()
+            },
             cancellation,
         )
         .await?;

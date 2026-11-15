@@ -1072,10 +1072,11 @@ impl RawActivityView {
                     }
                 }
             }
-            Some(Payload::CompactionStarted(_)) => {
+            Some(Payload::CompactionStarted(started)) => {
                 let state = self.state(owner);
                 if state.activities.insert(COMPACTION_ACTIVITY_ID.to_owned()) {
                     state.compaction_progress = None;
+                    state.compaction_trigger = Some(started.trigger.enum_value_or_default());
                     self.activities
                         .push((owner.clone(), COMPACTION_ACTIVITY_ID.to_owned()));
                 }
@@ -1087,15 +1088,20 @@ impl RawActivityView {
                 }
             }
             Some(Payload::CompactionFinished(_)) | Some(Payload::CompactionFailed(_)) => {
-                self.state(owner).compaction_progress = None;
+                let origin = {
+                    let state = self.state(owner);
+                    state.compaction_progress = None;
+                    super::rendering::compaction_trigger_suffix(state.compaction_trigger.take())
+                };
                 if self.state(owner).activities.remove(COMPACTION_ACTIVITY_ID) {
                     self.activities
                         .retain(|(id, activity)| id != owner || activity != COMPACTION_ACTIVITY_ID);
                     let (marker, text) = match published.payload.as_ref() {
-                        Some(Payload::CompactionFailed(failed)) => {
-                            ("✗", format!("compaction failed: {}", failed.message))
-                        }
-                        _ => ("✓", "compaction finished".to_owned()),
+                        Some(Payload::CompactionFailed(failed)) => (
+                            "✗",
+                            format!("compaction failed{origin}: {}", failed.message),
+                        ),
+                        _ => ("✓", format!("compaction finished{origin}")),
                     };
                     let notice = Arc::new(ActivityValue::Notice {
                         marker: marker.to_owned(),

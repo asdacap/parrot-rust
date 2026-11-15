@@ -67,6 +67,15 @@ async fn tool_result_triggers_core_compaction_and_reaches_next_provider_without_
     assert_eq!(
         events
             .iter()
+            .find(|event| event.has_compaction_started())
+            .unwrap()
+            .compaction_started()
+            .trigger,
+        protocol::CompactionTrigger::COMPACTION_TRIGGER_MODEL_REQUESTED.into()
+    );
+    assert_eq!(
+        events
+            .iter()
             .filter(|event| event.has_turn_started())
             .count(),
         1

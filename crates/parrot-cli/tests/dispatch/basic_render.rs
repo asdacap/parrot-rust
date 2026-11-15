@@ -728,6 +728,48 @@ async fn stream_cancellation_ends_only_reader_wait_while_callback_rpc_and_output
 }
 
 #[test]
+fn compaction_labels_distinguish_automatic_model_requested_and_user_requested() {
+    for (trigger, phrase) in [
+        (wire::CompactionTrigger::COMPACTION_TRIGGER_UNSPECIFIED, ""),
+        (
+            wire::CompactionTrigger::COMPACTION_TRIGGER_AUTOMATIC,
+            " (automatic)",
+        ),
+        (
+            wire::CompactionTrigger::COMPACTION_TRIGGER_MODEL_REQUESTED,
+            " (model requested)",
+        ),
+        (
+            wire::CompactionTrigger::COMPACTION_TRIGGER_USER_REQUESTED,
+            " (user requested)",
+        ),
+    ] {
+        let started = || {
+            event(Payload::CompactionStarted(wire::CompactionStarted {
+                trigger: trigger.into(),
+                ..Default::default()
+            }))
+        };
+        let (output, error, _) = render(vec![
+            started(),
+            event(Payload::CompactionFinished(wire::CompactionFinished::new())),
+            started(),
+            event(Payload::CompactionFailed(wire::CompactionFailed {
+                message: "boom".into(),
+                ..Default::default()
+            })),
+        ]);
+        assert_eq!(
+            output,
+            format!(
+                "  compaction started{phrase}\n  compaction finished{phrase}\n  compaction started{phrase}\n  compaction failed{phrase}: boom\n"
+            )
+        );
+        assert!(error.is_empty());
+    }
+}
+
+#[test]
 fn compaction_progress_uses_its_own_readable_lines_after_streamed_text() {
     let (output, error, _) = render(vec![
         text("partial"),

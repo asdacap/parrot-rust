@@ -3,10 +3,11 @@
 //! Each line is an append-only, per-line-flushed object:
 //! `{"id", "agent_session_id", "payload"}` where the payload is
 //! `{"type": "<proto oneof field name>", ...scalar variant fields}` using the
-//! proto field names. Proto enums serialize as their integer value. Unset
-//! optional fields are omitted. Repeated message fields, nested message
-//! fields and bytes fields are omitted. Only the one-shot chat path writes
-//! the log.
+//! proto field names. Proto enums serialize as their integer value, except the
+//! compaction trigger, which serializes as its name so readers can tell the
+//! origins apart. Unset optional fields are omitted. Repeated message fields,
+//! nested message fields and bytes fields are omitted. Only the one-shot chat
+//! path writes the log.
 
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -14,6 +15,8 @@ use std::io::{self, Write};
 use parrot_domain::protocol::messages::parrot as wire;
 use parrot_domain::protocol::messages::parrot::event::Payload;
 use serde_json::json;
+
+use crate::presenters::rendering::compaction_trigger_name;
 
 pub struct JsonlEventLog {
     file: Option<File>,
@@ -219,7 +222,14 @@ fn payload_value(payload: &Payload) -> serde_json::Value {
                 "output_cost": usage.output_cost,
             }),
         ),
-        Payload::CompactionStarted(_) => typed("compaction_started", json!({})),
+        Payload::CompactionStarted(compaction) => {
+            let mut fields = serde_json::Map::new();
+            if let Some(name) = compaction_trigger_name(compaction.trigger.enum_value_or_default())
+            {
+                fields.insert("trigger".to_owned(), json!(name));
+            }
+            typed("compaction_started", serde_json::Value::Object(fields))
+        }
         Payload::CompactionFinished(_) => typed("compaction_finished", json!({})),
         Payload::CompactionFailed(compaction) => typed(
             "compaction_failed",
@@ -439,6 +449,36 @@ mod tests {
         let payload = event_line(&compaction)["payload"].clone();
         assert_eq!(payload["type"], "compaction_started");
         assert_eq!(payload.as_object().expect("object").len(), 1);
+    }
+
+    #[test]
+    fn compaction_started_names_its_trigger() {
+        for (trigger, name) in [
+            (
+                wire::CompactionTrigger::COMPACTION_TRIGGER_AUTOMATIC,
+                "automatic",
+            ),
+            (
+                wire::CompactionTrigger::COMPACTION_TRIGGER_MODEL_REQUESTED,
+                "model_requested",
+            ),
+            (
+                wire::CompactionTrigger::COMPACTION_TRIGGER_USER_REQUESTED,
+                "user_requested",
+            ),
+        ] {
+            let started = wire::Event {
+                id: "e6".into(),
+                agent_session_id: "s1".into(),
+                payload: Some(Payload::CompactionStarted(wire::CompactionStarted {
+                    trigger: trigger.into(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            };
+            let payload = event_line(&started)["payload"].clone();
+            assert_eq!(payload["trigger"], name);
+        }
     }
 
     #[test]

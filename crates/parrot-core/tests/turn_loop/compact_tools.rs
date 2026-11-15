@@ -63,6 +63,10 @@ fn core_reads_compact_tool_targets_from_the_provider_call() {
         let compaction = state.compaction.lock().unwrap();
         assert_eq!(compaction.requests.len(), 1);
         assert_eq!(compaction.requests[0].target, Some(target));
+        assert_eq!(
+            compaction.requests[0].trigger,
+            parrot_core::CompactionTrigger::ModelRequested
+        );
     }
 }
 

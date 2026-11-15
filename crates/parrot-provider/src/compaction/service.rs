@@ -69,7 +69,8 @@ impl Compactor {
         effects: &mut dyn CompactionEffects,
         cancellation: &dyn Cancellation,
     ) -> Result<Option<Message>, Error> {
-        publish_terminal(effects, CompactionEvent::Started).await?;
+        let trigger = request.trigger;
+        publish_terminal(effects, CompactionEvent::Started(trigger)).await?;
         let result = self
             .execute(selected, request, sessions, effects, cancellation)
             .await;

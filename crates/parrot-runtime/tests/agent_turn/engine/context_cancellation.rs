@@ -317,6 +317,15 @@ async fn oversized_recovery_uses_the_shared_core_summary_without_publishing_priv
     assert_eq!(
         events
             .iter()
+            .find(|event| event.has_compaction_started())
+            .unwrap()
+            .compaction_started()
+            .trigger,
+        protocol::CompactionTrigger::COMPACTION_TRIGGER_AUTOMATIC.into()
+    );
+    assert_eq!(
+        events
+            .iter()
             .filter(|event| event.has_compaction_finished())
             .count(),
         1
@@ -378,6 +387,15 @@ async fn oversized_recovery_summary_cancellation_records_failure_after_joining_t
             .filter(|event| event.has_compaction_started())
             .count(),
         1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .find(|event| event.has_compaction_started())
+            .unwrap()
+            .compaction_started()
+            .trigger,
+        protocol::CompactionTrigger::COMPACTION_TRIGGER_AUTOMATIC.into()
     );
     let failed: Vec<_> = events
         .iter()
