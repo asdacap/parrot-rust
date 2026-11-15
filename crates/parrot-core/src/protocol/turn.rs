@@ -1,6 +1,9 @@
 use super::message::{ProviderResponse, Reasoning};
 use super::{BoxFuture, CancellationToken, Error};
 
+/// Drives turn execution and records turn lifecycle effects through core contracts.
+pub struct TurnEngine;
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum Outcome {
     Completed(String),

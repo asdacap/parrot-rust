@@ -1,6 +1,6 @@
 use parrot_core::{
     AgentState, BoxFuture, Content, ConversationAddition, ConversationPersistence,
-    ConversationReceipt, Error, States, add_phase_prompt,
+    ConversationReceipt, Error, States, TurnEngine,
 };
 use std::sync::Mutex;
 use std::task::{Context, Poll, Waker};
@@ -48,11 +48,29 @@ impl States for RecordingState {
 fn a_phase_prompt_records_only_when_it_flips_the_durable_marker() {
     let mut states = RecordingState::default();
     let mut state = AgentState::default();
-    finish(add_phase_prompt(&mut states, &mut state, "final", true)).unwrap();
-    finish(add_phase_prompt(&mut states, &mut state, "duplicate", true)).unwrap();
+    finish(TurnEngine::add_phase_prompt(
+        &mut states,
+        &mut state,
+        "final",
+        true,
+    ))
+    .unwrap();
+    finish(TurnEngine::add_phase_prompt(
+        &mut states,
+        &mut state,
+        "duplicate",
+        true,
+    ))
+    .unwrap();
     assert!(state.final_phase);
-    finish(add_phase_prompt(&mut states, &mut state, "restored", false)).unwrap();
-    finish(add_phase_prompt(
+    finish(TurnEngine::add_phase_prompt(
+        &mut states,
+        &mut state,
+        "restored",
+        false,
+    ))
+    .unwrap();
+    finish(TurnEngine::add_phase_prompt(
         &mut states,
         &mut state,
         "duplicate restore",

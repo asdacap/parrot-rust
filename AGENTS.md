@@ -13,6 +13,8 @@ method is already obvious.
 - Other crates interact with `parrot-core` only through its protocol contracts.
   Declare every public core type and trait in `crates/parrot-core/src/protocol/` or `protocol.rs`.
   Keep implementation types private. Root re-exports and core entry points may expose these contracts.
+- Call core behavior only through `parrot_core::TurnEngine`, not standalone functions or other implementation entry points.
+  If behavior does not belong on `TurnEngine`, it likely belongs outside `parrot-core`.
 - Prefer rich domain objects rather than anemic domain models.
   - For example, if something is agent session specific, create an instance per agent session and store in the same
   scope as the agent session.

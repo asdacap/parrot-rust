@@ -229,7 +229,7 @@ fn interruption_supplies_the_recovered_start_event_and_terminal_content_without_
     );
 
     assert_eq!(
-        finish(parrot_core::interrupt_turn(
+        finish(parrot_core::TurnEngine::interrupt_turn(
             &mut state,
             "recovered-start-event"
         )),

@@ -135,9 +135,9 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
                 turn_ids: self.states.turn_ids.clone(),
             };
             let start_event_id =
-                parrot_core::open_turn(&hooks, self.publisher, cancellation).await?;
+                parrot_core::TurnEngine::open_turn(&hooks, self.publisher, cancellation).await?;
             let skills = MemorySkills::new(self.states);
-            parrot_core::run_turn(
+            parrot_core::TurnEngine::run_turn(
                 self.states,
                 &skills,
                 self.tools,
@@ -167,7 +167,7 @@ async fn run(
         provider,
         publisher: &publisher,
     };
-    parrot_core::run(&mut lifecycle, cancellation).await
+    parrot_core::TurnEngine::run(&mut lifecycle, cancellation).await
 }
 
 async fn run_turn(
@@ -184,9 +184,10 @@ async fn run_turn(
         model: states.model.clone(),
         turn_ids: states.turn_ids.clone(),
     };
-    let start_event_id = parrot_core::open_turn(&hooks, &publisher, cancellation).await?;
+    let start_event_id =
+        parrot_core::TurnEngine::open_turn(&hooks, &publisher, cancellation).await?;
     let skills = MemorySkills::new(states);
-    parrot_core::run_turn(
+    parrot_core::TurnEngine::run_turn(
         states,
         &skills,
         tools,

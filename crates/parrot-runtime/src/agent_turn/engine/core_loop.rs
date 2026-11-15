@@ -183,7 +183,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                 ),
             };
             let token = parrot_core::CancellationToken::new(cancellation);
-            let turn = parrot_core::open_turn(&hooks, &publisher, token).await?;
+            let turn = parrot_core::TurnEngine::open_turn(&hooks, &publisher, token).await?;
             let provider = RuntimeProvider {
                 binding: &binding,
                 state: &backend.state,
@@ -208,7 +208,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                 skills: backend.skills.as_ref(),
                 cancellation: self.cancellation,
             };
-            let result = parrot_core::run_turn(
+            let result = parrot_core::TurnEngine::run_turn(
                 &mut states,
                 &skills,
                 &tools,
@@ -276,7 +276,7 @@ where
         work,
         failed_key: None,
     };
-    let outcome = parrot_core::run(
+    let outcome = parrot_core::TurnEngine::run(
         &mut lifecycle,
         parrot_core::CancellationToken::new(cancellation),
     )
@@ -304,7 +304,7 @@ where
 {
     let binding = TurnBinding::new();
     let mut states = RuntimeStates::bind(backend, &binding, &NeverCancelled, work);
-    if let Some(message) = parrot_core::interrupt_turn(&mut states, &key.start_event_id)
+    if let Some(message) = parrot_core::TurnEngine::interrupt_turn(&mut states, &key.start_event_id)
         .await
         .map_err(TurnError::Core)?
     {

@@ -5,78 +5,14 @@ use crate::{
     ConversationAddition, ConversationEvent, ConversationOrigin, ConversationPersistence,
     ConversationTurn, Error, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message,
     OpenedTurn, Outcome, Provider, Role, SkillProvider, States, ToolCallReceipt, ToolDefinition,
-    Tools, TurnHooks, TurnLifecycle, context, context::compact_context, execute_tools, rendering,
-    skills, steer_status,
+    Tools, TurnEngine, TurnHooks, TurnLifecycle, context, context::compact_context, execute_tools,
+    rendering, skills, steer_status,
 };
-
-/// Drains ready turns using state-backed settings and the invocation budget.
-pub async fn run(
-    lifecycle: &mut dyn TurnLifecycle,
-    cancellation: CancellationToken<'_>,
-) -> Result<Outcome, Error> {
-    let mut answer = String::new();
-    loop {
-        if lifecycle.has_scheduled_work() {
-            return Ok(Outcome::Completed(answer));
-        }
-        if cancellation.is_cancelled() {
-            return Err(Error::cancelled());
-        }
-        let token = CancellationToken::new(&cancellation);
-        if !lifecycle.has_ready_turn().await? {
-            return Ok(Outcome::Completed(answer));
-        }
-        match lifecycle.run_turn(token).await? {
-            Outcome::Completed(completed) => answer = completed,
-            exhausted @ Outcome::BudgetExhausted(_) => return Ok(exhausted),
-        }
-    }
-}
 
 impl OpenedTurn<'_> {
     pub fn start_event_id(&self) -> &str {
         &self.start_event_id
     }
-}
-
-/// Prepares the turn and publishes its start event before runtime activation.
-/// The returned turn retains the published ID even if activation later fails.
-pub async fn open_turn<'a>(
-    hooks: &'a dyn TurnHooks,
-    publisher: &dyn EventPublisher,
-    cancellation: CancellationToken<'_>,
-) -> Result<OpenedTurn<'a>, Error> {
-    let model = hooks.begin_conversation_turn().await?;
-    let start_event_id = publisher.report_turn_started(&model, cancellation).await?;
-    Ok(OpenedTurn {
-        start_event_id,
-        hooks,
-    })
-}
-
-/// Runs one active turn using settings and tools captured at each step.
-/// Activates the published turn returned by `open_turn` before reading agent state.
-pub async fn run_turn(
-    states: &mut dyn States,
-    skill_provider: &dyn SkillProvider,
-    tools: &dyn Tools,
-    provider: &dyn Provider,
-    publisher: &dyn EventPublisher,
-    turn: &OpenedTurn<'_>,
-    cancellation: CancellationToken<'_>,
-) -> Result<Outcome, Error> {
-    turn.hooks
-        .activate_conversation_turn(turn.start_event_id())
-        .await?;
-    let mut state = states.get_agent_state().await?;
-    let services = TurnServices {
-        skills: skill_provider,
-        provider,
-        publisher,
-    };
-    let result = execute_turn(states, tools, &services, turn, cancellation, &mut state).await;
-    states.set_agent_state(state).await?;
-    result
 }
 
 struct TurnServices<'a> {
@@ -100,7 +36,7 @@ async fn execute_turn(
     if state.final_phase {
         let restored =
             rendering::render_template(states, ConfigKey::RestoredToolsTemplate, &[]).await?;
-        add_phase_prompt(states, state, &restored, false).await?;
+        TurnEngine::add_phase_prompt(states, state, &restored, false).await?;
     }
     let mut compacted_oversized = false;
     let mut skills = skills::SkillPreparation::default();
@@ -164,7 +100,7 @@ async fn execute_turn(
         if flags.final_phase {
             let content =
                 rendering::render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
-            add_phase_prompt(states, state, &content, true).await?;
+            TurnEngine::add_phase_prompt(states, state, &content, true).await?;
         }
         let prepared = context::prepare_request(
             states,
@@ -331,105 +267,172 @@ async fn exhaust_budget(states: &dyn States) -> Result<Outcome, Error> {
     Ok(Outcome::BudgetExhausted(notice))
 }
 
-/// Records an interrupted assistant turn through the same generic conversation operation.
-pub async fn interrupt_turn(
-    states: &mut dyn States,
-    start_event_id: &str,
-) -> Result<Option<String>, Error> {
-    let content = rendering::render_template(states, ConfigKey::InterruptedTemplate, &[]).await?;
-    let usage = states.read_usage_totals().await?;
-    let receipt = states
-        .add_conversation_messages(ConversationAddition {
-            messages: vec![Message::text(Role::Assistant, &content)],
-            persistence: ConversationPersistence::CloseTurn {
-                start_event_id: start_event_id.to_owned(),
-                finish_reason: FinishReason::Interrupted,
-                usage,
-            },
-        })
-        .await?;
-    Ok(receipt.inserted.then_some(content))
-}
-
-/// Records a phase prompt only when it flips the agent state's final-phase marker:
-/// the final-provider-request prompt is recorded once, and the tool-availability
-/// restore is recorded only while the marker stands. A repeat records nothing.
-pub async fn add_phase_prompt(
-    states: &mut dyn States,
-    state: &mut AgentState,
-    content: &str,
-    final_phase: bool,
-) -> Result<(), Error> {
-    if state.final_phase == final_phase {
-        return Ok(());
+impl TurnEngine {
+    /// Drains ready turns using state-backed settings and the invocation budget.
+    pub async fn run(
+        lifecycle: &mut dyn TurnLifecycle,
+        cancellation: CancellationToken<'_>,
+    ) -> Result<Outcome, Error> {
+        let mut answer = String::new();
+        loop {
+            if lifecycle.has_scheduled_work() {
+                return Ok(Outcome::Completed(answer));
+            }
+            if cancellation.is_cancelled() {
+                return Err(Error::cancelled());
+            }
+            let token = CancellationToken::new(&cancellation);
+            if !lifecycle.has_ready_turn().await? {
+                return Ok(Outcome::Completed(answer));
+            }
+            match lifecycle.run_turn(token).await? {
+                Outcome::Completed(completed) => answer = completed,
+                exhausted @ Outcome::BudgetExhausted(_) => return Ok(exhausted),
+            }
+        }
     }
-    let (kind, notice) = if final_phase {
-        (
-            "final_provider_request_prompt",
-            "Final provider request prompt injected",
-        )
-    } else {
-        (
-            "tool_availability_restored_prompt",
-            "Tool availability restored prompt injected",
-        )
-    };
-    states
-        .add_conversation_messages(ConversationAddition {
-            messages: vec![Message::text(Role::System, content)],
-            persistence: ConversationPersistence::Append {
-                origin: ConversationOrigin::System,
-                event: ConversationEvent::Notice {
-                    kind: kind.into(),
-                    notice: notice.into(),
-                },
-            },
-        })
-        .await?;
-    state.final_phase = final_phase;
-    Ok(())
-}
 
-pub async fn prepare_context_epoch(
-    states: &mut dyn States,
-    state: &mut AgentState,
-    provider: &dyn Provider,
-    definitions: &[ToolDefinition],
-    cancellation: CancellationToken<'_>,
-) -> Result<String, Error> {
-    if cancellation.is_cancelled() {
-        return Err(Error::cancelled());
+    /// Prepares the turn and publishes its start event before runtime activation.
+    /// The returned turn retains the published ID even if activation later fails.
+    pub async fn open_turn<'a>(
+        hooks: &'a dyn TurnHooks,
+        publisher: &dyn EventPublisher,
+        cancellation: CancellationToken<'_>,
+    ) -> Result<OpenedTurn<'a>, Error> {
+        let model = hooks.begin_conversation_turn().await?;
+        let start_event_id = publisher.report_turn_started(&model, cancellation).await?;
+        Ok(OpenedTurn {
+            start_event_id,
+            hooks,
+        })
     }
-    let mut instructions = states.capture_system_prompt().await?;
-    let mut messages = states.read_conversation_state().await?.assemble_messages();
-    let mut configuration = states
-        .get_config(ConfigKey::Context)
-        .await?
-        .into_context()?;
-    let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
-    let mut context = ContextSnapshot::estimate(estimate, &configuration);
-    if context.requires_compaction(
-        &state.last_request_statistic,
-        &configuration.model.canonical_model,
-    ) {
-        let compacted = compact_context(
-            states,
-            state,
+
+    /// Runs one active turn using settings and tools captured at each step.
+    /// Activates the published turn returned by `open_turn` before reading agent state.
+    pub async fn run_turn(
+        states: &mut dyn States,
+        skill_provider: &dyn SkillProvider,
+        tools: &dyn Tools,
+        provider: &dyn Provider,
+        publisher: &dyn EventPublisher,
+        turn: &OpenedTurn<'_>,
+        cancellation: CancellationToken<'_>,
+    ) -> Result<Outcome, Error> {
+        turn.hooks
+            .activate_conversation_turn(turn.start_event_id())
+            .await?;
+        let mut state = states.get_agent_state().await?;
+        let services = TurnServices {
+            skills: skill_provider,
             provider,
-            definitions,
-            crate::CompactionRequest::default(),
-            cancellation,
-        )
-        .await?;
-        instructions = compacted.instructions;
-        messages = states.read_conversation_state().await?.assemble_messages();
-        configuration = states
+            publisher,
+        };
+        let result = execute_turn(states, tools, &services, turn, cancellation, &mut state).await;
+        states.set_agent_state(state).await?;
+        result
+    }
+
+    /// Records an interrupted assistant turn through the same generic conversation operation.
+    pub async fn interrupt_turn(
+        states: &mut dyn States,
+        start_event_id: &str,
+    ) -> Result<Option<String>, Error> {
+        let content =
+            rendering::render_template(states, ConfigKey::InterruptedTemplate, &[]).await?;
+        let usage = states.read_usage_totals().await?;
+        let receipt = states
+            .add_conversation_messages(ConversationAddition {
+                messages: vec![Message::text(Role::Assistant, &content)],
+                persistence: ConversationPersistence::CloseTurn {
+                    start_event_id: start_event_id.to_owned(),
+                    finish_reason: FinishReason::Interrupted,
+                    usage,
+                },
+            })
+            .await?;
+        Ok(receipt.inserted.then_some(content))
+    }
+
+    /// Records a phase prompt only when it flips the agent state's final-phase marker:
+    /// the final-provider-request prompt is recorded once, and the tool-availability
+    /// restore is recorded only while the marker stands. A repeat records nothing.
+    pub async fn add_phase_prompt(
+        states: &mut dyn States,
+        state: &mut AgentState,
+        content: &str,
+        final_phase: bool,
+    ) -> Result<(), Error> {
+        if state.final_phase == final_phase {
+            return Ok(());
+        }
+        let (kind, notice) = if final_phase {
+            (
+                "final_provider_request_prompt",
+                "Final provider request prompt injected",
+            )
+        } else {
+            (
+                "tool_availability_restored_prompt",
+                "Tool availability restored prompt injected",
+            )
+        };
+        states
+            .add_conversation_messages(ConversationAddition {
+                messages: vec![Message::text(Role::System, content)],
+                persistence: ConversationPersistence::Append {
+                    origin: ConversationOrigin::System,
+                    event: ConversationEvent::Notice {
+                        kind: kind.into(),
+                        notice: notice.into(),
+                    },
+                },
+            })
+            .await?;
+        state.final_phase = final_phase;
+        Ok(())
+    }
+
+    pub async fn prepare_context_epoch(
+        states: &mut dyn States,
+        state: &mut AgentState,
+        provider: &dyn Provider,
+        definitions: &[ToolDefinition],
+        cancellation: CancellationToken<'_>,
+    ) -> Result<String, Error> {
+        if cancellation.is_cancelled() {
+            return Err(Error::cancelled());
+        }
+        let mut instructions = states.capture_system_prompt().await?;
+        let mut messages = states.read_conversation_state().await?.assemble_messages();
+        let mut configuration = states
             .get_config(ConfigKey::Context)
             .await?
             .into_context()?;
         let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
-        context = ContextSnapshot::estimate(estimate, &configuration);
-        context.ensure_input_fits()?;
+        let mut context = ContextSnapshot::estimate(estimate, &configuration);
+        if context.requires_compaction(
+            &state.last_request_statistic,
+            &configuration.model.canonical_model,
+        ) {
+            let compacted = compact_context(
+                states,
+                state,
+                provider,
+                definitions,
+                crate::CompactionRequest::default(),
+                cancellation,
+            )
+            .await?;
+            instructions = compacted.instructions;
+            messages = states.read_conversation_state().await?.assemble_messages();
+            configuration = states
+                .get_config(ConfigKey::Context)
+                .await?
+                .into_context()?;
+            let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
+            context = ContextSnapshot::estimate(estimate, &configuration);
+            context.ensure_input_fits()?;
+        }
+        Ok(instructions)
     }
-    Ok(instructions)
 }

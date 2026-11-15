@@ -37,8 +37,14 @@ pub(crate) async fn prepare_request(
     options: &TurnOptions,
     cancellation: CancellationToken<'_>,
 ) -> Result<PreparedRequest, Error> {
-    let instructions =
-        crate::prepare_context_epoch(states, state, provider, definitions, cancellation).await?;
+    let instructions = crate::TurnEngine::prepare_context_epoch(
+        states,
+        state,
+        provider,
+        definitions,
+        cancellation,
+    )
+    .await?;
     let messages = states.read_conversation_state().await?.assemble_messages();
     let configuration = states
         .get_config(ConfigKey::Context)
