@@ -60,15 +60,14 @@ fn registry_defaults_flags_case_sensitivity_and_ordinal_order_are_effective_conf
         let mode = registry.resolve(id).unwrap();
         assert_eq!(mode.configuration(), &profiles[id]);
     }
-    for (id, read_only, maximum) in [
-        ("coordinator", false, 1024),
-        (BUILD, false, 1024),
-        (PLAN, true, 1024),
-        ("query", true, 8),
+    for (id, read_only) in [
+        ("coordinator", false),
+        (BUILD, false),
+        (PLAN, true),
+        ("query", true),
     ] {
         let selected = registry.resolve(id).unwrap();
         assert_eq!(selected.configuration().read_only, read_only);
-        assert_eq!(selected.configuration().max_turns, maximum);
     }
     let mut config = profiles[PLAN].clone();
     config.is_user_selectable = true;

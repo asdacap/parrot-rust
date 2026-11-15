@@ -25,25 +25,21 @@ fn read(root: &Node) -> Result<RuntimeSettings, parrot_foundation::config::Confi
 }
 
 #[test]
-fn shipped_global_defaults_and_explicit_overrides_serialize_independently() {
+fn recursion_limit_defaults_and_explicit_overrides_serialize() {
     let mut root = root();
     let loaded = read(&root).unwrap();
     assert_eq!(loaded.agent_limits, AgentLimitsConfig::default());
-    assert!(loaded.agent_limits.disable_max_turns);
     assert!(loaded.agent_limits.disable_recursion_limit);
-    for (turns, recursion) in [(false, true), (true, false), (false, false)] {
-        root.set("disable_max_turns", Node::scalar(turns.to_string()));
+    for recursion in [true, false] {
         root.set(
             "disable_recursion_limit",
             Node::scalar(recursion.to_string()),
         );
         let configured = read(&root).unwrap();
-        assert_eq!(configured.agent_limits.disable_max_turns, turns);
         assert_eq!(configured.agent_limits.disable_recursion_limit, recursion);
         assert_eq!(
             configured.snapshot()["agentLimits"],
             serde_json::json!({
-                "disableMaxTurns": turns,
                 "disableRecursionLimit": recursion,
             })
         );
@@ -65,25 +61,24 @@ fn packaged_profiles_have_latest_recursion_limits() {
 
 #[test]
 fn global_agent_limits_require_source_boolean_values() {
-    for key in ["disable_max_turns", "disable_recursion_limit"] {
-        for invalid in [
-            Node::scalar("yes"),
-            Node::scalar("True"),
-            Node::scalar("null"),
-            Node::mapping(vec![]),
-        ] {
-            let mut node = root();
-            node.set(key, invalid);
-            assert_eq!(
-                read(&node).unwrap_err().to_string(),
-                format!("{key} must be true or false")
-            );
-        }
+    let key = "disable_recursion_limit";
+    for invalid in [
+        Node::scalar("yes"),
+        Node::scalar("True"),
+        Node::scalar("null"),
+        Node::mapping(vec![]),
+    ] {
         let mut node = root();
-        node.remove(key);
+        node.set(key, invalid);
         assert_eq!(
             read(&node).unwrap_err().to_string(),
             format!("{key} must be true or false")
         );
     }
+    let mut node = root();
+    node.remove(key);
+    assert_eq!(
+        read(&node).unwrap_err().to_string(),
+        format!("{key} must be true or false")
+    );
 }

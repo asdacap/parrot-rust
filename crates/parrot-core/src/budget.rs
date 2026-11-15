@@ -14,13 +14,11 @@ impl AgentState {
         self.settlement_extensions = 0;
     }
 
-    pub fn admit(&mut self, maximum: i32, disable_max_turns: bool) -> Option<TurnFlags> {
-        if !disable_max_turns
-            && self.provider_requests >= maximum.wrapping_add(self.settlement_extensions)
-        {
+    pub fn admit(&mut self, maximum: i32) -> Option<TurnFlags> {
+        if self.provider_requests >= maximum.wrapping_add(self.settlement_extensions) {
             return None;
         }
-        let final_phase = !disable_max_turns && self.provider_requests.wrapping_add(1) >= maximum;
+        let final_phase = self.provider_requests.wrapping_add(1) >= maximum;
         Some(TurnFlags { final_phase })
     }
 

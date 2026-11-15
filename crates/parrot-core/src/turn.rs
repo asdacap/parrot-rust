@@ -175,7 +175,7 @@ async fn execute_turn<M: ToolResultMetadata>(
                     .await?;
             }
         }
-        let Some(flags) = state.admit(options.maximum_requests, options.disable_max_turns) else {
+        let Some(flags) = state.admit(options.maximum_requests) else {
             return exhaust_budget(states).await;
         };
         let definitions = if flags.final_phase {

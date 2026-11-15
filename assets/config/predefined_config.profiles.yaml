@@ -11,7 +11,7 @@ profiles:
   general:
     prompt: '@builtin:profile-prompts/general.md'
     usage: Select for general-purpose assistance, handling tasks directly and delegating when useful.
-    max_turns: 1024
+    max_turns: 1000000
     recursion_limit: 5
     read_only: false
     is_user_selectable: true
@@ -19,7 +19,7 @@ profiles:
   coordinator:
     prompt: '@builtin:profile-prompts/coordinator.md'
     usage: Select for communicating with the user while delegating the requested work to subagents and AgentTasks.
-    max_turns: 1024
+    max_turns: 1000000
     recursion_limit: 5
     read_only: false
     is_user_selectable: true
@@ -27,7 +27,7 @@ profiles:
   build:
     prompt: '@builtin:profile-prompts/build.md'
     usage: Select for implementing and verifying requested changes.
-    max_turns: 1024
+    max_turns: 1000000
     recursion_limit: 5
     read_only: false
     is_user_selectable: true
@@ -35,7 +35,7 @@ profiles:
   plan:
     prompt: '@builtin:profile-prompts/plan.md'
     usage: Select for read-only investigation and writing a plan.
-    max_turns: 1024
+    max_turns: 1000000
     recursion_limit: 5
     read_only: true
     is_user_selectable: true
@@ -43,7 +43,7 @@ profiles:
   query:
     prompt: '@builtin:profile-prompts/query.md'
     usage: Select for read-only questions about the project.
-    max_turns: 8
+    max_turns: 1000000
     recursion_limit: 3
     read_only: true
     is_user_selectable: true
@@ -51,7 +51,7 @@ profiles:
   explorer:
     usage: Delegate focused read-only codebase investigation and evidence gathering.
     prompt: '@builtin:profile-prompts/explorer.md'
-    max_turns: 32
+    max_turns: 1000000
     recursion_limit: 4
     read_only: true
     is_user_selectable: false
@@ -59,7 +59,7 @@ profiles:
   review:
     usage: Delegate defect-first read-only review of a requested change.
     prompt: '@builtin:profile-prompts/review.md'
-    max_turns: 32
+    max_turns: 1000000
     recursion_limit: 5
     read_only: true
     is_user_selectable: false
@@ -67,7 +67,7 @@ profiles:
   worker:
     usage: Delegate independently scoped implementation or production work.
     prompt: '@builtin:profile-prompts/worker.md'
-    max_turns: 128
+    max_turns: 1000000
     recursion_limit: 6
     read_only: false
     is_user_selectable: false
@@ -84,7 +84,7 @@ profiles:
       - ask
       - reply
       - wait
-    max_turns: 256
+    max_turns: 1000000
     recursion_limit: 1
     read_only: true
     is_user_selectable: false

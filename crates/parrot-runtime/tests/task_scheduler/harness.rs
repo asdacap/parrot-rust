@@ -56,7 +56,6 @@ impl Harness {
         let registry = AgentRegistry::new(RegistryConfig {
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
-                ..Default::default()
             },
             profiles: Arc::new(Profiles),
             factory: factory.clone(),

@@ -351,10 +351,7 @@ impl ScopeFactory<Security> for Factory {
                     templates.clone(),
                     broker.clone(),
                 ),
-                agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
-                    disable_max_turns: false,
-                    ..Default::default()
-                },
+                agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig::default(),
                 identity: prepared.identity.session.clone(),
                 history: prepared.history.clone(),
                 broker: broker.clone(),
@@ -447,7 +444,6 @@ impl Default for Harness {
         let registry = AgentRegistry::new(RegistryConfig {
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
-                ..Default::default()
             },
             profiles: Arc::new(Profiles),
             factory: factory.clone(),

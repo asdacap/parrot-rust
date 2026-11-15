@@ -53,8 +53,6 @@ pub struct TurnOptions {
     pub reasoning: Option<Reasoning>,
     pub provider_preferences: String,
     pub include_router_metadata: bool,
-    /// Turns off the provider-request limit entirely.
-    pub disable_max_turns: bool,
 }
 /// Consolidates the agent-local state that survives across turns and restarts.
 /// Core owns every field: it reads the state at turn start and saves it after the
