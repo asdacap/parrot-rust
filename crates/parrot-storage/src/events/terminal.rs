@@ -32,23 +32,17 @@ pub fn close_turn_if_open(
             "terminal proposal must be TurnEnded for the closing agent".into(),
         ));
     }
-    let start: Option<(i64, Vec<u8>)> = tx
+    let start_sequence: Option<i64> = tx
         .query_row(
-            "SELECT sequence, payload FROM event
+            "SELECT sequence FROM event
              WHERE agent_session = ?1 AND kind = 'turn_started'
              ORDER BY sequence DESC LIMIT 1",
             [agent_session_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .optional()?;
-    let (start_sequence, start_bytes) =
-        start.ok_or_else(|| EventError::Invalid("no open turn for the agent".into()))?;
-    let started = Event::parse_from_bytes(&start_bytes)?;
-    if started.agent_session_id != agent_session_id {
-        return Err(EventError::Invalid(
-            "turn start does not name the agent".into(),
-        ));
-    }
+    let start_sequence =
+        start_sequence.ok_or_else(|| EventError::Invalid("no open turn for the agent".into()))?;
     let terminal: Option<(i64, Vec<u8>)> = tx
         .query_row(
             "SELECT sequence, payload FROM event
