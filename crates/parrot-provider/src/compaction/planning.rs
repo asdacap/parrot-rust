@@ -118,7 +118,6 @@ impl CompactionPlan {
                 .iter()
                 .map(|group| CompactionGroup {
                     messages: group.messages.clone(),
-                    is_complete: group.is_complete,
                 })
                 .collect(),
             keep_group_from: keep,

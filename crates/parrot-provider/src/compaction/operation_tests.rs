@@ -28,6 +28,123 @@ fn history(effects: &mut Effects) {
 }
 
 #[tokio::test]
+async fn oversized_tool_input_fits_real_estimates_without_corrupting_metadata() {
+    for oversized_arguments in [false, true] {
+        let script = Script::summaries([SummaryResponse::Summary("replacement".into())]);
+        let selected = script.selection();
+        let sessions = ProviderSessions::new();
+        let mut effects = Effects::default();
+        history(&mut effects);
+        let raw = &mut effects.capture.conversation;
+        raw.history[0].message.role = parrot_core::Role::Assistant;
+        let arguments = if oversized_arguments {
+            format!(r#"{{"value":"{}"}}"#, "irreducible metadata ".repeat(5000))
+        } else {
+            " { \"value\" : 1.00 } ".into()
+        };
+        raw.history[0]
+            .message
+            .tool_calls
+            .push(parrot_core::ToolCall {
+                id: "original-call".into(),
+                name: "read".into(),
+                arguments_json: arguments.clone(),
+            });
+        raw.history[1].message.role = parrot_core::Role::Tool;
+        raw.history[1].message.tool_call_id = "original-call".into();
+        raw.history[1].message.contents = vec![parrot_core::Content::Text(
+            "evidence from the original tool output ".repeat(1000),
+        )];
+        raw.history[1].tool_owner_sequence = Some(1);
+        raw.messages = raw
+            .history
+            .iter()
+            .map(|item| item.message.clone())
+            .collect();
+        let original = raw.clone();
+        let result = compactor(80)
+            .compact(
+                &selected,
+                CompactionRequest::default(),
+                &sessions,
+                &mut effects,
+                &NeverCancelled,
+            )
+            .await;
+        assert_eq!(effects.capture.conversation, original);
+        let requests = script.requests.lock().unwrap().clone();
+        if oversized_arguments {
+            assert_eq!(
+                result,
+                Err(parrot_core::CompactionFailure::GroupExceedsBudget.into())
+            );
+            assert!(requests.is_empty());
+            assert!(effects.committed.is_none());
+        } else {
+            assert!(result.unwrap().is_some());
+            assert_eq!(requests.len(), 1);
+            let request = &requests[0];
+            assert_eq!(request.messages[0].tool_calls[0].arguments_json, arguments);
+            assert_eq!(request.messages[0].tool_calls[0].id, "original-call");
+            assert_eq!(request.messages[1].tool_call_id, "original-call");
+            let parrot_core::Content::Text(text) = &request.messages[1].contents[0] else {
+                panic!("expected truncated tool output")
+            };
+            assert!(text.ends_with("[...]"));
+            assert!(
+                estimate_input_tokens(
+                    &selected.canonical_model,
+                    &request.instructions,
+                    &request.tools,
+                    &request.messages,
+                )
+                .unwrap()
+                    <= 80
+            );
+            assert!(effects.reset);
+        }
+        sessions.close().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn generic_compaction_rejects_an_opaque_only_prior_replacement_without_losing_it() {
+    let script = Arc::new(Script::default());
+    let selected = script.selection();
+    let sessions = ProviderSessions::new();
+    let mut effects = Effects::default();
+    history(&mut effects);
+    effects.capture.conversation.summary = Some(parrot_core::ConversationSummary {
+        message: parrot_core::Message {
+            provider_id: "native".into(),
+            provider_content: "opaque continuation".into(),
+            ..Default::default()
+        },
+        watermark: 0,
+    });
+    let original = effects.capture.clone();
+    let error = compactor(1000)
+        .compact(
+            &selected,
+            CompactionRequest::default(),
+            &sessions,
+            &mut effects,
+            &NeverCancelled,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, parrot_core::ErrorCode::InvalidOperation);
+    assert_eq!(effects.capture, original);
+    assert!(effects.committed.is_none());
+    assert!(script.requests.lock().unwrap().is_empty());
+    assert_eq!(
+        *effects.events.lock().unwrap(),
+        ["started", "capture", "failed"]
+    );
+    sessions.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn operation_publishes_private_progress_and_returns_only_after_commit() {
     let script = Script::summaries([SummaryResponse::Summary("replacement".into())]);
     let selected = script.selection();

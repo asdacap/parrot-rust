@@ -32,7 +32,7 @@ pub(super) fn message(text: &str) -> Message {
 }
 
 pub(super) fn templates() -> Arc<PromptTemplateCatalog> {
-    let yaml = "prompt_templates:\n  compaction.summary-instructions:\n    template: 'instructions'\n  compaction.summary-prefix:\n    template: 'prefix:'\n  compaction.oversized-tool-group-notice:\n    template: '{path}'\n";
+    let yaml = "prompt_templates:\n  compaction.summary-instructions:\n    template: 'instructions'\n  compaction.summary-prefix:\n    template: 'prefix:'\n  compaction.oversized-tool-group-notice:\n    template: '{path}'\n  compaction.truncated-group-notice:\n    template: '[...]'\n    allowed_arguments: []\n    required_arguments: []\n";
     let environment = [
         ("HOME", "/mnt/workspace/tmp/compaction/home"),
         ("XDG_CONFIG_HOME", "/mnt/workspace/tmp/compaction/config"),
@@ -237,7 +237,6 @@ pub(super) struct Effects {
     pub capture: ContextCapture,
     pub events: Mutex<Vec<String>>,
     pub progress: Mutex<Vec<CompactionProgress>>,
-    pub scratch_writes: Mutex<Vec<Vec<u8>>>,
     pub contexts: Mutex<Vec<ContextSnapshot>>,
     pub committed: Option<ReplacementCommit>,
     pub reset: bool,
@@ -255,7 +254,6 @@ impl Default for Effects {
             },
             events: Mutex::default(),
             progress: Mutex::default(),
-            scratch_writes: Mutex::default(),
             contexts: Mutex::default(),
             committed: None,
             reset: false,
@@ -312,19 +310,6 @@ impl CompactionEffects for Effects {
                 },
             );
             Ok(offering)
-        })
-    }
-    fn write_scratch<'a>(
-        &'a self,
-        contents: &'a [u8],
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<String, Error>> {
-        Box::pin(async move {
-            self.scratch_writes.lock().unwrap().push(contents.to_vec());
-            if self.failure == Some("scratch") {
-                return Err(failure("scratch"));
-            }
-            Ok("blob".into())
         })
     }
     fn commit_replacement<'a>(

@@ -15,7 +15,6 @@ fn plan(groups: &[&str]) -> CompactionPlan {
             .iter()
             .map(|text| CompactionGroup {
                 messages: vec![message(text)],
-                is_complete: true,
             })
             .collect(),
         keep_group_from: groups.len() - 1,
@@ -91,7 +90,6 @@ fn no_plan_invokes_neither_provider_nor_progress() {
     let provider = Arc::new(Script::default());
     assert_eq!(run(None, &mut effects, &provider), Ok(None));
     assert!(effects.progress.lock().unwrap().is_empty());
-    assert!(effects.scratch_writes.lock().unwrap().is_empty());
     assert!(provider.requests.lock().unwrap().is_empty());
 }
 
@@ -202,81 +200,128 @@ fn empty_summary_fallback_halves_odd_atomic_groups_and_carries_each_actual_summa
 }
 
 #[test]
-fn initial_spills_commit_in_source_order_before_a_later_ineligible_group_fails() {
+fn oversized_user_text_is_truncated_to_the_actual_budget_without_a_file() {
+    let original = "界🦜".repeat(500);
+    let mut plan = plan(&[&original, "tail"]);
+    plan.input_budget = 48;
+    let effects = Effects::default();
+    let provider = Script::summaries([SummaryResponse::Summary("done".into())]);
+    let estimates = Estimates {
+        input_overhead: 7,
+        ..Default::default()
+    };
+    run_with(
+        Some(plan.clone()),
+        &effects,
+        &provider,
+        &estimates,
+        &NeverCancelled,
+    )
+    .unwrap()
+    .unwrap();
+    let requests = provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    let Content::Text(clipped) = &requests[0].messages[0].contents[0] else {
+        panic!("expected retained text prefix")
+    };
+    assert!(clipped.ends_with("[...]"));
+    assert!(original.starts_with(clipped.strip_suffix("[...]").unwrap()));
+    assert!(clipped.len() < original.len());
+    assert!(
+        parrot_core::Provider::estimate_input_tokens(&estimates, "", &[], &requests[0].messages,)
+            .unwrap()
+            <= plan.input_budget
+    );
+    assert_eq!(
+        plan.groups[0].messages[0].contents,
+        [Content::Text(original)]
+    );
+}
+
+#[test]
+fn oversized_tool_and_user_groups_are_truncated_without_changing_source_history() {
     let mut plan = plan(&[
-        "too large first tool group",
-        "too large plain user group",
+        &"tool-output".repeat(100),
+        &"user-input".repeat(100),
         "tail",
     ]);
-    plan.input_budget = 12 + 5;
+    plan.input_budget = 40;
     plan.groups[0].messages[0].role = Role::Assistant;
     plan.groups[0].messages[0].tool_calls.push(ToolCall {
         id: "call".into(),
         name: "tool".into(),
-        arguments_json: "{}".into(),
+        arguments_json: " { \"x\" : 1.00 } ".into(),
     });
-
+    let original = plan.clone();
     let mut effects = Effects::default();
-    let provider = Arc::new(Script::default());
+    let provider = Script::summaries([
+        SummaryResponse::Summary("first".into()),
+        SummaryResponse::Summary("done".into()),
+    ]);
+    run(Some(plan.clone()), &mut effects, &provider)
+        .unwrap()
+        .unwrap();
+    let requests = provider.requests.lock().unwrap();
+    assert!(!requests.is_empty());
     assert_eq!(
-        run(Some(plan), &mut effects, &provider),
-        Err(CompactionFailure::GroupExceedsBudget.into())
+        requests[0].messages[0].tool_calls,
+        original.groups[0].messages[0].tool_calls
     );
-    let writes = effects.scratch_writes.lock().unwrap();
-    assert_eq!(writes.len(), 1);
-    let artifact: serde_json::Value = serde_json::from_slice(&writes[0]).unwrap();
-    assert_eq!(
-        artifact,
-        serde_json::json!({ "messages": [{
-            "role": "Assistant",
-            "contents": [{ "kind": "Text", "text": "too large first tool group", "path": "", "media_type": "" }],
-            "tool_calls": [{ "id": "call", "name": "tool", "arguments_json": "{}" }],
-            "tool_call_id": ""
-        }] })
+    assert_eq!(requests[0].messages[0].role, Role::Assistant);
+    assert!(
+        requests
+            .iter()
+            .flat_map(texts)
+            .any(|text| text.ends_with("[...]"))
     );
-    assert!(provider.requests.lock().unwrap().is_empty());
+    assert_eq!(plan, original);
+    assert!(requests.iter().all(|request| {
+        texts(request)
+            .iter()
+            .map(|text| text.len() as i64)
+            .sum::<i64>()
+            <= 40
+    }));
 }
 
 #[test]
-fn a_previous_summary_can_force_one_late_spill_of_the_original_atomic_group() {
+fn a_previous_summary_forces_late_truncation_of_the_atomic_group() {
     let mut plan = plan(&["first-14-bytes!", "other-14-bytes!", "tail"]);
-    plan.input_budget = 12 + 25;
+    plan.input_budget = 37;
     plan.groups[1].messages[0].role = Role::Assistant;
     plan.groups[1].messages[0].tool_calls.push(ToolCall {
         id: "call".into(),
         name: "tool".into(),
         arguments_json: " { \"x\" : 1.00 } ".into(),
     });
-
+    let calls = plan.groups[1].messages[0].tool_calls.clone();
     let mut effects = Effects::default();
     let provider = Script::summaries([
         SummaryResponse::Summary("123456789012".into()),
         SummaryResponse::Summary("done".into()),
     ]);
     run(Some(plan), &mut effects, &provider).unwrap().unwrap();
-    let writes = effects.scratch_writes.lock().unwrap();
-    assert_eq!(writes.len(), 1);
-    let artifact: serde_json::Value = serde_json::from_slice(&writes[0]).unwrap();
-    assert_eq!(
-        artifact,
-        serde_json::json!({ "messages": [{
-            "role": "Assistant",
-            "contents": [{ "kind": "Text", "text": "other-14-bytes!", "path": "", "media_type": "" }],
-            "tool_calls": [{ "id": "call", "name": "tool", "arguments_json": " { \"x\" : 1.00 } " }],
-            "tool_call_id": ""
-        }] })
-    );
     let requests = provider.requests.lock().unwrap();
-    assert_eq!(
-        texts(&requests[1]),
-        ["prefix:123456789012", "blob", "instructions"]
+    assert_eq!(requests.len(), 2);
+    assert_eq!(texts(&requests[1])[0], "prefix:123456789012");
+    let clipped = texts(&requests[1])[1];
+    assert!(clipped.ends_with("[...]"));
+    assert!("other-14-bytes!".starts_with(clipped.strip_suffix("[...]").unwrap()));
+    assert!(
+        texts(&requests[1])
+            .iter()
+            .map(|text| text.len())
+            .sum::<usize>()
+            <= 37
     );
+    assert_eq!(texts(&requests[1])[2], "instructions");
+    assert_eq!(requests[1].messages[1].tool_calls, calls);
 }
 
 #[test]
-fn oversized_groups_write_json_with_image_path_before_rendering_the_notice() {
-    let mut plan = plan(&["oversized tool call", "tail"]);
-    plan.input_budget = 12 + 5;
+fn truncation_omits_images_but_keeps_atomic_tool_calls_and_result_identities() {
+    let mut plan = plan(&[&"oversized tool call".repeat(20), "tail"]);
+    plan.input_budget = 30;
     plan.groups[0].messages[0].role = Role::Assistant;
     plan.groups[0].messages[0].tool_calls.push(ToolCall {
         id: "call".into(),
@@ -296,26 +341,44 @@ fn oversized_groups_write_json_with_image_path_before_rendering_the_notice() {
         }],
         ..parrot_core::Message::default()
     });
+    let source = plan.groups[0].messages.clone();
     let mut effects = Effects::default();
     let provider = Script::summaries([SummaryResponse::Summary("done".into())]);
-    run(Some(plan), &mut effects, &provider).unwrap().unwrap();
-    let writes = effects.scratch_writes.lock().unwrap();
-    assert_eq!(writes.len(), 1);
-    let artifact: serde_json::Value = serde_json::from_slice(&writes[0]).unwrap();
-    assert_eq!(
-        artifact["messages"][0]["tool_calls"][0]["arguments_json"],
-        " { \"x\" : 1.00 } "
-    );
-    assert_eq!(artifact["messages"][1]["role"], "Tool");
-    assert_eq!(artifact["messages"][1]["tool_call_id"], "call");
-    assert_eq!(artifact["messages"][1]["contents"][0]["path"], "image.bin");
-    assert_eq!(
-        artifact["messages"][1]["contents"][0]["media_type"],
-        "image/test"
-    );
+    run(Some(plan.clone()), &mut effects, &provider)
+        .unwrap()
+        .unwrap();
     let requests = provider.requests.lock().unwrap();
-    assert_eq!(texts(&requests[0]), ["blob", "instructions"]);
-    assert_eq!(requests[0].messages[0].role, Role::System);
+    let messages = &requests[0].messages;
+    assert_eq!(messages[0].role, Role::Assistant);
+    assert_eq!(messages[0].tool_calls, source[0].tool_calls);
+    assert_eq!(messages[1].role, Role::Tool);
+    assert_eq!(messages[1].tool_call_id, "call");
+    assert_eq!(messages[1].contents, [Content::Text("[...]".into())]);
+    assert!(
+        texts(&requests[0])
+            .iter()
+            .map(|text| text.len() as i64)
+            .sum::<i64>()
+            <= 30
+    );
+    assert_eq!(plan.groups[0].messages, source);
+}
+
+#[test]
+fn irreducible_request_overhead_returns_an_error_without_a_summary_request() {
+    let mut plan = plan(&["too large", "tail"]);
+    plan.input_budget = 10;
+    let script = Arc::new(Script::default());
+    let effects = Effects::default();
+    let estimates = Estimates {
+        input_overhead: 20,
+        ..Default::default()
+    };
+    assert_eq!(
+        run_with(Some(plan), &effects, &script, &estimates, &NeverCancelled),
+        Err(CompactionFailure::GroupExceedsBudget.into())
+    );
+    assert!(script.requests.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -370,7 +433,7 @@ fn complete_summary_requests_include_estimator_overhead() {
 }
 
 #[test]
-fn cancelled_serialization_neither_writes_scratch_nor_invokes_provider() {
+fn cancelled_truncation_does_not_invoke_provider() {
     let mut plan = plan(&["oversized tool group", "tail"]);
     plan.input_budget = 17;
     plan.groups[0].messages[0].role = Role::Assistant;
@@ -392,6 +455,5 @@ fn cancelled_serialization_neither_writes_scratch_nor_invokes_provider() {
         ),
         Err(Error::cancelled())
     );
-    assert!(effects.scratch_writes.lock().unwrap().is_empty());
     assert!(script.requests.lock().unwrap().is_empty());
 }

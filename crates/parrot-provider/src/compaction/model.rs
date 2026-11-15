@@ -18,7 +18,6 @@ pub(super) struct CompactionConfiguration {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct CompactionGroup {
     pub messages: Vec<Message>,
-    pub is_complete: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

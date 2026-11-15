@@ -1,5 +1,5 @@
 use super::{
-    model::{CompactionConfiguration, CompactionGroup, CompactionInput, CompactionPlan},
+    model::{CompactionConfiguration, CompactionInput, CompactionPlan},
     planning::{CompactionPolicy, group_messages, is_complete},
 };
 use parrot_core::{
@@ -280,11 +280,5 @@ fn grouping_preserves_contiguous_tool_results_and_exact_call_identity() {
     );
     assert!(is_complete(&groups[0].messages));
     assert!(!is_complete(&messages[..2]));
-    assert!(
-        CompactionGroup {
-            messages: groups[0].messages.clone(),
-            is_complete: groups[0].is_complete
-        }
-        .can_spill()
-    );
+    assert!(groups[0].is_complete);
 }

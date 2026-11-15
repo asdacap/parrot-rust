@@ -5,7 +5,6 @@ mod fitting;
 mod model;
 mod planning;
 mod preparation;
-mod scratch;
 mod service;
 use execution::Execution;
 pub use service::{Compactor, estimate_input_tokens};
@@ -77,13 +76,6 @@ pub trait CompactionEffects: Send + Sync {
         context: ContextSnapshot,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<StatusOffering, Error>>;
-
-    /// Saves supplied bytes to authorized agent-local scratch and returns the persisted path.
-    fn write_scratch<'a>(
-        &'a self,
-        contents: &'a [u8],
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<String, Error>>;
 
     /// Persists the supplied replacement and associated status, then refreshes live history.
     /// Completes committed-status publication and reduction bookkeeping before returning.

@@ -162,6 +162,18 @@ async fn prepare_input(
     execution: &Execution<'_>,
 ) -> Result<CompactionInput, Error> {
     let raw = capture.conversation;
+    if raw.summary.as_ref().is_some_and(|summary| {
+        !summary.message.provider_content.is_empty()
+            && !summary
+                .message
+                .contents
+                .iter()
+                .any(|content| matches!(content, Content::Text(text) if !text.is_empty()))
+    }) {
+        return Err(Error::unsupported(
+            "Generic compaction of a provider-native continuation",
+        ));
+    }
     let base_watermark = raw.summary.as_ref().map_or(0, |summary| summary.watermark);
     let groups = preparation::assemble_groups(&raw);
     let estimate = execution.estimates.estimate_input_tokens(

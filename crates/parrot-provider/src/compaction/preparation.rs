@@ -1,7 +1,6 @@
 use super::model::CompactionHistoryGroup;
 use parrot_core::{
-    Content, ConversationHistoryItem, ConversationState, HistoryGroupMember, Message, Role,
-    assemble_history_groups,
+    ConversationHistoryItem, ConversationState, HistoryGroupMember, Role, assemble_history_groups,
 };
 use std::collections::BTreeMap;
 
@@ -15,11 +14,7 @@ pub(crate) fn assemble_groups(raw: &ConversationState) -> Vec<CompactionHistoryG
     let mut groups = Vec::new();
     if let Some(summary) = &raw.summary {
         groups.push(CompactionHistoryGroup {
-            messages: vec![Message {
-                role: Role::System,
-                contents: vec![Content::Text(summary.content.clone())],
-                ..Message::default()
-            }],
+            messages: vec![summary.message.clone()],
             end_watermark: summary.watermark,
             is_complete: true,
         });
