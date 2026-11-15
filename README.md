@@ -26,6 +26,45 @@ cross-version locking or simultaneous same-workspace safety guarantee**.
 - [Design philosophy](docs/design-philosophy.md)
 - [Domain glossary](GLOSSARY.md)
 
+## Benchmark results
+
+| Full 113-task run | Reasoning effort | Passed | Unsuccessful | Pass rate | Run cost |
+|---|---|---:|---:|---:|---:|
+| GLM-5.3-Flash through OpenCode Go | High | 65 | 48 | 57.5% | $49.78 client estimate |
+| DeepSeek V4.1 Flash 1017 through DeepInfra FP8 | High | 69 | 44 | 61.1% | $9.77 captured provider charges |
+
+The original GLM run's 48 unsuccessful tasks include two startup errors.
+Its recorded client cost estimate was **$49.78**, including $45.64 for input
+and $4.14 for output. This uses the original pricing, not DeepInfra's rates.
+See the [original usage and cost audit](/mnt/workspace/parrot-benchmark-reports/first-run-input-charge-attribution/README.md).
+These runs used different client revisions and prompts, so the comparison
+does not isolate model performance.
+
+### DeepSeek through DeepInfra FP8
+
+The November 15, 2026 DeepSWE run used DeepSeek V4.1 Flash 1017 through
+OpenRouter's DeepInfra FP8 endpoint. Reasoning effort was `high`, concurrency
+was 16, and benchmark retries were disabled.
+
+| Outcome | Tasks |
+|---|---:|
+| Passed | 69 |
+| Failed tests | 41 |
+| Execution errors | 3 |
+| Total | 113 |
+
+The full-suite pass rate was **61.1%**. Two execution errors occurred during
+startup attachment parsing. The third was a verifier timeout.
+
+Captured provider-reported charges totaled **$9.77**, approximately **$0.086 per
+scheduled task**. This is not a reconciled invoice. Repricing the client usage
+ledger at endpoint rates gives $8.25. The provider capture contains more
+generations than the client ledger, so these totals are not interchangeable.
+
+See the [full run report](/mnt/workspace/parrot-benchmark-reports/deepswe-deepinfra-deepseek-full-2026-11-15/README.md)
+for task results, usage reconciliation, immutable client provenance, and
+verification commands.
+
 ## Design philosophy
 
 See [Design philosophy](docs/design-philosophy.md) for the original principles
