@@ -1218,7 +1218,6 @@ impl States for MemoryState {
             Ok(parrot_core::ConversationState {
                 summary: None,
                 history,
-                messages: self.request().messages.clone(),
             })
         })
     }
@@ -1236,6 +1235,8 @@ impl States for MemoryState {
             );
             if let Some(fitted) = result? {
                 self.fitted_statuses.push(fitted.status);
+                self.request().messages = fitted.result.history;
+                self.compaction_plan = None;
             }
             if let Some(compacted) = self.compactions.pop_front() {
                 self.request().messages = compacted.messages;

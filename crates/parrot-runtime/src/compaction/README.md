@@ -54,12 +54,11 @@ a plausible replacement.
 
 Automatic, oversized-request, standalone, and inline compaction use the same
 selection, summary, and fitting behavior. Prompt inputs are refreshed before
-rendering the new epoch. The previous summary, its post-watermark durable tail,
-and current messages are read separately during a serialized epoch. Core uses the
-summary watermark to bound the tail and assembles these values without a combined
-atomic snapshot or cached capture. Native tail reads
-retain tool ownership and status classification and materialize historical image
-artifacts. Current transient messages remain separate.
+rendering the new epoch. The previous summary and its post-watermark durable tail
+are read during a serialized epoch. Core assembles provider-visible messages from
+the summary, its associated status row, and the tail without older compaction
+statuses. Native tail reads retain tool ownership and status classification and
+materialize historical image artifacts.
 
 Compaction awaits summary requests and admitted cleanup. Cancellation reaches
 summaries and other compaction effects. Started, finished, and failed notices

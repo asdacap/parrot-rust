@@ -116,6 +116,12 @@ async fn compaction_is_conversation_owned_without_a_separate_history_table() {
     assert_eq!(tables.len(), 5);
     let state = conversation_state(&repo, "agent").await.unwrap();
     assert_eq!(state.snapshot, Some(snapshot("summary", covered)));
+    assert_eq!(
+        repo.read_compaction_status_sequence("agent".into(), covered)
+            .await
+            .unwrap(),
+        None
+    );
     assert_eq!(state.items.len(), 1);
     assert_eq!(
         parrot_storage::events::types::content(&state.items[0].item.message.parts),
@@ -258,6 +264,12 @@ async fn compaction_status_is_atomic_and_canonical_history_excludes_associated_s
         .unwrap()
         .unwrap();
     assert_eq!(context.snapshot.summary, "second summary");
+    assert_eq!(
+        repo.read_compaction_status_sequence("agent".into(), covered)
+            .await
+            .unwrap(),
+        Some(context.status.as_ref().unwrap().sequence)
+    );
     assert_eq!(
         context.status.as_ref().unwrap().message.parts,
         vec![parrot_storage::events::ConversationPart::text(

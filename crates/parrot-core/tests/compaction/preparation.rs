@@ -231,13 +231,26 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
         }],
         ..message("tool result")
     };
-    let current = vec![message("current transient notice")];
+    let current = vec![
+        Message {
+            role: Role::System,
+            ..message("previous summary")
+        },
+        message("current status"),
+        assistant.clone(),
+        message("intervening user"),
+        result.clone(),
+        message("tail"),
+    ];
     let mut status_item = item(12, message("excluded old status"), None);
     status_item.is_compaction_status = true;
+    let mut current_status = item(16, message("current status"), None);
+    current_status.is_compaction_status = true;
     let raw = ConversationState {
         summary: Some(ConversationSummary {
             content: "previous summary".into(),
             watermark: 10,
+            status_sequence: Some(16),
         }),
         history: vec![
             item(9, message("already summarized"), None),
@@ -246,8 +259,8 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
             item(13, message("intervening user"), None),
             item(14, result.clone(), Some(11)),
             item(15, message("tail"), None),
+            current_status,
         ],
-        messages: current.clone(),
     };
     let definitions = vec![parrot_core::ToolDefinition {
         name: "advertised".into(),
@@ -303,6 +316,59 @@ fn preparation_groups_noncontiguous_owned_results_and_estimates_the_current_view
         [ContextSnapshot::estimate(37, &configuration().context)]
     );
     assert_eq!(*publisher.events.lock().unwrap(), ["started"]);
+}
+
+#[test]
+fn preparation_assembles_history_without_inheriting_an_older_status() {
+    for summary in [
+        None,
+        Some(ConversationSummary {
+            content: "summary without status".into(),
+            watermark: 1,
+            status_sequence: None,
+        }),
+    ] {
+        let mut old_status = item(3, message("old status"), None);
+        old_status.is_compaction_status = true;
+        let expected = if summary.is_some() {
+            vec![
+                Message {
+                    role: Role::System,
+                    ..message("summary without status")
+                },
+                message("user input"),
+                message("retry feedback"),
+            ]
+        } else {
+            vec![
+                message("user input"),
+                message("old status"),
+                message("retry feedback"),
+            ]
+        };
+        let mut preparation = Preparation {
+            raw: ConversationState {
+                summary,
+                history: vec![
+                    item(2, message("user input"), None),
+                    old_status,
+                    item(4, message("retry feedback"), None),
+                ],
+            },
+            ..Default::default()
+        };
+        let provider = Estimates::new(37);
+        let input = finish(prepare_compaction(
+            &mut preparation,
+            &provider,
+            &PreparationEventPublisher::default(),
+            &[],
+            &configuration(),
+        ))
+        .unwrap();
+        assert_eq!(input.messages, expected);
+        assert_eq!(provider.requests.lock().unwrap()[0].messages, expected);
+    }
 }
 
 #[test]

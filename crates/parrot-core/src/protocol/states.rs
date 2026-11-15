@@ -82,8 +82,8 @@ pub trait States: Send + Sync {
     fn read_usage_totals(&self) -> BoxFuture<'_, Result<crate::UsageTotals, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_usage_totals")) })
     }
-    /// Captures durable summary and history facts together with the current live messages.
-    /// Live messages retain uncommitted completion candidates and retry feedback absent from durable history.
+    /// Captures the persisted summary and its chronological history tail.
+    /// Core assembles provider-visible messages from these facts.
     fn read_conversation_state(&self) -> BoxFuture<'_, Result<ConversationState, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_conversation_state")) })
     }

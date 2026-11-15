@@ -345,17 +345,7 @@ impl ContextController {
         let summary = self.read_conversation_summary().await?;
         let watermark = summary.as_ref().map_or(0, |summary| summary.watermark);
         let history = self.read_conversation_tail(conversation, watermark).await?;
-        let messages = conversation
-            .messages()
-            .iter()
-            .map(provider_message)
-            .map(Into::into)
-            .collect();
-        Ok(parrot_core::ConversationState {
-            summary,
-            history,
-            messages,
-        })
+        Ok(parrot_core::ConversationState { summary, history })
     }
 
     async fn read_conversation_summary(
@@ -366,9 +356,21 @@ impl ContextController {
             .repository()
             .compaction(self.history.agent_session_id().into())
             .await?;
-        Ok(snapshot.map(|snapshot| parrot_core::ConversationSummary {
+        let Some(snapshot) = snapshot else {
+            return Ok(None);
+        };
+        let status_sequence = self
+            .history
+            .repository()
+            .read_compaction_status_sequence(
+                self.history.agent_session_id().into(),
+                snapshot.watermark,
+            )
+            .await?;
+        Ok(Some(parrot_core::ConversationSummary {
             content: snapshot.summary,
             watermark: snapshot.watermark,
+            status_sequence,
         }))
     }
 

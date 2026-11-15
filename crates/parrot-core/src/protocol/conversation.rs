@@ -1,18 +1,46 @@
-use super::{CompletionBlockerFeedback, FinishReason, Message};
+use super::{CompletionBlockerFeedback, Content, FinishReason, Message, Role};
 
-/// Captures durable history facts and the independent current provider-visible view.
+/// Captures the persisted summary and history used to assemble provider messages.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ConversationState {
     pub summary: Option<ConversationSummary>,
-    /// Contains the chronological durable tail after the captured summary watermark.
+    /// Persisted messages after the summary watermark, in chronological order.
+    /// Includes sequence and tool ownership metadata for compaction grouping.
     pub history: Vec<ConversationHistoryItem>,
-    pub messages: Vec<Message>,
+}
+
+impl ConversationState {
+    /// Assembles the summary, its associated status, and retained provider messages.
+    pub fn assemble_messages(&self) -> Vec<Message> {
+        let mut messages = Vec::new();
+        if let Some(summary) = &self.summary {
+            messages.push(Message {
+                role: Role::System,
+                contents: vec![Content::Text(summary.content.clone())],
+                ..Message::default()
+            });
+            if let Some(sequence) = summary.status_sequence
+                && let Some(status) = self.history.iter().find(|item| item.sequence == sequence)
+            {
+                messages.push(status.message.clone());
+            }
+        }
+        messages.extend(
+            self.history
+                .iter()
+                .filter(|item| self.summary.is_none() || !item.is_compaction_status)
+                .map(|item| item.message.clone()),
+        );
+        messages
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConversationSummary {
     pub content: String,
     pub watermark: i64,
+    /// Identifies this summary's status message in the history tail, if present.
+    pub status_sequence: Option<i64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

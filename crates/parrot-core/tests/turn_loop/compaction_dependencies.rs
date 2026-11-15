@@ -14,10 +14,13 @@ fn compaction_reads_return_owned_conversation_data_without_invoking_a_summary() 
     drop(state);
 
     assert_eq!(
-        input.messages,
+        input.assemble_messages(),
         [compaction_support::message("saved conversation")]
     );
-    assert_eq!(input.history[0].message, input.messages[0]);
+    assert_eq!(
+        input.history[0].message,
+        compaction_support::message("saved conversation")
+    );
     assert_eq!(input.history[0].sequence, 1);
     assert_eq!(input.history[0].tool_owner_sequence, None);
     assert_eq!(input.summary, None);

@@ -21,14 +21,15 @@ pub async fn prepare_compaction(
         let raw = states.read_conversation_state().await?;
         let base_watermark = raw.summary.as_ref().map_or(0, |summary| summary.watermark);
         let groups = assemble_groups(&raw);
-        let estimate = provider.estimate_input_tokens(&instructions, definitions, &raw.messages)?;
+        let messages = raw.assemble_messages();
+        let estimate = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
         let context = ContextSnapshot::estimate(estimate, &configuration.context);
         let offering = states.read_status_offering(context).await?;
         Ok(CompactionInput {
             groups,
             base_watermark,
             instructions,
-            messages: raw.messages,
+            messages,
             fixed_message: Message {
                 role: Role::System,
                 contents: vec![Content::Text(join_status_offering(&offering))],

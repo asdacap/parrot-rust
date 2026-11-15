@@ -96,6 +96,22 @@ impl ConversationRepository {
             .transaction(move |tx| read_snapshot(tx, &agent))
             .await
     }
+    pub async fn read_compaction_status_sequence(
+        &self,
+        agent: String,
+        watermark: i64,
+    ) -> Result<Option<i64>, EventError> {
+        self.events
+            .transaction(move |tx| {
+                tx.query_row(
+                    "SELECT compaction_status_sequence FROM conversation_item WHERE agent_session = ?1 AND kind = 'compaction' AND compaction_watermark = ?2;",
+                    params![agent, watermark],
+                    |row| row.get(0),
+                )
+                .map_err(Into::into)
+            })
+            .await
+    }
     pub async fn compaction_history(
         &self,
         agent: String,
