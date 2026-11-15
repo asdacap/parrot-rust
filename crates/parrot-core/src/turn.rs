@@ -1,12 +1,12 @@
 //! Turn engine: drains ready turns and drives one turn from input to settlement.
 
 use crate::{
-    AgentState, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConversationAddition,
-    ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationTurn, Error,
-    ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome, PromotedInput,
-    Provider, Role, SkillProvider, States, ToolCallReceipt, ToolDefinition, Tools, TurnEngine,
-    TurnHooks, TurnLifecycle, TurnOptions, TurnServices, context, rendering, skills,
-    status::steer_status, tool_settlement::execute_tools,
+    AgentState, CancellationToken, CompletionBlockerFeedback, ConfigKey, ContextSnapshot,
+    ConversationAddition, ConversationEvent, ConversationOrigin, ConversationPersistence,
+    ConversationTurn, Error, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message,
+    Outcome, PromotedInput, Provider, ProviderRequest, Role, SkillProvider, States,
+    ToolCallReceipt, ToolDefinition, Tools, TurnEngine, TurnHooks, TurnLifecycle, TurnOptions,
+    TurnServices, context, rendering, skills, status::steer_status, tool_settlement::execute_tools,
 };
 
 /// Drives one opened turn with its runtime services, per-turn budget state and
@@ -20,6 +20,13 @@ struct AgentTurn<'a> {
     publisher: &'a dyn EventPublisher,
     agent_state: AgentState,
     skill_preparation: skills::SkillPreparation,
+}
+
+/// The provider request assembled for one step, with its estimate facts.
+struct PreparedRequest {
+    request: ProviderRequest,
+    estimated_input_tokens: i64,
+    model_selector: String,
 }
 
 impl AgentTurn<'_> {
@@ -348,22 +355,115 @@ impl AgentTurn<'_> {
         Ok(())
     }
 
-    /// Prepares the next provider request against the current conversation state.
+    /// Prepares the next provider request against the current conversation state,
+    /// compacting first when the estimated input exceeds its trigger.
     async fn prepare_request(
         &mut self,
         definitions: &[ToolDefinition],
         options: &TurnOptions,
         cancellation: CancellationToken<'_>,
-    ) -> Result<context::PreparedRequest, Error> {
-        context::prepare_request(
-            self.states,
-            &mut self.agent_state,
-            self.provider,
-            definitions,
-            options,
-            cancellation,
-        )
-        .await
+    ) -> Result<PreparedRequest, Error> {
+        let instructions = self
+            .prepare_context_epoch(definitions, cancellation)
+            .await?;
+
+        let messages = self
+            .states
+            .read_conversation_state()
+            .await?
+            .assemble_messages();
+        let configuration = self
+            .states
+            .get_config(ConfigKey::Context)
+            .await?
+            .into_context()?;
+        let estimate =
+            self.provider
+                .estimate_input_tokens(&instructions, definitions, &messages)?;
+        let max_output_tokens = self
+            .agent_state
+            .last_request_statistic
+            .calculate_maximum_output_tokens(&configuration, estimate)?;
+
+        Ok(PreparedRequest {
+            estimated_input_tokens: estimate,
+            model_selector: configuration.canonical_model,
+            request: ProviderRequest {
+                model: options.model.clone(),
+                instructions,
+                messages,
+                tools: definitions.to_vec(),
+                max_output_tokens,
+                reasoning: options.reasoning.clone(),
+                provider_preferences: options.provider_preferences.clone(),
+                include_router_metadata: options.include_router_metadata,
+            },
+        })
+    }
+
+    /// Estimates the current context, compacts once when it exceeds its trigger,
+    /// and returns the instructions the request must use.
+    async fn prepare_context_epoch(
+        &mut self,
+        definitions: &[ToolDefinition],
+        cancellation: CancellationToken<'_>,
+    ) -> Result<String, Error> {
+        if cancellation.is_cancelled() {
+            return Err(Error::cancelled());
+        }
+
+        let mut instructions = self.states.capture_system_prompt().await?;
+        let mut messages = self
+            .states
+            .read_conversation_state()
+            .await?
+            .assemble_messages();
+        let mut configuration = self
+            .states
+            .get_config(ConfigKey::Context)
+            .await?
+            .into_context()?;
+        let estimate =
+            self.provider
+                .estimate_input_tokens(&instructions, definitions, &messages)?;
+        let mut context = ContextSnapshot::estimate(estimate, &configuration);
+
+        if context.requires_compaction(
+            &self.agent_state.last_request_statistic,
+            &configuration.canonical_model,
+        ) {
+            let compacted = context::compact_context(
+                self.states,
+                &mut self.agent_state,
+                self.provider,
+                definitions,
+                crate::CompactionRequest {
+                    trigger: crate::CompactionTrigger::Automatic,
+                    ..Default::default()
+                },
+                cancellation,
+            )
+            .await?;
+
+            instructions = compacted.instructions;
+            messages = self
+                .states
+                .read_conversation_state()
+                .await?
+                .assemble_messages();
+            configuration = self
+                .states
+                .get_config(ConfigKey::Context)
+                .await?
+                .into_context()?;
+            let estimate =
+                self.provider
+                    .estimate_input_tokens(&instructions, definitions, &messages)?;
+            context = ContextSnapshot::estimate(estimate, &configuration);
+            context.ensure_input_fits()?;
+        }
+
+        Ok(instructions)
     }
 
     /// Renders the terminal notice core records when the invocation budget runs out.
