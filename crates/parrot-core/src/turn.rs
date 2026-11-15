@@ -3,151 +3,141 @@
 use crate::{
     AgentState, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConversationAddition,
     ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationTurn, Error,
-    ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome, Provider, Role,
-    SkillProvider, States, ToolCallReceipt, Tools, TurnEngine, TurnHooks, TurnLifecycle,
-    TurnServices, context, rendering, skills, status::steer_status, tool_settlement::execute_tools,
+    ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome, PromotedInput,
+    Provider, Role, SkillProvider, States, ToolCallReceipt, Tools, TurnEngine, TurnHooks,
+    TurnLifecycle, TurnServices, context, rendering, skills, status::steer_status,
+    tool_settlement::execute_tools,
 };
 
-struct ExecutionServices<'a> {
+/// Drives one opened turn with its runtime services, per-turn budget state and
+/// skill preparation.
+struct AgentTurn<'a> {
+    states: &'a mut dyn States,
+    tools: &'a dyn Tools,
     hooks: &'a dyn TurnHooks,
-    skills: &'a dyn SkillProvider,
+    skill_provider: &'a dyn SkillProvider,
     provider: &'a dyn Provider,
     publisher: &'a dyn EventPublisher,
+    state: AgentState,
+    compacted_oversized: bool,
+    skill_preparation: skills::SkillPreparation,
 }
 
-async fn execute_turn(
-    states: &mut dyn States,
-    tools: &dyn Tools,
-    services: &ExecutionServices<'_>,
-    cancellation: CancellationToken<'_>,
-    state: &mut AgentState,
-) -> Result<Outcome, Error> {
-    if cancellation.is_cancelled() {
-        return Err(Error::cancelled());
-    }
-    state.begin_turn();
-    if state.final_phase {
-        let restored =
-            rendering::render_template(states, ConfigKey::RestoredToolsTemplate, &[]).await?;
-        add_phase_prompt(states, state, &restored, false).await?;
-    }
-    let mut compacted_oversized = false;
-    let mut skills = skills::SkillPreparation::default();
-    loop {
+impl AgentTurn<'_> {
+    /// Drives the turn from input admission through provider requests and tool
+    /// settlement to completion, budget exhaustion or an error.
+    async fn run(&mut self, cancellation: CancellationToken<'_>) -> Result<Outcome, Error> {
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
-        services.hooks.begin_step().await?;
-        let options = states.get_config(ConfigKey::Turn).await?.into_turn()?;
-        let catalog = tools.capture_catalog().await?;
-        if cancellation.is_cancelled() {
-            return Err(Error::cancelled());
+        self.state.begin_turn();
+        if self.state.final_phase {
+            let restored =
+                rendering::render_template(self.states, ConfigKey::RestoredToolsTemplate, &[])
+                    .await?;
+            self.add_phase_prompt(&restored, false).await?;
         }
-        let turn = states.get_last_turn().await?;
-        let admission = if turn.as_ref().is_some_and(ConversationTurn::needs_response) {
-            InputAdmission::SteersOnly
-        } else {
-            InputAdmission::SteersOrNextQueued
-        };
-        let inputs = states.promote_pending_inputs(admission).await?;
-        for input in &inputs {
-            states
-                .add_conversation_messages(ConversationAddition {
-                    messages: vec![input.message.clone()],
-                    persistence: ConversationPersistence::Committed(input.publication.clone()),
-                })
-                .await?;
-        }
-        let skill_prompt = skills
-            .prepare(states, services.skills, &inputs, cancellation)
-            .await?;
-        if !skill_prompt.content.is_empty() {
-            states
-                .add_conversation_messages(ConversationAddition {
-                    messages: vec![Message::text(Role::User, skill_prompt.content)],
-                    persistence: ConversationPersistence::Append {
-                        origin: ConversationOrigin::System,
-                        event: ConversationEvent::Notice {
-                            kind: "skill_prompt".into(),
-                            notice: String::new(),
-                        },
-                    },
-                })
-                .await?;
-            for path in skill_prompt.loaded_paths {
-                services
-                    .publisher
-                    .publish(ConversationEvent::SkillLoaded { path }, cancellation)
+        loop {
+            if cancellation.is_cancelled() {
+                return Err(Error::cancelled());
+            }
+            self.hooks.begin_step().await?;
+            let options = self.states.get_config(ConfigKey::Turn).await?.into_turn()?;
+            let catalog = self.tools.capture_catalog().await?;
+            if cancellation.is_cancelled() {
+                return Err(Error::cancelled());
+            }
+            let turn = self.states.get_last_turn().await?;
+            let admission = if turn.as_ref().is_some_and(ConversationTurn::needs_response) {
+                InputAdmission::SteersOnly
+            } else {
+                InputAdmission::SteersOrNextQueued
+            };
+            let inputs = self.states.promote_pending_inputs(admission).await?;
+            for input in &inputs {
+                self.states
+                    .add_conversation_messages(ConversationAddition {
+                        messages: vec![input.message.clone()],
+                        persistence: ConversationPersistence::Committed(input.publication.clone()),
+                    })
                     .await?;
             }
-        }
-        let Some(flags) = state.admit(options.maximum_requests) else {
-            return exhaust_budget(states).await;
-        };
-        let definitions = if flags.final_phase {
-            &catalog.final_phase
-        } else {
-            &catalog.normal
-        };
-        steer_status(states, state, services.provider, definitions, cancellation).await?;
-        if flags.final_phase {
-            let content =
-                rendering::render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
-            add_phase_prompt(states, state, &content, true).await?;
-        }
-        let prepared = context::prepare_request(
-            states,
-            state,
-            services.provider,
-            definitions,
-            &options,
-            cancellation,
-        )
-        .await?;
-        let attempt = state.count_request();
-        states.set_agent_state(state.clone()).await?;
-        let invoked = services
-            .provider
-            .invoke(prepared.request, cancellation)
-            .await;
-        let input_tokens = match &invoked {
-            Ok(response) => Some(response.input_tokens),
-            Err(error) => error.input_tokens,
-        };
-        if let Some(input_tokens) = input_tokens {
-            state.last_request_statistic.observe_usage(
-                &prepared.model_selector,
-                prepared.estimated_input_tokens,
-                input_tokens,
-            );
-        }
-        let response = match invoked.map_err(|error| error.error) {
-            Ok(response) => response,
-            Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
-                compacted_oversized = true;
-                if !context::compact_context(
-                    states,
-                    state,
-                    services.provider,
-                    definitions,
-                    crate::CompactionRequest {
-                        trigger: crate::CompactionTrigger::Automatic,
-                        ..Default::default()
-                    },
-                    cancellation,
-                )
-                .await?
-                .reduced
-                {
-                    return Err(error);
-                }
-                continue;
+            self.add_skill_prompt(&inputs, cancellation).await?;
+            let Some(flags) = self.state.admit(options.maximum_requests) else {
+                return self.exhaust_budget().await;
+            };
+            let definitions = if flags.final_phase {
+                &catalog.final_phase
+            } else {
+                &catalog.normal
+            };
+            steer_status(
+                self.states,
+                &mut self.state,
+                self.provider,
+                definitions,
+                cancellation,
+            )
+            .await?;
+            if flags.final_phase {
+                let content =
+                    rendering::render_template(self.states, ConfigKey::FinalRequestTemplate, &[])
+                        .await?;
+                self.add_phase_prompt(&content, true).await?;
             }
-            Err(error) => return Err(error),
-        };
-        compacted_oversized = false;
-        let retry_template =
-            if response.finish_reason == FinishReason::Length && !response.tool_calls.is_empty() {
+            let prepared = context::prepare_request(
+                self.states,
+                &mut self.state,
+                self.provider,
+                definitions,
+                &options,
+                cancellation,
+            )
+            .await?;
+            let attempt = self.state.count_request();
+            self.states.set_agent_state(self.state.clone()).await?;
+            let invoked = self.provider.invoke(prepared.request, cancellation).await;
+            let input_tokens = match &invoked {
+                Ok(response) => Some(response.input_tokens),
+                Err(error) => error.input_tokens,
+            };
+            if let Some(input_tokens) = input_tokens {
+                self.state.last_request_statistic.observe_usage(
+                    &prepared.model_selector,
+                    prepared.estimated_input_tokens,
+                    input_tokens,
+                );
+            }
+            let response = match invoked.map_err(|error| error.error) {
+                Ok(response) => response,
+                Err(error)
+                    if error.kind == ErrorKind::RequestTooLarge && !self.compacted_oversized =>
+                {
+                    self.compacted_oversized = true;
+                    if !context::compact_context(
+                        self.states,
+                        &mut self.state,
+                        self.provider,
+                        definitions,
+                        crate::CompactionRequest {
+                            trigger: crate::CompactionTrigger::Automatic,
+                            ..Default::default()
+                        },
+                        cancellation,
+                    )
+                    .await?
+                    .reduced
+                    {
+                        return Err(error);
+                    }
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            self.compacted_oversized = false;
+            let retry_reason = if response.finish_reason == FinishReason::Length
+                && !response.tool_calls.is_empty()
+            {
                 Some(ConfigKey::TruncatedToolCallTemplate)
             } else if response.tool_calls.iter().any(|call| {
                 serde_json::from_str::<serde_json::Value>(&call.arguments_json).is_err()
@@ -156,75 +146,95 @@ async fn execute_turn(
             } else {
                 None
             };
-        if let Some(key) = retry_template {
-            let content = rendering::render_template(states, key, &[]).await?;
-            states
-                .add_conversation_messages(ConversationAddition {
-                    messages: vec![Message::text(Role::System, &content)],
-                    persistence: ConversationPersistence::Append {
-                        origin: ConversationOrigin::System,
-                        event: ConversationEvent::Retry {
-                            reason: content,
-                            attempt,
+            if let Some(key) = retry_reason {
+                let content = rendering::render_template(self.states, key, &[]).await?;
+                self.states
+                    .add_conversation_messages(ConversationAddition {
+                        messages: vec![Message::text(Role::System, &content)],
+                        persistence: ConversationPersistence::Append {
+                            origin: ConversationOrigin::System,
+                            event: ConversationEvent::Retry {
+                                reason: content,
+                                attempt,
+                            },
                         },
-                    },
-                })
-                .await?;
-            continue;
-        }
-        if !response.tool_calls.is_empty() {
-            let recorded = states
-                .add_conversation_messages(ConversationAddition {
-                    messages: vec![Message::from_response(&response)],
-                    persistence: ConversationPersistence::Append {
-                        origin: ConversationOrigin::Model,
-                        event: ConversationEvent::Message,
-                    },
-                })
-                .await?;
-            services
-                .publisher
-                .publish(
-                    ConversationEvent::ToolRequestReceived {
-                        count: response.tool_calls.len() as i32,
-                    },
+                    })
+                    .await?;
+                continue;
+            }
+            if !response.tool_calls.is_empty() {
+                let recorded = self
+                    .states
+                    .add_conversation_messages(ConversationAddition {
+                        messages: vec![Message::from_response(&response)],
+                        persistence: ConversationPersistence::Append {
+                            origin: ConversationOrigin::Model,
+                            event: ConversationEvent::Message,
+                        },
+                    })
+                    .await?;
+                self.publisher
+                    .publish(
+                        ConversationEvent::ToolRequestReceived {
+                            count: response.tool_calls.len() as i32,
+                        },
+                        cancellation,
+                    )
+                    .await?;
+                let receipt = ToolCallReceipt {
+                    assistant_sequence: recorded.sequence,
+                };
+                self.states.set_agent_state(self.state.clone()).await?;
+                let compaction_request = execute_tools(
+                    self.states,
+                    self.tools,
+                    response.tool_calls.clone(),
+                    receipt,
+                    flags,
                     cancellation,
                 )
                 .await?;
-            let receipt = ToolCallReceipt {
-                assistant_sequence: recorded.sequence,
-            };
-            states.set_agent_state(state.clone()).await?;
-            let executed = execute_tools(
-                states,
-                tools,
-                response.tool_calls.clone(),
-                receipt,
-                flags,
-                cancellation,
-            )
-            .await;
-            *state = states.get_agent_state().await?;
-            if let Some(request) = executed? {
-                context::compact_context(
-                    states,
-                    state,
-                    services.provider,
-                    definitions,
-                    request,
-                    cancellation,
-                )
-                .await?;
+                self.state = self.states.get_agent_state().await?;
+                if let Some(request) = compaction_request {
+                    context::compact_context(
+                        self.states,
+                        &mut self.state,
+                        self.provider,
+                        definitions,
+                        request,
+                        cancellation,
+                    )
+                    .await?;
+                }
+                if flags.final_phase && !self.state.try_extend_settlement() {
+                    return self.exhaust_budget().await;
+                }
+                continue;
             }
-            if flags.final_phase && !state.try_extend_settlement() {
-                return exhaust_budget(states).await;
+            let messages = self.states.collect_completion_blockers().await?;
+            if !messages.is_empty() {
+                let mut additions = vec![Message::from_response(&response)];
+                additions.extend(
+                    messages
+                        .iter()
+                        .map(|message| Message::text(Role::System, message)),
+                );
+                self.states
+                    .add_conversation_messages(ConversationAddition {
+                        messages: additions,
+                        persistence: ConversationPersistence::CompletionBlockerFeedback(
+                            CompletionBlockerFeedback {
+                                messages,
+                                candidate: response,
+                            },
+                        ),
+                    })
+                    .await?;
+                self.state.restart();
+                continue;
             }
-            continue;
-        }
-        let messages = states.collect_completion_blockers().await?;
-        if messages.is_empty() {
-            let usage = states.read_usage_totals().await?;
-            states
+            let usage = self.states.read_usage_totals().await?;
+            self.states
                 .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::from_response(&response)],
                     persistence: ConversationPersistence::CloseTurn {
@@ -235,31 +245,87 @@ async fn execute_turn(
                 .await?;
             return Ok(Outcome::Completed(response.assistant_text));
         }
-        let mut additions = vec![Message::from_response(&response)];
-        additions.extend(
-            messages
-                .iter()
-                .map(|message| Message::text(Role::System, message)),
-        );
-        states
+    }
+
+    /// Prepares the skill prompt for the promoted inputs and records it with its
+    /// loaded-skill events when the prompt has content.
+    async fn add_skill_prompt(
+        &mut self,
+        inputs: &[PromotedInput],
+        cancellation: CancellationToken<'_>,
+    ) -> Result<(), Error> {
+        let skill_prompt = self
+            .skill_preparation
+            .prepare(self.states, self.skill_provider, inputs, cancellation)
+            .await?;
+        if skill_prompt.content.is_empty() {
+            return Ok(());
+        }
+        self.states
             .add_conversation_messages(ConversationAddition {
-                messages: additions,
-                persistence: ConversationPersistence::CompletionBlockerFeedback(
-                    CompletionBlockerFeedback {
-                        messages,
-                        candidate: response,
+                messages: vec![Message::text(Role::User, skill_prompt.content)],
+                persistence: ConversationPersistence::Append {
+                    origin: ConversationOrigin::System,
+                    event: ConversationEvent::Notice {
+                        kind: "skill_prompt".into(),
+                        notice: String::new(),
                     },
-                ),
+                },
             })
             .await?;
-        state.restart();
+        for path in skill_prompt.loaded_paths {
+            self.publisher
+                .publish(ConversationEvent::SkillLoaded { path }, cancellation)
+                .await?;
+        }
+        Ok(())
     }
-}
 
-/// Renders the terminal notice core records when the invocation budget runs out.
-async fn exhaust_budget(states: &dyn States) -> Result<Outcome, Error> {
-    let notice = rendering::render_template(states, ConfigKey::RunawayTemplate, &[]).await?;
-    Ok(Outcome::BudgetExhausted(notice))
+    /// Records a phase prompt only when it flips the agent state's final-phase marker:
+    /// the final-provider-request prompt is recorded once, and the tool-availability
+    /// restore is recorded only while the marker stands. A repeat records nothing.
+    async fn add_phase_prompt(&mut self, content: &str, final_phase: bool) -> Result<(), Error> {
+        if self.state.final_phase == final_phase {
+            return Ok(());
+        }
+        let (kind, notice) = if final_phase {
+            (
+                "final_provider_request_prompt",
+                "Final provider request prompt injected",
+            )
+        } else {
+            (
+                "tool_availability_restored_prompt",
+                "Tool availability restored prompt injected",
+            )
+        };
+        self.states
+            .add_conversation_messages(ConversationAddition {
+                messages: vec![Message::text(Role::System, content)],
+                persistence: ConversationPersistence::Append {
+                    origin: ConversationOrigin::System,
+                    event: ConversationEvent::Notice {
+                        kind: kind.into(),
+                        notice: notice.into(),
+                    },
+                },
+            })
+            .await?;
+        self.state.final_phase = final_phase;
+        Ok(())
+    }
+
+    /// Renders the terminal notice core records when the invocation budget runs out.
+    async fn exhaust_budget(&self) -> Result<Outcome, Error> {
+        let notice =
+            rendering::render_template(self.states, ConfigKey::RunawayTemplate, &[]).await?;
+        Ok(Outcome::BudgetExhausted(notice))
+    }
+
+    /// Persists the agent state after execution, including failures.
+    async fn record_state(self) -> Result<(), Error> {
+        self.states.set_agent_state(self.state).await
+    }
 }
 
 impl TurnEngine {
@@ -296,62 +362,29 @@ async fn run_opened_turn(
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
     turn.hooks.activate_conversation_turn().await?;
-    let mut state = turn.states.get_agent_state().await?;
-    let services = ExecutionServices {
+    let state = turn.states.get_agent_state().await?;
+    let mut agent = AgentTurn {
+        states: turn.states,
+        tools: turn.tools,
         hooks: turn.hooks,
-        skills: turn.skills,
+        skill_provider: turn.skills,
         provider: turn.provider,
         publisher: turn.publisher,
+        state,
+        compacted_oversized: false,
+        skill_preparation: skills::SkillPreparation::default(),
     };
-    let result = execute_turn(turn.states, turn.tools, &services, cancellation, &mut state).await;
-    turn.states.set_agent_state(state).await?;
+    let result = agent.run(cancellation).await;
+    agent.record_state().await?;
     result
-}
-
-/// Records a phase prompt only when it flips the agent state's final-phase marker:
-/// the final-provider-request prompt is recorded once, and the tool-availability
-/// restore is recorded only while the marker stands. A repeat records nothing.
-async fn add_phase_prompt(
-    states: &mut dyn States,
-    state: &mut AgentState,
-    content: &str,
-    final_phase: bool,
-) -> Result<(), Error> {
-    if state.final_phase == final_phase {
-        return Ok(());
-    }
-    let (kind, notice) = if final_phase {
-        (
-            "final_provider_request_prompt",
-            "Final provider request prompt injected",
-        )
-    } else {
-        (
-            "tool_availability_restored_prompt",
-            "Tool availability restored prompt injected",
-        )
-    };
-    states
-        .add_conversation_messages(ConversationAddition {
-            messages: vec![Message::text(Role::System, content)],
-            persistence: ConversationPersistence::Append {
-                origin: ConversationOrigin::System,
-                event: ConversationEvent::Notice {
-                    kind: kind.into(),
-                    notice: notice.into(),
-                },
-            },
-        })
-        .await?;
-    state.final_phase = final_phase;
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        AgentState, BoxFuture, Content, ConversationAddition, ConversationPersistence,
-        ConversationReceipt, Error, States,
+        AgentState, BoxFuture, CancellationToken, Content, ConversationAddition,
+        ConversationPersistence, ConversationReceipt, Error, EventPublisher, Provider,
+        SkillProvider, States, ToolCatalog, ToolExecutionRequest, ToolResult, Tools, TurnHooks,
     };
     use std::sync::Mutex;
     use std::task::{Context, Poll, Waker};
@@ -398,40 +431,63 @@ mod tests {
     #[test]
     fn a_phase_prompt_records_only_when_it_flips_the_durable_marker() {
         let mut states = RecordingState::default();
-        let mut state = AgentState::default();
-        finish(super::add_phase_prompt(
-            &mut states,
-            &mut state,
-            "final",
-            true,
-        ))
-        .unwrap();
-        finish(super::add_phase_prompt(
-            &mut states,
-            &mut state,
-            "duplicate",
-            true,
-        ))
-        .unwrap();
-        assert!(state.final_phase);
-        finish(super::add_phase_prompt(
-            &mut states,
-            &mut state,
-            "restored",
-            false,
-        ))
-        .unwrap();
-        finish(super::add_phase_prompt(
-            &mut states,
-            &mut state,
-            "duplicate restore",
-            false,
-        ))
-        .unwrap();
-        assert!(!state.final_phase);
+        let mut agent = super::AgentTurn {
+            states: &mut states,
+            tools: &UnusedTools,
+            hooks: &UnusedHooks,
+            skill_provider: &UnusedSkills,
+            provider: &UnusedProvider,
+            publisher: &UnusedPublisher,
+            state: AgentState::default(),
+            compacted_oversized: false,
+            skill_preparation: crate::skills::SkillPreparation::default(),
+        };
+        finish(agent.add_phase_prompt("final", true)).unwrap();
+        finish(agent.add_phase_prompt("duplicate", true)).unwrap();
+        assert!(agent.state.final_phase);
+        finish(agent.add_phase_prompt("restored", false)).unwrap();
+        finish(agent.add_phase_prompt("duplicate restore", false)).unwrap();
+        assert!(!agent.state.final_phase);
+        drop(agent);
         assert_eq!(
             *states.additions.lock().unwrap(),
             ["final".to_owned(), "restored".to_owned()]
         );
     }
+
+    struct UnusedHooks;
+    impl TurnHooks for UnusedHooks {
+        fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<crate::TurnModel, Error>> {
+            Box::pin(async { Err(Error::unsupported("hooks")) })
+        }
+        fn activate_conversation_turn(&self) -> BoxFuture<'_, Result<(), Error>> {
+            Box::pin(async { Err(Error::unsupported("hooks")) })
+        }
+        fn begin_step(&self) -> BoxFuture<'_, Result<(), Error>> {
+            Box::pin(async { Err(Error::unsupported("hooks")) })
+        }
+    }
+
+    struct UnusedTools;
+    impl Tools for UnusedTools {
+        fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
+            Box::pin(async { Err(Error::unsupported("tools")) })
+        }
+        fn execute<'a>(
+            &'a self,
+            _: ToolExecutionRequest,
+            _: CancellationToken<'a>,
+        ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
+            Box::pin(async { Err(Error::unsupported("tools")) })
+        }
+    }
+
+    struct UnusedProvider;
+    impl Provider for UnusedProvider {}
+
+    struct UnusedSkills;
+    impl SkillProvider for UnusedSkills {}
+
+    struct UnusedPublisher;
+    impl EventPublisher for UnusedPublisher {}
 }
