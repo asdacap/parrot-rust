@@ -68,7 +68,6 @@ impl Harness {
             )),
             parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
-                ..Default::default()
             },
         )
     }
@@ -142,7 +141,6 @@ impl Harness {
             states,
             parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
-                ..Default::default()
             },
         )
     }

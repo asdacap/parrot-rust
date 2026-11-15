@@ -11,24 +11,26 @@ mod usage;
 use parrot_core::AgentState;
 
 #[test]
-fn disabled_max_turns_preserves_normal_phase_settlement_cap_and_restart_policy() {
+fn million_request_budget_preserves_final_phase_settlement_cap_and_restart_policy() {
     let mut agent_state = AgentState::default();
-    for _ in 0..12 {
-        let flags = agent_state.admit(2, true).unwrap();
-        assert!(!flags.final_phase);
+    let maximum = 1_000_000;
+    for _ in 0..maximum - 1 {
+        assert!(!agent_state.admit(maximum).unwrap().final_phase);
         agent_state.count_request();
     }
+    assert!(agent_state.admit(maximum).unwrap().final_phase);
+    agent_state.count_request();
+    assert!(agent_state.admit(maximum).is_none());
     for _ in 0..4 {
         assert!(agent_state.try_extend_settlement());
-        let flags = agent_state.admit(2, true).unwrap();
-        assert!(!flags.final_phase);
+        assert!(agent_state.admit(maximum).unwrap().final_phase);
         agent_state.count_request();
+        assert!(agent_state.admit(maximum).is_none());
     }
     assert!(!agent_state.try_extend_settlement());
     agent_state.restart();
+    assert!(!agent_state.admit(maximum).unwrap().final_phase);
     for _ in 0..4 {
-        assert!(!agent_state.admit(1, true).unwrap().final_phase);
-        agent_state.count_request();
         assert!(agent_state.try_extend_settlement());
     }
     assert!(!agent_state.try_extend_settlement());
@@ -38,16 +40,16 @@ fn disabled_max_turns_preserves_normal_phase_settlement_cap_and_restart_policy()
 fn final_phase_and_settlement_extensions_follow_original_request_budget() {
     let mut agent_state = AgentState::default();
     agent_state.begin_turn();
-    let first = agent_state.admit(2, false).unwrap();
+    let first = agent_state.admit(2).unwrap();
     assert!(!first.final_phase);
     assert_eq!(agent_state.count_request(), 1);
-    let last = agent_state.admit(2, false).unwrap();
+    let last = agent_state.admit(2).unwrap();
     assert!(last.final_phase);
     assert_eq!(agent_state.count_request(), 2);
-    assert!(agent_state.admit(2, false).is_none());
+    assert!(agent_state.admit(2).is_none());
     for _ in 0..4 {
         assert!(agent_state.try_extend_settlement());
-        let flags = agent_state.admit(2, false).unwrap();
+        let flags = agent_state.admit(2).unwrap();
         assert!(flags.final_phase);
         agent_state.count_request();
     }
@@ -57,27 +59,27 @@ fn final_phase_and_settlement_extensions_follow_original_request_budget() {
 #[test]
 fn begin_turn_only_resets_requests_but_completion_retry_restart_resets_everything() {
     let mut agent_state = AgentState::default();
-    assert!(!agent_state.admit(2, false).unwrap().final_phase);
+    assert!(!agent_state.admit(2).unwrap().final_phase);
     assert_eq!(agent_state.count_request(), 1);
-    assert!(agent_state.admit(2, false).unwrap().final_phase);
+    assert!(agent_state.admit(2).unwrap().final_phase);
     assert_eq!(agent_state.count_request(), 2);
     assert!(agent_state.try_extend_settlement());
     agent_state.begin_turn();
-    let continuing = agent_state.admit(2, false).unwrap();
+    let continuing = agent_state.admit(2).unwrap();
     assert!(!continuing.final_phase);
     assert_eq!(agent_state.count_request(), 1);
-    let last = agent_state.admit(2, false).unwrap();
+    let last = agent_state.admit(2).unwrap();
     assert!(last.final_phase);
     assert_eq!(agent_state.count_request(), 2);
-    assert!(agent_state.admit(2, false).is_some());
+    assert!(agent_state.admit(2).is_some());
     agent_state.restart();
-    let restarted = agent_state.admit(2, false).unwrap();
+    let restarted = agent_state.admit(2).unwrap();
     assert!(!restarted.final_phase);
     assert_eq!(agent_state.count_request(), 1);
-    let final_request = agent_state.admit(2, false).unwrap();
+    let final_request = agent_state.admit(2).unwrap();
     assert!(final_request.final_phase);
     assert_eq!(agent_state.count_request(), 2);
-    assert!(agent_state.admit(2, false).is_none());
+    assert!(agent_state.admit(2).is_none());
     for _ in 0..4 {
         assert!(agent_state.try_extend_settlement());
     }

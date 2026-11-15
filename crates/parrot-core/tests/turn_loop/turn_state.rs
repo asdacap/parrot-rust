@@ -542,7 +542,7 @@ fn provider_errors_write_the_consumed_request_budget_back_to_states() {
         Err(Error::failed("provider failure"))
     );
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
-    assert!(state.budget.admit(1, false).is_none());
+    assert!(state.budget.admit(1).is_none());
     assert!(state.recorded_tools.is_empty());
     assert!(state.last_turn.as_ref().unwrap().needs_response());
 }

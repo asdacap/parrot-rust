@@ -557,10 +557,7 @@ impl Factory {
         let runtime_config = RuntimeConfig {
             agent_state: prepared.agent_state.clone(),
             tool_execution: tool_execution_config(&history, templates.clone(), publisher.clone()),
-            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
-                disable_max_turns: false,
-                ..Default::default()
-            },
+            agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig::default(),
             identity: prepared.identity.session.clone(),
             history: history.clone(),
             broker,

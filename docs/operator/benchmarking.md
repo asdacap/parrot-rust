@@ -208,10 +208,11 @@ allowlist is inert. The tasks' `no-network` declarations are verifier-side
 only. Parrot never runs there. Expect heavy resource requirements per task
 (up to 16 CPUs, 131 GB RAM, 512 GB storage, and GPUs on some tasks), and a
 72000-second agent timeout from each `task.toml`. Parrot's per-turn provider
-request cap comes from the selected profile's `max_turns` (1024 for the main
-profiles in `predefined_config.profiles.yaml`). Running the benchmark's
-intended harness, `px-eval`, would need the wrapper repackaged as a Harbor
-agent directory instead of a Pier import path.
+request cap comes from the selected profile's `max_turns`. All bundled
+profiles default to 1000000 requests. Explicit user-configured profile limits
+override that default. Running the benchmark's intended harness, `px-eval`,
+would need the wrapper repackaged as a Harbor agent directory instead of a
+Pier import path.
 
 The benchmark maintainers handle leaderboard submissions. Contact them through
 the DeepSWE run page for details.

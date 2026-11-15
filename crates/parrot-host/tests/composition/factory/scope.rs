@@ -889,7 +889,6 @@ impl Fixture {
             fast_mode: false,
             agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                 disable_recursion_limit: false,
-                ..Default::default()
             },
             router: router.clone(),
             modes,

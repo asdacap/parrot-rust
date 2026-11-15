@@ -6,7 +6,6 @@ use parrot_domain::values::agent_state::AgentStateUpdate;
 pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) history: &'a AgentHistoryView,
     pub(super) agent_state: &'a dyn AgentStateStore,
-    pub(super) disable_max_turns: bool,
     pub(super) activity: &'a dyn SessionActivity,
     pub(super) state: &'a Mutex<State>,
     pub(super) prompt: &'a SessionPrompt,
@@ -33,7 +32,6 @@ impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
         Self {
             history: &backend.history,
             agent_state: backend.agent_state.as_ref(),
-            disable_max_turns: backend.disable_max_turns,
             activity: backend.activity.as_ref(),
             state: &backend.state,
             prompt: &backend.prompt,
@@ -277,7 +275,6 @@ where
                         reasoning: selection.model.canonical_model.reasoning(),
                         provider_preferences: String::new(),
                         include_router_metadata: false,
-                        disable_max_turns: self.disable_max_turns,
                     }))
                 }
                 ConfigKey::Context => {

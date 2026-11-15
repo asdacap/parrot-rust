@@ -185,7 +185,7 @@ profiles:
   agent-task-payload:
     usage: Execute an AgentTask payload and verify its observable result.
     prompt: '@builtin:profile-prompts/agent-task-payload.md'
-    max_turns: 128
+    max_turns: 1000000
     recursion_limit: 6
     read_only: false
     is_user_selectable: false

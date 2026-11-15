@@ -588,7 +588,6 @@ struct MemoryState {
     turn_reads: AtomicUsize,
     admissions: Vec<InputAdmission>,
     cancellation: Arc<CancellationSource>,
-    unlimited: bool,
     maximum: i32,
     compaction_plan: Option<parrot_core::CompactionPlan>,
     summary_provider: compaction_support::Provider,
@@ -720,7 +719,6 @@ impl MemoryState {
             turn_reads: AtomicUsize::new(0),
             admissions: Vec::new(),
             cancellation,
-            unlimited: false,
             maximum: 10,
             compaction_plan: None,
             summary_provider: compaction_support::Provider::new([]),
@@ -800,7 +798,6 @@ impl MemoryState {
             reasoning: self.reasoning.clone(),
             provider_preferences: self.provider_preferences.clone(),
             include_router_metadata: self.include_router_metadata,
-            disable_max_turns: self.unlimited,
         }
     }
     fn prime_context(&mut self, estimate: i64) {
@@ -850,7 +847,6 @@ impl MemoryState {
         self.reasoning = options.reasoning.clone();
         self.provider_preferences = options.provider_preferences.clone();
         self.include_router_metadata = options.include_router_metadata;
-        self.unlimited = options.disable_max_turns;
     }
     fn run_with(&mut self, tools: &dyn Tools, provider: &dyn Provider) -> Result<Outcome, Error> {
         *self.compaction.lock().unwrap() =
@@ -1385,13 +1381,11 @@ fn malformed_final_response_exhausts_the_request_limit_without_a_settlement_exte
 
 #[test]
 fn caller_budget_configuration_controls_request_limits_and_final_phase() {
-    for disable_limits in [false, true] {
+    for maximum in [1, 1_000_000] {
         let mut state = MemoryState::new([Reply::invalid("bad"), Reply::final_response("answer")]);
-        state.maximum = 1;
+        state.maximum = maximum;
         let tools = state.tools.clone();
         let provider = state.provider.clone();
-
-        state.unlimited = disable_limits;
 
         assert_eq!(
             finish(run(
@@ -1400,7 +1394,7 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
                 &provider,
                 CancellationToken::new(provider.cancellation.as_ref())
             )),
-            if disable_limits {
+            if maximum == 1_000_000 {
                 Ok(Outcome::Completed("answer".into()))
             } else {
                 Ok(Outcome::BudgetExhausted(RUNAWAY_NOTICE.into()))
@@ -1409,10 +1403,10 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
         assert_eq!(state.retries, [("invalid tool calls".into(), 1)]);
         assert_eq!(
             state.request().rendered_instructions.len(),
-            if disable_limits { 2 } else { 1 }
+            if maximum == 1_000_000 { 2 } else { 1 }
         );
         assert!(state.capture_catalogs().iter().all(|tools| {
-            if disable_limits {
+            if maximum == 1_000_000 {
                 tools == &["read", "write"]
             } else {
                 tools == &["read"]
@@ -1420,13 +1414,17 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
         }));
         assert_eq!(
             state.final_requests,
-            if disable_limits { vec![] } else { vec![1] }
+            if maximum == 1_000_000 {
+                vec![]
+            } else {
+                vec![1]
+            }
         );
         assert!(state.recorded_tools.is_empty());
         assert!(state.tools.requests.lock().unwrap().is_empty());
         assert_eq!(
             state.trace.values().last().unwrap(),
-            if disable_limits {
+            if maximum == 1_000_000 {
                 "complete"
             } else {
                 "render_template"
@@ -1467,14 +1465,13 @@ fn exhausted_budget_returns_without_provider_or_terminal_state_effects() {
 }
 
 #[test]
-fn disabled_request_limits_keep_every_request_in_normal_phase() {
+fn large_request_budget_keeps_early_requests_in_normal_phase() {
     let mut state = MemoryState::new([
         Reply::tools("call1"),
         Reply::tools("call2"),
         Reply::final_response("answer"),
     ]);
-    state.unlimited = true;
-    state.maximum = 1;
+    state.maximum = 1_000_000;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(state.request().rendered_instructions.len(), 3);
     assert!(
@@ -1630,7 +1627,6 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
         }),
         provider_preferences: " { \"raw\" : [1.2300] } ".into(),
         include_router_metadata: true,
-        disable_max_turns: false,
     };
     state.budget = AgentState::default();
 
@@ -1668,7 +1664,6 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
         reasoning: None,
         provider_preferences: "second preferences".into(),
         include_router_metadata: false,
-        disable_max_turns: false,
     };
     state.enqueue_message(Delivery::Queue, "second question");
 

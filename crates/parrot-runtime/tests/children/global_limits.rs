@@ -73,7 +73,6 @@ async fn recursion_switch_controls_both_fresh_profile_admission_and_retained_res
                 8,
                 AgentLimitsConfig {
                     disable_recursion_limit: disabled,
-                    ..Default::default()
                 },
             );
             let root = h.root("root").await;
@@ -128,7 +127,6 @@ async fn explicit_false_restores_depth_four_and_latest_query_profile_count_three
             16,
             AgentLimitsConfig {
                 disable_recursion_limit: false,
-                ..Default::default()
             },
         );
         let root = h.root("root").await;

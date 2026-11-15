@@ -53,10 +53,7 @@ async fn root_runtime(
     let runtime_config = RuntimeConfig {
         agent_state: store.clone(),
         tool_execution: tool_execution_config(&fixture.history, templates.clone(), erased.clone()),
-        agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
-            disable_max_turns: false,
-            ..Default::default()
-        },
+        agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig::default(),
         // The pinned DrainTests fixture uses AgentIdentity.Main, not a child
         // whose initial status is intentionally another durable system message.
         identity: SessionIdentity {

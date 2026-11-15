@@ -152,14 +152,12 @@ pub use parrot_domain::values::tools::ConfiguredToolDefinition;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AgentLimitsConfig {
-    pub disable_max_turns: bool,
     pub disable_recursion_limit: bool,
 }
 
 impl Default for AgentLimitsConfig {
     fn default() -> Self {
         Self {
-            disable_max_turns: true,
             disable_recursion_limit: true,
         }
     }
@@ -241,7 +239,6 @@ impl RuntimeSettings {
         let agent_send_to_parent =
             boolean(root.get("agent_send_to_parent"), "agent_send_to_parent")?;
         let agent_limits = AgentLimitsConfig {
-            disable_max_turns: boolean(root.get("disable_max_turns"), "disable_max_turns")?,
             disable_recursion_limit: boolean(
                 root.get("disable_recursion_limit"),
                 "disable_recursion_limit",
@@ -310,7 +307,7 @@ impl RuntimeSettings {
             "inlineDiff":self.inline_diff,"compaction":{"triggerPercent":self.compaction.trigger_percent,"targetPercent":self.compaction.target_percent,"maximumInputTokens":self.compaction.maximum_input_tokens,"summaryOutputTokens":self.compaction.summary_output_tokens},
             "agentTasks":{"maximumAttempts":self.agent_tasks.maximum_attempts,"maximumResponseRepairs":self.agent_tasks.maximum_response_repairs,"forkHistoryMode":format!("{:?}",self.agent_tasks.fork_history_mode)},
             "agentSend":{"toParent":self.agent_send_to_parent},"toolDefinitions":tools,
-            "agentLimits":{"disableMaxTurns":self.agent_limits.disable_max_turns,"disableRecursionLimit":self.agent_limits.disable_recursion_limit},
+            "agentLimits":{"disableRecursionLimit":self.agent_limits.disable_recursion_limit},
             "liveBufferRows":self.live_buffer_rows,"userInputTimeoutMs":self.user_input_timeout_ms,
             "execCommandYieldAfterMs":self.exec_command_yield_after_ms,
             "requestLimits":{"imageBytesPerToolCycle":self.request_limits.image_bytes_per_tool_cycle,"imageBytesPerRead":self.request_limits.image_bytes_per_read,"providerRequestBytes":self.request_limits.provider_request_bytes},
