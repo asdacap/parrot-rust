@@ -2,6 +2,8 @@
 
 use std::{io, sync::Arc};
 
+use parrot_domain::protocol::messages::parrot as wire;
+
 use crate::{
     terminal_frames::{
         ItemIdentity, LiveBufferItem, LiveBufferRender, LiveBufferRenderContext,
@@ -211,6 +213,29 @@ impl ToolDisplayText {
 }
 fn count_lines(value: &str) -> usize {
     value.bytes().filter(|&c| c == b'\n').count() + 1
+}
+
+/// The words naming a recorded compaction origin, or nothing when it was not recorded.
+pub(crate) fn compaction_trigger_phrase(trigger: wire::CompactionTrigger) -> Option<&'static str> {
+    match trigger {
+        wire::CompactionTrigger::COMPACTION_TRIGGER_AUTOMATIC => Some("automatic"),
+        wire::CompactionTrigger::COMPACTION_TRIGGER_MODEL_REQUESTED => Some("model requested"),
+        wire::CompactionTrigger::COMPACTION_TRIGGER_USER_REQUESTED => Some("user requested"),
+        _ => None,
+    }
+}
+
+/// The parenthesized origin label appended to compaction text, empty when unrecorded.
+pub(crate) fn compaction_trigger_suffix(trigger: Option<wire::CompactionTrigger>) -> String {
+    trigger
+        .and_then(compaction_trigger_phrase)
+        .map(|phrase| format!(" ({phrase})"))
+        .unwrap_or_default()
+}
+
+/// The log name of a recorded compaction origin, or nothing when it was not recorded.
+pub(crate) fn compaction_trigger_name(trigger: wire::CompactionTrigger) -> Option<String> {
+    compaction_trigger_phrase(trigger).map(|phrase| phrase.replace(' ', "_"))
 }
 
 pub(crate) fn display_label(value: &str) -> String {

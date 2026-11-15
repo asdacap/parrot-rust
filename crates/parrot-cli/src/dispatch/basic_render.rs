@@ -7,6 +7,7 @@ use parrot_domain::protocol::messages::parrot as wire;
 
 use super::hierarchy::AgentSessionHierarchy;
 use super::task_format::{AgentTaskDeclarationFormatter, DurationFormatter, ProgressFormatter};
+use crate::presenters::rendering::compaction_trigger_suffix;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RenderOutcome {
@@ -24,6 +25,7 @@ pub struct BasicRenderer {
     hierarchy: AgentSessionHierarchy,
     // (agent_session_id, tool_call_id) -> accumulated arguments JSON.
     tool_arguments: BTreeMap<(String, String), String>,
+    compaction_trigger: Option<wire::CompactionTrigger>,
 }
 
 impl Default for BasicRenderer {
@@ -34,6 +36,7 @@ impl Default for BasicRenderer {
             text_owner: String::new(),
             hierarchy: AgentSessionHierarchy::new(),
             tool_arguments: BTreeMap::new(),
+            compaction_trigger: None,
         }
     }
 }
@@ -177,7 +180,14 @@ impl BasicRenderer {
             Some(Payload::AgentFailed(agent)) if !agent.parent_agent_session_id.is_empty() => {
                 writeln!(output, "  agent failed: {}: {}", agent.name, agent.message)?;
             }
-            Some(Payload::CompactionStarted(_)) => writeln!(output, "  compaction started")?,
+            Some(Payload::CompactionStarted(started)) => {
+                self.compaction_trigger = Some(started.trigger.enum_value_or_default());
+                writeln!(
+                    output,
+                    "  compaction started{}",
+                    compaction_trigger_suffix(self.compaction_trigger)
+                )?
+            }
             Some(Payload::CompactionProgress(progress)) => {
                 if progress.phase == wire::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into() {
                     writeln!(
@@ -189,9 +199,17 @@ impl BasicRenderer {
                     writeln!(output, "  compaction: saving summary")?;
                 }
             }
-            Some(Payload::CompactionFinished(_)) => writeln!(output, "  compaction finished")?,
+            Some(Payload::CompactionFinished(_)) => {
+                let origin = compaction_trigger_suffix(self.compaction_trigger.take());
+                writeln!(output, "  compaction finished{origin}")?
+            }
             Some(Payload::CompactionFailed(compaction)) => {
-                writeln!(output, "  compaction failed: {}", compaction.message)?
+                let origin = compaction_trigger_suffix(self.compaction_trigger.take());
+                writeln!(
+                    output,
+                    "  compaction failed{origin}: {}",
+                    compaction.message
+                )?
             }
             Some(Payload::ToolSnapshot(_)) if progress.is_some() => {
                 for line in

@@ -131,7 +131,10 @@ async fn execute_turn(
                     state,
                     services.provider,
                     definitions,
-                    crate::CompactionRequest::default(),
+                    crate::CompactionRequest {
+                        trigger: crate::CompactionTrigger::Automatic,
+                        ..Default::default()
+                    },
                     cancellation,
                 )
                 .await?

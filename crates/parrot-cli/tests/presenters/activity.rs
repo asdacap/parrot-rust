@@ -261,6 +261,71 @@ fn compaction_completions_identify_root_and_child_agents_once() {
 }
 
 #[test]
+fn compaction_labels_distinguish_automatic_model_requested_and_user_requested() {
+    for (trigger, phrase) in [
+        (wire::CompactionTrigger::COMPACTION_TRIGGER_UNSPECIFIED, ""),
+        (
+            wire::CompactionTrigger::COMPACTION_TRIGGER_AUTOMATIC,
+            " (automatic)",
+        ),
+        (
+            wire::CompactionTrigger::COMPACTION_TRIGGER_MODEL_REQUESTED,
+            " (model requested)",
+        ),
+        (
+            wire::CompactionTrigger::COMPACTION_TRIGGER_USER_REQUESTED,
+            " (user requested)",
+        ),
+    ] {
+        let mut view = view();
+        view.observe(&turn("root")).unwrap();
+        let started = || {
+            event(
+                "root",
+                wire::event::Payload::CompactionStarted(wire::CompactionStarted {
+                    trigger: trigger.into(),
+                    ..Default::default()
+                }),
+            )
+        };
+        view.observe(&started()).unwrap();
+        assert!(live(&view).contains(&format!("Compacting{phrase}…")));
+        let update = view
+            .observe(&event(
+                "root",
+                wire::event::Payload::CompactionFinished(wire::CompactionFinished::default()),
+            ))
+            .unwrap();
+        assert_eq!(
+            commits(&update),
+            [format!("✓ [main] compaction finished{phrase}")]
+        );
+        view.observe(&started()).unwrap();
+        let failed = view
+            .observe(&event(
+                "root",
+                wire::event::Payload::CompactionFailed(wire::CompactionFailed {
+                    message: "provider failed".into(),
+                    ..Default::default()
+                }),
+            ))
+            .unwrap();
+        assert_eq!(
+            commits(&failed),
+            [format!(
+                "✗ [main] compaction failed{phrase}: provider failed"
+            )]
+        );
+        view.observe(&event(
+            "root",
+            wire::event::Payload::CompactionStarted(wire::CompactionStarted::default()),
+        ))
+        .unwrap();
+        assert!(live(&view).ends_with("Compacting…"));
+    }
+}
+
+#[test]
 fn agent_completions_identify_root_and_child_agents_once() {
     for (owner, name, terminal_name, parent, prefix, label) in [
         ("root", "", "", "", "", "main"),

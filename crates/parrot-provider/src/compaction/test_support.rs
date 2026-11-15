@@ -337,7 +337,7 @@ impl CompactionEffects for Effects {
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
             let name = match event {
-                CompactionEvent::Started => "started",
+                CompactionEvent::Started(_) => "started",
                 CompactionEvent::Progress(progress) => {
                     self.progress.lock().unwrap().push(progress);
                     "progress"

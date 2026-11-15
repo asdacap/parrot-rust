@@ -53,7 +53,7 @@ pub struct CompactionProgress {
 }
 
 pub enum CompactionEvent {
-    Started,
+    Started(parrot_core::CompactionTrigger),
     Progress(CompactionProgress),
     Saving,
     Retry(crate::sessions::Event),

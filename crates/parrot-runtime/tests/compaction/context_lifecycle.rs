@@ -1,4 +1,5 @@
 use super::*;
+use parrot_domain::protocol::messages::parrot::CompactionTrigger;
 use parrot_storage::{
     artifacts::{ImageArtifactRepository, ImageArtifactStore},
     conversation::ConversationPart,
@@ -56,6 +57,10 @@ async fn provider_template_failure_retains_native_prompt_error_and_terminal_publ
         let published = events.published.lock().unwrap();
         assert_eq!(published.len(), 2);
         assert!(published[0].has_compaction_started());
+        assert_eq!(
+            published[0].compaction_started().trigger,
+            CompactionTrigger::COMPACTION_TRIGGER_USER_REQUESTED.into()
+        );
         assert!(published[1].has_compaction_failed());
     }
     sessions.close().await.unwrap();

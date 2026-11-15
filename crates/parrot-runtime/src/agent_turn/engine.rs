@@ -314,6 +314,7 @@ where
             .compact(
                 &selection.model,
                 parrot_core::CompactionRequest {
+                    trigger: parrot_core::CompactionTrigger::UserRequested,
                     target: target.map(Into::into),
                     tools: definitions.clone(),
                 },

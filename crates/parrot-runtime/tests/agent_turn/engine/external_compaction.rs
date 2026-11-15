@@ -59,6 +59,10 @@ async fn external_compact_waits_for_active_provider_before_starting_real_compact
         .unwrap();
     assert_eq!(progress.agent_session_id, events[started].agent_session_id);
     assert_eq!(
+        events[started].compaction_started().trigger,
+        protocol::CompactionTrigger::COMPACTION_TRIGGER_USER_REQUESTED.into()
+    );
+    assert_eq!(
         progress.compaction_progress().phase,
         protocol::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into()
     );

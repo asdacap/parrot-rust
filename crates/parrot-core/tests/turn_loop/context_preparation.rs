@@ -98,6 +98,10 @@ fn raw_and_calibrated_triggers_compact_and_keep_sampled_instructions() {
         assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
         assert_eq!(state.request().rendered_instructions, ["core request"]);
         assert_eq!(state.compaction.lock().unwrap().requests.len(), 1);
+        assert_eq!(
+            state.compaction.lock().unwrap().requests[0].trigger,
+            parrot_core::CompactionTrigger::Automatic
+        );
         let requests = state.provider.requests.lock().unwrap();
         assert_eq!(requests[0].instructions, "core request");
         assert_eq!(requests[0].messages, messages);
