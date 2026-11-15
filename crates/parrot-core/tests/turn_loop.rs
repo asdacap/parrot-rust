@@ -4,10 +4,10 @@ use parrot_core::{
     ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationReceipt,
     ConversationTurn, DerivedContext, Error, ErrorCode, ErrorKind, EventPublisher, FinishReason,
     InputAdmission, Message, Outcome, PromotedInput, PromptTemplate, Provider, ProviderRequest,
-    ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention, SkillReference, States,
-    StatusKey, StatusOffer, StatusOffering, StatusStanding, ToolCall, ToolCallReceipt, ToolCatalog,
-    ToolDefinition, ToolExecutionRequest, ToolResult, ToolStatus, Tools, TurnFlags, TurnModel,
-    TurnOptions, parse_skill_mentions,
+    ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention, SkillProvider,
+    SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding, ToolCall,
+    ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult, ToolStatus,
+    Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -169,7 +169,7 @@ impl parrot_core::TurnHooks for MemoryTurnHooks {
 
 struct MemoryTurnLifecycle<'a> {
     states: &'a mut MemoryState,
-    tools: &'a dyn Tools<Vec<u8>>,
+    tools: &'a dyn Tools,
     provider: &'a dyn Provider,
     publisher: &'a MemoryEventPublisher,
 }
@@ -196,8 +196,10 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
             };
             let start_event_id =
                 parrot_core::open_turn(&hooks, self.publisher, cancellation).await?;
+            let skills = MemorySkills::new(self.states);
             parrot_core::run_turn(
                 self.states,
+                &skills,
                 self.tools,
                 self.provider,
                 self.publisher,
@@ -211,7 +213,7 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
 
 async fn run(
     states: &mut MemoryState,
-    tools: &dyn Tools<Vec<u8>>,
+    tools: &dyn Tools,
     provider: &dyn Provider,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
@@ -232,7 +234,7 @@ async fn run(
 
 async fn run_turn(
     states: &mut MemoryState,
-    tools: &dyn Tools<Vec<u8>>,
+    tools: &dyn Tools,
     provider: &dyn Provider,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
@@ -247,8 +249,10 @@ async fn run_turn(
         turn_ids: states.turn_ids.clone(),
     };
     let start_event_id = parrot_core::open_turn(&hooks, &publisher, cancellation).await?;
+    let skills = MemorySkills::new(states);
     parrot_core::run_turn(
         states,
+        &skills,
         tools,
         provider,
         &publisher,
@@ -356,7 +360,7 @@ impl Trace {
     }
 }
 
-type ScriptedReplies = Arc<Mutex<VecDeque<Vec<ToolResult<Vec<u8>>>>>>;
+type ScriptedReplies = Arc<Mutex<VecDeque<Vec<ToolResult>>>>;
 
 #[derive(Clone)]
 struct MemoryTools {
@@ -367,7 +371,7 @@ struct MemoryTools {
     receipts: Arc<Mutex<Vec<ToolCallReceipt>>>,
     flags: Arc<Mutex<Vec<TurnFlags>>>,
 }
-impl Tools<Vec<u8>> for MemoryTools {
+impl Tools for MemoryTools {
     fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
         Box::pin(async move {
             self.trace.step("catalog", *self.fail_at.lock().unwrap())?;
@@ -391,7 +395,7 @@ impl Tools<Vec<u8>> for MemoryTools {
         &'a self,
         request: ToolExecutionRequest,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult<Vec<u8>>>, Error>> {
+    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
         Box::pin(async move {
             let ToolExecutionRequest {
                 calls,
@@ -559,8 +563,8 @@ struct MemoryState {
     usage_totals: parrot_core::UsageTotals,
     skill_rows: Vec<(Skill, SkillContent)>,
     steers_after_results: VecDeque<String>,
-    skill_lookups: Mutex<Vec<SkillReference>>,
-    skill_reads: Mutex<Vec<String>>,
+    skill_lookups: Arc<Mutex<Vec<SkillReference>>>,
+    skill_reads: Arc<Mutex<Vec<String>>>,
     trace: Trace,
     request: Arc<Mutex<MemoryRequestData>>,
     prompts: Arc<Mutex<MemoryPromptData>>,
@@ -572,7 +576,7 @@ struct MemoryState {
     final_requests: Vec<usize>,
     retries: Vec<(String, i32)>,
     recorded_tools: Vec<Message>,
-    applied_results: Vec<ToolResult<Vec<u8>>>,
+    applied_results: Vec<ToolResult>,
     recorded_catalogs: Vec<Vec<String>>,
     model: String,
     reasoning: Option<Reasoning>,
@@ -644,8 +648,8 @@ impl MemoryState {
             usage_totals: parrot_core::UsageTotals::default(),
             skill_rows: Vec::new(),
             steers_after_results: VecDeque::new(),
-            skill_lookups: Mutex::default(),
-            skill_reads: Mutex::default(),
+            skill_lookups: Arc::default(),
+            skill_reads: Arc::default(),
             request: request.clone(),
             prompts: Arc::default(),
             skill_templates: Arc::new(Mutex::new([
@@ -848,11 +852,7 @@ impl MemoryState {
         self.include_router_metadata = options.include_router_metadata;
         self.unlimited = options.disable_max_turns;
     }
-    fn run_with(
-        &mut self,
-        tools: &dyn Tools<Vec<u8>>,
-        provider: &dyn Provider,
-    ) -> Result<Outcome, Error> {
+    fn run_with(&mut self, tools: &dyn Tools, provider: &dyn Provider) -> Result<Outcome, Error> {
         *self.compaction.lock().unwrap() =
             MemoryCompaction::new(self.compaction_plan.clone(), self.summary_provider.clone());
         self.budget.restart();
@@ -1180,52 +1180,6 @@ impl States for MemoryState {
                     publication: Default::default(),
                 })
                 .collect())
-        })
-    }
-    fn resolve_skill_references<'a>(
-        &'a self,
-        references: &'a [SkillReference],
-    ) -> BoxFuture<'a, Result<Vec<Option<Skill>>, Error>> {
-        Box::pin(async move {
-            self.trace.step("resolve_skill_references", self.fail_at)?;
-            self.skill_lookups
-                .lock()
-                .unwrap()
-                .extend_from_slice(references);
-            if self.fail_at == Some("cancel_get_skills") {
-                self.cancellation.cancel();
-            }
-            Ok(references
-                .iter()
-                .map(|reference| {
-                    self.skill_rows
-                        .iter()
-                        .find(|(skill, _)| {
-                            skill.name == reference.name
-                                && reference
-                                    .path
-                                    .as_ref()
-                                    .is_none_or(|path| path == &skill.path || path == &skill.id)
-                        })
-                        .map(|(skill, _)| skill.clone())
-                })
-                .collect())
-        })
-    }
-    fn read_skill_content<'a>(
-        &'a self,
-        skill: &'a Skill,
-    ) -> BoxFuture<'a, Result<SkillContent, Error>> {
-        Box::pin(async move {
-            self.trace.step("read_skill_content", self.fail_at)?;
-            self.skill_reads.lock().unwrap().push(skill.id.clone());
-            Ok(self
-                .skill_rows
-                .iter()
-                .find(|(row, _)| row.id == skill.id)
-                .unwrap()
-                .1
-                .clone())
         })
     }
     fn read_usage_totals(&self) -> BoxFuture<'_, Result<parrot_core::UsageTotals, Error>> {
@@ -1940,7 +1894,7 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
 #[test]
 fn tools_and_provider_operate_without_states() {
     let state = MemoryState::new([Reply::final_response("standalone")]);
-    let tools: &dyn Tools<Vec<u8>> = &state.tools;
+    let tools: &dyn Tools = &state.tools;
     let catalog = finish(tools.capture_catalog()).unwrap();
     let calls = vec![ToolCall {
         id: "explicit-call".into(),
@@ -2399,4 +2353,75 @@ fn changed_auto_hash_steers_at_a_retry_continuation() {
             .count(),
         2
     );
+}
+
+struct MemorySkills {
+    skill_rows: Vec<(Skill, SkillContent)>,
+    skill_lookups: Arc<Mutex<Vec<SkillReference>>>,
+    skill_reads: Arc<Mutex<Vec<String>>>,
+    trace: Trace,
+    fail_at: Option<&'static str>,
+    cancellation: Arc<CancellationSource>,
+}
+
+impl MemorySkills {
+    fn new(state: &MemoryState) -> Self {
+        Self {
+            skill_rows: state.skill_rows.clone(),
+            skill_lookups: state.skill_lookups.clone(),
+            skill_reads: state.skill_reads.clone(),
+            trace: state.trace.clone(),
+            fail_at: state.fail_at,
+            cancellation: state.cancellation.clone(),
+        }
+    }
+}
+
+impl SkillProvider for MemorySkills {
+    fn resolve_skill_references<'a>(
+        &'a self,
+        references: &'a [SkillReference],
+    ) -> BoxFuture<'a, Result<Vec<Option<Skill>>, Error>> {
+        Box::pin(async move {
+            self.trace.step("resolve_skill_references", self.fail_at)?;
+            self.skill_lookups
+                .lock()
+                .unwrap()
+                .extend_from_slice(references);
+            if self.fail_at == Some("cancel_get_skills") {
+                self.cancellation.cancel();
+            }
+            Ok(references
+                .iter()
+                .map(|reference| {
+                    self.skill_rows
+                        .iter()
+                        .find(|(skill, _)| {
+                            skill.name == reference.name
+                                && reference
+                                    .path
+                                    .as_ref()
+                                    .is_none_or(|path| path == &skill.path || path == &skill.id)
+                        })
+                        .map(|(skill, _)| skill.clone())
+                })
+                .collect())
+        })
+    }
+    fn read_skill_content<'a>(
+        &'a self,
+        skill: &'a Skill,
+    ) -> BoxFuture<'a, Result<SkillContent, Error>> {
+        Box::pin(async move {
+            self.trace.step("read_skill_content", self.fail_at)?;
+            self.skill_reads.lock().unwrap().push(skill.id.clone());
+            Ok(self
+                .skill_rows
+                .iter()
+                .find(|(row, _)| row.id == skill.id)
+                .unwrap()
+                .1
+                .clone())
+        })
+    }
 }

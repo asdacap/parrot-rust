@@ -35,8 +35,8 @@ fn public_traits_are_limited_to_services_and_cancellation() {
             "Cancellation",
             "EventPublisher",
             "Provider",
+            "SkillProvider",
             "States",
-            "ToolResultMetadata",
             "Tools",
             "TurnHooks",
             "TurnLifecycle"

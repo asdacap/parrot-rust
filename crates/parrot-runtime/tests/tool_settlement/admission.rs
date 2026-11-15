@@ -47,13 +47,14 @@ impl EventPublisher for BoundaryPublisher {
     }
 }
 fn install_publisher(fixture: &Fixture, harness: &mut Harness, publisher: Arc<ToolPublisher>) {
-    harness.state = parrot_runtime::agent_turn::tool_conversation::ToolConversation::new(
-        fixture.history.clone(),
-        publisher.clone(),
-        Arc::new(id),
-        templates().as_ref(),
-    )
-    .unwrap();
+    harness.runtime_state.get_mut().tool_conversation =
+        parrot_runtime::agent_turn::tool_conversation::ToolConversation::new(
+            fixture.history.clone(),
+            publisher.clone(),
+            Arc::new(id),
+            templates().as_ref(),
+        )
+        .unwrap();
     harness.config = ToolExecutionConfig {
         path_variables: Default::default(),
         templates: templates(),

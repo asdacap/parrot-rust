@@ -41,13 +41,13 @@ pub use message::{
     ProviderRequest, ProviderResponse, Reasoning, Role,
 };
 pub use provider::{Provider, ProviderInvokeError, Tools};
-pub use skill::{DerivedContext, Skill, SkillContent, SkillMention, SkillReference};
+pub use skill::{DerivedContext, Skill, SkillContent, SkillMention, SkillProvider, SkillReference};
 pub use states::States;
 pub use status::{StatusKey, StatusOffer, StatusOffering, StatusStanding};
 pub use template::{MiniJinjaPromptTemplateEngine, ScalarPromptTemplateEngine};
 pub use tool::{
     ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolRecovery,
-    ToolResult, ToolResultMetadata, ToolSettlement, ToolStatus,
+    ToolResult, ToolSettlement, ToolStatus,
 };
 pub use turn::{
     AgentState, CompletionBlockerFeedback, OpenedTurn, Outcome, TurnFlags, TurnHooks,
