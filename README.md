@@ -30,7 +30,6 @@ cross-version locking or simultaneous same-workspace safety guarantee**.
 
 | Full 113-task run | Reasoning effort | Passed | Unsuccessful | Pass rate | Run cost |
 |---|---|---:|---:|---:|---:|
-| GLM-5.3-Flash through OpenCode Go | High | 65 | 48 | 57.5% | $49.78 client estimate |
 | DeepSeek V4.1 Flash 1017 through DeepInfra FP8 | High | 69 | 44 | 61.1% | $9.77 captured provider charges |
 
 The original GLM run's 48 unsuccessful tasks include two startup errors.
