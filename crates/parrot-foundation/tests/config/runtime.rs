@@ -80,6 +80,7 @@ fn root() -> Node {
                 ("trigger_percent", scalar("90")),
                 ("target_percent", scalar("30")),
                 ("maximum_input_tokens", scalar("60000")),
+                ("maximum_output_tokens", scalar("100000")),
                 ("summary_output_tokens", scalar("12000")),
             ]),
         ),

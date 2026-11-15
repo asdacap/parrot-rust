@@ -1417,6 +1417,7 @@ where
                     trigger_percent: compact.trigger_percent,
                     target_percent: compact.target_percent,
                     maximum_input_tokens: compact.maximum_input_tokens,
+                    maximum_output_tokens: compact.maximum_output_tokens,
                     summary_output_tokens: compact.summary_output_tokens,
                     summary_instructions: String::new(),
                     summary_prefix: String::new(),

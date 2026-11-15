@@ -423,6 +423,7 @@ fn configured_compactor(input_budget: i32, notice: &str, profiles: ModelProfiles
             trigger_percent: 90,
             target_percent: 50,
             maximum_input_tokens: input_budget,
+            maximum_output_tokens: 0,
             summary_output_tokens: 45,
             summary_instructions: "ignored settings instructions".into(),
             summary_prefix: "ignored settings prefix".into(),
