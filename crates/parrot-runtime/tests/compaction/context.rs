@@ -9,12 +9,12 @@ use super::{CompactionSettings, ModelProfiles};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
-        filenames::FilenameGenerator,
         paths::{RootOrigin, SelectedSessionRoot},
     },
     protocol::messages::parrot::{AgentNotice, Event},
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_provider::compaction::Compactor;
 use parrot_provider::{
     catalogs::Model,
     routing::{
@@ -30,7 +30,6 @@ use parrot_runtime::{
     prompt_context::{PromptResult, SessionPrompt, SystemPrompt},
 };
 use parrot_storage::{
-    artifacts::compaction::CompactionGroupBlobStore,
     conversation::{
         AgentConversation, AgentHistoryView, ConversationMessage, ConversationOrigin,
         ConversationRepository, HistoryForkBoundary, HistoryForkSelection, MessageRole,
@@ -50,13 +49,7 @@ use std::{
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
-struct Names;
-impl FilenameGenerator for Names {
-    fn next_filename(&self) -> String {
-        format!("t45-{}-arse.dat", NEXT.fetch_add(1, Ordering::Relaxed))
-    }
-}
-fn templates() -> Arc<PromptTemplateCatalog> {
+pub(crate) fn templates() -> Arc<PromptTemplateCatalog> {
     let environment = [
         ("HOME", "/tmp/t45/home"),
         ("XDG_CONFIG_HOME", "/tmp/t45/config"),
@@ -152,13 +145,7 @@ impl Fixture {
             templates.clone(),
         )
         .unwrap();
-        let blobs = CompactionGroupBlobStore::for_session(
-            self.repository.events().database().selected_root(),
-            "scratch",
-            Arc::new(Names),
-        )
-        .unwrap();
-        ContextController::new(compactor, history, blobs, templates)
+        ContextController::new(compactor, history)
     }
 }
 impl Drop for Fixture {
