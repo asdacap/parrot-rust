@@ -181,7 +181,7 @@ async fn prepare_preserves_text_artifact_order_and_performs_multiple_real_upload
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn unsupported_text_and_broken_png_return_none_with_diagnostic_and_no_upload() {
+async fn unsupported_text_and_broken_png_become_plain_text_with_diagnostic_and_no_upload() {
     let mut native = Native::new().await;
     let reads = Arc::new(Reads::default());
     reads.insert("notes.txt", "/fixture/notes", b"plain text");
@@ -189,7 +189,7 @@ async fn unsupported_text_and_broken_png_return_none_with_diagnostic_and_no_uplo
     let uploader = uploader(reads);
     for name in ["notes.txt", "broken.png"] {
         let mut diagnostic = Vec::new();
-        let result = bounded(uploader.prepare(
+        let prepared = bounded(uploader.prepare(
             &mut native.client,
             &native.session,
             "build",
@@ -199,8 +199,11 @@ async fn unsupported_text_and_broken_png_return_none_with_diagnostic_and_no_uplo
             &NeverCancelled,
         ))
         .await
+        .unwrap()
         .unwrap();
-        assert!(result.is_none());
+        assert_eq!(prepared.parts.len(), 2);
+        assert_eq!(prepared.parts[0].content, text("inspect "));
+        assert_eq!(prepared.parts[1].content, text(&format!("@{name}")));
         assert!(
             String::from_utf8(diagnostic)
                 .unwrap()
@@ -214,9 +217,10 @@ async fn unsupported_text_and_broken_png_return_none_with_diagnostic_and_no_uplo
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn later_unsupported_or_denied_reference_refuses_prompt_but_keeps_completed_image() {
+async fn later_unsupported_or_denied_reference_becomes_plain_text_but_keeps_completed_image() {
     // Sequential source semantics: a completed earlier image is NOT rolled back
-    // when a later reference cannot be prepared. No partial prompt is admitted.
+    // when a later reference cannot be prepared; the failed reference becomes
+    // plain text.
     for denied in [false, true] {
         let mut native = Native::new().await;
         let reads = Arc::new(Reads::default());
@@ -229,7 +233,7 @@ async fn later_unsupported_or_denied_reference_refuses_prompt_but_keeps_complete
         let policy = Policy::new(if denied { &["later.dat"] } else { &[] });
         let uploader = PromptAttachmentUploader::new(reads, modes(policy.clone(), policy));
         let mut diagnostic = Vec::new();
-        let result = bounded(uploader.prepare(
+        let prepared = bounded(uploader.prepare(
             &mut native.client,
             &native.session,
             "build",
@@ -239,8 +243,14 @@ async fn later_unsupported_or_denied_reference_refuses_prompt_but_keeps_complete
             &NeverCancelled,
         ))
         .await
+        .unwrap()
         .unwrap();
-        assert!(result.is_none());
+        assert_eq!(prepared.parts.len(), 5);
+        assert_eq!(prepared.parts[0].content, text("before "));
+        assert_eq!(artifact(&prepared.parts[1]), PNG_SHA256);
+        assert_eq!(prepared.parts[2].content, text(" then "));
+        assert_eq!(prepared.parts[3].content, text("@later.dat"));
+        assert_eq!(prepared.parts[4].content, text(" after"));
         assert!(
             String::from_utf8(diagnostic)
                 .unwrap()
@@ -295,20 +305,20 @@ async fn selected_immutable_mode_and_original_follow_read_are_forwarded_before_f
     let returned = reads.returned_bytes.load(Ordering::SeqCst);
     for path in ["blocked.dat", "link.dat"] {
         let mut diagnostic = Vec::new();
-        assert!(
-            bounded(uploader.prepare(
-                &mut native.client,
-                &native.session,
-                "plan",
-                &format!("@{path}"),
-                wire::Delivery::DELIVERY_QUEUE,
-                &mut diagnostic,
-                &NeverCancelled
-            ))
-            .await
-            .unwrap()
-            .is_none()
-        );
+        let prepared = bounded(uploader.prepare(
+            &mut native.client,
+            &native.session,
+            "plan",
+            &format!("@{path}"),
+            wire::Delivery::DELIVERY_QUEUE,
+            &mut diagnostic,
+            &NeverCancelled,
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(prepared.parts.len(), 1);
+        assert_eq!(prepared.parts[0].content, text(&format!("@{path}")));
         assert!(
             String::from_utf8(diagnostic)
                 .unwrap()
@@ -516,14 +526,14 @@ async fn real_native_server_rejects_oversize_invalid_image_and_metadata_without_
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn prepare_real_server_size_rejection_returns_no_request_or_partial_artifact() {
+async fn prepare_real_server_size_rejection_becomes_plain_text_without_partial_artifact() {
     let mut native = Native::new().await;
     let reads = Arc::new(Reads::default());
     let mut oversized = PNG.to_vec();
     oversized.resize(5 * CHUNK_BYTES + 1, 0);
     reads.insert("oversized.png", "/fixture/oversized.png", &oversized);
     let mut diagnostic = Vec::new();
-    let result = bounded(uploader(reads).prepare(
+    let prepared = bounded(uploader(reads).prepare(
         &mut native.client,
         &native.session,
         "build",
@@ -533,8 +543,11 @@ async fn prepare_real_server_size_rejection_returns_no_request_or_partial_artifa
         &NeverCancelled,
     ))
     .await
+    .unwrap()
     .unwrap();
-    assert!(result.is_none());
+    assert_eq!(prepared.parts.len(), 2);
+    assert_eq!(prepared.parts[0].content, text("inspect "));
+    assert_eq!(prepared.parts[1].content, text("@oversized.png"));
     assert_eq!(
         String::from_utf8(diagnostic).unwrap(),
         "parrot: cannot attach 'oversized.png': Status(StatusCode=\"InvalidArgument\", Detail=\"an image cannot exceed 5 MiB\")\n"
@@ -732,8 +745,11 @@ async fn native_rpc_cancelled_with_live_caller_is_caught_as_attach_diagnostic() 
         &cancellation,
     ))
     .await
+    .unwrap()
     .unwrap();
-    assert!(result.is_none());
+    assert_eq!(result.parts.len(), 2);
+    assert_eq!(result.parts[0].content, text("inspect "));
+    assert_eq!(result.parts[1].content, text("@pixel.dat"));
     assert!(!cancellation.is_cancelled());
     let diagnostic = String::from_utf8(diagnostic).unwrap();
     assert_eq!(
