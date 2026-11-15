@@ -11,9 +11,24 @@ a completed successful result. Forking and compaction use the latest completed
 checkpoint for each title. Unexecuted, failed, cancelled, and malformed calls do
 not create checkpoints. History forks preserve checkpoints.
 
-Each compaction summary identifies the last conversation item it covers, separately
-from where the summary appears in history. Usage history refers to conversation
-sequence numbers. `history.jsonl` is a derived view, not a recovery authority.
+Each compaction replacement identifies the last conversation item it covers,
+separately from where the replacement appears in history. The snapshot retains
+the complete message, including its role, parts, and opaque provider replay
+fields. Existing text-only snapshots remain readable without a database-format
+change. Full history forks preserve the replacement and remap its watermark.
+Named forks copy only the selected checkpoint tail, without the earlier snapshot.
+Usage history refers to conversation sequence numbers. `history.jsonl` is a
+derived view, not a recovery authority.
+
+The provider owns compaction execution and initiates its lifecycle events. Runtime
+atomically persists the supplied replacement and associated status, then reloads
+the live conversation. A returned replacement is already finalized. An event
+publication failure after commit does not roll back that replacement.
+
+Oversized summary input is truncated in memory with an omission notice. Compaction
+does not create group files, delete authoritative source messages, or remove
+stored image artifacts. See [Compaction and context budgets](../crates/parrot-provider/src/compaction/README.md)
+for the caller contract and failure ordering.
 
 ## Image metadata belongs to its part
 
