@@ -1,6 +1,6 @@
 use crate::{
     CancellationToken, ConfigKey, Content, DerivedContext, Error, PromotedInput, PromptTemplate,
-    Skill, SkillContent, SkillReference, States,
+    Skill, SkillContent, SkillProvider, SkillReference, States,
 };
 use std::{collections::HashSet, sync::Arc};
 
@@ -24,6 +24,7 @@ impl SkillPreparation {
     pub async fn prepare(
         &mut self,
         states: &mut dyn States,
+        skill_provider: &dyn SkillProvider,
         inputs: &[PromotedInput],
         cancellation: CancellationToken<'_>,
     ) -> Result<DerivedContext, Error> {
@@ -53,7 +54,7 @@ impl SkillPreparation {
                     .iter()
                     .map(|(reference, _)| reference.clone())
                     .collect::<Vec<_>>();
-                let records = states.resolve_skill_references(&references).await?;
+                let records = skill_provider.resolve_skill_references(&references).await?;
                 for (record, (_, position)) in records.into_iter().zip(mentions) {
                     if let Some(skill) = record
                         && self.selected_ids.insert(skill.id.clone())
@@ -93,7 +94,7 @@ impl SkillPreparation {
             if cancellation.is_cancelled() {
                 return Err(Error::cancelled());
             }
-            match states.read_skill_content(&skill).await? {
+            match skill_provider.read_skill_content(&skill).await? {
                 SkillContent::Text(content) => rendering.selected(preparation, &skill, &content)?,
                 SkillContent::Unavailable(message) => {
                     rendering.diagnostic(preparation, &skill.name, &message)?;

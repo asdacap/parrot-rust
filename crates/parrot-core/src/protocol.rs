@@ -35,7 +35,7 @@ pub use message::{
     ProviderRequest, ProviderResponse, Reasoning, Role,
 };
 pub use provider::{Provider, ProviderInvokeError, Tools};
-pub use skill::{DerivedContext, Skill, SkillContent, SkillReference};
+pub use skill::{DerivedContext, Skill, SkillContent, SkillProvider, SkillReference};
 pub use states::States;
 pub use tool::{
     ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolResult, ToolResultMetadata,

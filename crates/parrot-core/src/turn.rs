@@ -4,8 +4,8 @@ use crate::{
     AgentState, BoxFuture, CancellationToken, CompletionBlockerFeedback, ConfigKey,
     ConversationAddition, ConversationEvent, ConversationOrigin, ConversationPersistence,
     ConversationTurn, Error, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message,
-    Outcome, Provider, Role, States, ToolCallReceipt, ToolResultMetadata, Tools, add_phase_prompt,
-    context, execute_tools, rendering, skills, steer_status,
+    Outcome, Provider, Role, SkillProvider, States, ToolCallReceipt, ToolResultMetadata, Tools,
+    add_phase_prompt, context, execute_tools, rendering, skills, steer_status,
 };
 
 /// Supplies the drain loop with runtime-owned lifecycle facts and per-turn work.
@@ -86,6 +86,7 @@ pub async fn open_turn<'a>(
 /// Activates the published turn returned by `open_turn` before reading agent state.
 pub async fn run_turn<M: ToolResultMetadata>(
     states: &mut dyn States,
+    skill_provider: &dyn SkillProvider,
     tools: &dyn Tools<M>,
     provider: &dyn Provider,
     publisher: &dyn EventPublisher,
@@ -96,25 +97,26 @@ pub async fn run_turn<M: ToolResultMetadata>(
         .activate_conversation_turn(turn.start_event_id())
         .await?;
     let mut state = states.get_agent_state().await?;
-    let result = execute_turn(
-        states,
-        tools,
+    let services = TurnServices {
+        skills: skill_provider,
         provider,
         publisher,
-        turn,
-        cancellation,
-        &mut state,
-    )
-    .await;
+    };
+    let result = execute_turn(states, tools, &services, turn, cancellation, &mut state).await;
     states.set_agent_state(state).await?;
     result
+}
+
+struct TurnServices<'a> {
+    skills: &'a dyn SkillProvider,
+    provider: &'a dyn Provider,
+    publisher: &'a dyn EventPublisher,
 }
 
 async fn execute_turn<M: ToolResultMetadata>(
     states: &mut dyn States,
     tools: &dyn Tools<M>,
-    provider: &dyn Provider,
-    publisher: &dyn EventPublisher,
+    services: &TurnServices<'_>,
     opened: &OpenedTurn<'_>,
     cancellation: CancellationToken<'_>,
     state: &mut AgentState,
@@ -155,7 +157,9 @@ async fn execute_turn<M: ToolResultMetadata>(
                 })
                 .await?;
         }
-        let context = skills.prepare(states, &inputs, cancellation).await?;
+        let context = skills
+            .prepare(states, services.skills, &inputs, cancellation)
+            .await?;
         if !context.content.is_empty() {
             states
                 .add_conversation_messages(ConversationAddition {
@@ -170,7 +174,8 @@ async fn execute_turn<M: ToolResultMetadata>(
                 })
                 .await?;
             for path in context.loaded_paths {
-                publisher
+                services
+                    .publisher
                     .publish(ConversationEvent::SkillLoaded { path }, cancellation)
                     .await?;
             }
@@ -183,7 +188,7 @@ async fn execute_turn<M: ToolResultMetadata>(
         } else {
             &catalog.normal
         };
-        steer_status(states, state, provider, definitions, cancellation).await?;
+        steer_status(states, state, services.provider, definitions, cancellation).await?;
         if flags.final_phase {
             let content =
                 rendering::render_template(states, ConfigKey::FinalRequestTemplate, &[]).await?;
@@ -192,8 +197,8 @@ async fn execute_turn<M: ToolResultMetadata>(
         let prepared = context::prepare_request(
             states,
             state,
-            provider,
-            publisher,
+            services.provider,
+            services.publisher,
             definitions,
             &options,
             cancellation,
@@ -201,7 +206,10 @@ async fn execute_turn<M: ToolResultMetadata>(
         .await?;
         let attempt = state.count_request();
         states.set_agent_state(state.clone()).await?;
-        let invoked = provider.invoke(prepared.request, cancellation).await;
+        let invoked = services
+            .provider
+            .invoke(prepared.request, cancellation)
+            .await;
         let input_tokens = match &invoked {
             Ok(response) => Some(response.input_tokens),
             Err(error) => error.input_tokens,
@@ -220,8 +228,8 @@ async fn execute_turn<M: ToolResultMetadata>(
                 if !context::compact_context(
                     states,
                     state,
-                    provider,
-                    publisher,
+                    services.provider,
+                    services.publisher,
                     definitions,
                     crate::CompactionRequest::default(),
                     cancellation,
@@ -272,7 +280,8 @@ async fn execute_turn<M: ToolResultMetadata>(
                     },
                 })
                 .await?;
-            publisher
+            services
+                .publisher
                 .publish(
                     ConversationEvent::ToolRequestReceived {
                         count: response.tool_calls.len() as i32,
@@ -298,8 +307,8 @@ async fn execute_turn<M: ToolResultMetadata>(
                 context::compact_context(
                     states,
                     state,
-                    provider,
-                    publisher,
+                    services.provider,
+                    services.publisher,
                     definitions,
                     request,
                     cancellation,
