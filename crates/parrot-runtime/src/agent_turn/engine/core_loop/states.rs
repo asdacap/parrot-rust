@@ -138,7 +138,6 @@ where
                     }
                 }
                 ConversationPersistence::CloseTurn {
-                    start_event_id,
                     finish_reason,
                     usage,
                 } => {
@@ -146,10 +145,7 @@ where
                         .join_mutations()
                         .await
                         .map_err(|error| TurnError::Service(error.to_string()))?;
-                    let key = TurnKey {
-                        agent_session_id: self.history.agent_session_id().to_owned(),
-                        start_event_id,
-                    };
+                    let agent_session_id = self.history.agent_session_id().to_owned();
                     let mut event = self.events.event();
                     let completed: sessions::Completion = ProviderResponse {
                         finish_reason,
@@ -172,7 +168,7 @@ where
                         .repository()
                         .events()
                         .close_turn_and_publish(
-                            key,
+                            agent_session_id,
                             event,
                             Some(record),
                             &PublisherRef(self.publisher),

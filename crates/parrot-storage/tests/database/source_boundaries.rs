@@ -12,7 +12,7 @@ async fn fifty_event_message_transactions_leave_truncate_without_wal_or_shm() {
     for index in 0..50 {
         database.admit(index,&active(),move|tx| {
             let event=Event{id:index.to_string(),agent_session_id:"agent".into(),..Default::default()};
-            tx.execute("INSERT INTO event(id,agent_session,payload,created_at) VALUES(?1,'agent',?2,'')",params![event.id,event.write_to_bytes()?])?;
+            tx.execute("INSERT INTO event(id,agent_session,payload,kind,created_at) VALUES(?1,'agent',?2,'','')",params![event.id,event.write_to_bytes()?])?;
             tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at) VALUES('agent','input','user','','')",[])?;
             tx.execute("INSERT INTO conversation_part(item_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(?1,0,'text','hello','','','')", [tx.last_insert_rowid()])?;Ok(())
         }).unwrap().into_completion().await.unwrap();
@@ -48,7 +48,7 @@ async fn sql_event_and_message_are_durable_together_without_claiming_repository_
     .unwrap();
     let payload = original.clone();
     database.admit("durable",&active(),move|tx| {
-        tx.execute("INSERT INTO event(id,agent_session,payload,created_at) VALUES('kept','agent',?1,'')",[payload])?;
+        tx.execute("INSERT INTO event(id,agent_session,payload,kind,created_at) VALUES('kept','agent',?1,'','')",[payload])?;
         tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at) VALUES('agent','input','user','','')",[])?;
             tx.execute("INSERT INTO conversation_part(item_sequence,position,kind,text,artifact_id,media_type,display_name) VALUES(?1,0,'text','durable','','','')", [tx.last_insert_rowid()])?;Ok(())
     }).unwrap().into_completion().await.unwrap();

@@ -143,9 +143,8 @@ pub trait Turn: Send {
     ) -> BoxFuture<'a, Result<(), Error>>;
 }
 
-/// Borrows the published identity and services needed to execute one turn.
+/// Borrows the services needed to execute one turn.
 pub struct TurnServices<'a> {
-    pub start_event_id: &'a str,
     pub states: &'a mut dyn States,
     pub skills: &'a dyn SkillProvider,
     pub tools: &'a dyn Tools,
@@ -159,7 +158,7 @@ pub trait TurnHooks: Send + Sync {
     /// Captures the initial model selection and notifies provider sessions before publication.
     fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<crate::TurnModel, Error>>;
     /// Starts runtime activity and prepares the prompt epoch and skill snapshot after publication.
-    fn activate_conversation_turn(&self, start_event_id: &str) -> BoxFuture<'_, Result<(), Error>>;
+    fn activate_conversation_turn(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Captures settings for the next step without changing in-flight operations.
     fn begin_step(&self) -> BoxFuture<'_, Result<(), Error>>;
 }

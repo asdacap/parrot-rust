@@ -19,10 +19,9 @@ impl<S: AccessSnapshot + 'static> TurnHooks for RuntimeTurnHooks<'_, S> {
         })
     }
 
-    fn activate_conversation_turn(&self, turn_id: &str) -> BoxFuture<'_, Result<(), CoreError>> {
-        let turn_id = turn_id.to_owned();
+    fn activate_conversation_turn(&self) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
-            self.backend.activity.turn_started(&turn_id);
+            self.backend.activity.turn_started();
             self.backend
                 .state
                 .lock()

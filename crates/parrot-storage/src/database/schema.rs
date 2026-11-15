@@ -4,7 +4,7 @@ use rusqlite::{OpenFlags, TransactionBehavior};
 use std::path::Path;
 use std::time::Duration;
 
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 11;
 
 #[cfg(test)]
 #[path = "../../tests/database/current_schema_crash.rs"]
@@ -93,5 +93,54 @@ pub fn extract_usage_keys(event: &Event) -> (Option<&str>, Option<&str>) {
         (None, Some(&event.tool_execution_started().tool_call_id))
     } else {
         (None, None)
+    }
+}
+
+/// Every stored event names its payload variant so SQL can filter by kind,
+/// which the serialized payload blob alone does not support. The name is the
+/// proto oneof field name, which matches the variant's snake case. An event
+/// with no payload set stores an empty kind.
+pub fn extract_event_kind(event: &Event) -> &'static str {
+    use parrot_domain::protocol::messages::parrot::event::Payload;
+    match event.payload.as_ref() {
+        Some(Payload::TurnStarted(_)) => "turn_started",
+        Some(Payload::TextChunk(_)) => "text_chunk",
+        Some(Payload::ReasoningChunk(_)) => "reasoning_chunk",
+        Some(Payload::ToolCallChunk(_)) => "tool_call_chunk",
+        Some(Payload::RetryNotice(_)) => "retry_notice",
+        Some(Payload::TurnEnded(_)) => "turn_ended",
+        Some(Payload::TurnFailed(_)) => "turn_failed",
+        Some(Payload::InputAdmitted(_)) => "input_admitted",
+        Some(Payload::InputPromoted(_)) => "input_promoted",
+        Some(Payload::ToolStarted(_)) => "tool_started",
+        Some(Payload::ToolFinished(_)) => "tool_finished",
+        Some(Payload::ToolCancelled(_)) => "tool_cancelled",
+        Some(Payload::ToolError(_)) => "tool_error",
+        Some(Payload::AgentStarted(_)) => "agent_started",
+        Some(Payload::AgentFinished(_)) => "agent_finished",
+        Some(Payload::AgentFailed(_)) => "agent_failed",
+        Some(Payload::AgentStatisticsUpdated(_)) => "agent_statistics_updated",
+        Some(Payload::PlanCompleted(_)) => "plan_completed",
+        Some(Payload::PermissionPending(_)) => "permission_pending",
+        Some(Payload::SessionUsageSnapshot(_)) => "session_usage_snapshot",
+        Some(Payload::CompactionStarted(_)) => "compaction_started",
+        Some(Payload::CompactionFinished(_)) => "compaction_finished",
+        Some(Payload::CompactionFailed(_)) => "compaction_failed",
+        Some(Payload::ProviderCallUsage(_)) => "provider_call_usage",
+        Some(Payload::SkillLoaded(_)) => "skill_loaded",
+        Some(Payload::InputCanceled(_)) => "input_canceled",
+        Some(Payload::ProviderRequestPhaseChanged(_)) => "provider_request_phase_changed",
+        Some(Payload::RequestUsageRecorded(_)) => "request_usage_recorded",
+        Some(Payload::ToolExecutionStarted(_)) => "tool_execution_started",
+        Some(Payload::ToolRequestReceived(_)) => "tool_request_received",
+        Some(Payload::ModeTurnCompleted(_)) => "mode_turn_completed",
+        Some(Payload::AgentNotice(_)) => "agent_notice",
+        Some(Payload::ToolSnapshot(_)) => "tool_snapshot",
+        Some(Payload::EncryptedReasoningReceived(_)) => "encrypted_reasoning_received",
+        Some(Payload::CompactionProgress(_)) => "compaction_progress",
+        // The enum is non_exhaustive, so an event carrying a payload variant
+        // this build does not know stores an empty kind, as does an event with
+        // no payload set.
+        _ => "",
     }
 }

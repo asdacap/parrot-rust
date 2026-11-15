@@ -242,8 +242,8 @@ impl TurnStatus<Security> for Status {
 }
 struct Diagnostics;
 impl TurnDiagnostics for Diagnostics {
-    fn started(&self, _: &str) {}
-    fn finished(&self, _: &str, _: &str, _: Option<&str>) {}
+    fn started(&self) {}
+    fn finished(&self, _: &str, _: Option<&str>) {}
 }
 struct NoParent;
 impl ParentCompletion for NoParent {

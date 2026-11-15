@@ -199,13 +199,12 @@ fn run_turn_opens_the_turn_and_presents_the_selected_model() {
             alias_icon: None,
         }]
     );
-    assert_eq!(*state.turn_ids.lock().unwrap(), ["turn-start-0"]);
+    assert_eq!(*state.turn_activations.lock().unwrap(), 1);
     assert_eq!(
         state.closed_turns,
         [ConversationAddition {
             messages: vec![Message::text(Role::Assistant, "answer")],
             persistence: ConversationPersistence::CloseTurn {
-                start_event_id: "turn-start-0".into(),
                 finish_reason: FinishReason::Stop,
                 usage: parrot_core::UsageTotals {
                     input_tokens: 321,
@@ -226,18 +225,13 @@ fn run_convenience_drains_real_pending_messages_and_returns_the_latest_answer() 
     assert_eq!(state.run(), Ok(Outcome::Completed("second answer".into())));
     assert!(state.pending_messages.is_empty());
     assert_eq!(state.provider.requests.lock().unwrap().len(), 2);
-    assert_eq!(
-        state
-            .closed_turns
-            .iter()
-            .map(|addition| match &addition.persistence {
-                ConversationPersistence::CloseTurn { start_event_id, .. } =>
-                    start_event_id.as_str(),
-                _ => panic!("expected conversation-turn closure"),
-            })
-            .collect::<Vec<_>>(),
-        ["turn-start-0", "turn-start-1"]
-    );
+    assert_eq!(state.closed_turns.len(), 2);
+    for addition in &state.closed_turns {
+        assert!(matches!(
+            addition.persistence,
+            ConversationPersistence::CloseTurn { .. }
+        ));
+    }
     assert_eq!(
         state
             .trace
@@ -562,7 +556,7 @@ fn state_write_failures_stop_before_provider_invocation_and_take_precedence() {
 }
 
 #[test]
-fn core_disposes_each_completed_turn_with_its_published_identity() {
+fn core_disposes_each_completed_turn_in_order() {
     let mut state = MemoryState::new([
         Reply::final_response("first answer"),
         Reply::final_response("second answer"),
@@ -572,14 +566,8 @@ fn core_disposes_each_completed_turn_with_its_published_identity() {
     assert_eq!(
         state.disposed_turns,
         [
-            (
-                "turn-start-0".into(),
-                Ok(Outcome::Completed("first answer".into()))
-            ),
-            (
-                "turn-start-1".into(),
-                Ok(Outcome::Completed("second answer".into()))
-            ),
+            Ok(Outcome::Completed("first answer".into())),
+            Ok(Outcome::Completed("second answer".into())),
         ]
     );
 }
@@ -591,7 +579,7 @@ fn core_disposes_budget_exhaustion_without_opening_the_next_turn() {
     state.enqueue_message(Delivery::Queue, "next question");
     let expected = Ok(Outcome::BudgetExhausted(RUNAWAY_NOTICE.into()));
     assert_eq!(state.run(), expected);
-    assert_eq!(state.disposed_turns, [("turn-start-0".into(), expected)]);
+    assert_eq!(state.disposed_turns, [expected]);
     assert_eq!(state.pending_messages.len(), 1);
 }
 
@@ -608,7 +596,7 @@ fn core_disposes_activation_state_and_provider_failures() {
             _ => unreachable!(),
         }
         assert_eq!(state.run(), Err(error.clone()));
-        assert_eq!(state.disposed_turns, [("turn-start-0".into(), Err(error))]);
+        assert_eq!(state.disposed_turns, [Err(error)]);
         assert_eq!(state.started_turns.lock().unwrap().len(), 1);
     }
 }
@@ -621,10 +609,7 @@ fn core_disposes_when_saving_state_after_execution_fails() {
     assert_eq!(state.run(), Err(Error::failed("final save")));
     assert_eq!(state.provider.requests.lock().unwrap().len(), 1);
     assert_eq!(state.closed_turns.len(), 1);
-    assert_eq!(
-        state.disposed_turns,
-        [("turn-start-0".into(), Err(Error::failed("final save")))]
-    );
+    assert_eq!(state.disposed_turns, [Err(Error::failed("final save"))]);
 }
 
 #[test]
@@ -636,7 +621,7 @@ fn disposal_errors_stop_draining_and_take_precedence_over_execution() {
         state.disposal_error = Some(Error::failed("dispose"));
         assert_eq!(state.run(), Err(Error::failed("dispose")));
         let expected = activation_error.map_or(Ok(Outcome::Completed("answer".into())), Err);
-        assert_eq!(state.disposed_turns, [("turn-start-0".into(), expected)]);
+        assert_eq!(state.disposed_turns, [expected]);
         assert_eq!(state.started_turns.lock().unwrap().len(), 1);
     }
 }

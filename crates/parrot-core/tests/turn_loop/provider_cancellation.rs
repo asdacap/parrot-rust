@@ -74,10 +74,7 @@ fn entry_cancellation_reaches_inflight_provider_and_awaits_cleanup() {
         assert!(provider.cleaned.load(Ordering::SeqCst));
         assert!(!provider.estimates.cancellation.is_cancelled());
     }
-    assert_eq!(
-        state.disposed_turns,
-        [("turn-start-0".into(), Err(Error::cancelled()))]
-    );
+    assert_eq!(state.disposed_turns, [Err(Error::cancelled())]);
 }
 
 #[test]

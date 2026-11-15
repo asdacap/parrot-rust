@@ -11,10 +11,12 @@ pub mod tools;
 pub mod types;
 pub use error::EventError;
 pub use repository::AppendOutcome;
-pub use terminal::{CloseTurnError, TurnClosure, TurnCommit, TurnKey};
+pub use terminal::{CloseTurnError, TurnClosure, TurnCommit};
 pub use types::*;
 
-use crate::database::{DatabaseError, SessionDatabase, Transaction, extract_usage_keys};
+use crate::database::{
+    DatabaseError, SessionDatabase, Transaction, extract_event_kind, extract_usage_keys,
+};
 use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_domain::contracts::storage::{AdmissionError, CommitTicket, Committed};
 use parrot_domain::protocol::messages::parrot::Event;
@@ -142,7 +144,7 @@ pub use parrot_core::NeverCancelled;
 pub fn record(tx: &Transaction<'_>, event: &Event, at: &str) -> Result<StoredEvent, EventError> {
     let bytes = event.write_to_bytes()?;
     let (request, call) = extract_usage_keys(event);
-    tx.execute("INSERT INTO event (id, agent_session, payload, created_at, request_id, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",rusqlite::params![event.id,event.agent_session_id,bytes,at,request,call])?;
+    tx.execute("INSERT INTO event (id, agent_session, payload, kind, created_at, request_id, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",rusqlite::params![event.id,event.agent_session_id,bytes,extract_event_kind(event),at,request,call])?;
     let sequence = tx.last_insert_rowid();
     Ok(StoredEvent {
         sequence,

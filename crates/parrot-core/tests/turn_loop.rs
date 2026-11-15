@@ -72,12 +72,10 @@ impl EventPublisher for MemoryEventPublisher {
         &'a self,
         model: &'a TurnModel,
         _: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<String, Error>> {
+    ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
-            let mut started = self.started_turns.lock().unwrap();
-            let turn_id = format!("turn-start-{}", started.len());
-            started.push(model.clone());
-            Ok(turn_id)
+            self.started_turns.lock().unwrap().push(model.clone());
+            Ok(())
         })
     }
 }
@@ -86,7 +84,7 @@ const RUNAWAY_NOTICE: &str = "configured runaway notice";
 
 struct MemoryTurnHooks {
     model: String,
-    turn_ids: Arc<Mutex<Vec<String>>>,
+    activations: Arc<Mutex<usize>>,
     activation_error: Option<Error>,
     fail_at: Option<&'static str>,
 }
@@ -103,8 +101,8 @@ impl parrot_core::TurnHooks for MemoryTurnHooks {
             })
         })
     }
-    fn activate_conversation_turn(&self, turn_id: &str) -> BoxFuture<'_, Result<(), Error>> {
-        self.turn_ids.lock().unwrap().push(turn_id.to_owned());
+    fn activate_conversation_turn(&self) -> BoxFuture<'_, Result<(), Error>> {
+        *self.activations.lock().unwrap() += 1;
         let result = self.activation_error.clone().map_or(Ok(()), Err);
         Box::pin(async move { result })
     }
@@ -143,13 +141,12 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
         Box::pin(async move {
             let hooks = MemoryTurnHooks {
                 model: self.states.model.clone(),
-                turn_ids: self.states.turn_ids.clone(),
+                activations: self.states.turn_activations.clone(),
                 activation_error: self.states.activation_error.clone(),
                 fail_at: self.states.fail_at,
             };
             let model = parrot_core::TurnHooks::begin_conversation_turn(&hooks).await?;
-            let start_event_id = self
-                .publisher
+            self.publisher
                 .report_turn_started(&model, cancellation)
                 .await?;
             let skills = MemorySkills::new(self.states);
@@ -161,7 +158,6 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
                 publisher: self.publisher,
                 hooks,
                 skills,
-                start_event_id,
             }) as Box<dyn parrot_core::Turn>)
         })
     }
@@ -174,13 +170,11 @@ struct MemoryTurn<'a> {
     publisher: &'a MemoryEventPublisher,
     hooks: MemoryTurnHooks,
     skills: MemorySkills,
-    start_event_id: String,
 }
 
 impl parrot_core::Turn for MemoryTurn<'_> {
     fn borrow_services(&mut self) -> parrot_core::TurnServices<'_> {
         parrot_core::TurnServices {
-            start_event_id: &self.start_event_id,
             states: self.states,
             skills: &self.skills,
             tools: self.tools,
@@ -211,9 +205,7 @@ impl parrot_core::Turn for MemoryTurn<'_> {
                 }
                 Err(error) => Err(error.clone()),
             };
-            self.states
-                .disposed_turns
-                .push((self.start_event_id.clone(), result));
+            self.states.disposed_turns.push(result);
             self.states.disposal_error.clone().map_or(Ok(()), Err)
         })
     }
@@ -564,9 +556,9 @@ struct MemoryPromptData {
 struct MemoryState {
     events: Arc<Mutex<Vec<ConversationEvent>>>,
     started_turns: Arc<Mutex<Vec<TurnModel>>>,
-    turn_ids: Arc<Mutex<Vec<String>>>,
+    turn_activations: Arc<Mutex<usize>>,
     closed_turns: Vec<ConversationAddition>,
-    disposed_turns: Vec<(String, Result<Outcome, Error>)>,
+    disposed_turns: Vec<Result<Outcome, Error>>,
     activation_error: Option<Error>,
     disposal_error: Option<Error>,
     usage_totals: parrot_core::UsageTotals,
@@ -656,7 +648,7 @@ impl MemoryState {
         let mut state = Self {
             events: Arc::default(),
             started_turns: Arc::default(),
-            turn_ids: Arc::new(Mutex::new(Vec::new())),
+            turn_activations: Arc::new(Mutex::new(0)),
             closed_turns: Vec::new(),
             disposed_turns: Vec::new(),
             activation_error: None,

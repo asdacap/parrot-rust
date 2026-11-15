@@ -9,7 +9,6 @@ use crate::{
 };
 
 struct ExecutionServices<'a> {
-    start_event_id: &'a str,
     hooks: &'a dyn TurnHooks,
     skills: &'a dyn SkillProvider,
     provider: &'a dyn Provider,
@@ -229,7 +228,6 @@ async fn execute_turn(
                 .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::from_response(&response)],
                     persistence: ConversationPersistence::CloseTurn {
-                        start_event_id: services.start_event_id.to_owned(),
                         finish_reason: response.finish_reason.clone(),
                         usage,
                     },
@@ -297,12 +295,9 @@ async fn run_opened_turn(
     turn: TurnServices<'_>,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
-    turn.hooks
-        .activate_conversation_turn(turn.start_event_id)
-        .await?;
+    turn.hooks.activate_conversation_turn().await?;
     let mut state = turn.states.get_agent_state().await?;
     let services = ExecutionServices {
-        start_event_id: turn.start_event_id,
         hooks: turn.hooks,
         skills: turn.skills,
         provider: turn.provider,

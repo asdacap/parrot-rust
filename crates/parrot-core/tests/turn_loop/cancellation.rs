@@ -191,10 +191,7 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
         finish(running)
     };
     assert_eq!(result, Err(Error::cancelled()));
-    assert_eq!(
-        state.disposed_turns,
-        [("turn-start-0".into(), Err(Error::cancelled()))]
-    );
+    assert_eq!(state.disposed_turns, [Err(Error::cancelled())]);
     assert!(joined.load(Ordering::SeqCst));
     assert_eq!(state.recorded_tools.len(), 1);
     assert!(state.applied_results.is_empty());

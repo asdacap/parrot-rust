@@ -5,8 +5,8 @@ use parrot_provider::sessions;
 use std::{sync::Arc, time::Duration};
 
 pub trait TurnDiagnostics: Send + Sync {
-    fn started(&self, turn_id: &str);
-    fn finished(&self, turn_id: &str, outcome: &str, error_code: Option<&str>);
+    fn started(&self);
+    fn finished(&self, outcome: &str, error_code: Option<&str>);
 }
 
 pub struct LiveActivity {
@@ -82,11 +82,11 @@ impl SessionActivity for LiveActivity {
     fn finish_execution(&self, execution: i64, outcome: &Execution) {
         self.tracker.finish_execution(execution, outcome.clone());
     }
-    fn turn_started(&self, turn_id: &str) {
-        self.diagnostics.started(turn_id);
+    fn turn_started(&self) {
+        self.diagnostics.started();
     }
-    fn turn_finished(&self, turn_id: &str, outcome: &str, error_code: Option<&str>) {
-        self.diagnostics.finished(turn_id, outcome, error_code);
+    fn turn_finished(&self, outcome: &str, error_code: Option<&str>) {
+        self.diagnostics.finished(outcome, error_code);
     }
     fn assistant_message(&self, message: &str) {
         self.tracker.record_assistant_message(message);

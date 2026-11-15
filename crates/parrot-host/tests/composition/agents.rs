@@ -348,8 +348,8 @@ mod fixture {
         fn finish_execution(&self, execution: i64, outcome: &Execution) {
             self.0.finish_execution(execution, outcome.clone());
         }
-        fn turn_started(&self, _: &str) {}
-        fn turn_finished(&self, _: &str, _: &str, _: Option<&str>) {}
+        fn turn_started(&self) {}
+        fn turn_finished(&self, _: &str, _: Option<&str>) {}
         fn assistant_message(&self, _: &str) {}
     }
     struct NoParent;

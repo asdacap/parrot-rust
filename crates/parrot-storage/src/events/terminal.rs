@@ -4,12 +4,6 @@ use parrot_domain::contracts::async_ops::OperationError;
 use parrot_domain::contracts::events::EventPublisher;
 use rusqlite::{OptionalExtension, params};
 
-/// Source Drain keeps the persisted TurnStarted event ID as its turnId.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TurnKey {
-    pub agent_session_id: String,
-    pub start_event_id: String,
-}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TurnClosure {
     NewlyClosed,
@@ -17,7 +11,7 @@ pub enum TurnClosure {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct TurnCommit {
-    pub key: TurnKey,
+    pub agent_session_id: String,
     pub closure: TurnClosure,
     pub terminal: StoredEvent,
     pub conversation: Option<ConversationItem>,
@@ -25,64 +19,61 @@ pub struct TurnCommit {
 
 /// The committed event stream is the durable closed-turn state. Existing
 /// terminals win unchanged; a losing proposal writes no event or projection.
+/// The open turn is the agent session's latest `turn_started` event, and the
+/// proposal closes it when no terminal follows it.
 pub fn close_turn_if_open(
     tx: &Transaction<'_>,
-    key: &TurnKey,
+    agent_session_id: &str,
     proposed: &Event,
     message: Option<&ConversationMessage>,
 ) -> Result<TurnCommit, EventError> {
-    if proposed.agent_session_id != key.agent_session_id || !proposed.has_turn_ended() {
+    if proposed.agent_session_id != agent_session_id || !proposed.has_turn_ended() {
         return Err(EventError::Invalid(
-            "terminal proposal must be TurnEnded for the keyed agent".into(),
+            "terminal proposal must be TurnEnded for the closing agent".into(),
         ));
     }
-    let start: Option<(i64, String, Vec<u8>)> = tx
+    let start: Option<(i64, Vec<u8>)> = tx
         .query_row(
-            "SELECT sequence, agent_session, payload FROM event WHERE id = ?1",
-            [&key.start_event_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            "SELECT sequence, payload FROM event
+             WHERE agent_session = ?1 AND kind = 'turn_started'
+             ORDER BY sequence DESC LIMIT 1",
+            [agent_session_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    let (sequence, agent, bytes) =
-        start.ok_or_else(|| EventError::Invalid("turn start does not exist".into()))?;
-    let start = Event::parse_from_bytes(&bytes)?;
-    if agent != key.agent_session_id
-        || start.agent_session_id != key.agent_session_id
-        || !start.has_turn_started()
-    {
+    let (start_sequence, start_bytes) =
+        start.ok_or_else(|| EventError::Invalid("no open turn for the agent".into()))?;
+    let started = Event::parse_from_bytes(&start_bytes)?;
+    if started.agent_session_id != agent_session_id {
         return Err(EventError::Invalid(
-            "turn key does not name that agent's TurnStarted".into(),
+            "turn start does not name the agent".into(),
         ));
     }
-    let mut read=tx.prepare("SELECT sequence,payload FROM event WHERE agent_session = ?1 AND sequence > ?2 ORDER BY sequence")?;
-    let rows = read.query_map(params![key.agent_session_id, sequence], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
-    })?;
-    for row in rows {
-        let (sequence, raw) = row?;
+    let terminal: Option<(i64, Vec<u8>)> = tx
+        .query_row(
+            "SELECT sequence, payload FROM event
+             WHERE agent_session = ?1 AND sequence > ?2 AND kind = 'turn_ended'
+             ORDER BY sequence LIMIT 1",
+            params![agent_session_id, start_sequence],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((sequence, raw)) = terminal {
         let event = Event::parse_from_bytes(&raw)?;
-        if event.has_turn_ended() {
-            return Ok(TurnCommit {
-                key: key.clone(),
-                closure: TurnClosure::AlreadyClosed,
-                terminal: StoredEvent {
-                    sequence,
-                    event,
-                    raw,
-                },
-                conversation: None,
-            });
-        }
-        if event.has_turn_started() {
-            return Err(EventError::Invalid(
-                "turn key is stale: a later turn has started".into(),
-            ));
-        }
+        return Ok(TurnCommit {
+            agent_session_id: agent_session_id.to_owned(),
+            closure: TurnClosure::AlreadyClosed,
+            terminal: StoredEvent {
+                sequence,
+                event,
+                raw,
+            },
+            conversation: None,
+        });
     }
-    drop(read);
     let outcome = repository::append(tx, proposed, message)?;
     Ok(TurnCommit {
-        key: key.clone(),
+        agent_session_id: agent_session_id.to_owned(),
         closure: TurnClosure::NewlyClosed,
         terminal: outcome.stored,
         conversation: outcome.conversation,
@@ -101,13 +92,13 @@ pub enum CloseTurnError<E> {
 impl EventRepository {
     pub fn admit_close_turn(
         &self,
-        key: TurnKey,
+        agent_session_id: String,
         proposed: Event,
         message: Option<ConversationMessage>,
         cancellation: &dyn Cancellation,
-    ) -> Result<CommitTicket<TurnKey, TurnCommit, EventError>, AdmissionError<EventError>> {
-        let command_key = key.clone();
-        self.admit(key, cancellation, move |tx| {
+    ) -> Result<CommitTicket<String, TurnCommit, EventError>, AdmissionError<EventError>> {
+        let command_key = agent_session_id.clone();
+        self.admit(agent_session_id, cancellation, move |tx| {
             close_turn_if_open(tx, &command_key, &proposed, message.as_ref())
         })
     }
@@ -117,7 +108,7 @@ impl EventRepository {
     /// T46 must route BOTH normal and interrupted writers through this boundary.
     pub async fn close_turn_and_publish<P, R>(
         &self,
-        key: TurnKey,
+        agent_session_id: String,
         proposed: Event,
         message: Option<ConversationMessage>,
         publisher: &P,
@@ -129,7 +120,7 @@ impl EventRepository {
         R: FnOnce(&TurnCommit),
     {
         let ticket = self
-            .admit_close_turn(key, proposed, message, cancellation)
+            .admit_close_turn(agent_session_id, proposed, message, cancellation)
             .map_err(|error| match error {
                 AdmissionError::Cancelled => CloseTurnError::AdmissionCancelled,
                 AdmissionError::Rejected(error) => CloseTurnError::Repository(error),

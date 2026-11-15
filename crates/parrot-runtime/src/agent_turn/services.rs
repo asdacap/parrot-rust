@@ -168,8 +168,8 @@ pub trait SessionActivity: ProviderActivity {
     fn execution_duration(&self) -> std::time::Duration;
     fn finish_execution(&self, execution: i64, outcome: &super::lifecycle::Execution);
     /// Safe bounded classification only; never provider bodies/raw error metadata.
-    fn turn_started(&self, turn_id: &str);
-    fn turn_finished(&self, turn_id: &str, outcome: &str, error_code: Option<&str>);
+    fn turn_started(&self);
+    fn turn_finished(&self, outcome: &str, error_code: Option<&str>);
     fn assistant_message(&self, message: &str);
 }
 

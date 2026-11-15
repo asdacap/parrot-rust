@@ -9,3 +9,6 @@ CREATE INDEX IF NOT EXISTS event_request_by_sequence
 
 CREATE INDEX IF NOT EXISTS event_tool_call
     ON event (agent_session, tool_call_id) WHERE tool_call_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS event_turn_by_session
+    ON event (agent_session, kind, sequence);

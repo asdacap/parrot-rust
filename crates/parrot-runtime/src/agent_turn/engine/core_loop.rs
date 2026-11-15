@@ -115,7 +115,7 @@ struct CoreLoopLifecycle<'a, S: AccessSnapshot + 'static> {
     backend: &'a RuntimeBackend<S>,
     cancellation: &'a dyn Cancellation,
     work: &'a dyn DrainWork,
-    failed_key: Option<TurnKey>,
+    failed_turn: bool,
 }
 
 impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecycle<'_, S> {
@@ -185,7 +185,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                 ),
             };
             let model = parrot_core::TurnHooks::begin_conversation_turn(&hooks).await?;
-            let start_event_id = parrot_core::EventPublisher::report_turn_started(
+            parrot_core::EventPublisher::report_turn_started(
                 &publisher,
                 &model,
                 parrot_core::CancellationToken::new(cancellation),
@@ -217,8 +217,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
             };
             Ok(Box::new(RuntimeTurn {
                 backend,
-                failed_key: &mut self.failed_key,
-                start_event_id,
+                failed_turn: &mut self.failed_turn,
                 states,
                 tools,
                 hooks,
@@ -232,8 +231,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
 
 struct RuntimeTurn<'a, S: AccessSnapshot + 'static> {
     backend: &'a RuntimeBackend<S>,
-    failed_key: &'a mut Option<TurnKey>,
-    start_event_id: String,
+    failed_turn: &'a mut bool,
     states: RuntimeStates<'a, S>,
     tools: RuntimeTools<'a, S>,
     hooks: RuntimeTurnHooks<'a, S>,
@@ -245,7 +243,6 @@ struct RuntimeTurn<'a, S: AccessSnapshot + 'static> {
 impl<S: AccessSnapshot + 'static> parrot_core::Turn for RuntimeTurn<'_, S> {
     fn borrow_services(&mut self) -> parrot_core::TurnServices<'_> {
         parrot_core::TurnServices {
-            start_event_id: &self.start_event_id,
             states: &mut self.states,
             skills: &self.skills,
             tools: &self.tools,
@@ -262,23 +259,17 @@ impl<S: AccessSnapshot + 'static> parrot_core::Turn for RuntimeTurn<'_, S> {
         Box::pin(async move {
             let backend = self.backend;
             backend.skills.end_turn().await;
-            let key = TurnKey {
-                agent_session_id: backend.history.agent_session_id().to_owned(),
-                start_event_id: self.start_event_id.clone(),
-            };
             match result {
                 Ok(parrot_core::Outcome::Completed(completed)) => {
-                    backend
-                        .activity
-                        .turn_finished(&key.start_event_id, "completed", None);
+                    backend.activity.turn_finished("completed", None);
                     backend.activity.assistant_message(completed);
                 }
                 Ok(parrot_core::Outcome::BudgetExhausted(notice)) => {
-                    *self.failed_key = Some(key);
+                    *self.failed_turn = true;
                     backend.fail(notice.clone(), String::new()).await?;
                 }
                 Err(error) => {
-                    *self.failed_key = Some(key);
+                    *self.failed_turn = true;
                     if error.kind == ErrorKind::Cancelled
                         && !backend.suspending.load(Ordering::Acquire)
                     {
@@ -299,7 +290,6 @@ impl<S: AccessSnapshot + 'static> parrot_core::Turn for RuntimeTurn<'_, S> {
                             .add_conversation_messages(ConversationAddition {
                                 messages: vec![Message::text(Role::Assistant, &content)],
                                 persistence: ConversationPersistence::CloseTurn {
-                                    start_event_id: self.start_event_id.clone(),
                                     finish_reason: FinishReason::Interrupted,
                                     usage,
                                 },
@@ -320,7 +310,7 @@ pub(super) async fn run<S>(
     backend: &RuntimeBackend<S>,
     cancellation: &dyn Cancellation,
     work: &dyn DrainWork,
-) -> (Result<Execution, TurnError>, Option<TurnKey>)
+) -> (Result<Execution, TurnError>, bool)
 where
     S: AccessSnapshot + 'static,
 {
@@ -339,20 +329,20 @@ where
     }
     .await;
     if let Err(error) = initialized {
-        return (Err(error), None);
+        return (Err(error), false);
     }
     let mut lifecycle = CoreLoopLifecycle {
         backend,
         cancellation,
         work,
-        failed_key: None,
+        failed_turn: false,
     };
     let outcome = parrot_core::TurnEngine::run(
         &mut lifecycle,
         parrot_core::CancellationToken::new(cancellation),
     )
     .await;
-    let failed_key = lifecycle.failed_key.take();
+    let failed_turn = lifecycle.failed_turn;
     {
         let mut state = backend.state.lock().await;
         state.tool_conversation.reset_pending();
@@ -362,7 +352,7 @@ where
         Ok(parrot_core::Outcome::BudgetExhausted(notice)) => Ok(Execution::failed(notice)),
         Err(error) => Err(TurnError::Core(error)),
     };
-    (execution, failed_key)
+    (execution, failed_turn)
 }
 
 #[cfg(test)]

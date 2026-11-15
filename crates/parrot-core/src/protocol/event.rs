@@ -10,12 +10,12 @@ pub trait EventPublisher: Send + Sync {
     ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("EventPublisher.publish")) })
     }
-    /// Publishes the turn start event and returns its durable event id, which keys the turn.
+    /// Publishes the turn start event carrying the turn's model presentation.
     fn report_turn_started<'a>(
         &'a self,
         _model: &'a crate::TurnModel,
         _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<String, Error>> {
+    ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("EventPublisher.report_turn_started")) })
     }
 }

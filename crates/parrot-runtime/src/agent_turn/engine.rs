@@ -42,7 +42,7 @@ use parrot_storage::{
     conversation::{AgentConversation, AgentHistoryView, ConversationReadView, ModelMessage},
     events::{
         Admission, CloseTurnError, ConversationMessage, ConversationOrigin, ConversationPart,
-        EventError, MessageRole, NeverCancelled, ProviderContent, TurnClosure, TurnKey,
+        EventError, MessageRole, NeverCancelled, ProviderContent, TurnClosure,
     },
 };
 use std::sync::{
@@ -887,37 +887,27 @@ where
         work: &'a dyn DrainWork,
     ) -> BoxFuture<'a, Result<DrainPass, LifecycleError>> {
         Box::pin(async move {
-            let (result, failed_key) = core_loop::run(self, cancellation, work).await;
+            let (result, failed_turn) = core_loop::run(self, cancellation, work).await;
             let outcome = async {
                 match result {
                     Ok(execution) => {
-                        if execution.status == ExecutionStatus::Failed
-                            && let Some(key) = &failed_key
-                        {
-                            self.activity.turn_finished(
-                                &key.start_event_id,
-                                "failed",
-                                Some("runaway"),
-                            );
+                        if execution.status == ExecutionStatus::Failed && failed_turn {
+                            self.activity.turn_finished("failed", Some("runaway"));
                         }
                         Ok(execution)
                     }
                     Err(error) if error.is_cancelled() => {
                         work.join_mutations().await?;
-                        if let Some(key) = &failed_key {
-                            self.activity
-                                .turn_finished(&key.start_event_id, "cancelled", None);
+                        if failed_turn {
+                            self.activity.turn_finished("cancelled", None);
                         }
                         Ok(Execution::canceled())
                     }
                     Err(error) => {
                         work.join_mutations().await?;
-                        if let Some(key) = &failed_key {
-                            self.activity.turn_finished(
-                                &key.start_event_id,
-                                "failed",
-                                Some(error.diagnostic_code().code()),
-                            );
+                        if failed_turn {
+                            self.activity
+                                .turn_finished("failed", Some(error.diagnostic_code().code()));
                         }
                         self.fail(error.to_string(), error.response_body().to_owned())
                             .await

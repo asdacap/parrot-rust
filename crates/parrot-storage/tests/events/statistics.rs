@@ -145,8 +145,8 @@ async fn usage_fact_semantic_retry_preserves_original_wire_unknowns_and_optional
             let (request_id, tool_call_id) =
                 parrot_storage::database::extract_usage_keys(&parsed);
             tx.execute(
-                "INSERT INTO event (id, agent_session, payload, created_at, request_id, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                rusqlite::params![parsed.id, parsed.agent_session_id, raw, AT, request_id, tool_call_id],
+                "INSERT INTO event (id, agent_session, payload, kind, created_at, request_id, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![parsed.id, parsed.agent_session_id, raw, "request_usage_recorded", AT, request_id, tool_call_id],
             )?;
             assert_eq!(append_usage_fact(tx, &fact, &clock)?, 1);
             let stored: Vec<u8> =

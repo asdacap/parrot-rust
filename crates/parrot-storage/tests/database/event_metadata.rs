@@ -50,7 +50,7 @@ fn agent_start_facts_keep_their_original_identity_after_reopen() {
     ] {
         transaction
             .execute(
-                "INSERT INTO event(id,agent_session,payload,created_at) VALUES(?1,?2,?3,'')",
+                "INSERT INTO event(id,agent_session,payload,kind,created_at) VALUES(?1,?2,?3,'agent_started','')",
                 params![
                     event.id,
                     event.agent_session_id,

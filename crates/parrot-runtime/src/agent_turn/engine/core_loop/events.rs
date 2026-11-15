@@ -23,7 +23,7 @@ impl parrot_core::EventPublisher for RuntimeEventPublisher<'_> {
         &'a self,
         model: &'a parrot_core::TurnModel,
         cancellation: parrot_core::CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<String, CoreError>> {
+    ) -> BoxFuture<'a, Result<(), CoreError>> {
         adapt_operation(async move {
             let mut event = self.events.event();
             let mut payload = protocol::TurnStarted {
@@ -39,9 +39,7 @@ impl parrot_core::EventPublisher for RuntimeEventPublisher<'_> {
                     });
             }
             event.set_turn_started(payload);
-            let turn_id = event.id.clone();
-            self.events.emit(event, &cancellation).await?;
-            Ok(turn_id)
+            self.events.emit(event, &cancellation).await
         })
     }
 }

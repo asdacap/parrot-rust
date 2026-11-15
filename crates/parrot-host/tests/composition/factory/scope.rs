@@ -2406,7 +2406,6 @@ async fn shared_provider_routes_actual_turn_diagnostics(interrupt: bool) {
     assert_eq!(fixture.requests.lock().unwrap().len(), 3);
     let first_events = first_user.lease.events.replay().await.unwrap();
     let second_events = second_user.lease.events.replay().await.unwrap();
-    let mut turn_ids = Vec::new();
     for (scope, events) in [
         (&first_root, &first_events),
         (&second_root, &second_events),
@@ -2426,7 +2425,6 @@ async fn shared_provider_routes_actual_turn_diagnostics(interrupt: bool) {
             1,
             "actual durable TurnEnded for {agent}"
         );
-        turn_ids.push(starts[0].id.clone());
     }
     #[cfg(target_os = "linux")]
     for path in [&first_path, &second_path] {
@@ -2498,12 +2496,7 @@ async fn shared_provider_routes_actual_turn_diagnostics(interrupt: bool) {
         assert!(!log.contains("private-"));
         assert!(!log.contains("https://example.invalid"));
     }
-    for ((scope, turn_id), log) in
-        scopes
-            .iter()
-            .zip(turn_ids)
-            .zip([&first_log, &second_log, &first_log])
-    {
+    for (scope, log) in scopes.iter().zip([&first_log, &second_log, &first_log]) {
         let agent = &scope.identity().session.session_id;
         let lines: Vec<_> = log
             .lines()
@@ -2535,11 +2528,13 @@ async fn shared_provider_routes_actual_turn_diagnostics(interrupt: bool) {
         );
         assert_eq!(
             turn_diagnostic_field(starts[0], "correlation"),
-            Some(turn_id.as_str())
+            None,
+            "turn diagnostics no longer correlate by start event id"
         );
         assert_eq!(
             turn_diagnostic_field(finishes[0], "correlation"),
-            Some(turn_id.as_str())
+            None,
+            "turn diagnostics no longer correlate by start event id"
         );
     }
     assert!(first_log.contains("category=\"session\" event=\"closed\""));

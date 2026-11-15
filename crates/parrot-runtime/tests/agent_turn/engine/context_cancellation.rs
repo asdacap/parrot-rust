@@ -46,14 +46,10 @@ async fn awaited_actual_epoch_prompt_cancellation_closes_interrupted_without_pro
     assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 0);
     let events = fixture.events().await;
     assert_interrupted(&events);
-    let started = events
-        .iter()
-        .find(|event| event.has_turn_started())
-        .unwrap();
     let diagnostic = runtime.activity.diagnostic.lock().unwrap().clone();
     assert_eq!(diagnostic.len(), 2);
-    assert_eq!(diagnostic[0], format!("started:{}", started.id));
-    assert!(diagnostic[1].starts_with(&format!("finished:{}:cancelled:", started.id)));
+    assert_eq!(diagnostic[0], "started");
+    assert!(diagnostic[1].starts_with("finished:cancelled:"));
     assert!(trace.values().iter().any(|entry| entry == "epoch-start"));
     assert!(!trace.values().iter().any(|entry| entry == "epoch-done"));
     assert!(!trace.values().iter().any(|entry| entry == "skills-begin"));
@@ -146,8 +142,8 @@ async fn native_initialization_failure_finishes_its_started_activity_without_ent
     assert!(!events.iter().any(|event| event.has_turn_ended()));
     let diagnostic = runtime.activity.diagnostic.lock().unwrap().clone();
     assert_eq!(diagnostic.len(), 2);
-    assert_eq!(diagnostic[0], format!("started:{}", starts[0].id));
-    assert!(diagnostic[1].starts_with(&format!("finished:{}:failed:", starts[0].id)));
+    assert_eq!(diagnostic[0], "started");
+    assert!(diagnostic[1].starts_with("finished:failed:"));
     runtime.close().await;
 }
 

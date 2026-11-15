@@ -9,7 +9,6 @@ use parrot_storage::database::{Connection, SessionDatabase, Transaction};
 use parrot_storage::events::terminal::close_turn_if_open;
 use parrot_storage::events::{
     ConversationMessage, EventError, EventRepository, MessageRole, NeverCancelled, TurnClosure,
-    TurnKey,
 };
 use protobuf::Message;
 use std::io::Write;
@@ -93,10 +92,6 @@ async fn main() {
     start.set_turn_started(TurnStarted::new());
     repository.append(start, None).await.unwrap();
 
-    let key = TurnKey {
-        agent_session_id: "agent".into(),
-        start_event_id: "crash-start".into(),
-    };
     let mut proposed = Event::new();
     proposed.id = "crash-terminal".into();
     proposed.agent_session_id = "agent".into();
@@ -121,7 +116,8 @@ async fn main() {
         "during-transaction" => {
             repository
                 .transaction(move |transaction| -> Result<(), EventError> {
-                    let outcome = close_turn_if_open(transaction, &key, &proposed, Some(&message))?;
+                    let outcome =
+                        close_turn_if_open(transaction, "agent", &proposed, Some(&message))?;
                     assert_eq!(outcome.closure, TurnClosure::NewlyClosed);
                     assert_eq!(count_rows(transaction, "event"), 2);
                     for table in ["conversation_part", "conversation_item"] {
@@ -137,7 +133,7 @@ async fn main() {
         }
         "after-commit-before-observation" => {
             let _unobserved_ticket = repository
-                .admit_close_turn(key, proposed, Some(message), &NeverCancelled)
+                .admit_close_turn("agent".to_owned(), proposed, Some(message), &NeverCancelled)
                 .unwrap();
             repository
                 .transaction(|transaction| {
@@ -162,14 +158,13 @@ async fn main() {
             };
             repository
                 .close_turn_and_publish(
-                    key,
+                    "agent".to_owned(),
                     proposed,
                     Some(message),
                     &publisher,
                     &NeverCancelled,
                     |receipt| {
                         assert_eq!(receipt.closure, TurnClosure::NewlyClosed);
-                        assert_eq!(receipt.key.start_event_id, "crash-start");
                         publisher.closed.store(true, Ordering::SeqCst);
                     },
                 )

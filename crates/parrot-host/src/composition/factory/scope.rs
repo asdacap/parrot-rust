@@ -298,7 +298,7 @@ struct ScopeLog<S: RestrictableAccessSnapshot + 'static> {
     user: Arc<UserServices<S>>,
     session_id: String,
     clock: Arc<dyn Clock>,
-    turn: Mutex<Option<(String, Instant)>>,
+    turn: Mutex<Option<Instant>>,
 }
 impl<S: RestrictableAccessSnapshot + 'static> ScopeLog<S> {
     fn event(
@@ -348,25 +348,16 @@ impl<S: RestrictableAccessSnapshot + 'static> DiagnosticSink for ScopeLog<S> {
     }
 }
 impl<S: RestrictableAccessSnapshot + 'static> TurnDiagnostics for ScopeLog<S> {
-    fn started(&self, turn_id: &str) {
-        *self.turn.lock().expect("turn diagnostics poisoned") =
-            Some((turn_id.to_owned(), self.clock.now()));
+    fn started(&self) {
+        *self.turn.lock().expect("turn diagnostics poisoned") = Some(self.clock.now());
         let mut event = DiagnosticEvent::new("turn", "started", DiagnosticSeverity::Information);
         event.agent_session_id = Some(self.session_id.clone());
-        event.correlation_id = Some(turn_id.to_owned());
         self.user.diagnostic(&event);
     }
-    fn finished(&self, turn_id: &str, outcome: &str, code: Option<&str>) {
-        let started = {
-            let mut turn = self.turn.lock().expect("turn diagnostics poisoned");
-            match turn.as_ref() {
-                Some((active_id, started)) if active_id == turn_id => {
-                    let started = *started;
-                    *turn = None;
-                    started
-                }
-                _ => return,
-            }
+    fn finished(&self, outcome: &str, code: Option<&str>) {
+        let started = self.turn.lock().expect("turn diagnostics poisoned").take();
+        let Some(started) = started else {
+            return;
         };
         let severity = if outcome == "failed" {
             DiagnosticSeverity::Error
@@ -375,7 +366,6 @@ impl<S: RestrictableAccessSnapshot + 'static> TurnDiagnostics for ScopeLog<S> {
         };
         let mut event = DiagnosticEvent::new("turn", "finished", severity);
         event.agent_session_id = Some(self.session_id.clone());
-        event.correlation_id = Some(turn_id.to_owned());
         event.outcome = Some(outcome.to_owned());
         event.error_code = code.map(str::to_owned);
         event.duration_milliseconds = Some(

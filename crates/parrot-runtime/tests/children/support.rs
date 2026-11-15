@@ -411,8 +411,8 @@ impl SessionActivity for Activity {
         Duration::from_millis(1234)
     }
     fn finish_execution(&self, _: i64, _: &Execution) {}
-    fn turn_started(&self, _: &str) {}
-    fn turn_finished(&self, _: &str, _: &str, _: Option<&str>) {}
+    fn turn_started(&self) {}
+    fn turn_finished(&self, _: &str, _: Option<&str>) {}
     fn assistant_message(&self, _: &str) {}
 }
 pub type Backend = RuntimeBackend<Security>;
