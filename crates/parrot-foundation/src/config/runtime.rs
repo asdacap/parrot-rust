@@ -112,6 +112,8 @@ pub struct CompactionConfig {
     pub trigger_percent: i32,
     pub target_percent: i32,
     pub maximum_input_tokens: i32,
+    /// Hard cap on requested output tokens; zero disables it.
+    pub maximum_output_tokens: i32,
     pub summary_output_tokens: i32,
 }
 
@@ -304,7 +306,7 @@ impl RuntimeSettings {
             "cliUtilities":{"expected":self.cli_utilities.expected,"optional":self.cli_utilities.optional},
             "readOnlyExecCommandPrefixes":self.read_only_exec_command_prefixes.as_slice(),"disabledTools":self.disabled_tools,
             "sandboxRules":rules(&self.sandbox_rules),"sandboxEnabled":self.sandbox_enabled,"sandboxDevBind":self.sandbox_dev_bind.as_slice(),
-            "inlineDiff":self.inline_diff,"compaction":{"triggerPercent":self.compaction.trigger_percent,"targetPercent":self.compaction.target_percent,"maximumInputTokens":self.compaction.maximum_input_tokens,"summaryOutputTokens":self.compaction.summary_output_tokens},
+            "inlineDiff":self.inline_diff,"compaction":{"triggerPercent":self.compaction.trigger_percent,"targetPercent":self.compaction.target_percent,"maximumInputTokens":self.compaction.maximum_input_tokens,"maximumOutputTokens":self.compaction.maximum_output_tokens,"summaryOutputTokens":self.compaction.summary_output_tokens},
             "agentTasks":{"maximumAttempts":self.agent_tasks.maximum_attempts,"maximumResponseRepairs":self.agent_tasks.maximum_response_repairs,"forkHistoryMode":format!("{:?}",self.agent_tasks.fork_history_mode)},
             "agentSend":{"toParent":self.agent_send_to_parent},"toolDefinitions":tools,
             "agentLimits":{"disableRecursionLimit":self.agent_limits.disable_recursion_limit},
@@ -645,6 +647,7 @@ fn read_compaction(root: &Node) -> Result<CompactionConfig> {
             "trigger_percent",
             "target_percent",
             "maximum_input_tokens",
+            "maximum_output_tokens",
             "summary_output_tokens",
         ],
     )?;
@@ -662,6 +665,11 @@ fn read_compaction(root: &Node) -> Result<CompactionConfig> {
             node,
             "maximum_input_tokens",
             "compaction.maximum_input_tokens",
+        )?,
+        maximum_output_tokens: nonnegative_integer(
+            node,
+            "maximum_output_tokens",
+            "compaction.maximum_output_tokens",
         )?,
         summary_output_tokens: positive_integer(
             node,

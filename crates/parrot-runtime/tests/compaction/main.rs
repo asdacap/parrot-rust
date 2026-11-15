@@ -150,12 +150,13 @@ fn select(selected: &ProviderModel) -> ResolvedModelSelection {
         .resolve("provider/model")
         .unwrap()
 }
-fn compactor(trigger: i32, target: i32, input: i32) -> Compactor {
+fn compactor(trigger: i32, target: i32, input: i32, output: i32) -> Compactor {
     Compactor::new(
         CompactionSettings {
             trigger_percent: trigger,
             target_percent: target,
             maximum_input_tokens: input,
+            maximum_output_tokens: output,
             summary_output_tokens: 100,
             summary_instructions: "Summarize.".into(),
             summary_prefix: "Summary: ".into(),
@@ -267,8 +268,14 @@ fn compaction_boundaries_preserve_full_requested_output_and_request_headroom() {
     ] {
         let mut selected = model(context_window);
         selected.model.max_output_tokens = output;
-        let snapshot =
-            estimate_context(&compactor(100, 30, 60000), &select(&selected), "", &[], &[]).unwrap();
+        let snapshot = estimate_context(
+            &compactor(100, 30, 60000, 0),
+            &select(&selected),
+            "",
+            &[],
+            &[],
+        )
+        .unwrap();
         let trigger = snapshot.trigger_tokens.unwrap();
         let budget = RequestStatistic::default();
         let requested = if output > 0 { output } else { 32 * 1024 };
@@ -323,7 +330,7 @@ fn original_context_usage_rows_strict_boundary() {
         (-10, "", 4, None, false),
     ] {
         let snapshot = estimate_context(
-            &compactor(50, 30, 60000),
+            &compactor(50, 30, 60000, 0),
             &select(&model(limit)),
             instructions,
             &[],
@@ -375,7 +382,7 @@ fn actual_selected_policy_and_override_preserve_total_window() {
     let selected = ModelRouter::new(registry, routing)
         .resolve("small")
         .unwrap();
-    let snapshot = estimate_context(&compactor(90, 30, 60000), &selected, "", &[], &[]).unwrap();
+    let snapshot = estimate_context(&compactor(90, 30, 60000, 0), &selected, "", &[], &[]).unwrap();
     assert_eq!(snapshot.context_limit, 1000);
     assert_eq!(snapshot.input_limit, 1000);
     assert_eq!(snapshot.trigger_percent, 40);
@@ -449,7 +456,7 @@ fn o200k_base_text_totals_preserve_image_and_request_overhead() {
         4 + (1 + 6 + 1 + 12) + 164 + 4
     );
     let selection = select(&selected);
-    let compactor = compactor(50, 30, 600);
+    let compactor = compactor(50, 30, 600, 0);
     let boundary =
         estimate_context(&compactor, &selection, "Hello, world!", &tools, &history).unwrap();
     assert_eq!(boundary.estimated_tokens, 192);
@@ -465,4 +472,17 @@ fn o200k_base_text_totals_preserve_image_and_request_overhead() {
     .unwrap();
     assert_eq!(above.estimated_tokens, 193);
     assert!(above.exceeds_trigger());
+}
+
+#[test]
+fn configured_output_cap_bounds_the_reserved_trigger() {
+    let mut selected = model(1_048_576);
+    selected.model.max_output_tokens = 943_718;
+    let selected = select(&selected);
+    let uncapped = compactor(90, 30, 60_000, 0).capture_context_configuration(&selected);
+    assert_eq!(uncapped.calculate_requested_output_tokens(), 943_718);
+    assert_eq!(uncapped.calculate_trigger_tokens(), Some(99_864));
+    let capped = compactor(90, 30, 60_000, 100_000).capture_context_configuration(&selected);
+    assert_eq!(capped.calculate_requested_output_tokens(), 100_000);
+    assert_eq!(capped.calculate_trigger_tokens(), Some(903_405));
 }

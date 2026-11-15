@@ -27,6 +27,8 @@ pub struct CompactionSettings {
     pub trigger_percent: i32,
     pub target_percent: i32,
     pub maximum_input_tokens: i32,
+    /// Hard cap on the output tokens requested from the model; zero disables it.
+    pub maximum_output_tokens: i32,
     pub summary_output_tokens: i32,
     pub summary_instructions: String,
     pub summary_prefix: String,

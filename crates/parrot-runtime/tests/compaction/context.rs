@@ -137,6 +137,7 @@ impl Fixture {
                 trigger_percent: trigger,
                 target_percent: 30,
                 maximum_input_tokens: 60000,
+                maximum_output_tokens: 0,
                 summary_output_tokens: 1024,
                 summary_instructions: String::new(),
                 summary_prefix: String::new(),

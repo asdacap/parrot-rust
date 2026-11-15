@@ -54,7 +54,10 @@ impl Compactor {
             canonical_model: selected.canonical_model.selector(),
             context_window: selected.canonical_model.model.context_window,
             maximum_input_tokens: selected.canonical_model.model.max_input_tokens,
-            maximum_output_tokens: selected.canonical_model.model.max_output_tokens,
+            maximum_output_tokens: cap_output_tokens(
+                selected.canonical_model.model.max_output_tokens,
+                self.settings.maximum_output_tokens,
+            ),
             trigger_percent: self.settings.trigger_percent,
             context_limit: selected.context_limit().map(Into::into),
         }
@@ -151,6 +154,15 @@ impl Compactor {
             summary_instructions: self.settings.summary_instructions.clone(),
             summary_prefix: self.settings.summary_prefix.clone(),
         }
+    }
+}
+
+/// Applies the configured output cap to the model's declared limit; zero disables the cap.
+fn cap_output_tokens(declared: i32, cap: i32) -> i32 {
+    if declared > 0 && cap > 0 {
+        declared.min(cap)
+    } else {
+        declared
     }
 }
 
