@@ -1,8 +1,8 @@
 use crate::{
     AgentState, CancellationToken, ConfigKey, ContextSnapshot, ConversationAddition,
     ConversationEvent, ConversationOrigin, ConversationPersistence, Error, Message, Provider,
-    ProviderRequest, Role, States, StatusKey, StatusOffering, StatusStanding, ToolDefinition,
-    context::fit_status,
+    ProviderRequest, Role, States, StatusKey, ToolDefinition, context::fit_status,
+    status_steering_needed,
 };
 use std::fmt;
 
@@ -28,37 +28,12 @@ impl fmt::Display for StatusKey {
     }
 }
 
-/// Returns whether the core should steer a new status assembly at a safe point.
-/// Non-auto slots never trigger steering on their own. A new conversation has
-/// empty standing state, so the first safe point steers the initial assembly
-/// even when every slot is static. An auto-update slot with no standing hash
-/// counts as changed, because its content was never injected.
-pub fn status_steering_needed(offering: &StatusOffering, standing: &StatusStanding) -> bool {
-    if offering.is_empty() {
-        return false;
-    }
-    standing.is_empty()
-        || offering
-            .iter()
-            .filter(|(_, offer)| offer.is_auto_update)
-            .any(|(key, offer)| standing.get(key) != Some(&offer.hash))
-}
-
-/// Joins every offered slot's rendered text in slot order.
-pub fn join_status_offering(offering: &StatusOffering) -> String {
-    offering
-        .values()
-        .map(|offer| offer.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
 /// Injects full fitted status without a standing baseline. Later auto-update
 /// changes inject only auto-update slots with changed identities.
 /// After each message, the agent state records cumulative standing identities so
 /// unchanged slots stay known across updates and restarts.
 /// Safe points occur between provider requests.
-pub async fn steer_status(
+pub(crate) async fn steer_status(
     states: &mut dyn States,
     state: &mut AgentState,
     provider: &dyn Provider,
@@ -129,8 +104,8 @@ pub async fn steer_status(
 
 #[cfg(test)]
 mod tests {
-    use super::{StatusKey, StatusOffering, StatusStanding, status_steering_needed};
-    use crate::StatusOffer;
+    use super::{StatusKey, status_steering_needed};
+    use crate::{StatusOffer, StatusOffering, StatusStanding};
 
     fn offering(entries: &[(&str, &str, bool)]) -> StatusOffering {
         entries

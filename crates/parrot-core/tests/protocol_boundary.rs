@@ -75,7 +75,7 @@ fn public_functions_do_not_accept_callback_contracts() {
 }
 
 #[test]
-fn public_types_are_declared_in_protocol() {
+fn public_items_are_declared_in_protocol() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut sources = Vec::new();
     read_sources(&root, &mut sources);
@@ -85,18 +85,28 @@ fn public_types_are_declared_in_protocol() {
             continue;
         }
         for (line, declaration) in source.lines().enumerate() {
-            let declaration = declaration.trim();
-            if ["pub struct ", "pub enum ", "pub trait ", "pub type "]
+            let trimmed = declaration.trim();
+            let type_declaration = ["pub struct ", "pub enum ", "pub trait ", "pub type "]
                 .iter()
-                .any(|prefix| declaration.starts_with(prefix))
-            {
-                violations.push(format!("{}:{}: {declaration}", path.display(), line + 1));
+                .any(|prefix| trimmed.starts_with(prefix));
+            let free_declaration = !declaration.starts_with(char::is_whitespace)
+                && [
+                    "pub fn ",
+                    "pub async fn ",
+                    "pub mod ",
+                    "pub const ",
+                    "pub static ",
+                ]
+                .iter()
+                .any(|prefix| declaration.starts_with(prefix));
+            if type_declaration || free_declaration {
+                violations.push(format!("{}:{}: {trimmed}", path.display(), line + 1));
             }
         }
     }
     assert!(
         violations.is_empty(),
-        "public core types must be declared in protocol:\n{}",
+        "public core items must be declared in protocol:\n{}",
         violations.join("\n")
     );
 }

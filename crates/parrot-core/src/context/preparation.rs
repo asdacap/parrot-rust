@@ -4,7 +4,7 @@ use crate::{
 };
 
 /// Requests provider-owned compaction and reloads its state effects before returning.
-pub async fn compact_context(
+pub(crate) async fn compact_context(
     states: &mut dyn States,
     state: &mut AgentState,
     provider: &dyn Provider,
@@ -110,3 +110,6 @@ async fn prepare_context_epoch(
     }
     Ok(instructions)
 }
+
+#[cfg(test)]
+mod tests;
