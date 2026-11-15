@@ -1,7 +1,7 @@
 use parrot_cli::presenters::tools::generic::GenericToolPresenter;
 use parrot_cli::presenters::*;
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackRenderOptions,
 };
 
 fn terminal(result: &str) -> ToolTerminalPresentation {
@@ -14,7 +14,7 @@ fn terminal(result: &str) -> ToolTerminalPresentation {
 fn rendered(item: &Presentation) -> String {
     ScrollbackItem::render(
         item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns: 32_768,
             color: false,
             inline_diff: false,
@@ -35,7 +35,7 @@ fn generic_presenter_formats_json_inputs_and_results_as_yaml() {
     let live = presenter.present_live(&call, 0).unwrap();
     let live = LiveBufferItem::render(
         &live,
-        LiveBufferRenderContext {
+        LiveBufferRenderOptions {
             columns: 32_768,
             color: false,
         },

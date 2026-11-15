@@ -6,7 +6,7 @@ use parrot_domain::{
 
 use crate::dispatch::dialog::{DialogOption, load};
 
-use super::{CommandContext, SlashCommand, SlashFailure};
+use super::{CommandEnvironment, SlashCommand, SlashFailure};
 
 pub struct TaskLimitCommand;
 
@@ -22,13 +22,13 @@ impl SlashCommand for TaskLimitCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let value = arguments.trim();
             let limit = if value.is_empty() {
-                context.session.get_task_limit(cancellation).await?
+                environment.session.get_task_limit(cancellation).await?
             } else {
                 let parsed = value
                     .bytes()
@@ -36,7 +36,7 @@ impl SlashCommand for TaskLimitCommand {
                     .then(|| value.parse::<i32>().ok())
                     .flatten();
                 let Some(limit) = parsed else {
-                    context
+                    environment
                         .dialog
                         .show_error(
                             "usage: /task-limit [N] (N must be an integer from 0 to 2147483647)",
@@ -45,9 +45,12 @@ impl SlashCommand for TaskLimitCommand {
                         .await?;
                     return Ok(());
                 };
-                context.session.set_task_limit(limit, cancellation).await?
+                environment
+                    .session
+                    .set_task_limit(limit, cancellation)
+                    .await?
             };
-            context
+            environment
                 .dialog
                 .show(
                     &[format!("extra managed-task budget: {limit}")],
@@ -73,23 +76,23 @@ impl SlashCommand for CompactCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let target = match compact_target(arguments) {
                 Ok(target) => target,
                 Err(()) => {
-                    context
+                    environment
                         .dialog
                         .show_error("usage: /compact", cancellation)
                         .await?;
                     return Ok(());
                 }
             };
-            context.activity.wait_until_idle(cancellation).await?;
-            if let Err(failure) = context.session.compact(target, cancellation).await {
-                context
+            environment.activity.wait_until_idle(cancellation).await?;
+            if let Err(failure) = environment.session.compact(target, cancellation).await {
+                environment
                     .dialog
                     .show_error(
                         &format!("compaction failed: {}", exception_message(&failure)),
@@ -131,14 +134,14 @@ impl SlashCommand for GoalCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             if arguments.is_empty() {
-                context.session.clear_goal(cancellation).await
+                environment.session.clear_goal(cancellation).await
             } else {
-                context.session.set_goal(arguments, cancellation).await
+                environment.session.set_goal(arguments, cancellation).await
             }
         })
     }
@@ -158,10 +161,10 @@ impl SlashCommand for StandingInstructionCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
-        context
+        environment
             .session
             .set_standing_instruction(arguments, cancellation)
     }
@@ -181,7 +184,7 @@ impl SlashCommand for SandboxEnableCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
@@ -192,18 +195,18 @@ impl SlashCommand for SandboxEnableCommand {
             } else if value.eq_ignore_ascii_case("false") {
                 false
             } else {
-                context
+                environment
                     .dialog
                     .show_error("usage: /sandbox_enable <true|false>", cancellation)
                     .await?;
                 return Ok(());
             };
             let result: Result<(), SlashFailure> = async {
-                let response = context
+                let response = environment
                     .session
                     .sandbox_enable(enabled, cancellation)
                     .await?;
-                context
+                environment
                     .dialog
                     .show(
                         &[if response.enabled {
@@ -219,7 +222,7 @@ impl SlashCommand for SandboxEnableCommand {
             }
             .await;
             if let Err(failure) = result {
-                context
+                environment
                     .dialog
                     .show_error(
                         &format!("failed to set sandbox: {}", exception_message(&failure)),
@@ -258,20 +261,20 @@ impl SlashCommand for SkillsCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             if !arguments.is_empty() {
-                context
+                environment
                     .dialog
                     .show_error("usage: /skills", cancellation)
                     .await?;
                 return Ok(());
             }
-            match run_skills(context, cancellation).await {
+            match run_skills(environment, cancellation).await {
                 Err(SlashFailure::Rpc(failure)) => {
-                    context
+                    environment
                         .dialog
                         .show_error(
                             &format!("skills unavailable: {}", failure.message()),
@@ -287,10 +290,10 @@ impl SlashCommand for SkillsCommand {
 }
 
 async fn run_skills(
-    context: &mut CommandContext<'_>,
+    environment: &mut CommandEnvironment<'_>,
     cancellation: &dyn Cancellation,
 ) -> Result<(), SlashFailure> {
-    let action = context
+    let action = environment
         .dialog
         .select(
             "Skills",
@@ -314,27 +317,27 @@ async fn run_skills(
     };
     if action.id == "list" {
         let listed = load(
-            context.dialog,
+            environment.dialog,
             "Loading skills…",
-            context.session.list_skills(cancellation),
+            environment.session.list_skills(cancellation),
             cancellation,
         )
         .await?;
-        return show_inventory(context, &listed, cancellation).await;
+        return show_inventory(environment, &listed, cancellation).await;
     }
     loop {
         let listed = load(
-            context.dialog,
+            environment.dialog,
             "Loading skills…",
-            context.session.list_skills(cancellation),
+            environment.session.list_skills(cancellation),
             cancellation,
         )
         .await?;
         if listed.skills.is_empty() {
-            return show_inventory(context, &listed, cancellation).await;
+            return show_inventory(environment, &listed, cancellation).await;
         }
         if !listed.errors.is_empty() {
-            context
+            environment
                 .dialog
                 .show(&error_lines(&listed), cancellation)
                 .await?;
@@ -354,7 +357,7 @@ async fn run_skills(
                 )
             })
             .collect();
-        let selected = context
+        let selected = environment
             .dialog
             .select("Enable or disable skills", &options, cancellation)
             .await?;
@@ -373,13 +376,13 @@ async fn run_skills(
                 "Sequence contains more than one matching element".to_owned(),
             ));
         }
-        context.activity.wait_until_idle(cancellation).await?;
-        let configured = context
+        environment.activity.wait_until_idle(cancellation).await?;
+        let configured = environment
             .session
             .configure_skill(&skill.path, !skill.enabled, cancellation)
             .await?;
-        (context.refresh_skills)(cancellation).await?;
-        context
+        (environment.refresh_skills)(cancellation).await?;
+        environment
             .dialog
             .show(
                 &[format!(
@@ -399,7 +402,7 @@ async fn run_skills(
 }
 
 async fn show_inventory(
-    context: &mut CommandContext<'_>,
+    environment: &mut CommandEnvironment<'_>,
     listed: &ListSkillsResponse,
     cancellation: &dyn Cancellation,
 ) -> Result<(), SlashFailure> {
@@ -421,7 +424,7 @@ async fn show_inventory(
         lines.push("No skills available.".to_owned());
     }
     lines.extend(error_lines(listed));
-    context.dialog.show(&lines, cancellation).await?;
+    environment.dialog.show(&lines, cancellation).await?;
     Ok(())
 }
 

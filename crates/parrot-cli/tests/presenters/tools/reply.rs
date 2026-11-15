@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use parrot_cli::presenters::*;
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackRenderOptions,
 };
 
 fn live(call: &ToolCallPresentation, columns: usize) -> Vec<String> {
@@ -13,7 +13,7 @@ fn live(call: &ToolCallPresentation, columns: usize) -> Vec<String> {
         )
         .present_live(call, 0)
         .unwrap(),
-        LiveBufferRenderContext {
+        LiveBufferRenderOptions {
             columns,
             color: false,
         },
@@ -38,7 +38,7 @@ fn terminal(
         .present_terminal(call, terminal)
         .unwrap()
         .unwrap(),
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns,
             color: false,
             inline_diff: false,

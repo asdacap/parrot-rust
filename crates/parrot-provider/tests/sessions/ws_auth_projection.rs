@@ -446,7 +446,7 @@ fn native_error(error: &Error) -> Value {
     json!({"type":std::any::type_name::<Error>(),"variant":format!("{error:?}"),"message":error.to_string(),"source_chain":chain})
 }
 // Replay only an already-observed typed error through the actual public
-// DiagnosticSession to observe its request-context classifier. This side probe
+// DiagnosticSession to observe its request classification. This side probe
 // never participates in provider attempts, source counters or transport logic.
 struct ErrorSession(Error);
 impl Session for ErrorSession {

@@ -1,7 +1,7 @@
 //! Awaited context epochs over the authoritative storage history.
 use super::effects::{NativeErrors, describe_error};
 use super::{CompactionError, CompactionObserver, ContextSize, ContextSnapshot};
-use crate::prompt_context::{PromptError, SessionPrompt};
+use crate::prompt_assembly::{PromptError, SessionPrompt};
 use parrot_core::{
     ContextConfiguration as CoreContextConfiguration, NeverCancelled, PlanningError,
 };

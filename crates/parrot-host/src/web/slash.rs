@@ -27,10 +27,10 @@ use tonic::{Request, Response, Status};
 /// Binds the source CLI SlashCommands.Create and SlashSession to browser dialogs.
 /// Production construction belongs to the CLI owner, not a second web registry.
 pub trait WebSlashFactory: Send + Sync {
-    fn create(&self, context: WebSlashContext) -> Box<dyn WebSlashRegistry>;
+    fn create(&self, bindings: WebSlashBindings) -> Box<dyn WebSlashRegistry>;
 }
 
-pub struct WebSlashContext {
+pub struct WebSlashBindings {
     pub client: WebClient,
     pub initial_session: wire::UserSession,
     pub dialog: Arc<WebSlashDialog>,
@@ -123,7 +123,7 @@ impl ParrotWeb for WebSlashService {
         _: Request<web::ListSlashCommandsRequest>,
     ) -> Result<Response<web::ListSlashCommandsResponse>, Status> {
         let (frames, _receiver) = mpsc::unbounded_channel();
-        let registry = self.factory.create(WebSlashContext {
+        let registry = self.factory.create(WebSlashBindings {
             client: self.local.clone(),
             initial_session: wire::UserSession::new(),
             dialog: Arc::new(WebSlashDialog::new(frames)),
@@ -165,7 +165,7 @@ impl ParrotWeb for WebSlashService {
                 })
                 .await?
                 .into_inner();
-            let mut registry = factory.create(WebSlashContext {
+            let mut registry = factory.create(WebSlashBindings {
                 client,
                 initial_session: initial.clone(),
                 dialog: dialog.clone(),

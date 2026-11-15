@@ -1,9 +1,9 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_domain::values::config::ModelProfileConfig;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let profiles = context
+    let fixture = ConfigFixture::new();
+    let profiles = fixture
         .configured(
             r#"model_profiles:
   provider:

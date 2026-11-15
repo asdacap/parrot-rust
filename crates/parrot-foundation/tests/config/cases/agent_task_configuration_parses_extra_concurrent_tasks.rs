@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_foundation::config::runtime::AgentTaskForkHistoryMode;
 
 #[test]
@@ -12,8 +12,8 @@ fn defaults_and_overrides_preserve_other_settings() {
             i32::MAX,
         ),
     ] {
-        let context = Context::new();
-        let tasks = context.configured(yaml).unwrap().runtime.agent_tasks;
+        let fixture = ConfigFixture::new();
+        let tasks = fixture.configured(yaml).unwrap().runtime.agent_tasks;
         assert_eq!(tasks.extra_concurrent_tasks, expected);
         assert_eq!(tasks.maximum_attempts, 5);
         assert_eq!(tasks.maximum_response_repairs, 3);
@@ -41,9 +41,9 @@ fn rejects_invalid_values_with_field_path() {
         "[]",
         "{}",
     ] {
-        let context = Context::new();
+        let fixture = ConfigFixture::new();
         assert_eq!(
-            context
+            fixture
                 .configured(&format!(
                     "agent_tasks:\n  extra_concurrent_tasks: {value}\n"
                 ))

@@ -9,7 +9,7 @@ use parrot_host::web::router::WebClient;
 use super::{ModelSelection, ModelWizard, check_cancelled, load, model_alias, rpc};
 use crate::{
     dispatch::dialog::DialogOption,
-    slash_sessions::{CommandContext, SlashCommand, SlashFailure},
+    slash_sessions::{CommandEnvironment, SlashCommand, SlashFailure},
 };
 
 pub struct ModelCommand {
@@ -30,23 +30,27 @@ impl SlashCommand for ModelCommand {
     fn run<'a>(
         &'a self,
         _: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let selected = self
                 .wizard
-                .select(Some(context.session.model()), context.dialog, cancellation)
+                .select(
+                    Some(environment.session.model()),
+                    environment.dialog,
+                    cancellation,
+                )
                 .await?;
             let Some(selected) = selected else {
                 return Ok(());
             };
-            context.activity.wait_until_idle(cancellation).await?;
-            context
+            environment.activity.wait_until_idle(cancellation).await?;
+            environment
                 .session
                 .select_model(&selected, cancellation)
                 .await?;
-            context
+            environment
                 .dialog
                 .show(&[format!("model is now {selected} (saved)")], cancellation)
                 .await?;
@@ -73,13 +77,13 @@ impl SlashCommand for ModelsCommand {
     fn run<'a>(
         &'a self,
         _: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let mut client = self.client.clone();
             let listed = load(
-                context.dialog,
+                environment.dialog,
                 "Loading models…",
                 rpc(client.list_models(ListModelsRequest::new()), cancellation),
                 cancellation,
@@ -93,7 +97,7 @@ impl SlashCommand for ModelsCommand {
             if lines.is_empty() {
                 lines.push("no providers are configured".into());
             }
-            context.dialog.show(&lines, cancellation).await?;
+            environment.dialog.show(&lines, cancellation).await?;
             Ok(())
         })
     }
@@ -117,13 +121,13 @@ impl SlashCommand for EffortCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
-            let current_model = context.session.model().to_owned();
+            let current_model = environment.session.model().to_owned();
             let (selector, listed) = load(
-                context.dialog,
+                environment.dialog,
                 "Loading models…",
                 async {
                     let selector =
@@ -137,17 +141,17 @@ impl SlashCommand for EffortCommand {
             )
             .await?;
             let Some(current) = ModelSelection::resolve(&listed.models, &selector) else {
-                context
+                environment
                     .dialog
                     .show_error(
-                        &format!("unknown selected model: {}", context.session.model()),
+                        &format!("unknown selected model: {}", environment.session.model()),
                         cancellation,
                     )
                     .await?;
                 return Ok(());
             };
             if current.model.variants.is_empty() {
-                context
+                environment
                     .dialog
                     .show_error(
                         &format!("{} exposes no model efforts", current.base_selector()),
@@ -166,7 +170,7 @@ impl SlashCommand for EffortCommand {
                         DialogOption::new(&variant.name, &variant.name, &variant.reasoning_effort)
                     })
                     .collect::<Vec<_>>();
-                context
+                environment
                     .dialog
                     .select("Select model effort", &options, cancellation)
                     .await?
@@ -178,17 +182,17 @@ impl SlashCommand for EffortCommand {
                 return Ok(());
             };
             let Some(replacement) = current.with_variant(&effort) else {
-                context
+                environment
                     .dialog
                     .show_error(&format!("unknown model effort {effort}"), cancellation)
                     .await?;
                 return Ok(());
             };
-            context
+            environment
                 .session
                 .select_model(&replacement.selector(), cancellation)
                 .await?;
-            context
+            environment
                 .dialog
                 .show(
                     &[format!(
@@ -218,25 +222,25 @@ impl SlashCommand for ModelPresetSetCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             check_cancelled(cancellation)?;
             if validate_preset_name(arguments).is_err() {
-                context
+                environment
                     .dialog
                     .show_error(&preset_usage(self.name()), cancellation)
                     .await?;
                 return Ok(());
             }
-            match context
+            match environment
                 .session
                 .set_model_preset(arguments, cancellation)
                 .await
             {
                 Ok(preset) => {
-                    context
+                    environment
                         .dialog
                         .show(
                             &[format!(
@@ -248,7 +252,7 @@ impl SlashCommand for ModelPresetSetCommand {
                         .await?
                 }
                 Err(SlashFailure::Rpc(status)) => {
-                    context
+                    environment
                         .dialog
                         .show_error(status.message(), cancellation)
                         .await?
@@ -271,23 +275,23 @@ impl SlashCommand for ModelPresetSelectCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             check_cancelled(cancellation)?;
 
             let name = if arguments.trim().is_empty() {
-                context.activity.wait_until_idle(cancellation).await?;
+                environment.activity.wait_until_idle(cancellation).await?;
                 let presets = load(
-                    context.dialog,
+                    environment.dialog,
                     "Loading presets…",
-                    context.session.list_model_presets(cancellation),
+                    environment.session.list_model_presets(cancellation),
                     cancellation,
                 )
                 .await?;
                 if presets.is_empty() {
-                    context
+                    environment
                         .dialog
                         .show_error("no model presets are saved", cancellation)
                         .await?;
@@ -297,7 +301,7 @@ impl SlashCommand for ModelPresetSelectCommand {
                     .iter()
                     .map(|preset| DialogOption::new(&preset.name, &preset.name, &preset.model))
                     .collect::<Vec<_>>();
-                let Some(selected) = context
+                let Some(selected) = environment
                     .dialog
                     .select("Select a model preset", &options, cancellation)
                     .await?
@@ -307,22 +311,22 @@ impl SlashCommand for ModelPresetSelectCommand {
                 selected.id
             } else {
                 if validate_preset_name(arguments).is_err() {
-                    context
+                    environment
                         .dialog
                         .show_error(&preset_usage(self.name()), cancellation)
                         .await?;
                     return Ok(());
                 }
-                context.activity.wait_until_idle(cancellation).await?;
+                environment.activity.wait_until_idle(cancellation).await?;
                 arguments.to_owned()
             };
-            match context
+            match environment
                 .session
                 .select_model_preset(&name, cancellation)
                 .await
             {
                 Ok(preset) => {
-                    context
+                    environment
                         .dialog
                         .show(
                             &[format!(
@@ -334,7 +338,7 @@ impl SlashCommand for ModelPresetSelectCommand {
                         .await?
                 }
                 Err(SlashFailure::Rpc(status)) => {
-                    context
+                    environment
                         .dialog
                         .show_error(status.message(), cancellation)
                         .await?
@@ -361,7 +365,7 @@ impl SlashCommand for SetContextLimitCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
@@ -370,20 +374,24 @@ impl SlashCommand for SetContextLimitCommand {
                 || value.contains([' ', '\t', '\r', '\n'])
                 || ContextSize::parse(value).is_err()
             {
-                context
+                environment
                     .dialog
                     .show_error("usage: /set-context-limit <size>", cancellation)
                     .await?;
                 return Ok(());
             }
-            match context.session.set_context_limit(value, cancellation).await {
+            match environment
+                .session
+                .set_context_limit(value, cancellation)
+                .await
+            {
                 Ok(response) => {
                     let suffix = if response.alias_override {
                         "; the current model alias override remains effective"
                     } else {
                         ""
                     };
-                    context
+                    environment
                         .dialog
                         .show(
                             &[format!("Context compaction limit set to {value}{suffix}")],
@@ -392,7 +400,7 @@ impl SlashCommand for SetContextLimitCommand {
                         .await?;
                 }
                 Err(failure) => {
-                    context
+                    environment
                         .dialog
                         .show_error(
                             &format!("failed to set context limit: {}", failure.message()),

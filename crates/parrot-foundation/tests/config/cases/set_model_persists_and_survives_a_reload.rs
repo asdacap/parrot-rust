@@ -1,7 +1,7 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    context.load().unwrap().set_model("glm-5.2").unwrap();
-    assert_eq!(context.load().unwrap().model, "glm-5.2");
+    let fixture = ConfigFixture::new();
+    fixture.load().unwrap().set_model("glm-5.2").unwrap();
+    assert_eq!(fixture.load().unwrap().model, "glm-5.2");
 }

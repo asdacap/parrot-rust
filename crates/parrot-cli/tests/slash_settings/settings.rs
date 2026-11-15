@@ -49,7 +49,7 @@ fn models() -> RpcState {
 fn exact_settings_names_and_summaries() {
     let set = ModelPresetSetCommand;
     let select = ModelPresetSelectCommand;
-    let context = SetContextLimitCommand;
+    let limit = SetContextLimitCommand;
     assert_eq!(
         (set.name(), set.summary()),
         (
@@ -65,7 +65,7 @@ fn exact_settings_names_and_summaries() {
         )
     );
     assert_eq!(
-        (context.name(), context.summary()),
+        (limit.name(), limit.summary()),
         (
             "/set-context-limit",
             "Set the automatic context compaction trigger"

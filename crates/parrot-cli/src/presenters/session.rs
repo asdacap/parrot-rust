@@ -18,7 +18,7 @@ use super::turn::{response_boundary, response_owner};
 use super::{
     AgentTaskDeclarationFormatter, AgentTaskProgressFormatter, EnhancedTurnRenderer,
     ImmediateScrollbackValue, ModelineValue, Presentation, PresenterError, PresenterResult,
-    RollingTokenRateWindow, RuntimeUsage, RuntimeUsageTracker, SessionReplayContext,
+    RollingTokenRateWindow, RuntimeUsage, RuntimeUsageTracker, SessionReplayState,
     ToolPresenterRegistry,
 };
 
@@ -38,7 +38,7 @@ pub struct PresentationUpdate {
 pub struct EnhancedSessionPresenter {
     columns: usize,
     color: bool,
-    replay: Arc<Mutex<SessionReplayContext>>,
+    replay: Arc<Mutex<SessionReplayState>>,
     was_replaying: bool,
     hierarchy: AgentSessionHierarchy,
     registry: Arc<ToolPresenterRegistry>,
@@ -69,7 +69,7 @@ impl EnhancedSessionPresenter {
     pub fn with_registry(
         columns: usize,
         color: bool,
-        replay: Arc<Mutex<SessionReplayContext>>,
+        replay: Arc<Mutex<SessionReplayState>>,
         registry: Arc<ToolPresenterRegistry>,
     ) -> Self {
         let was_replaying = replay

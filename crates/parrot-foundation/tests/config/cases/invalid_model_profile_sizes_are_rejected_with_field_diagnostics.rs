@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for value in [
@@ -14,8 +14,8 @@ fn source_assertions() {
         "'~'",
     ] {
         for key in ["maximum_input_tokens", "summary_output_tokens"] {
-            let context = Context::new();
-            let failure = context
+            let fixture = ConfigFixture::new();
+            let failure = fixture
                 .configured(&format!(
                     "model_profiles:\n  provider/model:\n    {key}: {value}\n"
                 ))

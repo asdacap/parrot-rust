@@ -420,7 +420,7 @@ async fn retrying_provider_forwards_capabilities() {
 #[tokio::test(start_paused = true)]
 async fn retries_preserve_attached_call_trace_identity() {
     use parrot_provider::sessions::diagnostics::{
-        CallContext, CallTrace, DiagnosticEvent, DiagnosticSink, MonotonicDiagnosticClock,
+        CallIdentity, CallTrace, DiagnosticEvent, DiagnosticSink, MonotonicDiagnosticClock,
     };
     struct Sink;
     impl DiagnosticSink for Sink {
@@ -429,7 +429,7 @@ async fn retries_preserve_attached_call_trace_identity() {
     let trace = Arc::new(CallTrace::start(
         Arc::new(Sink),
         Arc::new(MonotonicDiagnosticClock::default()),
-        CallContext {
+        CallIdentity {
             agent_session_id: "agent".into(),
             correlation_id: "call".into(),
             provider_id: "fake".into(),

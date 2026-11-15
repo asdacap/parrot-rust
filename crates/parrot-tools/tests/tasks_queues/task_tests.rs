@@ -17,7 +17,7 @@ use parrot_domain::{
         },
         paths::ResolvedRead,
         runtime::TaskController,
-        security::{AccessSnapshot, InvocationContext},
+        security::{AccessSnapshot, InvocationScope},
         tools::{ParallelSafety, Tool},
     },
     values::{
@@ -389,10 +389,10 @@ fn invocation(arguments: &str) -> ToolInvocation {
     }
 }
 
-fn context(
+fn scope(
     cancellation: &dyn Cancellation,
-) -> InvocationContext<'_, DomainAccessSnapshot, Arc<Selection>> {
-    InvocationContext::new(
+) -> InvocationScope<'_, DomainAccessSnapshot, Arc<Selection>> {
+    InvocationScope::new(
         DomainAccessSnapshot::new(false),
         Arc::new(Selection),
         cancellation,
@@ -403,7 +403,7 @@ async fn assert_invalid_set(arguments: &str, expected: &str, expected_reads: usi
     let fixture = Fixture::default();
     let result = fixture
         .tool(TaskToolKind::Set)
-        .invoke(invocation(arguments), context(&Never))
+        .invoke(invocation(arguments), scope(&Never))
         .await
         .unwrap();
     assert_eq!(result.text, expected);
@@ -503,7 +503,7 @@ async fn set_denied_artifact_does_not_mutate_controller() {
         .tool(TaskToolKind::Set)
         .invoke(
             invocation(r#"{"path":"artifact.json"}"#),
-            InvocationContext::new(security, Arc::new(Selection), &Never),
+            InvocationScope::new(security, Arc::new(Selection), &Never),
         )
         .await
         .unwrap();
@@ -524,7 +524,7 @@ async fn assert_set_success(arguments: &str, expected_reads: usize) {
         .tool(TaskToolKind::Set)
         .invoke(
             invocation(arguments),
-            InvocationContext::new(security, selection.clone(), &Never),
+            InvocationScope::new(security, selection.clone(), &Never),
         )
         .await
         .unwrap();
@@ -593,7 +593,7 @@ async fn set_preserves_optional_model_and_failure_for_both_input_forms() {
         };
         fixture
             .tool(TaskToolKind::Set)
-            .invoke(invocation(&arguments), context(&Never))
+            .invoke(invocation(&arguments), scope(&Never))
             .await
             .unwrap();
         let updates = fixture.controller.updates.lock().unwrap();
@@ -616,7 +616,7 @@ async fn assert_rejected_set(kind: FailureKind, message: &str) {
         .tool(TaskToolKind::Set)
         .invoke(
             invocation(&format!(r#"{{"tasks":{DECLARATIONS}}}"#)),
-            context(&Never),
+            scope(&Never),
         )
         .await
         .unwrap();
@@ -653,7 +653,7 @@ async fn set_propagates_cancellation_observed_during_artifact_read_without_updat
         .tool(TaskToolKind::Set)
         .invoke(
             invocation(r#"{"path":"artifact.json"}"#),
-            context(cancellation.as_ref()),
+            scope(cancellation.as_ref()),
         )
         .await;
     assert_eq!(result, Err(OperationError::Cancelled));
@@ -671,7 +671,7 @@ async fn set_forwards_cancelled_inline_invocation_to_controller_without_mutation
         .tool(TaskToolKind::Set)
         .invoke(
             invocation(&format!(r#"{{"tasks":{DECLARATIONS}}}"#)),
-            context(&cancellation),
+            scope(&cancellation),
         )
         .await;
     assert_eq!(result, Err(OperationError::Cancelled));
@@ -694,7 +694,7 @@ async fn set_propagates_controller_cancellation_without_rendering_or_update() {
         .tool(TaskToolKind::Set)
         .invoke(
             invocation(&format!(r#"{{"tasks":{DECLARATIONS}}}"#)),
-            context(&Never),
+            scope(&Never),
         )
         .await;
     assert_eq!(result, Err(OperationError::Cancelled));
@@ -716,7 +716,7 @@ async fn set_propagates_unexpected_reader_failure_instead_of_claiming_access_den
     };
     let result = fixture
         .tool(TaskToolKind::Set)
-        .invoke(invocation(r#"{"path":"artifact.json"}"#), context(&Never))
+        .invoke(invocation(r#"{"path":"artifact.json"}"#), scope(&Never))
         .await;
     assert_eq!(
         result,
@@ -733,7 +733,7 @@ async fn assert_get(arguments: &str, expected: &str, query: Option<Option<&str>>
     let fixture = Fixture::snapshot();
     let result = fixture
         .tool(TaskToolKind::Get)
-        .invoke(invocation(arguments), context(&Never))
+        .invoke(invocation(arguments), scope(&Never))
         .await
         .unwrap();
     assert_eq!(result.text.as_bytes(), expected.as_bytes());
@@ -820,7 +820,7 @@ async fn get_waits_for_snapshot_future_before_rendering_list_or_detail() {
             ..Default::default()
         };
         let tool = fixture.tool(TaskToolKind::Get);
-        let mut result = tool.invoke(invocation(arguments), context(&Never));
+        let mut result = tool.invoke(invocation(arguments), scope(&Never));
         std::future::poll_fn(|cx| {
             assert!(result.as_mut().poll(cx).is_pending());
             Poll::Ready(())
@@ -862,7 +862,7 @@ async fn get_validates_arguments_before_snapshot_and_waits_to_propagate_its_erro
             "error: The JSON property 'unexpected' could not be mapped to the tool input.",
         ),
     ] {
-        let mut result = tool.invoke(invocation(arguments), context(&Never));
+        let mut result = tool.invoke(invocation(arguments), scope(&Never));
         std::future::poll_fn(|cx| {
             let Poll::Ready(output) = result.as_mut().poll(cx) else {
                 panic!("argument rejection must not wait for the snapshot gate")
@@ -873,7 +873,7 @@ async fn get_validates_arguments_before_snapshot_and_waits_to_propagate_its_erro
         .await;
         assert!(fixture.controller.queries.lock().unwrap().is_empty());
     }
-    let mut result = tool.invoke(invocation(r#"{"name":"build"}"#), context(&Never));
+    let mut result = tool.invoke(invocation(r#"{"name":"build"}"#), scope(&Never));
     std::future::poll_fn(|cx| {
         assert!(result.as_mut().poll(cx).is_pending());
         Poll::Ready(())
@@ -896,7 +896,7 @@ async fn get_empty_snapshot_is_exact_empty_json_array() {
     let fixture = Fixture::default();
     let result = fixture
         .tool(TaskToolKind::Get)
-        .invoke(invocation("{}"), context(&Never))
+        .invoke(invocation("{}"), scope(&Never))
         .await
         .unwrap();
     assert_eq!(result.text.as_bytes(), b"[]");
@@ -925,7 +925,7 @@ async fn get_omits_nested_execution_fields_even_when_child_has_state_result_and_
     };
     let result = fixture
         .tool(TaskToolKind::Get)
-        .invoke(invocation(r#"{"name":"ship"}"#), context(&Never))
+        .invoke(invocation(r#"{"name":"ship"}"#), scope(&Never))
         .await
         .unwrap();
     assert_eq!(result.text.as_bytes(), SHIP_DETAIL.as_bytes());
@@ -948,7 +948,7 @@ async fn get_propagates_unexpected_snapshot_backend_failure() {
     };
     let result = fixture
         .tool(TaskToolKind::Get)
-        .invoke(invocation("{}"), context(&Never))
+        .invoke(invocation("{}"), scope(&Never))
         .await;
     assert_eq!(result, Err(OperationError::Failed(error)));
     assert_eq!(
@@ -1056,7 +1056,7 @@ async fn accepted_path_replay_returns_exact_rich_text_before_any_new_argument_or
     let original = tool
         .invoke(
             invocation(r#"{"path":"artifact.json"}"#),
-            InvocationContext::new(
+            InvocationScope::new(
                 DomainAccessSnapshot::new(false),
                 Arc::new(Selection),
                 &Never,
@@ -1072,11 +1072,7 @@ async fn accepted_path_replay_returns_exact_rich_text_before_any_new_argument_or
         let replay = tool
             .invoke(
                 invocation(arguments),
-                InvocationContext::new(
-                    DomainAccessSnapshot::new(true),
-                    Arc::new(Selection),
-                    &Never,
-                ),
+                InvocationScope::new(DomainAccessSnapshot::new(true), Arc::new(Selection), &Never),
             )
             .await
             .unwrap();
@@ -1104,7 +1100,7 @@ async fn set_returns_controller_response_verbatim_without_another_lookup_or_quer
         .tool(TaskToolKind::Set)
         .invoke(
             invocation(&format!(r#"{{"tasks":{DECLARATIONS}}}"#)),
-            context(&Never),
+            scope(&Never),
         )
         .await
         .unwrap();
@@ -1134,10 +1130,7 @@ async fn get_exposes_owner_and_absolute_dedicated_assignees_in_summary_and_detai
         ..Default::default()
     };
     let tool = fixture.tool(TaskToolKind::Get);
-    let result = tool
-        .invoke(invocation("{}"), context(&Never))
-        .await
-        .unwrap();
+    let result = tool.invoke(invocation("{}"), scope(&Never)).await.unwrap();
     let summary: serde_json::Value = serde_json::from_str(&result.text).unwrap();
     assert_eq!(summary[0]["state"], "succeeded");
     assert_eq!(summary[0]["assigned_to"], "self");
@@ -1151,7 +1144,7 @@ async fn get_exposes_owner_and_absolute_dedicated_assignees_in_summary_and_detai
         let result = tool
             .invoke(
                 invocation(&format!(r#"{{"name":"{name}"}}"#)),
-                context(&Never),
+                scope(&Never),
             )
             .await
             .unwrap();
@@ -1187,7 +1180,7 @@ async fn composite_detail_keeps_execution_metadata_out_of_recursive_declarations
     };
     let result = fixture
         .tool(TaskToolKind::Get)
-        .invoke(invocation(r#"{"name":"ship"}"#), context(&Never))
+        .invoke(invocation(r#"{"name":"ship"}"#), scope(&Never))
         .await
         .unwrap();
     let detail: serde_json::Value = serde_json::from_str(&result.text).unwrap();
@@ -1221,7 +1214,7 @@ async fn set_rejects_assignee_metadata_in_inline_artifact_and_recursive_declarat
             };
             let result = fixture
                 .tool(TaskToolKind::Set)
-                .invoke(invocation(&arguments), context(&Never))
+                .invoke(invocation(&arguments), scope(&Never))
                 .await
                 .unwrap();
             assert!(

@@ -1,11 +1,11 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_domain::values::config::PathPlatform;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let mut config = context.load().unwrap();
-    let skill = context.directory.join("skill/SKILL.md");
-    std::fs::create_dir(&context.path).unwrap();
+    let fixture = ConfigFixture::new();
+    let mut config = fixture.load().unwrap();
+    let skill = fixture.directory.join("skill/SKILL.md");
+    std::fs::create_dir(&fixture.path).unwrap();
     assert!(
         config
             .set_skill_enabled(skill.to_str().unwrap(), false)
@@ -17,10 +17,10 @@ fn source_assertions() {
             .skills
             .is_enabled(
                 skill.to_str().unwrap(),
-                context.directory.to_str().unwrap(),
+                fixture.directory.to_str().unwrap(),
                 PathPlatform::Unix
             )
             .unwrap()
     );
-    assert!(!std::path::PathBuf::from(format!("{}.tmp", context.path.display())).exists());
+    assert!(!std::path::PathBuf::from(format!("{}.tmp", fixture.path.display())).exists());
 }

@@ -1,7 +1,7 @@
 use parrot_cli::presenters::tools::generic::GenericToolPresenter;
 use parrot_cli::presenters::tools::status::StatusToolPresenter;
 use parrot_cli::presenters::*;
-use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderContext};
+use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderOptions};
 use parrot_cli::terminal_layout::TerminalText;
 #[test]
 fn status_output_preserves_all_lines_wrapping_and_sanitization() {
@@ -16,7 +16,7 @@ fn status_output_preserves_all_lines_wrapping_and_sanitization() {
         ..Default::default()
     };
     for columns in [32, 512] {
-        let context = ScrollbackRenderContext {
+        let options = ScrollbackRenderOptions {
             columns,
             color: false,
             inline_diff: false,
@@ -26,7 +26,7 @@ fn status_output_preserves_all_lines_wrapping_and_sanitization() {
             .present_terminal(&call, &terminal)
             .unwrap()
             .unwrap();
-        let rendered = ScrollbackItem::render(&item, context.clone()).unwrap();
+        let rendered = ScrollbackItem::render(&item, options.clone()).unwrap();
         let mut expected = TerminalText::layout("✓ tool call status", columns);
         for line in output.replace('\u{1b}', "").split('\n') {
             expected.extend(
@@ -41,7 +41,7 @@ fn status_output_preserves_all_lines_wrapping_and_sanitization() {
             .present_terminal(&ToolCallPresentation::new("other", "{}"), &terminal)
             .unwrap()
             .unwrap();
-        assert!(ScrollbackItem::render(&generic, context).unwrap().len() <= 10);
+        assert!(ScrollbackItem::render(&generic, options).unwrap().len() <= 10);
     }
 }
 #[test]

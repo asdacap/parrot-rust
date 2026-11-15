@@ -6,8 +6,8 @@ use parrot_domain::protocol::messages::parrot as wire;
 
 use crate::{
     terminal_frames::{
-        ItemIdentity, LiveBufferItem, LiveBufferRender, LiveBufferRenderContext,
-        LiveBufferRetention, ScrollbackItem, ScrollbackLayout, ScrollbackRenderContext,
+        ItemIdentity, LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions,
+        LiveBufferRetention, ScrollbackItem, ScrollbackLayout, ScrollbackRenderOptions,
     },
     terminal_layout::{MarkdownRenderer, TerminalLine, TerminalStyle, TerminalText},
 };
@@ -289,17 +289,17 @@ fn status_style(
 }
 
 impl LiveBufferItem for Presentation {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
-        self.render_live_decorated(context, &ActivityDecoration::default())
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
+        self.render_live_decorated(options, &ActivityDecoration::default())
     }
 }
 impl Presentation {
     pub fn render_live_decorated(
         &self,
-        context: LiveBufferRenderContext,
+        options: LiveBufferRenderOptions,
         decoration: &ActivityDecoration,
     ) -> io::Result<LiveBufferRender> {
-        let columns = decoration.content_columns(context.columns);
+        let columns = decoration.content_columns(options.columns);
         let (lines, header_count, metadata) = match self {
             Self::Tool(report) => {
                 let label = report.timer.as_ref().map_or_else(
@@ -336,9 +336,9 @@ impl Presentation {
             Self::Lines { lines, .. } => (lines.clone(), 0, ToolPresentationMetadata::default()),
             _ => (
                 self.render_scrollback_decorated(
-                    ScrollbackRenderContext {
-                        columns: context.columns,
-                        color: context.color,
+                    ScrollbackRenderOptions {
+                        columns: options.columns,
+                        color: options.color,
                         inline_diff: false,
                         previous_packing: None,
                     },
@@ -349,11 +349,11 @@ impl Presentation {
             ),
         };
         let header_style = if metadata.style == ToolPresentationStyle::Muted {
-            style(context.color, "\x1b[48;5;236m\x1b[38;5;245m")
+            style(options.color, "\x1b[48;5;236m\x1b[38;5;245m")
         } else {
-            style(context.color, "\x1b[48;5;236m\x1b[36m")
+            style(options.color, "\x1b[48;5;236m\x1b[36m")
         };
-        let surface = style(context.color, "\x1b[48;5;236m\x1b[38;5;252m");
+        let surface = style(options.color, "\x1b[48;5;236m\x1b[38;5;252m");
         Ok(LiveBufferRender {
             lines: lines
                 .into_iter()
@@ -375,23 +375,23 @@ impl Presentation {
     }
     pub fn render_scrollback_decorated(
         &self,
-        context: ScrollbackRenderContext,
+        options: ScrollbackRenderOptions,
         decoration: &ActivityDecoration,
     ) -> io::Result<Vec<String>> {
         match self {
-            Self::Tool(report) => render_tool(report, &context, decoration),
+            Self::Tool(report) => render_tool(report, &options, decoration),
             Self::Lines { lines, .. } => Ok(lines.clone()),
             Self::AgentSpawn {
                 name,
                 metadata,
                 prompt,
-            } => Ok(render_spawn(name, metadata, prompt, &context, decoration)),
+            } => Ok(render_spawn(name, metadata, prompt, &options, decoration)),
             Self::Diff {
                 tool_name,
                 path,
                 diff,
             } => {
-                let previous = context
+                let previous = options
                     .previous_packing
                     .as_ref()
                     .and_then(|identity| identity.downcast_ref::<DiffPacking>());
@@ -403,7 +403,7 @@ impl Presentation {
                             ToolTerminalStatus::Succeeded,
                             ToolPresentationMetadata::default(),
                         ),
-                        &context,
+                        &options,
                         decoration,
                     );
                 }
@@ -415,9 +415,9 @@ impl Presentation {
                 let lines = render_diff(
                     heading,
                     diff,
-                    decoration.content_columns(context.columns),
-                    context.color,
-                    context.inline_diff,
+                    decoration.content_columns(options.columns),
+                    options.color,
+                    options.inline_diff,
                 )?;
                 Ok(decoration.apply("", lines))
             }
@@ -468,17 +468,17 @@ impl ScrollbackItem for Presentation {
     fn continues(&self, _previous: &dyn ScrollbackItem) -> bool {
         false
     }
-    fn render(&self, context: ScrollbackRenderContext) -> io::Result<Vec<String>> {
-        self.render_scrollback_decorated(context, &ActivityDecoration::default())
+    fn render(&self, options: ScrollbackRenderOptions) -> io::Result<Vec<String>> {
+        self.render_scrollback_decorated(options, &ActivityDecoration::default())
     }
 }
 fn render_tool(
     report: &ToolReport,
-    context: &ScrollbackRenderContext,
+    options: &ScrollbackRenderOptions,
     decoration: &ActivityDecoration,
 ) -> io::Result<Vec<String>> {
-    let columns = decoration.content_columns(context.columns);
-    let (marker, status_style) = status_style(report.status, &report.metadata, context.color);
+    let columns = decoration.content_columns(options.columns);
+    let (marker, status_style) = status_style(report.status, &report.metadata, options.color);
     let mut header = TerminalText::layout_words(&report.label, columns);
     if report.metadata.multiline_label && header.len() > 5 {
         let omitted = header.len() - 5;
@@ -505,11 +505,11 @@ fn render_tool(
         vec![]
     } else if block.kind == ToolBlockKind::Diff {
         bound(
-            render_diff("", &block.text, columns, context.color, context.inline_diff)?,
+            render_diff("", &block.text, columns, options.color, options.inline_diff)?,
             maximum_lines,
             "… diff output truncated",
             columns,
-            context.color,
+            options.color,
         )
     } else if block.kind == ToolBlockKind::CompletedInput {
         bound(
@@ -517,12 +517,12 @@ fn render_tool(
                 "",
                 &format!("```yaml\n{}\n```", block.text),
                 columns,
-                context.color,
+                options.color,
             ),
             maximum_lines,
             "… completed input truncated",
             columns,
-            context.color,
+            options.color,
         )
     } else {
         let values = ToolDisplayText::layout_details(
@@ -573,16 +573,16 @@ fn render_spawn(
     name: &str,
     metadata: &str,
     prompt: &str,
-    context: &ScrollbackRenderContext,
+    options: &ScrollbackRenderOptions,
     decoration: &ActivityDecoration,
 ) -> Vec<String> {
-    let columns = decoration.content_columns(context.columns);
+    let columns = decoration.content_columns(options.columns);
     let heading = if name.is_empty() {
         "Started agent".to_owned()
     } else {
         format!("Started {}", TerminalText::sanitize_line(name))
     };
-    let bold = style(context.color, "\x1b[1m");
+    let bold = style(options.color, "\x1b[1m");
     let mut offset = 0;
     let mut lines = Vec::new();
     for line in TerminalText::layout_words(&heading, columns) {
@@ -605,7 +605,7 @@ fn render_spawn(
         lines.extend(
             TerminalText::layout_words(&TerminalText::sanitize_line(metadata), columns)
                 .iter()
-                .map(|line| muted(context.color).apply(line)),
+                .map(|line| muted(options.color).apply(line)),
         );
     }
     lines.push(String::new());

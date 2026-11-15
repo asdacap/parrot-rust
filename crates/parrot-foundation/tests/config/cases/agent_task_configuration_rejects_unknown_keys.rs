@@ -1,9 +1,9 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
+    let fixture = ConfigFixture::new();
     assert_eq!(
-        context
+        fixture
             .configured("agent_tasks:\n  unsupported: 1\n")
             .unwrap_err()
             .to_string(),

@@ -15,7 +15,7 @@ use parrot_provider::{
 };
 use parrot_runtime::{
     interactions::{QuestionDefinition, QuestionReplyKind},
-    prompt_context::{SkillRoot, SkillScope},
+    prompt_assembly::{SkillRoot, SkillScope},
 };
 use parrot_storage::{
     history_files::{SessionCatalog, SessionMeta},
@@ -209,7 +209,7 @@ impl CapturedProcessLauncher for DenyTools {
 }
 impl PermissionServices for DenyTools {
     type Security = SharedSecurity<ReadOnlyFixture>;
-    type Selection = ContextSelection<ReadOnlyFixture>;
+    type Selection = InvocationSelection<ReadOnlyFixture>;
     fn resolve_target(&self, path: &str) -> Result<WriteTarget, Failure> {
         Ok(WriteTarget {
             path: path.into(),
@@ -555,7 +555,7 @@ impl Rpc {
                         scope: SkillScope::User,
                         follow_directory_links: false,
                     }],
-                    SkillDiscoveryContext {
+                    SkillPathBases {
                         working_directory: workspace.launch_directory().into(),
                         platform: PathPlatform::Unix,
                     },

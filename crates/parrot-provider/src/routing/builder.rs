@@ -1,7 +1,7 @@
 //! Configured providers only: external metadata cannot introduce endpoints.
 use super::{
     auth::CredentialSources,
-    factory::{ProviderBuildContext, ProviderImplementation, build_provider},
+    factory::{ProviderBuildInputs, ProviderImplementation, build_provider},
     models_dev::ModelsDevInformationProvider,
     registry::ProviderRegistry,
 };
@@ -165,7 +165,7 @@ impl ProviderRegistryBuilder {
                 };
                 external.get(key).cloned().unwrap_or_default()
             };
-            let built = build_provider(ProviderBuildContext {
+            let built = build_provider(ProviderBuildInputs {
                 id: &id,
                 config,
                 credentials: self.services.credentials.as_ref(),

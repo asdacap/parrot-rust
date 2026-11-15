@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parrot_cli::presenters::{
-    EnhancedSessionPresenter, Presentation, SessionReplayContext, ToolPresenterRegistry,
+    EnhancedSessionPresenter, Presentation, SessionReplayState, ToolPresenterRegistry,
 };
 use parrot_cli::terminal_frames::ScrollbackLayout;
 use parrot_domain::protocol::messages::{parrot as wire, queue};
@@ -440,7 +440,7 @@ fn reasoning_rows_precede_replayed_and_live_plan_output() {
 }
 
 #[test]
-fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_timers() {
+fn live_skill_index_refresh_recomputes_reads_without_resetting_other_tool_timers() {
     use parrot_cli::presenters::{
         ToolPresenter,
         tools::{
@@ -449,7 +449,7 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
             read::{ReadToolPresenter, SkillReadPathFormatter},
         },
     };
-    use parrot_cli::terminal_frames::LiveBufferRenderContext;
+    use parrot_cli::terminal_frames::LiveBufferRenderOptions;
     use std::sync::atomic::{AtomicU64, Ordering};
     let clock = Arc::new(AtomicU64::new(0));
     let paths = Arc::new(SkillReadPathFormatter::new(
@@ -476,7 +476,7 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
     let mut presenter = SessionHarness::external(EnhancedSessionPresenter::with_registry(
         200,
         true,
-        Arc::new(Mutex::new(SessionReplayContext::new(false))),
+        Arc::new(Mutex::new(SessionReplayState::new(false))),
         registry,
     ));
     presenter
@@ -518,7 +518,7 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
     let before_lines = before
         .iter()
         .flat_map(|item| {
-            item.render(LiveBufferRenderContext {
+            item.render(LiveBufferRenderOptions {
                 columns: 200,
                 color: true,
             })
@@ -532,7 +532,7 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
         .unwrap();
     assert_eq!(read.style().start(), "\x1b[48;5;236m\x1b[36m");
     clock.store(12, Ordering::Release);
-    paths.replace_context(Vec::new(), &[]);
+    paths.replace_index(Vec::new(), &[]);
     let after = presenter.snapshot().unwrap();
     assert!(
         live(&after, 200).contains("running 12s"),
@@ -541,7 +541,7 @@ fn live_skill_context_refresh_recomputes_reads_without_resetting_other_tool_time
     let after_lines = after
         .iter()
         .flat_map(|item| {
-            item.render(LiveBufferRenderContext {
+            item.render(LiveBufferRenderOptions {
                 columns: 200,
                 color: true,
             })
@@ -1390,11 +1390,11 @@ pub(crate) fn queue_event(owner: &str, queues: Vec<queue::QueueState>) -> wire::
 
 fn boundary_case(kind: &str, owner: &str, replaying: bool) {
     // This is the source's constant RunWithReplay predicate, not prepared-stream state.
-    let context = Arc::new(Mutex::new(SessionReplayContext::new(replaying)));
+    let replay = Arc::new(Mutex::new(SessionReplayState::new(replaying)));
     let mut presenter = SessionHarness::external(EnhancedSessionPresenter::with_registry(
         120,
         false,
-        context,
+        replay,
         Arc::new(ToolPresenterRegistry::standard_with_skill_read_paths(
             Vec::new(),
             Arc::new(parrot_cli::presenters::tools::read::SkillReadPathFormatter::default()),

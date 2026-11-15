@@ -12,7 +12,7 @@ async fn invoke_task(
         kind,
         &catalog::configured_definitions(&fixture.configuration),
         scope
-            .get_service::<ScopedTaskController<Security, ContextSelection<Security>>>()
+            .get_service::<ScopedTaskController<Security, InvocationSelection<Security>>>()
             .unwrap(),
         Arc::new(Files::<SharedSecurity<Security>>(PhantomData)),
     )
@@ -20,9 +20,9 @@ async fn invoke_task(
     let turn = scope.selection().capture().unwrap();
     bounded(tool.invoke(
         invocation,
-        InvocationContext::new(
+        InvocationScope::new(
             SharedSecurity(turn.security.clone()),
-            ContextSelection::external(turn),
+            InvocationSelection::external(turn),
             &NeverCancelled,
         ),
     ))

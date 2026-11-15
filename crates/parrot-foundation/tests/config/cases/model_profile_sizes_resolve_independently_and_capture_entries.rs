@@ -1,11 +1,11 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_domain::values::config::{ModelProfileConfig, ModelProfiles};
 use std::collections::BTreeMap;
 
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let configuration = context.configured("model_profiles:\n  provider:\n    maximum_input_tokens: 80000\n  provider/model:\n    summary_output_tokens: 10000\n").unwrap();
+    let fixture = ConfigFixture::new();
+    let configuration = fixture.configured("model_profiles:\n  provider:\n    maximum_input_tokens: 80000\n  provider/model:\n    summary_output_tokens: 10000\n").unwrap();
     assert_eq!(
         configuration
             .models

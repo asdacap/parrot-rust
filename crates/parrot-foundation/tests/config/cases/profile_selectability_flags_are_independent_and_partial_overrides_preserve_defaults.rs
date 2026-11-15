@@ -1,9 +1,9 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let configuration = context.configured("profiles:\n  build:\n    is_agent_selectable: true\n  worker:\n    is_user_selectable: true\n").unwrap();
+    let fixture = ConfigFixture::new();
+    let configuration = fixture.configured("profiles:\n  build:\n    is_agent_selectable: true\n  worker:\n    is_user_selectable: true\n").unwrap();
     for id in ["build", "worker"] {
         assert!(configuration.runtime.profiles[id].is_user_selectable);
         assert!(configuration.runtime.profiles[id].is_agent_selectable);

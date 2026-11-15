@@ -1,6 +1,6 @@
 use parrot_cli::presenters::tools::read_image::ReadImageToolPresenter;
 use parrot_cli::presenters::*;
-use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderContext};
+use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderOptions};
 use parrot_domain::protocol::messages::parrot::ArtifactReference;
 #[test]
 fn read_image_renders_one_line_size_and_dimensions_or_compact_without_metadata() {
@@ -36,7 +36,7 @@ fn read_image_renders_one_line_size_and_dimensions_or_compact_without_metadata()
         assert_eq!(
             ScrollbackItem::render(
                 &item,
-                ScrollbackRenderContext {
+                ScrollbackRenderOptions {
                     columns: 32768,
                     color: false,
                     inline_diff: false,

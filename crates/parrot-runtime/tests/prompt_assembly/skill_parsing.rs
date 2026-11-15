@@ -1,9 +1,9 @@
-use parrot_runtime::prompt_context::{
+use parrot_runtime::prompt_assembly::{
     SkillDisplayMetadata, SkillScope, normalize_skill_path, parse_skill_display_metadata,
     parse_skill_frontmatter,
 };
 
-fn skill(path: &str, name: &str) -> parrot_runtime::prompt_context::SkillMetadata {
+fn skill(path: &str, name: &str) -> parrot_runtime::prompt_assembly::SkillMetadata {
     parse_skill_frontmatter(
         path,
         &format!("---\nname: {name}\ndescription: description\n---\nbody"),

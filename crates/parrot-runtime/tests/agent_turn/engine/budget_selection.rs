@@ -649,7 +649,7 @@ async fn intermediate_usage_calibrates_later_requests_even_when_the_stream_fails
 #[tokio::test]
 async fn actual_input_and_exhausted_context_fail_before_any_provider_request_with_typed_diagnostics()
  {
-    for (context, input_limit, message) in [
+    for (context_window, input_limit, message) in [
         (400_000, 1, "input limit"),
         (
             1,
@@ -663,7 +663,7 @@ async fn actual_input_and_exhausted_context_fail_before_any_provider_request_wit
             &fixture,
             &provider,
             BudgetLimits {
-                context_window: context,
+                context_window,
                 maximum_input_tokens: input_limit,
                 maximum_output_tokens: 0,
             },

@@ -25,7 +25,7 @@ pub use parrot_runtime::{
     agent_turn::services::*,
     compaction::*,
     event_broker::{BrokerError, EventBroker},
-    prompt_context::{PromptResult, SystemPrompt},
+    prompt_assembly::{PromptResult, SystemPrompt},
 };
 pub use parrot_storage::{
     conversation::{AgentHistoryView, ConversationMessage, ConversationRepository, MessageRole},

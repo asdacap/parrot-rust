@@ -245,7 +245,7 @@ impl BorrowedTool<Security> for CompactTool {
     fn invoke<'a>(
         &'a self,
         _: ToolInvocation,
-        _: BorrowedToolContext<'a, Security>,
+        _: BorrowedToolState<'a, Security>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         Box::pin(async move {

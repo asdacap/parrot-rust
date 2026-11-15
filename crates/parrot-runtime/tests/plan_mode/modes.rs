@@ -111,20 +111,20 @@ fn lazy_mode_profile_prompt_follows_prepare_complete_and_reattach() {
     let before = profile.prompt().unwrap();
     // Consume T44's actual composite/epoch contract with the selected mode's
     // lazy text; this local adapter is not the production host composition.
-    use parrot_runtime::prompt_context::{CompositeSystemPrompt, SystemPrompt};
+    use parrot_runtime::prompt_assembly::{CompositeSystemPrompt, SystemPrompt};
     struct ModePrompt(SessionMode<Policy>);
     impl SystemPrompt for ModePrompt {
         fn renew_epoch(&mut self) {}
         fn read_system_prompts(
             &mut self,
             _: &parrot_provider::routing::aliases::ResolvedModelSelection,
-        ) -> parrot_runtime::prompt_context::PromptResult<Vec<(String, String)>> {
+        ) -> parrot_runtime::prompt_assembly::PromptResult<Vec<(String, String)>> {
             self.0
                 .profile()
                 .prompt()
                 .map(|text| vec![("test:mode".into(), text)])
                 .map_err(|error| {
-                    parrot_runtime::prompt_context::PromptError::Context(error.to_string())
+                    parrot_runtime::prompt_assembly::PromptError::Context(error.to_string())
                 })
         }
     }

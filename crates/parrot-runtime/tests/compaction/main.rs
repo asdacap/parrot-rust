@@ -113,9 +113,9 @@ impl Provider for ImageProvider {
         panic!("no session")
     }
 }
-fn model(context: i32) -> ProviderModel {
+fn model(context_window: i32) -> ProviderModel {
     let mut value = Model::new("model", "provider");
-    value.context_window = context;
+    value.context_window = context_window;
     value.max_output_tokens = 1;
     ProviderModel {
         provider: Arc::new(ImageProvider {
@@ -213,7 +213,7 @@ fn original_missing_usage_switch_and_reset() {
 }
 #[test]
 fn original_output_budget_rows() {
-    for (context, output, input, estimate, expected) in [
+    for (context_window, output, input, estimate, expected) in [
         (0, 0, 0, 1000, 32768),
         (0, 8192, 0, 1000, 8192),
         (0, 65536, 0, 1000, 65536),
@@ -223,7 +223,7 @@ fn original_output_budget_rows() {
         (2000, 100, 0, 1001, 100),
         (2000, 0, 1001, 1001, 948),
     ] {
-        let mut selected = model(context);
+        let mut selected = model(context_window);
         selected.model.max_output_tokens = output;
         selected.model.max_input_tokens = input;
         assert_eq!(
@@ -255,7 +255,7 @@ fn original_actual_usage_five_percent_rows() {
 }
 #[test]
 fn compaction_boundaries_preserve_full_requested_output_and_request_headroom() {
-    for (context, output) in [
+    for (context_window, output) in [
         (180_000, 0),
         (180_000, 8_192),
         (180_000, 65_536),
@@ -265,7 +265,7 @@ fn compaction_boundaries_preserve_full_requested_output_and_request_headroom() {
         (i32::MAX, 0),
         (1_000, 1),
     ] {
-        let mut selected = model(context);
+        let mut selected = model(context_window);
         selected.model.max_output_tokens = output;
         let snapshot =
             estimate_context(&compactor(100, 30, 60000), &select(&selected), "", &[], &[]).unwrap();
@@ -289,14 +289,14 @@ fn compaction_boundaries_preserve_full_requested_output_and_request_headroom() {
 
 #[test]
 fn original_exhausted_capacity_rows_exact_messages() {
-    for (context, input, actual, expected) in [
+    for (context_window, input, actual, expected) in [
         (2000, 1400, 1500, OutputTokenError::InputLimitExceeded),
         (0, 1400, 1500, OutputTokenError::InputLimitExceeded),
         (1500, 0, 1500, OutputTokenError::NoOutputCapacity),
         (1575, 0, 1500, OutputTokenError::NoOutputCapacity),
         (1000, 0, 1500, OutputTokenError::NoOutputCapacity),
     ] {
-        let mut selected = model(context);
+        let mut selected = model(context_window);
         selected.model.max_input_tokens = input;
         let mut budget = RequestStatistic::default();
         budget.observe_usage("provider/model", 1000, actual);

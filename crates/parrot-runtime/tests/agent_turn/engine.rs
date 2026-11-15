@@ -32,7 +32,7 @@ use parrot_runtime::{
     },
     compaction::*,
     event_broker::{BrokerError, EventBroker},
-    prompt_context::{PromptResult, SystemPrompt},
+    prompt_assembly::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
     conversation::{
@@ -551,15 +551,15 @@ impl BorrowedTool<Security> for FixtureTool {
     fn invoke<'a>(
         &'a self,
         _: ToolInvocation,
-        context: BorrowedToolContext<'a, Security>,
+        state: BorrowedToolState<'a, Security>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         Box::pin(async move {
             self.tools.executions.fetch_add(1, Ordering::SeqCst);
             if let Some(observations) = &self.observations {
                 observations.lock().unwrap().push((
-                    context.selection.profile.id.clone(),
-                    context
+                    state.selection.profile.id.clone(),
+                    state
                         .definitions
                         .iter()
                         .map(|tool| tool.name.clone())
@@ -596,11 +596,11 @@ impl SystemPrompt for Prompt {
             self.trace.push("epoch-start");
             tokio::task::yield_now().await;
             if self.cancel_sample {
-                return Err(parrot_runtime::prompt_context::PromptError::Cancelled);
+                return Err(parrot_runtime::prompt_assembly::PromptError::Cancelled);
             }
             cancellation
                 .check()
-                .map_err(|_| parrot_runtime::prompt_context::PromptError::Cancelled)?;
+                .map_err(|_| parrot_runtime::prompt_assembly::PromptError::Cancelled)?;
             self.sampled = true;
             self.trace.push("epoch-done");
             Ok(())

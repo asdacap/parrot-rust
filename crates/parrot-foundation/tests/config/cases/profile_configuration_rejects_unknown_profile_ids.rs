@@ -1,9 +1,9 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
+    let fixture = ConfigFixture::new();
     assert_eq!(
-        context
+        fixture
             .configured("profiles:\n  unknown: {}\n")
             .unwrap_err()
             .to_string(),

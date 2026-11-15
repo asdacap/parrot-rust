@@ -11,7 +11,7 @@ use parrot_domain::contracts::events::{
     EventPublisher, EventSubscription, RetentionClass, SubscriptionLimits,
 };
 use parrot_domain::contracts::paths::*;
-use parrot_domain::contracts::security::{AccessSnapshot, InvocationContext, SecurityProvider};
+use parrot_domain::contracts::security::{AccessSnapshot, InvocationScope, SecurityProvider};
 use parrot_domain::contracts::storage::Committed;
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 
@@ -135,14 +135,14 @@ fn actual_resolved_target_and_per_invocation_owned_snapshots_control_tools() {
     assert_eq!(
         ready(port.invoke(
             Invocation::Read(fallback.clone()),
-            InvocationContext::new(first.clone(), 11, &cancel)
+            InvocationScope::new(first.clone(), 11, &cancel)
         )),
         Err(OperationError::Failed(Fault::Denied))
     );
     assert_eq!(
         ready(port.invoke(
             Invocation::Read(fallback),
-            InvocationContext::new(second, 12, &cancel)
+            InvocationScope::new(second, 12, &cancel)
         )),
         Ok(PathBuf::from("/legacy/actual"))
     );
@@ -150,7 +150,7 @@ fn actual_resolved_target_and_per_invocation_owned_snapshots_control_tools() {
     assert_eq!(
         ready(port.invoke(
             Invocation::Write("/allowed/output".into()),
-            InvocationContext::new(first, 13, &cancel)
+            InvocationScope::new(first, 13, &cancel)
         )),
         Ok(PathBuf::from("/allowed/output"))
     );
@@ -165,7 +165,7 @@ fn actual_resolved_target_and_per_invocation_owned_snapshots_control_tools() {
     assert_eq!(
         ready(port.invoke(
             Invocation::Write("/allowed/output".into()),
-            InvocationContext::new(policy.capture(), 14, &cancel)
+            InvocationScope::new(policy.capture(), 14, &cancel)
         )),
         Err(OperationError::Cancelled)
     );

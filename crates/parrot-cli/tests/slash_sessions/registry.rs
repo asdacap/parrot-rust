@@ -30,7 +30,7 @@ impl SlashCommand for Command {
     fn run<'a>(
         &'a self,
         args: &'a str,
-        _: &'a mut CommandContext<'_>,
+        _: &'a mut CommandEnvironment<'_>,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
@@ -85,7 +85,7 @@ async fn direct_registry_preserves_command_identity_and_exact_normalized_argumen
     let mut dialog = RecordingDialog::default();
     let stop = Stop::new();
     {
-        let mut context = CommandContext {
+        let mut environment = CommandEnvironment {
             session: &mut session,
             activity: &activity,
             dialog: &mut dialog,
@@ -100,7 +100,7 @@ async fn direct_registry_preserves_command_identity_and_exact_normalized_argumen
             "/unknown arguments",
         ] {
             registry
-                .dispatch(entered, &mut context, &stop)
+                .dispatch(entered, &mut environment, &stop)
                 .await
                 .unwrap();
         }
@@ -214,7 +214,7 @@ async fn mode_clear_and_modes_use_shared_activity_and_actual_replacement() {
     registry
         .dispatch(
             "/mode",
-            &mut CommandContext {
+            &mut CommandEnvironment {
                 session: &mut session,
                 activity: &activity,
                 dialog: &mut mode_dialog,
@@ -229,7 +229,7 @@ async fn mode_clear_and_modes_use_shared_activity_and_actual_replacement() {
     registry
         .dispatch(
             "/clear",
-            &mut CommandContext {
+            &mut CommandEnvironment {
                 session: &mut session,
                 activity: &activity,
                 dialog: &mut clear_dialog,
@@ -243,7 +243,7 @@ async fn mode_clear_and_modes_use_shared_activity_and_actual_replacement() {
     registry
         .dispatch(
             "/modes",
-            &mut CommandContext {
+            &mut CommandEnvironment {
                 session: &mut session,
                 activity: &activity,
                 dialog: &mut mode_dialog,

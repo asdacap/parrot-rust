@@ -13,8 +13,8 @@ use parrot_cli::{
     dispatch::dialog::{self, DialogOption, SlashDialog},
     terminal_dialogs::dialog::{CommitScrollback, EnhancedSlashDialog, LiveInputHost},
     terminal_frames::{
-        LiveBufferCaret, LiveBufferItem, LiveBufferRenderContext, LiveBufferRetention,
-        ScrollbackItem, ScrollbackRenderContext,
+        LiveBufferCaret, LiveBufferItem, LiveBufferRenderOptions, LiveBufferRetention,
+        ScrollbackItem, ScrollbackRenderOptions,
     },
     terminal_input::{TerminalKey, TerminalKeyKind},
 };
@@ -74,7 +74,7 @@ impl ScriptedHost {
                 frame
                     .iter()
                     .map(|item| {
-                        item.render(LiveBufferRenderContext {
+                        item.render(LiveBufferRenderOptions {
                             columns,
                             color: false,
                         })
@@ -156,7 +156,7 @@ fn dialog(host: &Arc<ScriptedHost>) -> EnhancedSlashDialog {
 }
 fn assert_prompt(item: &Arc<dyn LiveBufferItem>, text: &str, column: isize) {
     let rendered = item
-        .render(LiveBufferRenderContext {
+        .render(LiveBufferRenderOptions {
             columns: 80,
             color: false,
         })
@@ -197,7 +197,7 @@ async fn print_commits_all_lines_without_opening_a_dialog() {
     assert!(committed[0].is_completed());
     assert_eq!(
         committed[0]
-            .render(ScrollbackRenderContext {
+            .render(ScrollbackRenderOptions {
                 columns: 80,
                 color: false,
                 inline_diff: false,
@@ -497,7 +497,7 @@ async fn text_secret_and_information_are_all_live_input_items() {
         assert_eq!(rendered[0][0], vec!["Key: "]);
         assert_prompt(&frames[0][1], "> ", 2);
         let information = frames[frames.len() - 2][0]
-            .render(LiveBufferRenderContext {
+            .render(LiveBufferRenderOptions {
                 columns: 80,
                 color: true,
             })
@@ -509,7 +509,7 @@ async fn text_secret_and_information_are_all_live_input_items() {
         assert_eq!(rendered[rendered.len() - 2], vec![vec!["first", "second"]]);
         assert_eq!(rendered.last().unwrap(), &vec![vec!["failed"]]);
         let failure = frames.last().unwrap()[0]
-            .render(LiveBufferRenderContext {
+            .render(LiveBufferRenderOptions {
                 columns: 80,
                 color: true,
             })
@@ -628,8 +628,8 @@ async fn typed_dialog_load_records_activity_and_joins_successful_work() {
 }
 
 #[tokio::test]
-async fn picker_and_text_keep_multiline_context_in_every_editing_frame() {
-    for (context, columns, expected) in [
+async fn picker_and_text_keep_multiline_message_in_every_editing_frame() {
+    for (message, columns, expected) in [
         ("Header\nQuestion", 80, vec!["Header", "Question"]),
         ("Header\nQuestion", 6, vec!["Header", "Questi", "on"]),
         ("Question", 80, vec!["Question"]),
@@ -637,7 +637,7 @@ async fn picker_and_text_keep_multiline_context_in_every_editing_frame() {
         let host = ScriptedHost::new(submit(text("a")));
         dialog(&host)
             .select(
-                context,
+                message,
                 &[DialogOption::new("answer", "Answer", "")],
                 &TestCancellation::default(),
             )
@@ -645,7 +645,7 @@ async fn picker_and_text_keep_multiline_context_in_every_editing_frame() {
             .unwrap();
         let text_host = ScriptedHost::new(submit(text("ab")));
         dialog(&text_host)
-            .read_text(context, &TestCancellation::default())
+            .read_text(message, &TestCancellation::default())
             .await
             .unwrap();
         for frame in host

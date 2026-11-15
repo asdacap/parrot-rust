@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for key in [
@@ -13,9 +13,9 @@ fn source_assertions() {
             &["0", "-1", "1.5", "true", "null", "2147483648"]
         };
         for value in values {
-            let context = Context::new();
+            let fixture = ConfigFixture::new();
             assert!(
-                context
+                fixture
                     .configured(&format!("compaction:\n  {key}: {value}\n"))
                     .is_err()
             );

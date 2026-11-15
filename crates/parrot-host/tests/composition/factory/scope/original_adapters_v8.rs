@@ -41,7 +41,7 @@ async fn production_catalog_task_runner_forks_execute_publish_success_and_join_a
     let owner = fixture.root();
     let user = fixture.user();
     let controller = owner
-        .get_service::<ScopedTaskController<Security, ContextSelection<Security>>>()
+        .get_service::<ScopedTaskController<Security, InvocationSelection<Security>>>()
         .unwrap();
     let first_gate = Arc::new(Semaphore::new(0));
     let second_gate = Arc::new(Semaphore::new(0));
@@ -405,7 +405,7 @@ async fn idle_authoritative_owner_wakes_on_real_task_success_before_sibling_fano
     let owner = fixture.root();
     let user = fixture.user();
     let controller = owner
-        .get_service::<ScopedTaskController<Security, ContextSelection<Security>>>()
+        .get_service::<ScopedTaskController<Security, InvocationSelection<Security>>>()
         .unwrap();
     let missing = parrot_tools::task_artifacts::parse_task_set(&json!([
         {"name":"b","description":"Do b","payload":"not executed","acceptance_criteria":"unused","dependencies":["missing"]}

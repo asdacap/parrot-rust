@@ -1,8 +1,8 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let config = context
+    let fixture = ConfigFixture::new();
+    let config = fixture
         .configured(
             r#"model_presets:
   Work:

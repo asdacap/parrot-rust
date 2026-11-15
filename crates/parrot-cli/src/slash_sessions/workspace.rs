@@ -7,7 +7,7 @@ use parrot_domain::{
 };
 use tonic::Code;
 
-use super::{CommandContext, SlashCommand, SlashFailure};
+use super::{CommandEnvironment, SlashCommand, SlashFailure};
 use crate::dispatch::dialog::{DialogOption, load};
 
 /// Consumer seam for the original ITerminalSessionController. The terminal
@@ -65,18 +65,18 @@ impl WorkspaceSessionsCommand {
 
     async fn run_inner(
         &self,
-        context: &mut CommandContext<'_>,
+        environment: &mut CommandEnvironment<'_>,
         cancellation: &dyn Cancellation,
     ) -> Result<(), NavigationFailure> {
         let listed = load(
-            context.dialog,
+            environment.dialog,
             "Loading workspace sessions…",
             self.navigation.list(cancellation),
             cancellation,
         )
         .await?;
         if listed.sessions.is_empty() {
-            context
+            environment
                 .dialog
                 .show(
                     &["No sessions in the current workspace.".into()],
@@ -85,15 +85,15 @@ impl WorkspaceSessionsCommand {
                 .await?;
             return Ok(());
         }
-        let options = workspace_options(&listed.sessions, context.session.id());
-        let selected = context
+        let options = workspace_options(&listed.sessions, environment.session.id());
+        let selected = environment
             .dialog
             .select("Workspace sessions", &options, cancellation)
             .await?;
         let Some(selected) = selected else {
             return Ok(());
         };
-        if selected.id == context.session.id() {
+        if selected.id == environment.session.id() {
             return Ok(());
         }
         let mut matching = listed
@@ -109,15 +109,15 @@ impl WorkspaceSessionsCommand {
             ));
         }
         if item.state.enum_value().ok() == Some(wire::SessionState::SESSION_STATE_CORRUPT) {
-            context
+            environment
                 .dialog
                 .show_error("session metadata is corrupt", cancellation)
                 .await?;
             return Ok(());
         }
-        context.activity.wait_until_idle(cancellation).await?;
+        environment.activity.wait_until_idle(cancellation).await?;
         load(
-            context.dialog,
+            environment.dialog,
             "Loading selected session…",
             self.navigation.load(&selected.id, cancellation),
             cancellation,
@@ -135,11 +135,11 @@ impl SlashCommand for WorkspaceSessionsCommand {
     fn run<'a>(
         &'a self,
         _: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
-            match self.run_inner(context, cancellation).await {
+            match self.run_inner(environment, cancellation).await {
                 Ok(()) => Ok(()),
                 Err(NavigationFailure::Rpc(status))
                     if !cancellation.is_cancelled() && status.code() != Code::Cancelled =>
@@ -149,11 +149,14 @@ impl SlashCommand for WorkspaceSessionsCommand {
                     } else {
                         status.message()
                     };
-                    context.dialog.show_error(message, cancellation).await?;
+                    environment.dialog.show_error(message, cancellation).await?;
                     Ok(())
                 }
                 Err(NavigationFailure::Recoverable(message)) if !cancellation.is_cancelled() => {
-                    context.dialog.show_error(&message, cancellation).await?;
+                    environment
+                        .dialog
+                        .show_error(&message, cancellation)
+                        .await?;
                     Ok(())
                 }
                 Err(failure) => Err(failure.into()),

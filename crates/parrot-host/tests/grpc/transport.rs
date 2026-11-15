@@ -257,11 +257,11 @@ impl Parrot for Endpoint {
     }
 }
 
-struct Context {
+struct GrpcFixture {
     root: std::path::PathBuf,
     log: Arc<FileDiagnosticLog>,
 }
-impl Context {
+impl GrpcFixture {
     fn new() -> Self {
         let root = std::path::Path::new("/tmp").join(format!(
             "t63-transport-{}",
@@ -294,7 +294,7 @@ impl Context {
         .unwrap()
     }
 }
-impl Drop for Context {
+impl Drop for GrpcFixture {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
     }
@@ -342,9 +342,9 @@ async fn bounded<T>(future: impl std::future::Future<Output = T>) -> T {
 #[tokio::test]
 async fn tcp_is_http2_and_client_disposal_does_not_stop_owner() {
     bounded(async {
-        let context = Context::new();
-        let mut server = context.server(Endpoint::default()).await;
-        let mut first = context.client(&server);
+        let fixture = GrpcFixture::new();
+        let mut server = fixture.server(Endpoint::default()).await;
+        let mut first = fixture.client(&server);
         first
             .client()
             .unwrap()
@@ -357,7 +357,7 @@ async fn tcp_is_http2_and_client_disposal_does_not_stop_owner() {
             first.attach(attachment("id"), &Active).await,
             Err(AttachError::Disposed)
         ));
-        let mut second = context.client(&server);
+        let mut second = fixture.client(&server);
         second
             .client()
             .unwrap()
@@ -372,7 +372,7 @@ async fn tcp_is_http2_and_client_disposal_does_not_stop_owner() {
 
 #[tokio::test]
 async fn tcp_requires_token_and_https_requires_identity() {
-    let context = Context::new();
+    let fixture = GrpcFixture::new();
     let address = TransportAddress::parse("http://127.0.0.1:0").unwrap();
     assert!(
         GrpcServer::start(
@@ -380,20 +380,20 @@ async fn tcp_requires_token_and_https_requires_identity() {
             address.clone(),
             None,
             None,
-            context.log.clone()
+            fixture.log.clone()
         )
         .await
         .is_err()
     );
-    assert!(GrpcTransportClient::connect(&address, None, None, context.log.clone()).is_err());
+    assert!(GrpcTransportClient::connect(&address, None, None, fixture.log.clone()).is_err());
     let address = TransportAddress::parse("https://127.0.0.1:0").unwrap();
     assert!(
         GrpcServer::start(
             Endpoint::default(),
             address,
-            Some(context.token()),
+            Some(fixture.token()),
             None,
-            context.log.clone()
+            fixture.log.clone()
         )
         .await
         .is_err()
@@ -403,10 +403,10 @@ async fn tcp_requires_token_and_https_requires_identity() {
 #[tokio::test]
 async fn malformed_unauthorized_http2_is_401_before_rpc_dispatch() {
     bounded(async {
-        let context = Context::new();
+        let fixture = GrpcFixture::new();
         let endpoint = Endpoint::default();
         let calls = endpoint.calls.clone();
-        let mut server = context.server(endpoint).await;
+        let mut server = fixture.server(endpoint).await;
         for authorization in [
             None,
             Some("Bearer incorrect"),
@@ -448,7 +448,7 @@ async fn malformed_unauthorized_http2_is_401_before_rpc_dispatch() {
             task.await.unwrap().unwrap();
         }
         assert_eq!(calls.load(Ordering::SeqCst), 0);
-        let mut client = context.client(&server);
+        let mut client = fixture.client(&server);
         client
             .client()
             .unwrap()
@@ -464,12 +464,12 @@ async fn malformed_unauthorized_http2_is_401_before_rpc_dispatch() {
 #[tokio::test]
 async fn attach_retries_only_not_found_and_returns_exact_session() {
     bounded(async {
-        let context = Context::new();
+        let fixture = GrpcFixture::new();
         let endpoint = Endpoint::default();
         endpoint.missing.store(2, Ordering::SeqCst);
         let calls = endpoint.calls.clone();
-        let mut server = context.server(endpoint).await;
-        let mut client = context.client(&server);
+        let mut server = fixture.server(endpoint).await;
+        let mut client = fixture.client(&server);
         let session = client
             .attach(attachment("exact-id"), &Active)
             .await
@@ -484,7 +484,7 @@ async fn attach_retries_only_not_found_and_returns_exact_session() {
 #[tokio::test]
 async fn attach_rejects_different_session_and_non_retryable_status() {
     bounded(async {
-        let context = Context::new();
+        let fixture = GrpcFixture::new();
         for code in [
             None,
             Some(tonic::Code::PermissionDenied),
@@ -497,8 +497,8 @@ async fn attach_rejects_different_session_and_non_retryable_status() {
                 ..Default::default()
             };
             let calls = endpoint.calls.clone();
-            let mut server = context.server(endpoint).await;
-            let mut client = context.client(&server);
+            let mut server = fixture.server(endpoint).await;
+            let mut client = fixture.client(&server);
             match (
                 client.attach(attachment("expected-id"), &Active).await,
                 code,
@@ -519,13 +519,13 @@ async fn attach_rejects_different_session_and_non_retryable_status() {
 #[tokio::test]
 async fn attach_total_deadline_and_caller_cancellation() {
     bounded(async {
-        let context = Context::new();
+        let fixture = GrpcFixture::new();
         let endpoint = Endpoint {
             status: Some(tonic::Code::Unavailable),
             ..Default::default()
         };
-        let mut server = context.server(endpoint).await;
-        let mut client = context.client(&server);
+        let mut server = fixture.server(endpoint).await;
+        let mut client = fixture.client(&server);
         let start = tokio::time::Instant::now();
         assert!(matches!(
             client.attach(attachment("id"), &Active).await,
@@ -549,9 +549,9 @@ async fn attach_total_deadline_and_caller_cancellation() {
 #[tokio::test]
 async fn shutdown_terminates_forever_listen_and_retains_join_when_close_observer_drops() {
     bounded(async {
-        let context = Context::new();
-        let mut server = context.server(Endpoint::default()).await;
-        let mut client = context.client(&server);
+        let fixture = GrpcFixture::new();
+        let mut server = fixture.server(Endpoint::default()).await;
+        let mut client = fixture.client(&server);
         let mut stream = client
             .client()
             .unwrap()
@@ -578,15 +578,15 @@ async fn shutdown_terminates_forever_listen_and_retains_join_when_close_observer
 #[tokio::test]
 async fn unix_lazy_attach_can_precede_owner_and_socket_is_cleaned_after_join() {
     bounded(async {
-        let context = Context::new();
-        let path = context.root.join("socket/parrot.sock");
+        let fixture = GrpcFixture::new();
+        let path = fixture.root.join("socket/parrot.sock");
         let address = TransportAddress::Unix(path.clone());
         let mut client =
-            GrpcTransportClient::connect(&address, None, None, context.log.clone()).unwrap();
+            GrpcTransportClient::connect(&address, None, None, fixture.log.clone()).unwrap();
         let attach = client.attach(attachment("owner-id"), &Active);
         let owner = async {
             tokio::time::sleep(Duration::from_millis(150)).await;
-            GrpcServer::start_local(Endpoint::default(), &path, context.log.clone())
+            GrpcServer::start_local(Endpoint::default(), &path, fixture.log.clone())
                 .await
                 .unwrap()
         };
@@ -603,11 +603,11 @@ async fn unix_lazy_attach_can_precede_owner_and_socket_is_cleaned_after_join() {
 async fn exact_64mib_request_is_accepted_and_both_outgoing_and_incoming_limits_reject_one_more() {
     bounded(async {
         use protobuf::Message;
-        let context = Context::new();
+        let fixture = GrpcFixture::new();
         let endpoint = Endpoint::default();
         let calls = endpoint.calls.clone();
-        let mut server = context.server(endpoint).await;
-        let mut client = context.client(&server);
+        let mut server = fixture.server(endpoint).await;
+        let mut client = fixture.client(&server);
         let exact = attachment(&"x".repeat(parrot_host::grpc::MESSAGE_BYTES - 5));
         assert_eq!(
             exact.compute_size(),
@@ -668,7 +668,7 @@ async fn exact_64mib_request_is_accepted_and_both_outgoing_and_incoming_limits_r
 async fn exact_64mib_response_is_accepted_and_server_encoding_rejects_one_more() {
     bounded(async {
         use protobuf::Message;
-        let context = Context::new();
+        let fixture = GrpcFixture::new();
         for extra in [0, 1] {
             let endpoint = Endpoint {
                 reply_id: Some(String::new()),
@@ -684,8 +684,8 @@ async fn exact_64mib_response_is_accepted_and_server_encoding_rejects_one_more()
                 (parrot_host::grpc::MESSAGE_BYTES + extra) as u64
             );
             drop(expected);
-            let mut server = context.server(endpoint).await;
-            let mut client = context.client(&server);
+            let mut server = fixture.server(endpoint).await;
+            let mut client = fixture.client(&server);
             let mut bypass_client_receive = client
                 .client()
                 .unwrap()
@@ -710,7 +710,7 @@ async fn exact_64mib_response_is_accepted_and_server_encoding_rejects_one_more()
 async fn client_decoding_limit_rejects_oversized_response_even_when_server_encoding_is_unbounded() {
     bounded(async {
         use parrot_domain::protocol::bindings::parrot::parrot_server::ParrotServer;
-        let context = Context::new();
+        let fixture = GrpcFixture::new();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address =
             TransportAddress::parse(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
@@ -735,9 +735,9 @@ async fn client_decoding_limit_rejects_oversized_response_even_when_server_encod
         });
         let mut client = GrpcTransportClient::connect(
             &address,
-            Some(&context.token()),
+            Some(&fixture.token()),
             None,
-            context.log.clone(),
+            fixture.log.clone(),
         )
         .unwrap();
         assert_eq!(
@@ -759,7 +759,7 @@ async fn client_decoding_limit_rejects_oversized_response_even_when_server_encod
 #[tokio::test]
 async fn tls_rejects_untrusted_fixture_without_disabling_certificate_verification() {
     bounded(async {
-        let context = Context::new();
+        let fixture = GrpcFixture::new();
         let identity = tonic::transport::Identity::from_pem(
             include_bytes!("fixtures/server.pem"),
             include_bytes!("fixtures/server-key.pem"),
@@ -767,13 +767,13 @@ async fn tls_rejects_untrusted_fixture_without_disabling_certificate_verificatio
         let mut server = GrpcServer::start(
             Endpoint::default(),
             TransportAddress::parse("https://127.0.0.1:0").unwrap(),
-            Some(context.token()),
+            Some(fixture.token()),
             Some(tonic::transport::ServerTlsConfig::new().identity(identity)),
-            context.log.clone(),
+            fixture.log.clone(),
         )
         .await
         .unwrap();
-        let mut client = context.client(&server);
+        let mut client = fixture.client(&server);
         assert_eq!(
             client
                 .client()
@@ -792,7 +792,7 @@ async fn tls_rejects_untrusted_fixture_without_disabling_certificate_verificatio
 #[tokio::test]
 async fn tls_explicit_synthetic_root_validates_normal_verified_http2() {
     bounded(async {
-        let context = Context::new();
+        let fixture = GrpcFixture::new();
         let certificate = include_bytes!("fixtures/server.pem");
         let identity = tonic::transport::Identity::from_pem(
             certificate,
@@ -801,9 +801,9 @@ async fn tls_explicit_synthetic_root_validates_normal_verified_http2() {
         let mut server = GrpcServer::start(
             Endpoint::default(),
             TransportAddress::parse("https://127.0.0.1:0").unwrap(),
-            Some(context.token()),
+            Some(fixture.token()),
             Some(tonic::transport::ServerTlsConfig::new().identity(identity)),
-            context.log.clone(),
+            fixture.log.clone(),
         )
         .await
         .unwrap();
@@ -814,9 +814,9 @@ async fn tls_explicit_synthetic_root_validates_normal_verified_http2() {
             .domain_name("localhost");
         let mut client = GrpcTransportClient::connect(
             server.address(),
-            Some(&context.token()),
+            Some(&fixture.token()),
             Some(tls),
-            context.log.clone(),
+            fixture.log.clone(),
         )
         .unwrap();
         let result = client
@@ -833,16 +833,16 @@ async fn tls_explicit_synthetic_root_validates_normal_verified_http2() {
 #[tokio::test]
 async fn global_transport_diagnostics_correlate_lifetimes_without_paths_tokens_or_payloads() {
     bounded(async {
-        let context = Context::new();
-        let mut server = context.server(Endpoint::default()).await;
-        let mut client = context.client(&server);
+        let fixture = GrpcFixture::new();
+        let mut server = fixture.server(Endpoint::default()).await;
+        let mut client = fixture.client(&server);
         client
             .attach(attachment("PRIVATE-SESSION-PAYLOAD"), &Active)
             .await
             .unwrap();
         client.close();
         server.close().await.unwrap();
-        let text = std::fs::read_to_string(context.log.path()).unwrap();
+        let text = std::fs::read_to_string(fixture.log.path()).unwrap();
         for operation in [
             "host.start",
             "host.ready",
@@ -887,8 +887,8 @@ async fn global_transport_diagnostics_correlate_lifetimes_without_paths_tokens_o
         assert!(text.contains("duration_ms=\""));
         assert!(text.contains("outcome=\"success\""));
         assert!(!text.contains("PRIVATE-SESSION-PAYLOAD"));
-        assert!(!text.contains(&context.token().bearer()));
-        assert!(!text.contains(&context.root.to_string_lossy().to_string()));
+        assert!(!text.contains(&fixture.token().bearer()));
+        assert!(!text.contains(&fixture.root.to_string_lossy().to_string()));
         assert!(!text.contains("user_session="));
     })
     .await;
@@ -903,15 +903,15 @@ async fn separate_global_sinks_record_exact_attach_pair_and_sanitized_rejection_
             Some(tonic::Code::InvalidArgument),
             Some(tonic::Code::Aborted),
         ] {
-            let server_context = Context::new();
-            let client_context = Context::new();
-            let mut server = server_context
+            let server_fixture = GrpcFixture::new();
+            let client_fixture = GrpcFixture::new();
+            let mut server = server_fixture
                 .server(Endpoint {
                     status: code,
                     ..Default::default()
                 })
                 .await;
-            let mut client = client_context.client(&server);
+            let mut client = client_fixture.client(&server);
             let result = client
                 .attach(
                     wire::AttachSessionRequest {
@@ -925,8 +925,8 @@ async fn separate_global_sinks_record_exact_attach_pair_and_sanitized_rejection_
             assert_eq!(result.is_ok(), code.is_none());
             client.close();
             server.close().await.unwrap();
-            let client_log = std::fs::read_to_string(client_context.log.path()).unwrap();
-            let server_log = std::fs::read_to_string(server_context.log.path()).unwrap();
+            let client_log = std::fs::read_to_string(client_fixture.log.path()).unwrap();
+            let server_log = std::fs::read_to_string(server_fixture.log.path()).unwrap();
             let entries: Vec<_> = client_log
                 .lines()
                 .filter(|line| line.contains("event=\"attach."))
@@ -972,7 +972,7 @@ async fn separate_global_sinks_record_exact_attach_pair_and_sanitized_rejection_
                     "DIAGNOSTIC-PRIVATE-ID",
                     "/DIAGNOSTIC-PRIVATE-WORKSPACE",
                     "synthetic failure",
-                    &server_context.token().bearer(),
+                    &server_fixture.token().bearer(),
                     &server.address().to_string(),
                 ] {
                     assert!(!log.contains(sentinel));
@@ -986,13 +986,13 @@ async fn separate_global_sinks_record_exact_attach_pair_and_sanitized_rejection_
 #[tokio::test]
 async fn shutdown_joins_while_http2_response_is_unread_and_flow_control_is_exhausted() {
     bounded(async {
-        let context = Context::new();
+        let fixture = GrpcFixture::new();
         let endpoint = Endpoint {
             listen_bytes: 256 * 1024,
             ..Default::default()
         };
         let emitted = endpoint.emitted.clone();
-        let mut server = context.server(endpoint).await;
+        let mut server = fixture.server(endpoint).await;
         let socket = tokio::net::TcpStream::connect(server.address().socket_addr().unwrap())
             .await
             .unwrap();
@@ -1010,7 +1010,7 @@ async fn shutdown_joins_while_http2_response_is_unread_and_flow_control_is_exhau
             .header("content-type", "application/grpc")
             .header(
                 "authorization",
-                format!("Bearer {}", context.token().bearer()),
+                format!("Bearer {}", fixture.token().bearer()),
             )
             .body(Full::new(Bytes::from_static(&[0; 5])))
             .unwrap();
@@ -1045,7 +1045,7 @@ async fn shutdown_joins_while_http2_response_is_unread_and_flow_control_is_exhau
 async fn shutdown_releases_idle_http2_and_partial_tls_handshake_connections() {
     bounded(async {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let context = Context::new();
+        let fixture = GrpcFixture::new();
         for tls in [false, true] {
             let identity = tonic::transport::Identity::from_pem(
                 include_bytes!("fixtures/server.pem"),
@@ -1059,9 +1059,9 @@ async fn shutdown_releases_idle_http2_and_partial_tls_handshake_connections() {
                     "http://127.0.0.1:0"
                 })
                 .unwrap(),
-                Some(context.token()),
+                Some(fixture.token()),
                 tls.then(|| tonic::transport::ServerTlsConfig::new().identity(identity)),
-                context.log.clone(),
+                fixture.log.clone(),
             )
             .await
             .unwrap();

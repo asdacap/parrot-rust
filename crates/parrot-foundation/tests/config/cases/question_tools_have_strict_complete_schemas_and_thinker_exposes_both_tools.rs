@@ -1,9 +1,9 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use serde_json::Value;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let config = context.load().unwrap();
+    let fixture = ConfigFixture::new();
+    let config = fixture.load().unwrap();
     let question: Value =
         serde_json::from_str(&config.runtime.tools["question"].parameters_json).unwrap();
     assert_eq!(question["additionalProperties"], false);

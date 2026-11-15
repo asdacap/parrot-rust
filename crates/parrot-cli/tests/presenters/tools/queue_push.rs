@@ -1,6 +1,6 @@
 use parrot_cli::presenters::{tools::queue_push::QueuePushToolPresenter, *};
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackRenderOptions,
 };
 fn rows(arguments: &str, result: &str, columns: usize) -> Vec<String> {
     let item = QueuePushToolPresenter
@@ -16,7 +16,7 @@ fn rows(arguments: &str, result: &str, columns: usize) -> Vec<String> {
         .unwrap();
     ScrollbackItem::render(
         &item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns,
             color: false,
             inline_diff: true,
@@ -50,7 +50,7 @@ fn items_and_source_path_render_open_closed_without_file_reads() {
             .unwrap();
         let live = LiveBufferItem::render(
             &item,
-            LiveBufferRenderContext {
+            LiveBufferRenderOptions {
                 columns: 512,
                 color: false,
             },

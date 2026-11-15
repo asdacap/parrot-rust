@@ -8,7 +8,7 @@ use crate::slash_settings::{
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 
 use super::{
-    ApplicationExit, CommandContext, CompactCommand, GoalCommand, ModeCommand, ModeSelection,
+    ApplicationExit, CommandEnvironment, CompactCommand, GoalCommand, ModeCommand, ModeSelection,
     ModesCommand, SandboxEnableCommand, SessionsCommand, SkillsCommand, SlashCommand,
     SlashCommandRegistry, SlashFailure, StandingInstructionCommand, StatusCommand,
     TaskLimitCommand, WorkspaceNavigation, WorkspaceSessionsCommand,
@@ -25,15 +25,15 @@ impl SlashCommand for ClearCommand {
     fn run<'a>(
         &'a self,
         _: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         c: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
-            context.activity.wait_until_idle(c).await?;
-            context.session.start_new(c).await?;
-            context
+            environment.activity.wait_until_idle(c).await?;
+            environment.session.start_new(c).await?;
+            environment
                 .dialog
-                .show(&[format!("new session {}", context.session.id())], c)
+                .show(&[format!("new session {}", environment.session.id())], c)
                 .await?;
             Ok(())
         })
@@ -51,17 +51,17 @@ impl SlashCommand for HelpCommand {
     fn run<'a>(
         &'a self,
         _: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         c: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
-            let mut commands: Vec<_> = context.commands.iter().collect();
+            let mut commands: Vec<_> = environment.commands.iter().collect();
             commands.sort_by(|left, right| left.name.encode_utf16().cmp(right.name.encode_utf16()));
             let lines: Vec<_> = commands
                 .into_iter()
                 .map(|command| format!("{:<12} {}", command.name, command.summary))
                 .collect();
-            context.dialog.show(&lines, c).await?;
+            environment.dialog.show(&lines, c).await?;
             Ok(())
         })
     }
@@ -87,11 +87,11 @@ impl SlashCommand for VersionCommand {
     fn run<'a>(
         &'a self,
         _: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         c: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
-            context
+            environment
                 .dialog
                 .show(&[format!("parrot {}", self.version)], c)
                 .await
@@ -118,7 +118,7 @@ impl SlashCommand for ExitCommand {
     fn run<'a>(
         &'a self,
         _: &'a str,
-        _: &'a mut CommandContext<'_>,
+        _: &'a mut CommandEnvironment<'_>,
         c: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         self.application.exit(c)

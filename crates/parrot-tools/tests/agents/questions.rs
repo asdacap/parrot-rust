@@ -20,7 +20,7 @@ use parrot_runtime::interactions::{
 use parrot_tools::agents::AgentToolError;
 use parrot_tools::agents::questions::{AskTool, QuestionTool, ReplyTool};
 
-use super::{CANCELLED, NEVER, Security, context, invocation, templates};
+use super::{CANCELLED, NEVER, Security, invocation, invocation_scope, templates};
 
 struct Diagnostics;
 impl InteractionDiagnostics for Diagnostics {
@@ -85,7 +85,7 @@ async fn question_maps_schema_input_into_actual_broker_and_formats_label_reply()
     let broker = broker();
     let tool = question_tool(broker.clone());
     let task = tokio::spawn(async move {
-        tool.invoke(invocation(r#"{"questions":[{"header":"Palette","prompt":"Pick a colour","options":["Blue",{"label":"Red","description":"warm"}],"multiple":true,"custom":true}]}"#), context(&NEVER)).await
+        tool.invoke(invocation(r#"{"questions":[{"header":"Palette","prompt":"Pick a colour","options":["Blue",{"label":"Red","description":"warm"}],"multiple":true,"custom":true}]}"#), invocation_scope(&NEVER)).await
     });
     wait_pending(&broker).await;
     let pending = broker.pending();
@@ -117,7 +117,7 @@ async fn ordered_answers_preserve_question_and_supplied_selection_order() {
     let broker = broker();
     let tool = question_tool(broker.clone());
     let task = tokio::spawn(async move {
-        tool.invoke(invocation(r#"{"questions":[{"prompt":"First","options":["Red","Blue"],"multiple":true,"custom":true},{"prompt":"Second"}]}"#), context(&NEVER)).await
+        tool.invoke(invocation(r#"{"questions":[{"prompt":"First","options":["Red","Blue"],"multiple":true,"custom":true},{"prompt":"Second"}]}"#), invocation_scope(&NEVER)).await
     });
     wait_pending(&broker).await;
     let pending = broker.pending();
@@ -149,8 +149,10 @@ async fn custom_default_distinguishes_absent_null_and_empty_options() {
         let broker = broker();
         let tool = question_tool(broker.clone());
         let arguments = arguments.to_owned();
-        let task =
-            tokio::spawn(async move { tool.invoke(invocation(&arguments), context(&NEVER)).await });
+        let task = tokio::spawn(async move {
+            tool.invoke(invocation(&arguments), invocation_scope(&NEVER))
+                .await
+        });
         wait_pending(&broker).await;
         let pending = broker.pending();
         assert_eq!(pending[0].questions[0].custom, expected);
@@ -166,7 +168,7 @@ async fn custom_default_distinguishes_absent_null_and_empty_options() {
     ] {
         assert_eq!(
             question_tool(broker())
-                .invoke(invocation(arguments), context(&NEVER))
+                .invoke(invocation(arguments), invocation_scope(&NEVER))
                 .await
                 .unwrap(),
             "error: question requires options or custom answers"
@@ -184,7 +186,7 @@ async fn wire_rejection_never_leaves_actual_broker_pending() {
         r#"{"questions":[{"id":"colour","prompt":"Pick","options":[{"id":"blue","label":"Blue","unexpected":true}]}]}"#,
     ] {
         assert!(
-            tool.invoke(invocation(arguments), context(&NEVER))
+            tool.invoke(invocation(arguments), invocation_scope(&NEVER))
                 .await
                 .unwrap()
                 .starts_with("error: ")
@@ -192,7 +194,7 @@ async fn wire_rejection_never_leaves_actual_broker_pending() {
         assert!(broker.pending().is_empty());
     }
     assert_eq!(
-        tool.invoke(invocation(r#"{"questions":[]}"#), context(&NEVER))
+        tool.invoke(invocation(r#"{"questions":[]}"#), invocation_scope(&NEVER))
             .await
             .unwrap(),
         "error: question requests require between 1 and 32 questions"
@@ -233,7 +235,7 @@ async fn actual_broker_timeout_is_user_away_normal_text() {
         question_tool(broker.clone())
             .invoke(
                 invocation(r#"{"questions":[{"prompt":"Pick"}]}"#),
-                context(&NEVER)
+                invocation_scope(&NEVER)
             )
             .await
             .unwrap(),
@@ -249,7 +251,7 @@ async fn question_cancellation_is_not_an_error_result_and_registration_is_remove
         question_tool(broker.clone())
             .invoke(
                 invocation(r#"{"questions":[{"prompt":"Pick"}]}"#),
-                context(&CANCELLED)
+                invocation_scope(&CANCELLED)
             )
             .await,
         Err(OperationError::Cancelled)
@@ -369,7 +371,7 @@ async fn ask_blocks_until_reply_settles_immediately_and_preserves_plain_text() {
         );
         let args = serde_json::json!({"name":name,"message":"  Proceed?\nDetails  "});
         let asking = tokio::spawn(async move {
-            ask.invoke(invocation(&args.to_string()), context(&NEVER))
+            ask.invoke(invocation(&args.to_string()), invocation_scope(&NEVER))
                 .await
         });
         let request = wait_pending_ask(&recipient).await;
@@ -383,7 +385,7 @@ async fn ask_blocks_until_reply_settles_immediately_and_preserves_plain_text() {
                     invocation(
                         &serde_json::json!({"request_id":request.id,"message":"yes"}).to_string()
                     ),
-                    context(&NEVER)
+                    invocation_scope(&NEVER)
                 )
                 .await,
             Err(OperationError::Failed(AgentToolError::QuestionRejected(_)))
@@ -400,7 +402,7 @@ async fn ask_blocks_until_reply_settles_immediately_and_preserves_plain_text() {
             serde_json::json!({"request_id":request.id,"message":"  yes\nnow  "}).to_string();
         assert_eq!(
             reply
-                .invoke(invocation(&arguments), context(&NEVER))
+                .invoke(invocation(&arguments), invocation_scope(&NEVER))
                 .await
                 .unwrap(),
             format!("Replied to ask {}.", request.id)
@@ -408,7 +410,9 @@ async fn ask_blocks_until_reply_settles_immediately_and_preserves_plain_text() {
         assert!(recipient.pending().is_empty());
         assert_eq!(asking.await.unwrap().unwrap(), "  yes\nnow  ");
         assert!(matches!(
-            reply.invoke(invocation(&arguments), context(&NEVER)).await,
+            reply
+                .invoke(invocation(&arguments), invocation_scope(&NEVER))
+                .await,
             Err(OperationError::Failed(AgentToolError::QuestionRejected(_)))
         ));
     }
@@ -430,7 +434,7 @@ async fn ask_cycle_and_cancellation_are_propagated_without_fabricating_replies()
     assert_eq!(
         ask.invoke(
             invocation(r#"{"name":"second","message":"hello"}"#),
-            context(&CANCELLED)
+            invocation_scope(&CANCELLED)
         )
         .await,
         Err(OperationError::Cancelled)
@@ -439,7 +443,7 @@ async fn ask_cycle_and_cancellation_are_propagated_without_fabricating_replies()
     let asking = tokio::spawn(async move {
         ask.invoke(
             invocation(r#"{"name":"second","message":"hello"}"#),
-            context(&NEVER),
+            invocation_scope(&NEVER),
         )
         .await
     });
@@ -455,7 +459,7 @@ async fn ask_cycle_and_cancellation_are_propagated_without_fabricating_replies()
     let cycle = reverse
         .invoke(
             invocation(r#"{"name":"first","message":"cycle"}"#),
-            context(&NEVER),
+            invocation_scope(&NEVER),
         )
         .await;
     assert!(
@@ -465,7 +469,7 @@ async fn ask_cycle_and_cancellation_are_propagated_without_fabricating_replies()
         ReplyTool::new(definition(), communication(second.clone()), templates());
     assert_eq!(
         reply
-            .invoke(invocation("not-json"), context(&CANCELLED))
+            .invoke(invocation("not-json"), invocation_scope(&CANCELLED))
             .await,
         Err(OperationError::Cancelled)
     );
@@ -493,7 +497,7 @@ async fn invalid_ask_and_reply_inputs_do_not_reach_the_service() {
         r#"{"name":"x","message":"x","extra":true}"#,
     ] {
         assert!(
-            ask.invoke(invocation(arguments), context(&NEVER))
+            ask.invoke(invocation(arguments), invocation_scope(&NEVER))
                 .await
                 .unwrap()
                 .starts_with("error: "),
@@ -512,7 +516,7 @@ async fn invalid_ask_and_reply_inputs_do_not_reach_the_service() {
     ] {
         assert!(
             reply
-                .invoke(invocation(arguments), context(&NEVER))
+                .invoke(invocation(arguments), invocation_scope(&NEVER))
                 .await
                 .unwrap()
                 .starts_with("error: "),
@@ -535,7 +539,7 @@ async fn question_uses_selected_result_templates() {
     let task = tokio::spawn(async move {
         tool.invoke(
             invocation(r#"{"questions":[{"prompt":"Pick"}]}"#),
-            context(&NEVER),
+            invocation_scope(&NEVER),
         )
         .await
     });
@@ -568,7 +572,7 @@ async fn ask_and_reply_use_selected_result_templates() {
     let asking = tokio::spawn(async move {
         ask.invoke(
             invocation(r#"{"name":"second","message":"hello"}"#),
-            context(&NEVER),
+            invocation_scope(&NEVER),
         )
         .await
     });
@@ -581,7 +585,7 @@ async fn ask_and_reply_use_selected_result_templates() {
                 invocation(
                     &serde_json::json!({"request_id":request.id,"message":"yes"}).to_string()
                 ),
-                context(&NEVER)
+                invocation_scope(&NEVER)
             )
             .await
             .unwrap(),
@@ -600,7 +604,7 @@ async fn ask_and_reply_use_selected_result_templates() {
         unanswered
             .invoke(
                 invocation(r#"{"name":"fourth","message":"hello"}"#),
-                context(&NEVER),
+                invocation_scope(&NEVER),
             )
             .await
             .unwrap(),

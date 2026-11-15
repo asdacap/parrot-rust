@@ -9,14 +9,14 @@ use parrot_domain::{
 
 use crate::dispatch::hierarchy::AgentSessionHierarchy;
 
-pub struct SessionReplayContext {
+pub struct SessionReplayState {
     hierarchy: AgentSessionHierarchy,
     complete: Option<Arc<dyn Fn(bool) + Send + Sync>>,
     replaying: bool,
     root_turn: RootTurnActivity,
 }
 
-impl SessionReplayContext {
+impl SessionReplayState {
     pub fn new(replaying: bool) -> Self {
         Self {
             hierarchy: AgentSessionHierarchy::default(),

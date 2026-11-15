@@ -108,7 +108,7 @@ fn m4_missing_variable_is_strict_and_discards_prior_output() {
     assert!(error.contains("undefined"), "{error}");
     assert!(
         !error.contains("PRIVATE-PARTIAL"),
-        "debug source context must be disabled"
+        "debug source excerpt must be disabled"
     );
 }
 

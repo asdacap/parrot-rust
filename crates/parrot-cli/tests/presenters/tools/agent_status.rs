@@ -1,6 +1,6 @@
 use parrot_cli::presenters::{tools::agent_status::AgentStatusToolPresenter, *};
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackRenderOptions,
 };
 use std::sync::Arc;
 
@@ -19,7 +19,7 @@ fn resolves_agent_name_and_preserves_all_status_lines() {
     assert_eq!(
         LiveBufferItem::render(
             &live,
-            LiveBufferRenderContext {
+            LiveBufferRenderOptions {
                 columns: 512,
                 color: false
             }
@@ -40,7 +40,7 @@ fn resolves_agent_name_and_preserves_all_status_lines() {
         .unwrap();
     let rows = ScrollbackItem::render(
         &item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns: 512,
             color: false,
             inline_diff: true,

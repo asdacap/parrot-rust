@@ -34,13 +34,13 @@ pub trait SecurityProvider: Send + Sync {
 }
 
 /// Owns invocation-start policy and selection, borrowing only cancellation.
-pub struct InvocationContext<'a, Security, Selection> {
+pub struct InvocationScope<'a, Security, Selection> {
     security: Security,
     selection: Selection,
     cancellation: &'a dyn Cancellation,
 }
 
-impl<'a, Security, Selection> InvocationContext<'a, Security, Selection> {
+impl<'a, Security, Selection> InvocationScope<'a, Security, Selection> {
     pub fn new(
         security: Security,
         selection: Selection,

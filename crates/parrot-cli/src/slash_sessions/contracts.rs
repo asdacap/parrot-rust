@@ -56,7 +56,7 @@ pub trait SlashCommand: Send + Sync {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>>;
 }
@@ -65,7 +65,7 @@ pub type SkillRefresh = Arc<
     dyn for<'a> Fn(&'a dyn Cancellation) -> BoxFuture<'a, Result<(), SlashFailure>> + Send + Sync,
 >;
 
-pub struct CommandContext<'a> {
+pub struct CommandEnvironment<'a> {
     pub session: &'a mut dyn SlashSession,
     pub activity: &'a dyn SlashActivity,
     pub dialog: &'a mut dyn SlashDialog,

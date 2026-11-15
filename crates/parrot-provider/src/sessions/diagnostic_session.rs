@@ -2,7 +2,7 @@
 use super::{
     Event, Request,
     diagnostics::{
-        CallContext, CallTrace, DiagnosticClock, DiagnosticSink, LastRequestDumper, TraceOutcome,
+        CallIdentity, CallTrace, DiagnosticClock, DiagnosticSink, LastRequestDumper, TraceOutcome,
     },
     runtime::{Error, EventStream, Session},
 };
@@ -93,7 +93,7 @@ impl DiagnosticStream {
         let trace = Arc::new(CallTrace::start(
             self.sink.clone(),
             self.clock.clone(),
-            CallContext {
+            CallIdentity {
                 agent_session_id: self.agent_session_id.clone(),
                 correlation_id: format!(
                     "{:016x}{:016x}",

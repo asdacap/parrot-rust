@@ -482,7 +482,7 @@ fn trace(
     Arc::new(diagnostics::CallTrace::start(
         sink,
         Arc::new(diagnostics::MonotonicDiagnosticClock::default()),
-        diagnostics::CallContext {
+        diagnostics::CallIdentity {
             agent_session_id: "agent".into(),
             correlation_id: "call".into(),
             provider_id: "fake".into(),
@@ -566,7 +566,7 @@ async fn websocket_trace_dumps_actual_incremental_body_and_counts_wire_bytes() {
     session.close().await.unwrap();
 }
 #[tokio::test]
-async fn websocket_archive_includes_full_tool_context_alongside_incremental_request() {
+async fn websocket_archive_includes_full_request_alongside_incremental_request() {
     let tool_call = json!({
         "type": "function_call",
         "id": "fc1",

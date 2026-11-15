@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
-use parrot_domain::contracts::security::InvocationContext;
+use parrot_domain::contracts::security::InvocationScope;
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::{ConfiguredToolDefinition, ToolDefinitionCatalog};
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -454,18 +454,18 @@ where
     fn invoke<'a>(
         &'a self,
         invocation: Self::Invocation,
-        context: InvocationContext<'a, Self::Security, Self::Selection>,
+        scope: InvocationScope<'a, Self::Security, Self::Selection>,
     ) -> BoxFuture<'a, Result<Self::Output, OperationError<Self::Error>>> {
         Box::pin(async move {
             match self
-                .execute_inner(&invocation, context.security(), context.cancellation())
+                .execute_inner(&invocation, scope.security(), scope.cancellation())
                 .await
             {
                 Ok(result) => Ok(result),
                 Err(error)
                     if error.kind() == io::ErrorKind::Interrupted
                         && self.kind != ProcessToolKind::Monitor
-                        && context.cancellation().is_cancelled() =>
+                        && scope.cancellation().is_cancelled() =>
                 {
                     Err(OperationError::Cancelled)
                 }

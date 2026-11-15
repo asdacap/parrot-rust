@@ -121,7 +121,7 @@ fn opaque_replacement_reaches_the_next_request_without_interpretation() {
         contents: vec![Content::Text("retained tail".into())],
         ..Message::default()
     };
-    let context = state.request().context.clone();
+    let model = state.request().model.clone();
     state
         .compaction
         .lock()
@@ -130,7 +130,7 @@ fn opaque_replacement_reaches_the_next_request_without_interpretation() {
         .push_back(Ok(Some(replacement.clone())));
     state.compactions.push_back(CompactedContext {
         messages: vec![replacement.clone(), retained.clone()],
-        state: context,
+        state: model,
     });
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));

@@ -1,18 +1,18 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    assert!(context.load().unwrap().runtime.sandbox_enabled);
+    let fixture = ConfigFixture::new();
+    assert!(fixture.load().unwrap().runtime.sandbox_enabled);
     assert!(
-        context
+        fixture
             .configured("sandbox:\n  enabled: true\n")
             .unwrap()
             .runtime
             .sandbox_enabled
     );
     assert!(
-        !context
+        !fixture
             .configured("sandbox:\n  enabled: false\n")
             .unwrap()
             .runtime

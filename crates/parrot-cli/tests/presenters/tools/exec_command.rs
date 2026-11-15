@@ -1,7 +1,7 @@
 use crate::support::animate;
 use parrot_cli::presenters::{tools::exec_command::ExecCommandToolPresenter, *};
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackRenderOptions,
 };
 use std::sync::{
     Arc,
@@ -17,7 +17,7 @@ fn call(command: &str) -> ToolCallPresentation {
 fn rows(item: &Presentation, color: bool) -> Vec<String> {
     ScrollbackItem::render(
         item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns: 32768,
             color,
             inline_diff: true,
@@ -145,7 +145,7 @@ fn named_long_commands_commit_start_and_omit_repeated_command_afterwards() {
         let live = presenter.present_live(&call, 0).unwrap();
         let live_rows = LiveBufferItem::render(
             &live,
-            LiveBufferRenderContext {
+            LiveBufferRenderOptions {
                 columns: 32768,
                 color: false,
             },
@@ -198,7 +198,7 @@ fn elapsed_clock_survives_animation_frames() {
         assert_eq!(
             LiveBufferItem::render(
                 &live,
-                LiveBufferRenderContext {
+                LiveBufferRenderOptions {
                     columns: 32768,
                     color: false
                 }

@@ -76,14 +76,14 @@ fn executable_https_explicit_pem_preserves_chain_trust_authentication_and_shutdo
         assert!(address.starts_with("https://127.0.0.1:"), "{address}");
         // An independent verified TLS peer observes the whole supplied chain,
         // including the synthetic root (not merely a usable leaf certificate).
-        let mut context =
+        let mut builder =
             openssl::ssl::SslContextBuilder::new(openssl::ssl::SslMethod::tls()).unwrap();
-        context.set_verify(openssl::ssl::SslVerifyMode::PEER);
-        context
+        builder.set_verify(openssl::ssl::SslVerifyMode::PEER);
+        builder
             .cert_store_mut()
             .add_cert(X509::from_pem(TLS_ROOT).unwrap())
             .unwrap();
-        context.set_alpn_protos(b"\x02h2").unwrap();
+        builder.set_alpn_protos(b"\x02h2").unwrap();
         let socket = TransportAddress::parse(&address)
             .unwrap()
             .socket_addr()
@@ -95,7 +95,7 @@ fn executable_https_explicit_pem_preserves_chain_trust_authentication_and_shutdo
         stream
             .set_write_timeout(Some(Duration::from_secs(5)))
             .unwrap();
-        let mut ssl = openssl::ssl::Ssl::new(&context.build()).unwrap();
+        let mut ssl = openssl::ssl::Ssl::new(&builder.build()).unwrap();
         ssl.set_hostname("localhost").unwrap();
         ssl.param_mut().set_host("localhost").unwrap();
         let peer = ssl.connect(stream).unwrap();

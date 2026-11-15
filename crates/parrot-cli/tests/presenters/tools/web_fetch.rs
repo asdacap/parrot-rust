@@ -1,6 +1,6 @@
 use parrot_cli::presenters::{tools::web_fetch::WebFetchToolPresenter, *};
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackRenderOptions,
 };
 #[test]
 fn schema_label_and_tool_errors_are_specific_and_muted() {
@@ -10,7 +10,7 @@ fn schema_label_and_tool_errors_are_specific_and_muted() {
     assert_eq!(
         LiveBufferItem::render(
             &live,
-            LiveBufferRenderContext {
+            LiveBufferRenderOptions {
                 columns: 32768,
                 color: false
             }
@@ -34,7 +34,7 @@ fn schema_label_and_tool_errors_are_specific_and_muted() {
     assert_eq!(
         ScrollbackItem::render(
             &item,
-            ScrollbackRenderContext {
+            ScrollbackRenderOptions {
                 columns: 32768,
                 color: false,
                 inline_diff: true,

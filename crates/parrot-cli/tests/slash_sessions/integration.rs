@@ -393,7 +393,7 @@ async fn real_factory_registers_source_order_and_terminal_workspace_completion()
     let activity = PollingSlashActivity(Arc::new(|| false));
     let mut dialog = RecordingDialog::default();
     let refresh = refresh(record);
-    let mut context = CommandContext {
+    let mut environment = CommandEnvironment {
         session: &mut current,
         activity: &activity,
         dialog: &mut dialog,
@@ -401,23 +401,23 @@ async fn real_factory_registers_source_order_and_terminal_workspace_completion()
         commands: &[],
     };
     registry
-        .dispatch("/auth sentinel-argument", &mut context, &Stop::new())
+        .dispatch("/auth sentinel-argument", &mut environment, &Stop::new())
         .await
         .unwrap();
     terminal
-        .dispatch("/help", &mut context, &Stop::new())
+        .dispatch("/help", &mut environment, &Stop::new())
         .await
         .unwrap();
     registry
-        .dispatch("/version ignored", &mut context, &Stop::new())
+        .dispatch("/version ignored", &mut environment, &Stop::new())
         .await
         .unwrap();
     registry
-        .dispatch("/sandbox-enable true", &mut context, &Stop::new())
+        .dispatch("/sandbox-enable true", &mut environment, &Stop::new())
         .await
         .unwrap();
     registry
-        .dispatch("/exit", &mut context, &Stop::new())
+        .dispatch("/exit", &mut environment, &Stop::new())
         .await
         .unwrap();
     assert_eq!(exits.load(Ordering::SeqCst), 1);
@@ -462,7 +462,7 @@ async fn registry_dispatches_first_exact_token_preserving_argument_tail() {
     let mut dialog = RecordingDialog::default();
     let refresh = refresh(record);
     {
-        let mut context = CommandContext {
+        let mut environment = CommandEnvironment {
             session: &mut session,
             activity: &activity,
             dialog: &mut dialog,
@@ -477,7 +477,7 @@ async fn registry_dispatches_first_exact_token_preserving_argument_tail() {
             "/Goal x",
         ] {
             registry
-                .dispatch(entered, &mut context, &Stop::new())
+                .dispatch(entered, &mut environment, &Stop::new())
                 .await
                 .unwrap();
         }
@@ -542,7 +542,7 @@ async fn clear_uses_configured_defaults_without_model_or_mode_prompts_before_new
     registry
         .dispatch(
             "/clear",
-            &mut CommandContext {
+            &mut CommandEnvironment {
                 session: &mut session,
                 activity: &activity,
                 dialog: &mut dialog,

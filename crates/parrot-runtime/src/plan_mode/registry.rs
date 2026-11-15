@@ -100,7 +100,7 @@ impl<S: AccessSnapshot + 'static> ModeRegistry<S> {
 }
 
 /// The host's existing ForAgent binding seam only. It must preserve configured
-/// exceptions while materializing the actual selected agent scratch context.
+/// exceptions while materializing the actual selected agent scratch directory.
 /// T53 does not implement grants, rule inspection, or the denied P05 operation.
 pub trait RetainedModePolicyMaterializer<S: AccessSnapshot + 'static>: Send + Sync {
     fn for_agent(

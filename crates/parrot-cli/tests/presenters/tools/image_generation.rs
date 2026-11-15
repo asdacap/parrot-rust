@@ -1,6 +1,6 @@
 use parrot_cli::presenters::tools::image_generation::ImageGenerationToolPresenter;
 use parrot_cli::presenters::*;
-use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderContext};
+use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderOptions};
 #[test]
 fn imagegen_terminal_repeats_prompt_references_and_appends_error() {
     let call = ToolCallPresentation::new(
@@ -37,7 +37,7 @@ fn imagegen_terminal_repeats_prompt_references_and_appends_error() {
         assert_eq!(
             ScrollbackItem::render(
                 &item,
-                ScrollbackRenderContext {
+                ScrollbackRenderOptions {
                     columns: 32768,
                     color: false,
                     inline_diff: false,

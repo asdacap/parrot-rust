@@ -48,10 +48,10 @@ fn config_error_kind_preserves_io_message_and_permission_denied_category() {
 
 #[test]
 fn config_error_kind_retains_actual_setter_write_failure_without_publication() {
-    let context = super::support::Context::new();
-    let mut configuration = context.configured("model: p/old\n").unwrap();
-    let before = context.saved();
-    let temporary = PathBuf::from(format!("{}.tmp", context.path.display()));
+    let fixture = super::support::ConfigFixture::new();
+    let mut configuration = fixture.configured("model: p/old\n").unwrap();
+    let before = fixture.saved();
+    let temporary = PathBuf::from(format!("{}.tmp", fixture.path.display()));
     std::fs::create_dir(&temporary).unwrap();
     let expected = std::fs::write(&temporary, "probe").unwrap_err().to_string();
     let error = configuration.set_model("p/new").unwrap_err();
@@ -59,14 +59,14 @@ fn config_error_kind_retains_actual_setter_write_failure_without_publication() {
     assert_eq!(error.0, expected);
     assert_eq!(error.to_string(), expected);
     assert_eq!(configuration.model, "p/old");
-    assert_eq!(context.saved(), before);
+    assert_eq!(fixture.saved(), before);
 }
 
 #[test]
 fn config_error_kind_preserves_predefined_copy_sanitized_validation() {
-    let context = super::support::Context::new();
-    std::fs::create_dir(&context.predefined).unwrap();
-    let error = context.load().unwrap_err();
+    let fixture = super::support::ConfigFixture::new();
+    std::fs::create_dir(&fixture.predefined).unwrap();
+    let error = fixture.load().unwrap_err();
     assert_eq!(error.kind(), ConfigErrorKind::InvalidData);
     assert_eq!(error.0, "unable to write predefined configuration");
     assert_eq!(

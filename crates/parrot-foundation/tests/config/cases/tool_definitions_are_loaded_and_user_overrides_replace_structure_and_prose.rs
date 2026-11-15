@@ -1,10 +1,10 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use serde_json::{Value, json};
 
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let configuration = context.configured("tools:\n  question:\n    parameters:\n      properties:\n        questions:\n          minItems: 2\n          items:\n            properties:\n              prompt:\n                description: Custom question prompt.\n      required: [questions, custom]\n").unwrap();
+    let fixture = ConfigFixture::new();
+    let configuration = fixture.configured("tools:\n  question:\n    parameters:\n      properties:\n        questions:\n          minItems: 2\n          items:\n            properties:\n              prompt:\n                description: Custom question prompt.\n      required: [questions, custom]\n").unwrap();
     let definitions = &configuration.runtime.tools;
     assert_eq!(definitions.len(), 28);
     assert!(definitions.contains_key("set_exit_reminder"));

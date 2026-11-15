@@ -1,6 +1,6 @@
 use parrot_cli::presenters::{tools::write_stdin::WriteStdinToolPresenter, *};
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackRenderOptions,
 };
 #[test]
 fn only_process_character_count_and_status_are_shown_after_redaction() {
@@ -26,7 +26,7 @@ fn only_process_character_count_and_status_are_shown_after_redaction() {
     let live = presenter.present_live(&call, 0).unwrap();
     let live_text = LiveBufferItem::render(
         &live,
-        LiveBufferRenderContext {
+        LiveBufferRenderOptions {
             columns: 32768,
             color: false,
         },
@@ -43,7 +43,7 @@ fn only_process_character_count_and_status_are_shown_after_redaction() {
         .unwrap();
     let text = ScrollbackItem::render(
         &finished,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns: 32768,
             color: false,
             inline_diff: true,

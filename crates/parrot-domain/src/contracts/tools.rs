@@ -1,7 +1,7 @@
 //! Tool invocation boundaries; concrete tools and scheduling belong to later tasks.
 
 use super::async_ops::{BoxFuture, OperationError};
-use super::security::{AccessSnapshot, InvocationContext};
+use super::security::{AccessSnapshot, InvocationScope};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ParallelSafety {
@@ -31,6 +31,6 @@ pub trait Tool: Send + Sync {
     fn invoke<'a>(
         &'a self,
         invocation: Self::Invocation,
-        context: InvocationContext<'a, Self::Security, Self::Selection>,
+        scope: InvocationScope<'a, Self::Security, Self::Selection>,
     ) -> BoxFuture<'a, Result<Self::Output, OperationError<Self::Error>>>;
 }

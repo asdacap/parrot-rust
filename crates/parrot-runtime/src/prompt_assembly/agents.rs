@@ -158,7 +158,7 @@ where
         _selection: &ResolvedModelSelection,
     ) -> PromptResult<Vec<(String, String)>> {
         let files = self.sampled.as_ref().ok_or_else(|| {
-            PromptError::Context("The system context has not been sampled for this epoch.".into())
+            PromptError::Context("The system prompts have not been sampled for this epoch.".into())
         })?;
         if files.is_empty() {
             return Ok(Vec::new());

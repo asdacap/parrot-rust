@@ -10,7 +10,7 @@ use std::sync::Arc;
 use parrot_core::NeverCancelled;
 use parrot_domain::contracts::async_ops::{BoxFuture, OperationError};
 use parrot_domain::contracts::runtime::AgentRuntime;
-use parrot_domain::contracts::security::InvocationContext;
+use parrot_domain::contracts::security::InvocationScope;
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
 use parrot_foundation::config::json_string;
@@ -226,7 +226,7 @@ where
     fn invoke<'a>(
         &'a self,
         invocation: Self::Invocation,
-        context: InvocationContext<'a, Self::Security, Self::Selection>,
+        scope: InvocationScope<'a, Self::Security, Self::Selection>,
     ) -> BoxFuture<'a, Result<Self::Output, OperationError<Self::Error>>> {
         Box::pin(async move {
             let operation = match self.kind {
@@ -236,7 +236,7 @@ where
                         Err(error) => return self.error(&error.0).map_err(OperationError::Failed),
                     };
                     input.model = if input.model.is_empty() {
-                        context.selection().requested_model.clone()
+                        scope.selection().requested_model.clone()
                     } else {
                         match self.models.resolve(&input.model) {
                             Ok(model) => model,
@@ -259,8 +259,8 @@ where
                                 assistant_sequence: invocation.assistant_sequence,
                                 call_id: invocation.call_id,
                             },
-                            context.security().clone(),
-                            context.cancellation(),
+                            scope.security().clone(),
+                            scope.cancellation(),
                         )
                         .await
                         .map(|result| result.format())
@@ -276,7 +276,7 @@ where
                                 input,
                                 allow_parent: self.allow_parent,
                             },
-                            context.cancellation(),
+                            scope.cancellation(),
                         )
                         .await
                         .map(|result| result.format())
@@ -305,7 +305,7 @@ where
                         Ok(input) => input,
                         Err(error) => return self.error(&error.0).map_err(OperationError::Failed),
                     };
-                    self.runtime.wait(input, context.cancellation()).await
+                    self.runtime.wait(input, scope.cancellation()).await
                 }
             };
             match operation {

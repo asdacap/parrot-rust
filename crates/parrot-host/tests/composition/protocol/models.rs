@@ -465,13 +465,10 @@ fn preset_callback_failure_restores_actual_selection_and_routing() {
 fn fail_configuration_write(fixture: &Fixture) {
     std::fs::create_dir(fixture.directory.join("config.yaml.tmp")).unwrap();
 }
-fn assert_persistence_failure(error: parrot_host::composition::protocol::RpcError, context: &str) {
+fn assert_persistence_failure(error: parrot_host::composition::protocol::RpcError, prefix: &str) {
     assert_eq!(error.code, RpcCode::Internal);
     assert!(!error.is_unhandled_io());
-    assert!(
-        error.message.starts_with(&format!("{context}: ")),
-        "{error}"
-    );
+    assert!(error.message.starts_with(&format!("{prefix}: ")), "{error}");
 }
 #[test]
 fn configure_alias_classifies_actual_configuration_io_as_internal() {

@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 
 #[test]
 fn source_assertions() {
@@ -8,7 +8,7 @@ fn source_assertions() {
         "model_presets:\n  bad:\n    model: p/m\n    model_aliases: {}\n    context_limits: []",
     ] {
         assert!(
-            Context::new().configured(yaml).is_err(),
+            ConfigFixture::new().configured(yaml).is_err(),
             "source InvalidDataException case {yaml}"
         );
     }

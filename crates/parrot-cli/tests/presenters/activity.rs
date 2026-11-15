@@ -7,7 +7,7 @@ use parrot_cli::presenters::tools::{
     exec_command::ExecCommandToolPresenter, generic::GenericToolPresenter,
 };
 use parrot_cli::presenters::{ActivityUpdate, RawActivityView, ToolPresenterRegistry};
-use parrot_cli::terminal_frames::{LiveBufferRenderContext, ScrollbackRenderContext};
+use parrot_cli::terminal_frames::{LiveBufferRenderOptions, ScrollbackRenderOptions};
 use parrot_domain::protocol::messages::{parrot as wire, process, queue};
 use protobuf::Message;
 
@@ -74,7 +74,7 @@ fn live_at(view: &RawActivityView, columns: usize) -> String {
         .unwrap()
         .iter()
         .flat_map(|item| {
-            item.render(LiveBufferRenderContext {
+            item.render(LiveBufferRenderOptions {
                 columns,
                 color: false,
             })
@@ -93,7 +93,7 @@ fn commits_at(update: &ActivityUpdate, columns: usize) -> Vec<String> {
         .commits
         .iter()
         .map(|item| {
-            item.render(ScrollbackRenderContext {
+            item.render(ScrollbackRenderOptions {
                 columns,
                 color: false,
                 inline_diff: false,
@@ -759,7 +759,7 @@ fn child_reasoning_rows_label_each_row_once_at_exact_terminal_width() {
             assert!(live_at(&view, columns).starts_with("  ✦ [worker] A ✦ B|"));
             let snapshot = view.snapshot().unwrap();
             let narrower = snapshot[0]
-                .render(LiveBufferRenderContext {
+                .render(LiveBufferRenderOptions {
                     columns: 17,
                     color: false,
                 })
@@ -882,7 +882,7 @@ fn reasoning_rows_keep_immutable_live_and_scrollback_snapshots_at_sink_width() {
     assert_eq!(commits_at(&committed, 3), ["✦ A|✦ B"]);
     assert_eq!(live_at(&view, 7), "✦ C ✦ D");
     let original = snapshot[0]
-        .render(LiveBufferRenderContext {
+        .render(LiveBufferRenderOptions {
             columns: 7,
             color: false,
         })
@@ -910,7 +910,7 @@ fn reasoning_rows_pack_counted_summary_and_encrypted_entries_with_color() {
     let snapshot = view.snapshot().unwrap();
     for color in [false, true] {
         let rendered = snapshot[0]
-            .render(LiveBufferRenderContext {
+            .render(LiveBufferRenderOptions {
                 columns: 160,
                 color,
             })
@@ -921,7 +921,7 @@ fn reasoning_rows_pack_counted_summary_and_encrypted_entries_with_color() {
     let committed = view.flush_reasoning_row().unwrap();
     assert_eq!(commits(&committed), [expected]);
     let colored = committed.commits[0]
-        .render(ScrollbackRenderContext {
+        .render(ScrollbackRenderOptions {
             columns: 160,
             color: true,
             inline_diff: false,
@@ -1103,7 +1103,7 @@ fn task_rows_reserve_marker_indent_when_wrapping() {
     ))
     .unwrap();
     let rendered = view.snapshot().unwrap()[0]
-        .render(LiveBufferRenderContext {
+        .render(LiveBufferRenderOptions {
             columns: 14,
             color: false,
         })
@@ -1120,7 +1120,7 @@ fn task_rows_reserve_marker_indent_when_wrapping() {
     let finished = view.finish().unwrap();
     assert_eq!(
         finished.commits[0]
-            .render(ScrollbackRenderContext {
+            .render(ScrollbackRenderOptions {
                 columns: 14,
                 color: false,
                 inline_diff: false,
@@ -1933,7 +1933,7 @@ fn monitor_marker_blinks_without_moving_or_restyling_content() {
             .iter()
             .find_map(|item| {
                 let rendered = item
-                    .render(LiveBufferRenderContext {
+                    .render(LiveBufferRenderOptions {
                         columns: 160,
                         color: true,
                     })

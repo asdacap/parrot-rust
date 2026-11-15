@@ -1,6 +1,6 @@
 use super::support::{Activity, Dialog, NEVER, RpcFixture, RpcState, Session, Temp};
 use parrot_cli::{
-    slash_sessions::{CommandContext, SkillRefresh, SlashCommands},
+    slash_sessions::{CommandEnvironment, SkillRefresh, SlashCommands},
     slash_settings::{AuthServices, SettingsServices},
 };
 use parrot_domain::contracts::async_ops::{
@@ -151,7 +151,7 @@ async fn real_settings_handlers_register_exact_source_spellings_and_dispatch_thr
     let activity = Activity::default();
     let mut dialog = Dialog::default();
     let refresh: SkillRefresh = Arc::new(|_| Box::pin(async { Ok(()) }));
-    let mut context = CommandContext {
+    let mut environment = CommandEnvironment {
         session: &mut session,
         activity: &activity,
         dialog: &mut dialog,
@@ -159,15 +159,15 @@ async fn real_settings_handlers_register_exact_source_spellings_and_dispatch_thr
         commands: &[],
     };
     registry
-        .dispatch("/set-context-limit\t100k", &mut context, &NEVER)
+        .dispatch("/set-context-limit\t100k", &mut environment, &NEVER)
         .await
         .unwrap();
     registry
-        .dispatch("/model-preset-set Work", &mut context, &NEVER)
+        .dispatch("/model-preset-set Work", &mut environment, &NEVER)
         .await
         .unwrap();
     registry
-        .dispatch("/models", &mut context, &NEVER)
+        .dispatch("/models", &mut environment, &NEVER)
         .await
         .unwrap();
     assert_eq!(session.context_limits, ["100k"]);

@@ -14,7 +14,7 @@ use parrot_provider::routing::aliases::ResolvedModelSelection;
 use std::sync::{Arc, RwLock};
 use tokio::sync::Mutex;
 
-/// Exposes agent-local catalog records without preparing selected-skill context.
+/// Exposes agent-local catalog records without preparing the selected-skill prompt.
 pub struct AgentSkills<
     R: AuthorizedReadService + ?Sized,
     P: SecurityProvider<Snapshot = R::Security>,
@@ -117,7 +117,7 @@ where
         cancellation.check().map_err(|_| PromptError::Cancelled)?;
         self.ensure_turn(cancellation).await?;
         let working_directory = self.working_directory.clone();
-        let platform = self.catalog.context().platform;
+        let platform = self.catalog.path_bases().platform;
         let matches = |candidate: &SkillMetadata, reference: &parrot_core::SkillReference| {
             candidate.name == reference.name
                 && reference.path.as_ref().is_none_or(|path| {

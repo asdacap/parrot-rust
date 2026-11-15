@@ -27,7 +27,7 @@ use parrot_provider::{
 };
 use parrot_runtime::{
     compaction::*,
-    prompt_context::{PromptResult, SessionPrompt, SystemPrompt},
+    prompt_assembly::{PromptResult, SessionPrompt, SystemPrompt},
 };
 use parrot_storage::{
     conversation::{
@@ -257,17 +257,20 @@ impl Scripted {
             closed: self.closed.clone(),
         }))
     }
-    fn selection(&self, context: i32) -> parrot_provider::routing::aliases::ResolvedModelSelection {
-        self.selection_model(context, "model")
+    fn selection(
+        &self,
+        context_window: i32,
+    ) -> parrot_provider::routing::aliases::ResolvedModelSelection {
+        self.selection_model(context_window, "model")
     }
     fn selection_model(
         &self,
-        context: i32,
+        context_window: i32,
         id: &str,
     ) -> parrot_provider::routing::aliases::ResolvedModelSelection {
         let selector = format!("scripted/{id}");
         let mut model = Model::new(id, "scripted");
-        model.context_window = context;
+        model.context_window = context_window;
         model.max_output_tokens = 1;
         let registry = Arc::new(
             ProviderRegistry::new(
@@ -382,7 +385,7 @@ impl SystemPrompt for EpochProduct {
             tokio::task::yield_now().await;
             cancellation
                 .check()
-                .map_err(|_| parrot_runtime::prompt_context::PromptError::Cancelled)?;
+                .map_err(|_| parrot_runtime::prompt_assembly::PromptError::Cancelled)?;
             self.sampled.fetch_add(1, Ordering::SeqCst);
             self.sampling = false;
             Ok(())

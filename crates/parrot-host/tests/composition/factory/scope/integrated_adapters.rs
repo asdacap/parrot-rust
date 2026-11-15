@@ -146,7 +146,7 @@ pub(super) async fn agent_invoke(
             assistant_sequence: 1,
             call_id: "adapter-agent-call".into(),
         },
-        InvocationContext::new(
+        InvocationScope::new(
             SharedSecurity(Arc::new(Security)),
             AgentSelection {
                 requested_model: "local/model".into(),
@@ -162,7 +162,7 @@ pub(super) async fn set_tasks(
     tasks: Value,
 ) -> (ToolInvocation, String) {
     let controller = root
-        .get_service::<ScopedTaskController<Security, ContextSelection<Security>>>()
+        .get_service::<ScopedTaskController<Security, InvocationSelection<Security>>>()
         .unwrap();
     let tool = TaskTool::new(
         TaskToolKind::Set,
@@ -210,9 +210,9 @@ pub(super) async fn set_tasks(
     let output = tool
         .invoke(
             invocation.clone(),
-            InvocationContext::new(
+            InvocationScope::new(
                 SharedSecurity(turn.security.clone()),
-                ContextSelection::external(turn),
+                InvocationSelection::external(turn),
                 &NeverCancelled,
             ),
         )
@@ -332,7 +332,7 @@ async fn retained_wait_wakes_from_actual_task_notifier_and_oversized_publication
     let saved = std::fs::read_to_string(&path).unwrap();
     assert!(saved == expected_update || saved == expected_complete);
     let snapshot = root
-        .get_service::<ScopedTaskController<Security, ContextSelection<Security>>>()
+        .get_service::<ScopedTaskController<Security, InvocationSelection<Security>>>()
         .unwrap()
         .snapshot(TaskQuery { name: None })
         .await

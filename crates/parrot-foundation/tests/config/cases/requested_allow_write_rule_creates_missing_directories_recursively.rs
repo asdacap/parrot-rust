@@ -1,10 +1,10 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_foundation::config::runtime::{SandboxRule, SandboxRuleAction};
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let missing = context.directory.join("missing/target");
-    let config = context
+    let fixture = ConfigFixture::new();
+    let missing = fixture.directory.join("missing/target");
+    let config = fixture
         .configured(&format!(
             "sandbox_rules:\n  - path: {}\n    rule: allow_write\n    create_if_not_exist: true\n",
             missing.display()

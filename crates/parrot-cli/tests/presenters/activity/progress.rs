@@ -438,7 +438,7 @@ fn progress_adapts_to_width_color_unicode_and_large_counts() {
                 .unwrap()
                 .iter()
                 .flat_map(|item| {
-                    item.render(LiveBufferRenderContext { columns, color })
+                    item.render(LiveBufferRenderOptions { columns, color })
                         .unwrap()
                         .lines
                 })

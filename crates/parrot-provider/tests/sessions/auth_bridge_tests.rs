@@ -539,7 +539,7 @@ fn websocket_causes() -> Vec<(Error, &'static str)> {
     ]
 }
 #[test]
-fn websocket_wrapper_retains_outer_display_typed_cause_clone_and_contextual_retry_category() {
+fn websocket_wrapper_retains_outer_display_typed_cause_clone_and_retry_classification() {
     for (cause, _) in websocket_causes() {
         let wrapper = websocket_wrapper(cause.clone());
         assert_eq!(wrapper.to_string(), "Responses WebSocket transport failed.");

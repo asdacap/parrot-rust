@@ -119,22 +119,22 @@ fn core_queries_text_mentions_and_reads_each_selected_record_once_in_text_order(
         *state.skill_reads.lock().unwrap(),
         ["/physical/second/SKILL.md", "/physical/first/SKILL.md",]
     );
-    let context = &state.recorded_input_contexts[0];
+    let prompt = &state.recorded_skill_prompts[0];
     assert_eq!(
         state.loaded_skill_paths(),
         ["/skills/second/SKILL.md", "/skills/first/SKILL.md"]
     );
     assert!(
-        context.content.find("SECOND BODY").unwrap() < context.content.find("FIRST BODY").unwrap()
+        prompt.content.find("SECOND BODY").unwrap() < prompt.content.find("FIRST BODY").unwrap()
     );
     assert!(
-        context
+        prompt
             .content
             .contains("---\nname: first\n---\nFIRST BODY {name}")
     );
     assert_eq!(
         state.provider.requests.lock().unwrap()[0].messages[0].contents,
-        [Content::Text(context.content.clone())]
+        [Content::Text(prompt.content.clone())]
     );
 }
 
@@ -199,7 +199,7 @@ fn canonical_identity_deduplicates_a_steer_and_reloads_on_the_next_turn() {
         *state.skill_reads.lock().unwrap(),
         ["/physical/selected/SKILL.md", "/physical/selected/SKILL.md",]
     );
-    assert_eq!(state.recorded_input_contexts.len(), 2);
+    assert_eq!(state.recorded_skill_prompts.len(), 2);
     assert_eq!(state.skill_lookups.lock().unwrap().len(), 3);
     assert!(state.pending_messages.is_empty());
     assert_eq!(state.provider.requests.lock().unwrap().len(), 3);
@@ -220,7 +220,7 @@ fn core_uses_configured_templates_without_interpreting_skill_body_text() {
     );
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(
-        state.recorded_input_contexts[0].content,
+        state.recorded_skill_prompts[0].content,
         "configured [selected] => literal {name} & <body>"
     );
 }
@@ -244,18 +244,18 @@ fn unavailable_and_oversized_records_produce_notices_without_loaded_paths() {
     state.add_skill("large", SkillContent::Text("界".repeat(3000)));
     state.add_skill("boundary", SkillContent::Text("x".repeat(8192)));
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    let context = &state.recorded_input_contexts[0];
+    let prompt = &state.recorded_skill_prompts[0];
     assert_eq!(state.loaded_skill_paths(), ["/skills/boundary/SKILL.md"]);
-    assert!(context.content.contains("<name>&lt;bad&amp;&gt;</name>"));
+    assert!(prompt.content.contains("<name>&lt;bad&amp;&gt;</name>"));
     assert!(
-        context
+        prompt
             .content
             .contains("denied &lt;target&gt; &amp; details")
     );
-    assert!(context.content.contains("<skill-too-large>"));
-    assert!(context.content.contains("8192-byte injection limit"));
-    assert!(context.content.contains(&"x".repeat(8192)));
-    assert!(!context.content.contains(&"界".repeat(3000)));
+    assert!(prompt.content.contains("<skill-too-large>"));
+    assert!(prompt.content.contains("8192-byte injection limit"));
+    assert!(prompt.content.contains(&"x".repeat(8192)));
+    assert!(!prompt.content.contains(&"界".repeat(3000)));
 }
 
 #[test]
@@ -268,10 +268,10 @@ fn diagnostics_are_normalized_and_limited_in_utf16_without_splitting_unicode() {
         SkillContent::Unavailable(format!(" \n {} tail", "😀".repeat(600))),
     );
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    let context = &state.recorded_input_contexts[0];
-    assert!(context.content.contains(&"😀".repeat(512)));
-    assert!(!context.content.contains(&"😀".repeat(513)));
-    assert!(!context.content.contains("tail"));
+    let prompt = &state.recorded_skill_prompts[0];
+    assert!(prompt.content.contains(&"😀".repeat(512)));
+    assert!(!prompt.content.contains(&"😀".repeat(513)));
+    assert!(!prompt.content.contains("tail"));
     assert!(state.loaded_skill_paths().is_empty());
 }
 
@@ -294,13 +294,13 @@ fn combined_budget_keeps_complete_skill_bodies_and_reports_omitted_instructions(
         state.add_skill(&name, SkillContent::Text("x".repeat(7900)));
     }
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    let context = &state.recorded_input_contexts[0];
-    assert!(context.content.len() <= 1024 * 1024);
+    let prompt = &state.recorded_skill_prompts[0];
+    assert!(prompt.content.len() <= 1024 * 1024);
     assert!(!state.loaded_skill_paths().is_empty());
     assert!(state.loaded_skill_paths().len() < 150);
-    assert!(context.content.contains("active-turn prompt budget"));
+    assert!(prompt.content.contains("active-turn prompt budget"));
     assert_eq!(
-        context.content.matches(&"x".repeat(7900)).count(),
+        prompt.content.matches(&"x".repeat(7900)).count(),
         state.loaded_skill_paths().len()
     );
     assert_eq!(state.skill_reads.lock().unwrap().len(), 150);
@@ -325,19 +325,19 @@ fn combined_diagnostic_budget_reserves_space_for_an_omitted_summary() {
         state.add_skill(&name, SkillContent::Unavailable("x".repeat(2000)));
     }
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    let context = &state.recorded_input_contexts[0];
-    assert!(context.content.len() <= 1024 * 1024);
+    let prompt = &state.recorded_skill_prompts[0];
+    assert!(prompt.content.len() <= 1024 * 1024);
     assert!(
-        context
+        prompt
             .content
             .contains("diagnostics omitted by the active-turn prompt budget")
     );
     assert!(state.loaded_skill_paths().is_empty());
-    assert!(context.content.matches("<skill-unavailable>").count() < 1200);
+    assert!(prompt.content.matches("<skill-unavailable>").count() < 1200);
 }
 
 #[test]
-fn cancellation_after_metadata_lookup_stops_before_body_read_or_context_recording() {
+fn cancellation_after_metadata_lookup_stops_before_body_read_or_skill_prompt_recording() {
     let mut state = MemoryState::new([Reply::final_response("not invoked")]);
     state.pending_messages.clear();
     state.enqueue_message(Delivery::Steer, "$selected");
@@ -346,7 +346,7 @@ fn cancellation_after_metadata_lookup_stops_before_body_read_or_context_recordin
     assert_eq!(state.run(), Err(Error::cancelled()));
     assert_eq!(state.skill_lookups.lock().unwrap().len(), 1);
     assert!(state.skill_reads.lock().unwrap().is_empty());
-    assert!(state.recorded_input_contexts.is_empty());
+    assert!(state.recorded_skill_prompts.is_empty());
     assert!(state.provider.requests.lock().unwrap().is_empty());
 }
 
@@ -365,7 +365,7 @@ fn unknown_skills_do_not_read_content_or_expand_templates() {
         }]
     );
     assert!(state.skill_reads.lock().unwrap().is_empty());
-    assert!(state.recorded_input_contexts.is_empty());
+    assert!(state.recorded_skill_prompts.is_empty());
 }
 
 #[test]
@@ -386,6 +386,6 @@ fn an_unusable_diagnostic_template_fails_before_any_content_read() {
         ))
     );
     assert!(state.skill_reads.lock().unwrap().is_empty());
-    assert!(state.recorded_input_contexts.is_empty());
+    assert!(state.recorded_skill_prompts.is_empty());
     assert!(state.provider.requests.lock().unwrap().is_empty());
 }

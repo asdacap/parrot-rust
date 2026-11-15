@@ -5,7 +5,7 @@ use std::io;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::terminal_frames::{
-    LiveBufferItem, LiveBufferRender, LiveBufferRenderContext, LiveBufferRetention, TerminalLine,
+    LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions, LiveBufferRetention, TerminalLine,
     TerminalStyle,
 };
 use crate::terminal_layout::TerminalText;
@@ -18,19 +18,19 @@ pub struct MarqueeValue {
 }
 
 impl LiveBufferItem for MarqueeValue {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         let prefix = TerminalText::sanitize_line(&self.prefix);
         let text = TerminalText::sanitize_line(&self.text);
-        let available = context.columns.saturating_sub(TerminalText::width(&prefix));
+        let available = options.columns.saturating_sub(TerminalText::width(&prefix));
         let value = if available == 0 {
-            TerminalText::clip(&prefix, context.columns)
+            TerminalText::clip(&prefix, options.columns)
         } else {
             format!("{prefix}{}", viewport(&text, available, self.frame))
         };
         Ok(LiveBufferRender {
             lines: vec![TerminalLine::new(
                 value,
-                TerminalStyle::new(if context.color {
+                TerminalStyle::new(if options.color {
                     "\x1b[48;5;236m\x1b[38;5;252m"
                 } else {
                     ""
@@ -143,15 +143,15 @@ impl ModelineValue {
 pub struct QuestionCountdownValue(pub i64);
 
 impl LiveBufferItem for QuestionCountdownValue {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         let text = format!("Auto-return in {}:{:02}", self.0 / 60, self.0 % 60);
         Ok(LiveBufferRender {
-            lines: TerminalText::layout_words(&text, context.columns)
+            lines: TerminalText::layout_words(&text, options.columns)
                 .into_iter()
                 .map(|line| {
                     TerminalLine::new(
                         line,
-                        TerminalStyle::new(if context.color {
+                        TerminalStyle::new(if options.color {
                             "\x1b[48;5;236m\x1b[38;5;252m"
                         } else {
                             ""
@@ -166,11 +166,11 @@ impl LiveBufferItem for QuestionCountdownValue {
 }
 
 impl LiveBufferItem for ModelineValue {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         Ok(LiveBufferRender {
             lines: vec![TerminalLine::new(
-                self.render_text(context.columns),
-                TerminalStyle::new(if context.color {
+                self.render_text(options.columns),
+                TerminalStyle::new(if options.color {
                     "\x1b[48;5;236m\x1b[32m"
                 } else {
                     ""

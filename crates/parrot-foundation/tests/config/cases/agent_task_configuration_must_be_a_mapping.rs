@@ -1,10 +1,10 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for value in ["null", "5", "[]"] {
-        let context = Context::new();
+        let fixture = ConfigFixture::new();
         assert_eq!(
-            context
+            fixture
                 .configured(&format!("agent_tasks: {value}\n"))
                 .unwrap_err()
                 .to_string(),

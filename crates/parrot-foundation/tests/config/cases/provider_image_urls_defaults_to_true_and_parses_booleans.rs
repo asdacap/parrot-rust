@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for (provider_id, line, expected) in [
@@ -8,8 +8,8 @@ fn source_assertions() {
         ("chatgpt", "", true),
         ("chatgpt", "    image_urls: false\n", false),
     ] {
-        let context = Context::new();
-        let configured = context
+        let fixture = ConfigFixture::new();
+        let configured = fixture
             .configured(&format!(
                 "providers:\n  {provider_id}:\n    header_timeout_ms: 1\n{line}"
             ))
@@ -18,7 +18,7 @@ fn source_assertions() {
             configured.models.providers[provider_id].image_urls,
             expected
         );
-        let error = context
+        let error = fixture
             .configured(&format!(
                 "providers:\n  {provider_id}:\n    image_urls: maybe\n"
             ))

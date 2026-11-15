@@ -251,11 +251,11 @@ impl SystemPrompt for GatedPrompt {
             if let Some(Some(gate)) = self.gates.pop_front() {
                 gate.wait(cancellation)
                     .await
-                    .map_err(|_| parrot_runtime::prompt_context::PromptError::Cancelled)?;
+                    .map_err(|_| parrot_runtime::prompt_assembly::PromptError::Cancelled)?;
             }
             cancellation
                 .check()
-                .map_err(|_| parrot_runtime::prompt_context::PromptError::Cancelled)?;
+                .map_err(|_| parrot_runtime::prompt_assembly::PromptError::Cancelled)?;
             self.sampled.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })

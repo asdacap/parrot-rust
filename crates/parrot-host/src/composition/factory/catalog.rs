@@ -1,9 +1,9 @@
 //! Retains the actual configured tool catalog at the runtime settlement boundary.
-use crate::composition::context::{ContextSelection, RetainedCompactTool};
+use crate::composition::invocation::{InvocationSelection, RetainedCompactTool};
 use parrot_domain::contracts::{
     async_ops::{BoxFuture, OperationError},
     filesystem::FileReadErrorKind,
-    security::{AccessSnapshot, InvocationContext},
+    security::{AccessSnapshot, InvocationScope},
     tools::{ParallelSafety, Tool},
 };
 use parrot_runtime::{
@@ -17,8 +17,8 @@ use parrot_storage::diagnostics::FailureKind;
 use parrot_tools::{catalog, files};
 use std::sync::Arc;
 
-type ScopedCatalog<S> = catalog::Catalog<SharedSecurity<S>, ContextSelection<S>>;
-type RetainedTool<S> = catalog::RetainedTool<SharedSecurity<S>, ContextSelection<S>>;
+type ScopedCatalog<S> = catalog::Catalog<SharedSecurity<S>, InvocationSelection<S>>;
+type RetainedTool<S> = catalog::RetainedTool<SharedSecurity<S>, InvocationSelection<S>>;
 
 /// One adapter per agent scope. Neither materialization nor invocation rebuilds
 /// a family tool: all handles below retain the catalog's original tool Arcs.
@@ -104,27 +104,24 @@ impl<S: AccessSnapshot + 'static> Tool for CatalogTool<S> {
     fn invoke<'a>(
         &'a self,
         invocation: ToolInvocation,
-        context: InvocationContext<'a, SharedSecurity<S>, TurnSelection<S>>,
+        scope: InvocationScope<'a, SharedSecurity<S>, TurnSelection<S>>,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         let selection = catalog::Selection {
-            requested_model: context
+            requested_model: scope
                 .selection()
                 .model
                 .requested_selector
                 .value
                 .as_str()
                 .into(),
-            scoped: ContextSelection::external(context.selection().clone()),
+            scoped: InvocationSelection::external(scope.selection().clone()),
         };
-        let retained_context = InvocationContext::new(
-            context.security().clone(),
-            selection,
-            context.cancellation(),
-        );
+        let retained_scope =
+            InvocationScope::new(scope.security().clone(), selection, scope.cancellation());
         let invocation = invocation_to_catalog(invocation);
         Box::pin(async move {
             self.tool
-                .invoke(invocation, retained_context)
+                .invoke(invocation, retained_scope)
                 .await
                 .map(output_to_runtime)
                 .map_err(|error| match error {

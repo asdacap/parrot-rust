@@ -4,8 +4,8 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use parrot_cli::terminal_frames::{
-    ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRender, LiveBufferRenderContext,
-    LiveBufferRetention, ScrollbackItem, ScrollbackLayout, ScrollbackRenderContext,
+    ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions,
+    LiveBufferRetention, ScrollbackItem, ScrollbackLayout, ScrollbackRenderOptions,
     TerminalCellStyleSpan, TerminalFrameRenderer, TerminalLine, TerminalStyle,
 };
 use serde_json::Value;
@@ -27,7 +27,7 @@ fn text<'a>(value: &'a Value, key: &str) -> &'a str {
 
 struct FixtureLive(Value);
 impl LiveBufferItem for FixtureLive {
-    fn render(&self, _: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, _: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         let lines = self.0["lines"]
             .as_array()
             .unwrap()
@@ -133,9 +133,9 @@ impl ScrollbackItem for FixtureScroll {
             .zip(previous.sequence_identity().as_ref())
             .is_some_and(|(own, previous)| Arc::ptr_eq(own, previous))
     }
-    fn render(&self, context: ScrollbackRenderContext) -> io::Result<Vec<String>> {
+    fn render(&self, options: ScrollbackRenderOptions) -> io::Result<Vec<String>> {
         let skip_heading = flag(&self.value, "suppress_heading_if_same_packing", false)
-            && context
+            && options
                 .previous_packing
                 .as_ref()
                 .and_then(|value| value.downcast_ref::<String>())

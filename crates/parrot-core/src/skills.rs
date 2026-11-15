@@ -1,6 +1,6 @@
 use crate::{
-    CancellationToken, ConfigKey, Content, DerivedContext, Error, PromotedInput, PromptTemplate,
-    Skill, SkillContent, SkillMention, SkillProvider, SkillReference, States,
+    CancellationToken, ConfigKey, Content, Error, PreparedSkillPrompt, PromotedInput,
+    PromptTemplate, Skill, SkillContent, SkillMention, SkillProvider, SkillReference, States,
 };
 use std::{collections::HashSet, sync::Arc};
 
@@ -19,7 +19,7 @@ impl SkillPreparation {
         skill_provider: &dyn SkillProvider,
         inputs: &[PromotedInput],
         cancellation: CancellationToken<'_>,
-    ) -> Result<DerivedContext, Error> {
+    ) -> Result<PreparedSkillPrompt, Error> {
         let mut selected = Vec::new();
         for input in inputs {
             let mut mentions = Vec::new();
@@ -60,7 +60,7 @@ impl SkillPreparation {
             return Err(Error::cancelled());
         }
         if selected.is_empty() {
-            return Ok(DerivedContext::default());
+            return Ok(PreparedSkillPrompt::default());
         }
         selected.sort_by(|(left, lp), (right, rp)| {
             lp.cmp(rp)
@@ -145,7 +145,7 @@ fn unavailable(preparation: &SkillTemplates, name: &str, message: &str) -> Resul
 }
 
 struct SkillRendering {
-    context: DerivedContext,
+    prompt: PreparedSkillPrompt,
     content_budget: usize,
     omitted: i32,
 }
@@ -169,28 +169,22 @@ impl SkillRendering {
                 )
             })?;
         Ok(Self {
-            context: DerivedContext::default(),
+            prompt: PreparedSkillPrompt::default(),
             content_budget,
             omitted: 0,
         })
     }
 
     fn fits(&self, value: &str) -> bool {
-        self.context.content.len()
-            + if self.context.content.is_empty() {
-                0
-            } else {
-                2
-            }
-            + value.len()
+        self.prompt.content.len() + if self.prompt.content.is_empty() { 0 } else { 2 } + value.len()
             <= self.content_budget
     }
 
     fn append(&mut self, value: &str) {
-        if !self.context.content.is_empty() {
-            self.context.content.push_str("\n\n");
+        if !self.prompt.content.is_empty() {
+            self.prompt.content.push_str("\n\n");
         }
-        self.context.content.push_str(value);
+        self.prompt.content.push_str(value);
     }
 
     fn notice(&mut self, value: &str) {
@@ -240,7 +234,7 @@ impl SkillRendering {
         )?;
         if self.fits(&value) {
             self.append(&value);
-            self.context.loaded_paths.push(skill.path.clone());
+            self.prompt.loaded_paths.push(skill.path.clone());
         } else {
             self.diagnostic(
                 preparation,
@@ -251,7 +245,7 @@ impl SkillRendering {
         Ok(())
     }
 
-    fn finish(mut self, preparation: &SkillTemplates) -> Result<DerivedContext, Error> {
+    fn finish(mut self, preparation: &SkillTemplates) -> Result<PreparedSkillPrompt, Error> {
         if self.omitted > 0 {
             let summary = unavailable(
                 preparation,
@@ -262,13 +256,13 @@ impl SkillRendering {
                 ),
             )?;
             self.append(&summary);
-            if self.context.content.len() > MAXIMUM_TURN_BYTES {
+            if self.prompt.content.len() > MAXIMUM_TURN_BYTES {
                 return Err(Error::failed(
                     "The selected-skill context exceeds the active-turn prompt budget.",
                 ));
             }
         }
-        Ok(self.context)
+        Ok(self.prompt)
     }
 }
 

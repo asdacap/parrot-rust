@@ -26,7 +26,7 @@ mod fixture {
             filenames::FilenameGenerator,
             paths::{RootOrigin, SelectedSessionRoot},
             runtime::AgentRuntime,
-            security::InvocationContext,
+            security::InvocationScope,
             tools::{ParallelSafety, Tool},
         },
         protocol::messages::parrot::{self as protocol, Event},
@@ -58,7 +58,7 @@ mod fixture {
         },
         compaction::{ContextController, ContextResult, ContextSnapshot, ContextStatus},
         event_broker::EventBroker,
-        prompt_context::{PromptResult, SystemPrompt},
+        prompt_assembly::{PromptResult, SystemPrompt},
         tool_settlement::{
             self, SharedSecurity, ToolDiagnostics, ToolExecutionConfig, ToolFactory, ToolFailure,
             ToolHandle, ToolInventory, ToolMetadata, ToolOutput,
@@ -438,7 +438,7 @@ mod fixture {
         fn invoke<'a>(
             &'a self,
             invocation: Self::Invocation,
-            context: InvocationContext<'a, Self::Security, Self::Selection>,
+            scope: InvocationScope<'a, Self::Security, Self::Selection>,
         ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
             Box::pin(async move {
                 let mut invocation = self.tool.invoke(
@@ -447,17 +447,17 @@ mod fixture {
                         assistant_sequence: invocation.assistant_sequence,
                         call_id: invocation.call_id,
                     },
-                    InvocationContext::new(
-                        context.security().clone(),
+                    InvocationScope::new(
+                        scope.security().clone(),
                         AgentSelection {
-                            requested_model: context
+                            requested_model: scope
                                 .selection()
                                 .model
                                 .requested_selector
                                 .value
                                 .clone(),
                         },
-                        context.cancellation(),
+                        scope.cancellation(),
                     ),
                 );
                 let mut observed = false;
@@ -971,7 +971,7 @@ mod fixture {
                         assistant_sequence: 0,
                         call_id: "direct-wait".into(),
                     },
-                    InvocationContext::new(
+                    InvocationScope::new(
                         SharedSecurity(Security::new(255)),
                         AgentSelection {
                             requested_model: "scripted/model".into(),
@@ -1333,7 +1333,7 @@ fn questions(header: &str) -> Vec<QuestionDefinition> {
 }
 
 async fn two_agent_asks_guard_completion(promoted_before_completion: bool) {
-    use parrot_domain::contracts::{security::InvocationContext, tools::Tool};
+    use parrot_domain::contracts::{security::InvocationScope, tools::Tool};
     use parrot_domain::values::tools::ConfiguredToolDefinition;
     use parrot_runtime::tool_settlement::SharedSecurity;
     use parrot_tools::agents::{
@@ -1387,8 +1387,8 @@ async fn two_agent_asks_guard_completion(promoted_before_completion: bool) {
         assistant_sequence: 0,
         call_id: format!("ask-{header}"),
     };
-    let context = || {
-        InvocationContext::new(
+    let scope = || {
+        InvocationScope::new(
             SharedSecurity(support::Security::new(255)),
             AgentSelection {
                 requested_model: "scripted/model".into(),
@@ -1396,8 +1396,8 @@ async fn two_agent_asks_guard_completion(promoted_before_completion: bool) {
             &NeverCancelled,
         )
     };
-    let first = first_tool.invoke(invocation("first"), context());
-    let second = second_tool.invoke(invocation("second"), context());
+    let first = first_tool.invoke(invocation("first"), scope());
+    let second = second_tool.invoke(invocation("second"), scope());
     tokio::pin!(first, second);
     let observe = async {
         bounded(async {
@@ -1485,7 +1485,7 @@ async fn two_agent_asks_guard_completion(promoted_before_completion: bool) {
                         assistant_sequence: 0,
                         call_id: format!("reply-{name}"),
                     },
-                    context(),
+                    scope(),
                 )
                 .await
                 .unwrap();

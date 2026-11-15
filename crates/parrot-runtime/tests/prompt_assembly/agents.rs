@@ -229,7 +229,7 @@ async fn agents_global_then_ancestry_order_and_epoch_resampling_are_actual_reads
     let selection = router.resolve("unused/vendor/model").unwrap();
     assert_eq!(
         prompt.build(&selection).unwrap_err().to_string(),
-        "The system context has not been sampled for this epoch."
+        "The system prompts have not been sampled for this epoch."
     );
     prompt.sample_epoch(&Never).await.unwrap();
     let first = prompt.build(&selection).unwrap();

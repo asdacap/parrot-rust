@@ -7,7 +7,7 @@ use parrot_storage::{
 
 #[tokio::test]
 async fn provider_template_failure_retains_native_prompt_error_and_terminal_publication() {
-    use parrot_runtime::prompt_context::{SystemPromptProvider, TemplateSystemPromptProvider};
+    use parrot_runtime::prompt_assembly::{SystemPromptProvider, TemplateSystemPromptProvider};
 
     let fixture = Fixture::new();
     let history = fixture.history();
@@ -50,7 +50,7 @@ async fn provider_template_failure_retains_native_prompt_error_and_terminal_publ
 
     assert!(matches!(
         error,
-        ContextError::Prompt(parrot_runtime::prompt_context::PromptError::Template(_))
+        ContextError::Prompt(parrot_runtime::prompt_assembly::PromptError::Template(_))
     ));
     assert!(provider.requests.lock().unwrap().is_empty());
     {

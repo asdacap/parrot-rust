@@ -1,6 +1,6 @@
 use parrot_cli::presenters::tools::agent_send::AgentSendToolPresenter;
 use parrot_cli::presenters::*;
-use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderContext};
+use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderOptions};
 use std::sync::Arc;
 fn complete(call: &ToolCallPresentation, result: &str) -> (ToolReport, Vec<String>) {
     let item = AgentSendToolPresenter
@@ -16,7 +16,7 @@ fn complete(call: &ToolCallPresentation, result: &str) -> (ToolReport, Vec<Strin
         .unwrap();
     let lines = ScrollbackItem::render(
         &item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns: 512,
             color: false,
             inline_diff: false,

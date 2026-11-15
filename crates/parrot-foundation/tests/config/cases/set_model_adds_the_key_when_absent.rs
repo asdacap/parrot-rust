@@ -1,12 +1,12 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    context
+    let fixture = ConfigFixture::new();
+    fixture
         .configured("theme: dark\n")
         .unwrap()
         .set_model("added")
         .unwrap();
-    assert_eq!(context.load().unwrap().model, "added");
-    assert!(context.saved().contains("theme: dark"));
+    assert_eq!(fixture.load().unwrap().model, "added");
+    assert!(fixture.saved().contains("theme: dark"));
 }

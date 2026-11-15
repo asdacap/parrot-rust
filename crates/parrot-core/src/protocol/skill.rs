@@ -22,7 +22,7 @@ pub enum SkillContent {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct DerivedContext {
+pub struct PreparedSkillPrompt {
     pub content: String,
     pub loaded_paths: Vec<String>,
 }

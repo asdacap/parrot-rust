@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for (key, value) in [
@@ -12,9 +12,9 @@ fn source_assertions() {
         ("maximum_response_repairs", "0"),
         ("maximum_response_repairs", "words"),
     ] {
-        let context = Context::new();
+        let fixture = ConfigFixture::new();
         assert_eq!(
-            context
+            fixture
                 .configured(&format!("agent_tasks:\n  {key}: {value}\n"))
                 .unwrap_err()
                 .to_string(),

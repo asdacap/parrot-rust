@@ -1,9 +1,9 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_foundation::config::runtime::ReadOnlyCollection;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let prefixes: ReadOnlyCollection<String> = context
+    let fixture = ConfigFixture::new();
+    let prefixes: ReadOnlyCollection<String> = fixture
         .load()
         .unwrap()
         .runtime

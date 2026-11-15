@@ -82,7 +82,7 @@ fn calibration_clamps_negative_previous_estimates_and_ignores_nonpositive_actual
 
 #[test]
 fn output_capacity_uses_model_limits_or_fallback_and_preserves_integer_headroom() {
-    for (context, output, input, estimate, expected) in [
+    for (context_window, output, input, estimate, expected) in [
         (0, 0, 0, 1000, 32768),
         (0, -1, 0, 1000, 32768),
         (0, 8192, 0, 1000, 8192),
@@ -94,7 +94,7 @@ fn output_capacity_uses_model_limits_or_fallback_and_preserves_integer_headroom(
         (2000, 100, 0, 1001, 100),
         (2000, 0, 1001, 1001, 948),
     ] {
-        let mut fixture = Fixture::new(context);
+        let mut fixture = Fixture::new(context_window);
         fixture.configuration.maximum_output_tokens = output;
         fixture.configuration.maximum_input_tokens = input;
         assert_eq!(
@@ -127,7 +127,7 @@ fn actual_usage_calibration_reserves_five_percent_headroom() {
 
 #[test]
 fn compaction_boundary_keeps_full_requested_output_and_strict_headroom() {
-    for (context, output) in [
+    for (context_window, output) in [
         (180000, 0),
         (180000, 8192),
         (180000, 65536),
@@ -137,7 +137,7 @@ fn compaction_boundary_keeps_full_requested_output_and_strict_headroom() {
         (i32::MAX, 0),
         (1000, 1),
     ] {
-        let mut fixture = Fixture::new(context);
+        let mut fixture = Fixture::new(context_window);
         fixture.configuration.trigger_percent = 100;
         fixture.configuration.maximum_output_tokens = output;
         let snapshot = ContextSnapshot::estimate(0, &fixture.configuration);
@@ -162,14 +162,14 @@ fn compaction_boundary_keeps_full_requested_output_and_strict_headroom() {
 
 #[test]
 fn output_exhaustion_preserves_typed_errors_messages_and_core_classification() {
-    for (context, input, actual, expected) in [
+    for (context_window, input, actual, expected) in [
         (2000, 1400, 1500, OutputTokenError::InputLimitExceeded),
         (0, 1400, 1500, OutputTokenError::InputLimitExceeded),
         (1500, 0, 1500, OutputTokenError::NoOutputCapacity),
         (1575, 0, 1500, OutputTokenError::NoOutputCapacity),
         (1000, 0, 1500, OutputTokenError::NoOutputCapacity),
     ] {
-        let mut fixture = Fixture::new(context);
+        let mut fixture = Fixture::new(context_window);
         fixture.configuration.maximum_input_tokens = input;
         let mut calibration = RequestStatistic::default();
         calibration.observe_usage("provider/model", 1000, actual);

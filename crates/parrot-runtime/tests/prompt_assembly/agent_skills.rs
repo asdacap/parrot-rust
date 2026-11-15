@@ -75,7 +75,7 @@ fn skills_fixture() -> (
             scope: SkillScope::Repo,
             follow_directory_links: true,
         }],
-        SkillDiscoveryContext {
+        SkillPathBases {
             working_directory: "/work".into(),
             platform: PathPlatform::Unix,
         },
@@ -713,7 +713,7 @@ async fn linked_lookup_uses_catalog_platform_aliases_without_spurious_refresh() 
                     scope: SkillScope::Repo,
                     follow_directory_links: true,
                 }],
-                SkillDiscoveryContext {
+                SkillPathBases {
                     working_directory: "/private/tmp/work".into(),
                     platform,
                 },
@@ -764,7 +764,7 @@ async fn disabled_known_lookup_does_not_refresh_and_next_enabled_duplicate_is_re
             scope: SkillScope::Repo,
             follow_directory_links: true,
         }],
-        SkillDiscoveryContext {
+        SkillPathBases {
             working_directory: "/work".into(),
             platform: PathPlatform::Unix,
         },
@@ -876,7 +876,7 @@ async fn metadata_lookup_matches_physical_discovery_and_relative_paths_without_r
             scope: SkillScope::Repo,
             follow_directory_links: true,
         }],
-        SkillDiscoveryContext {
+        SkillPathBases {
             working_directory: "/working".into(),
             platform: PathPlatform::Unix,
         },

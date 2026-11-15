@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime};
 use parrot_domain::contracts::async_ops::Cancelled;
 pub use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, Clock, OperationError};
 use parrot_domain::contracts::paths::ResolvedRead;
-use parrot_domain::contracts::security::{AccessSnapshot, InvocationContext, SecurityProvider};
+use parrot_domain::contracts::security::{AccessSnapshot, InvocationScope, SecurityProvider};
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -193,23 +193,23 @@ impl Tool for FakeTool {
     fn invoke<'a>(
         &'a self,
         invocation: Invocation,
-        context: InvocationContext<'a, Snapshot, u64>,
+        scope: InvocationScope<'a, Snapshot, u64>,
     ) -> BoxFuture<'a, Result<PathBuf, OperationError<Fault>>> {
         Box::pin(async move {
-            context
+            scope
                 .cancellation()
                 .check()
                 .map_err(|_| OperationError::Cancelled)?;
             let path = match invocation {
                 Invocation::Read(read) => {
-                    context
+                    scope
                         .security()
                         .check_read(&read)
                         .map_err(OperationError::Failed)?;
                     read.actual_path().to_path_buf()
                 }
                 Invocation::Write(path) => {
-                    context
+                    scope
                         .security()
                         .check_write(&path)
                         .map_err(OperationError::Failed)?;
@@ -219,7 +219,7 @@ impl Tool for FakeTool {
             self.invocations
                 .lock()
                 .unwrap()
-                .push((*context.selection(), path.clone()));
+                .push((*scope.selection(), path.clone()));
             Ok(path)
         })
     }

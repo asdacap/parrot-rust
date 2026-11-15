@@ -81,7 +81,7 @@ async fn bounded<T>(future: impl Future<Output = T>) -> T {
         .expect("bounded startup component fixture")
 }
 
-struct Context {
+struct StartupFixture {
     root: PathBuf,
     roots: ApplicationRoots,
     runtime: RuntimeIdentity,
@@ -91,7 +91,7 @@ struct Context {
     opens: Arc<AtomicUsize>,
     configurations: Arc<AtomicUsize>,
 }
-impl Context {
+impl StartupFixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "t65-{}-{}",
@@ -296,7 +296,7 @@ impl Context {
         }
     }
 }
-impl Drop for Context {
+impl Drop for StartupFixture {
     fn drop(&mut self) {
         std::fs::remove_dir_all(&self.root).unwrap();
     }
@@ -322,17 +322,17 @@ struct Endpoint {
     event_count: usize,
 }
 impl Endpoint {
-    fn new(context: &Context, scenario: &'static str) -> Self {
+    fn new(fixture: &StartupFixture, scenario: &'static str) -> Self {
         Self {
             scenario,
-            claim: context.claim(),
-            directory: context.root.clone(),
+            claim: fixture.claim(),
+            directory: fixture.root.clone(),
             calls: Arc::default(),
             owner: None,
             attach_started: Arc::default(),
             resume_started: Arc::default(),
             retry_started: Arc::default(),
-            progress: context.restore_progress.observer(),
+            progress: fixture.restore_progress.observer(),
             event_count: 3,
         }
     }
@@ -482,32 +482,32 @@ endpoint! {
 }
 
 async fn run_case(scenario: &'static str, interactive: bool, expected_opens: usize, fresh: usize) {
-    let context = Context::new();
-    let mut endpoint = Endpoint::new(&context, scenario);
-    let activation = (scenario != "fresh").then(|| context.admit(scenario.starts_with("foreign")));
+    let fixture = StartupFixture::new();
+    let mut endpoint = Endpoint::new(&fixture, scenario);
+    let activation = (scenario != "fresh").then(|| fixture.admit(scenario.starts_with("foreign")));
     if matches!(scenario, "load" | "inactive-connect" | "recover-race") {
         activation.as_ref().unwrap().release().unwrap();
     }
     endpoint.owner = activation;
-    let mut local_server = context.server(endpoint.clone(), false).await;
-    let mut local_owner = context.client(&local_server);
+    let mut local_server = fixture.server(endpoint.clone(), false).await;
+    let mut local_owner = fixture.client(&local_server);
     let local_client = local_owner.client().unwrap().clone();
     let mut owner_server = if matches!(
         scenario,
         "connect" | "inactive-connect" | "rejected" | "race" | "recover" | "recover-race"
     ) {
-        Some(context.server(endpoint.clone(), true).await)
+        Some(fixture.server(endpoint.clone(), true).await)
     } else {
         None
     };
     let take_over = scenario == "foreign-take-over";
-    let startup = context.startup(local_client, take_over);
+    let startup = fixture.startup(local_client, take_over);
     let stop = Stop::new();
     let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, interactive, &stop))
         .await
         .unwrap();
-    assert_eq!(context.opens.load(Ordering::SeqCst), expected_opens);
-    assert_eq!(context.configurations.load(Ordering::SeqCst), fresh);
+    assert_eq!(fixture.opens.load(Ordering::SeqCst), expected_opens);
+    assert_eq!(fixture.configurations.load(Ordering::SeqCst), fresh);
     let resumes = usize::from(!matches!(
         scenario,
         "fresh" | "connect" | "inactive-connect"
@@ -529,13 +529,13 @@ async fn run_case(scenario: &'static str, interactive: bool, expected_opens: usi
         }
         for resumed in &calls.resumed {
             assert_eq!(resumed.user_session_id, "existing");
-            assert_eq!(resumed.working_directory, context.root.to_str().unwrap());
+            assert_eq!(resumed.working_directory, fixture.root.to_str().unwrap());
             assert_eq!(resumed.interactive_permissions, interactive);
             assert_eq!(resumed.take_over, take_over);
         }
         for attached in &calls.attached {
             assert_eq!(attached.user_session_id, "existing");
-            assert_eq!(attached.working_directory, context.root.to_str().unwrap());
+            assert_eq!(attached.working_directory, fixture.root.to_str().unwrap());
         }
     }
     assert_eq!(
@@ -566,10 +566,10 @@ async fn run_case(scenario: &'static str, interactive: bool, expected_opens: usi
         opened.remote.is_some(),
         fresh == 0 && !matches!(scenario, "load" | "recover" | "foreign-take-over")
     );
-    let text = context.text();
+    let text = fixture.text();
     (endpoint.progress)("existing", 100);
     assert_eq!(
-        context.text(),
+        fixture.text(),
         text,
         "observer must be inactive after startup"
     );
@@ -606,7 +606,7 @@ async fn run_case(scenario: &'static str, interactive: bool, expected_opens: usi
         };
         assert!(text.contains(expected), "{scenario}: {text}");
     }
-    context.assert_diagnostics("success");
+    fixture.assert_diagnostics("success");
     drop(opened);
     if let Some(server) = owner_server.as_mut() {
         bounded(server.close()).await.unwrap();
@@ -639,13 +639,13 @@ scenario_tests! {
 #[tokio::test]
 async fn no_sandbox_rejects_attachment_including_after_an_ownership_race() {
     for scenario in ["connect", "race"] {
-        let context = Context::new();
-        let mut endpoint = Endpoint::new(&context, scenario);
-        endpoint.owner = Some(context.admit(false));
-        let mut local_server = context.server(endpoint.clone(), false).await;
-        let mut owner_server = context.server(endpoint.clone(), true).await;
-        let mut local = context.client(&local_server);
-        let startup = context
+        let fixture = StartupFixture::new();
+        let mut endpoint = Endpoint::new(&fixture, scenario);
+        endpoint.owner = Some(fixture.admit(false));
+        let mut local_server = fixture.server(endpoint.clone(), false).await;
+        let mut owner_server = fixture.server(endpoint.clone(), true).await;
+        let mut local = fixture.client(&local_server);
+        let startup = fixture
             .startup(local.client().unwrap().clone(), false)
             .with_remote_attachment(false);
         let failure = bounded(startup.open(ChatSessionStart::ResumeLatest, true, &Stop::new()))
@@ -655,13 +655,13 @@ async fn no_sandbox_rejects_attachment_including_after_an_ownership_race() {
             .into_status();
         assert_eq!(failure.code(), Code::FailedPrecondition);
         assert!(failure.message().contains("--no-sandbox"));
-        assert_eq!(context.configurations.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.configurations.load(Ordering::SeqCst), 0);
         {
             let calls = endpoint.calls.lock().unwrap();
             assert!(calls.created.is_empty());
             assert_eq!(calls.attached.len(), if scenario == "race" { 2 } else { 1 });
         }
-        assert!(!context.text().contains("creating a new user session"));
+        assert!(!fixture.text().contains("creating a new user session"));
         local.close();
         bounded(owner_server.close()).await.unwrap();
         bounded(local_server.close()).await.unwrap();
@@ -670,18 +670,18 @@ async fn no_sandbox_rejects_attachment_including_after_an_ownership_race() {
 
 #[tokio::test]
 async fn empty_restore_reports_zero_events() {
-    let context = Context::new();
-    context.admit(false).release().unwrap();
-    let mut endpoint = Endpoint::new(&context, "load");
+    let fixture = StartupFixture::new();
+    fixture.admit(false).release().unwrap();
+    let mut endpoint = Endpoint::new(&fixture, "load");
     endpoint.event_count = 0;
-    let mut server = context.server(endpoint, false).await;
-    let mut local = context.client(&server);
-    let startup = context.startup(local.client().unwrap().clone(), false);
+    let mut server = fixture.server(endpoint, false).await;
+    let mut local = fixture.client(&server);
+    let startup = fixture.startup(local.client().unwrap().clone(), false);
     let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, false, &Stop::new()))
         .await
         .unwrap();
     assert!(
-        context
+        fixture
             .text()
             .contains("loaded existing user session existing (0 events loaded)")
     );
@@ -691,12 +691,12 @@ async fn empty_restore_reports_zero_events() {
 }
 
 async fn cancellation_case(session_start: ChatSessionStart, during_attach: bool) {
-    let context = Context::new();
-    let _activation = context.admit(false);
-    let endpoint = Endpoint::new(&context, "cancel");
-    let mut server = context.server(endpoint.clone(), true).await;
-    let mut local_owner = context.client(&server);
-    let startup = context.startup(local_owner.client().unwrap().clone(), false);
+    let fixture = StartupFixture::new();
+    let _activation = fixture.admit(false);
+    let endpoint = Endpoint::new(&fixture, "cancel");
+    let mut server = fixture.server(endpoint.clone(), true).await;
+    let mut local_owner = fixture.client(&server);
+    let startup = fixture.startup(local_owner.client().unwrap().clone(), false);
     let stop = Stop::new();
     if !during_attach {
         stop.cancel();
@@ -705,7 +705,7 @@ async fn cancellation_case(session_start: ChatSessionStart, during_attach: bool)
         if during_attach {
             bounded(endpoint.attach_started.notified()).await;
             assert!(
-                context
+                fixture
                     .text()
                     .contains("connecting to existing user session existing...")
             );
@@ -713,13 +713,13 @@ async fn cancellation_case(session_start: ChatSessionStart, during_attach: bool)
         }
     });
     assert!(matches!(result, Err(StartupError::Rpc(status)) if status.code() == Code::Cancelled));
-    assert_eq!(context.opens.load(Ordering::SeqCst), 0);
-    assert_eq!(context.configurations.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.opens.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.configurations.load(Ordering::SeqCst), 0);
     assert!(endpoint.calls.lock().unwrap().created.is_empty());
     assert!(endpoint.calls.lock().unwrap().resumed.is_empty());
-    assert_eq!(context.text().is_empty(), !during_attach);
-    assert!(!context.text().contains("connected to existing"));
-    context.assert_diagnostics("cancelled");
+    assert_eq!(fixture.text().is_empty(), !during_attach);
+    assert!(!fixture.text().contains("connected to existing"));
+    fixture.assert_diagnostics("cancelled");
     local_owner.close();
     bounded(server.close()).await.unwrap();
 }
@@ -737,20 +737,20 @@ async fn cancellation_during_native_attach_has_no_fallback() {
 }
 
 async fn recovery_failure_case(scenario: &'static str, expected: Code) {
-    let context = Context::new();
-    let _activation = context.admit(false);
-    let endpoint = Endpoint::new(&context, scenario);
-    let mut local_server = context.server(endpoint.clone(), false).await;
-    let mut owner_server = context.server(endpoint.clone(), true).await;
-    let mut local_owner = context.client(&local_server);
-    let startup = context.startup(local_owner.client().unwrap().clone(), false);
+    let fixture = StartupFixture::new();
+    let _activation = fixture.admit(false);
+    let endpoint = Endpoint::new(&fixture, scenario);
+    let mut local_server = fixture.server(endpoint.clone(), false).await;
+    let mut owner_server = fixture.server(endpoint.clone(), true).await;
+    let mut local_owner = fixture.client(&local_server);
+    let startup = fixture.startup(local_owner.client().unwrap().clone(), false);
     let stop = Stop::new();
     let (result, ()) = tokio::join!(
         bounded(startup.open(ChatSessionStart::ResumeLatest, true, &stop)),
         async {
             bounded(endpoint.resume_started.notified()).await;
-            assert!(context.text().contains("existing... 1 events loaded"));
-            assert!(!context.text().contains("loaded existing user session"));
+            assert!(fixture.text().contains("existing... 1 events loaded"));
+            assert!(!fixture.text().contains("loaded existing user session"));
             if scenario == "cancel-retry" {
                 bounded(endpoint.retry_started.notified()).await;
             }
@@ -760,15 +760,15 @@ async fn recovery_failure_case(scenario: &'static str, expected: Code) {
         }
     );
     assert!(matches!(result, Err(StartupError::Rpc(status)) if status.code() == expected));
-    let before = context.text();
+    let before = fixture.text();
     (endpoint.progress)("existing", 100);
     assert_eq!(
-        context.text(),
+        fixture.text(),
         before,
         "late progress after a failed resume"
     );
-    assert_eq!(context.opens.load(Ordering::SeqCst), 1);
-    assert_eq!(context.configurations.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.opens.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.configurations.load(Ordering::SeqCst), 0);
     {
         let calls = endpoint.calls.lock().unwrap();
         assert!(calls.created.is_empty());
@@ -776,7 +776,7 @@ async fn recovery_failure_case(scenario: &'static str, expected: Code) {
         assert_eq!(calls.resumed[0].user_session_id, "existing");
         assert_eq!(
             calls.resumed[0].working_directory,
-            context.root.to_str().unwrap()
+            fixture.root.to_str().unwrap()
         );
         assert!(calls.resumed[0].interactive_permissions);
         assert_eq!(
@@ -789,9 +789,9 @@ async fn recovery_failure_case(scenario: &'static str, expected: Code) {
         "creating a new user session",
         "connected to existing",
     ] {
-        assert!(!context.text().contains(absent));
+        assert!(!fixture.text().contains(absent));
     }
-    context.assert_diagnostics(if expected == Code::Cancelled {
+    fixture.assert_diagnostics(if expected == Code::Cancelled {
         "cancelled"
     } else {
         "failure"
@@ -819,13 +819,13 @@ async fn explicit_rpc_cancelled_resume_is_not_swallowed() {
 
 #[tokio::test]
 async fn explicit_rpc_cancelled_attach_with_live_caller_retries_then_creates_fresh() {
-    let context = Context::new();
-    let _activation = context.admit(false);
-    let endpoint = Endpoint::new(&context, "rpc-cancel-attach");
-    let mut local_server = context.server(endpoint.clone(), false).await;
-    let mut owner_server = context.server(endpoint.clone(), true).await;
-    let mut local = context.client(&local_server);
-    let startup = context.startup(local.client().unwrap().clone(), false);
+    let fixture = StartupFixture::new();
+    let _activation = fixture.admit(false);
+    let endpoint = Endpoint::new(&fixture, "rpc-cancel-attach");
+    let mut local_server = fixture.server(endpoint.clone(), false).await;
+    let mut owner_server = fixture.server(endpoint.clone(), true).await;
+    let mut local = fixture.client(&local_server);
+    let startup = fixture.startup(local.client().unwrap().clone(), false);
     let caller = Stop::new();
     let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, true, &caller))
         .await
@@ -833,8 +833,8 @@ async fn explicit_rpc_cancelled_attach_with_live_caller_retries_then_creates_fre
     assert!(!caller.is_cancelled());
     assert_eq!(opened.session.id, "new-session");
     assert!(opened.remote.is_none());
-    assert_eq!(context.opens.load(Ordering::SeqCst), 1);
-    assert_eq!(context.configurations.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.opens.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.configurations.load(Ordering::SeqCst), 1);
     {
         let calls = endpoint.calls.lock().unwrap();
         assert_eq!(calls.attached.len(), 2);
@@ -843,7 +843,7 @@ async fn explicit_rpc_cancelled_attach_with_live_caller_retries_then_creates_fre
         assert_eq!(calls.resumed[0].user_session_id, "existing");
         assert_eq!(
             calls.resumed[0].working_directory,
-            context.root.to_str().unwrap()
+            fixture.root.to_str().unwrap()
         );
         assert!(calls.resumed[0].interactive_permissions);
         assert!(!calls.resumed[0].take_over);
@@ -851,15 +851,15 @@ async fn explicit_rpc_cancelled_attach_with_live_caller_retries_then_creates_fre
         assert_eq!(calls.created[0].mode, "fresh-mode");
         assert!(calls.created[0].interactive_permissions);
     }
-    let progress = context.text();
+    let progress = fixture.text();
     assert!(progress.contains("restoring existing user session existing..."));
     assert!(!progress.contains("loaded existing"));
     assert!(!progress.contains("connected to existing"));
     assert!(progress.contains("unable to connect to existing user session existing"));
     assert!(progress.contains("Attachment cancelled."));
     assert!(progress.contains("created user session new-session"));
-    context.assert_diagnostics("success");
-    assert!(!context.log().contains("Attachment cancelled."));
+    fixture.assert_diagnostics("success");
+    assert!(!fixture.log().contains("Attachment cancelled."));
     drop(opened);
     local.close();
     bounded(owner_server.close()).await.unwrap();
@@ -868,15 +868,15 @@ async fn explicit_rpc_cancelled_attach_with_live_caller_retries_then_creates_fre
 
 #[tokio::test]
 async fn explicit_fresh_skips_discovery_and_preserves_live_owner_data() {
-    let context = Context::new();
-    let _activation = context.admit(false);
+    let fixture = StartupFixture::new();
+    let _activation = fixture.admit(false);
     let id = UserSessionId::parse("existing").unwrap();
-    let old = context.roots.current().state().join("sessions/existing");
+    let old = fixture.roots.current().state().join("sessions/existing");
     std::fs::write(old.join("session.db"), b"retained database").unwrap();
     std::fs::create_dir(old.join("artifacts")).unwrap();
     std::fs::write(old.join("artifacts/image"), b"retained image").unwrap();
-    let canonical = WorkingDirectoryClaim::canonicalize(&context.root).unwrap();
-    let association = context
+    let canonical = WorkingDirectoryClaim::canonicalize(&fixture.root).unwrap();
+    let association = fixture
         .roots
         .current()
         .state()
@@ -884,11 +884,11 @@ async fn explicit_fresh_skips_discovery_and_preserves_live_owner_data() {
         .join(WorkingDirectoryClaim::fingerprint(&canonical))
         .join("existing.json");
     std::fs::write(&association, "{").unwrap();
-    let endpoint = Endpoint::new(&context, "connect");
-    let mut owner_server = context.server(endpoint.clone(), true).await;
-    let mut local_server = context.server(endpoint.clone(), false).await;
-    let mut local = context.client(&local_server);
-    let startup = context.startup(local.client().unwrap().clone(), true);
+    let endpoint = Endpoint::new(&fixture, "connect");
+    let mut owner_server = fixture.server(endpoint.clone(), true).await;
+    let mut local_server = fixture.server(endpoint.clone(), false).await;
+    let mut local = fixture.client(&local_server);
+    let startup = fixture.startup(local.client().unwrap().clone(), true);
     let opened = bounded(startup.open(ChatSessionStart::Fresh, true, &Stop::new()))
         .await
         .unwrap();
@@ -910,8 +910,8 @@ async fn explicit_fresh_skips_discovery_and_preserves_live_owner_data() {
         b"retained image"
     );
     assert_eq!(std::fs::read_to_string(&association).unwrap(), "{");
-    assert!(context.claim().is_active(&id, &context.root).unwrap());
-    context.assert_diagnostics("success");
+    assert!(fixture.claim().is_active(&id, &fixture.root).unwrap());
+    fixture.assert_diagnostics("success");
     drop(opened);
     local.close();
     bounded(owner_server.close()).await.unwrap();
@@ -920,10 +920,10 @@ async fn explicit_fresh_skips_discovery_and_preserves_live_owner_data() {
 
 #[tokio::test]
 async fn corrupt_claim_hard_fails_before_lazy_local_open() {
-    let context = Context::new();
-    let _activation = context.admit(false);
-    let canonical = WorkingDirectoryClaim::canonicalize(&context.root).unwrap();
-    let association = context
+    let fixture = StartupFixture::new();
+    let _activation = fixture.admit(false);
+    let canonical = WorkingDirectoryClaim::canonicalize(&fixture.root).unwrap();
+    let association = fixture
         .roots
         .current()
         .state()
@@ -931,33 +931,33 @@ async fn corrupt_claim_hard_fails_before_lazy_local_open() {
         .join(WorkingDirectoryClaim::fingerprint(&canonical))
         .join("existing.json");
     std::fs::write(association, "{").unwrap();
-    let endpoint = Endpoint::new(&context, "fresh");
-    let mut server = context.server(endpoint.clone(), false).await;
-    let mut owner = context.client(&server);
-    let startup = context.startup(owner.client().unwrap().clone(), false);
+    let endpoint = Endpoint::new(&fixture, "fresh");
+    let mut server = fixture.server(endpoint.clone(), false).await;
+    let mut owner = fixture.client(&server);
+    let startup = fixture.startup(owner.client().unwrap().clone(), false);
     assert!(matches!(
         startup
             .open(ChatSessionStart::ResumeLatest, true, &Stop::new())
             .await,
         Err(StartupError::CorruptState)
     ));
-    assert_eq!(context.opens.load(Ordering::SeqCst), 0);
-    assert_eq!(context.configurations.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.opens.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.configurations.load(Ordering::SeqCst), 0);
     assert!(endpoint.calls.lock().unwrap().created.is_empty());
-    context.assert_diagnostics("failure");
+    fixture.assert_diagnostics("failure");
     owner.close();
     bounded(server.close()).await.unwrap();
 }
 
 #[tokio::test]
 async fn native_identity_mismatch_is_not_accepted_as_attached() {
-    let context = Context::new();
-    let activation = context.admit(false);
+    let fixture = StartupFixture::new();
+    let activation = fixture.admit(false);
     activation.release().unwrap();
-    let endpoint = Endpoint::new(&context, "wrong-id");
-    let mut server = context.server(endpoint.clone(), true).await;
-    let mut local = context.client(&server);
-    let startup = context.startup(local.client().unwrap().clone(), false);
+    let endpoint = Endpoint::new(&fixture, "wrong-id");
+    let mut server = fixture.server(endpoint.clone(), true).await;
+    let mut local = fixture.client(&server);
+    let startup = fixture.startup(local.client().unwrap().clone(), false);
     let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, false, &Stop::new()))
         .await
         .unwrap();
@@ -965,7 +965,7 @@ async fn native_identity_mismatch_is_not_accepted_as_attached() {
     assert!(opened.remote.is_none());
     assert_eq!(endpoint.calls.lock().unwrap().attached.len(), 1);
     assert_eq!(endpoint.calls.lock().unwrap().resumed.len(), 1);
-    assert_eq!(context.configurations.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.configurations.load(Ordering::SeqCst), 0);
     drop(opened);
     local.close();
     bounded(server.close()).await.unwrap();
@@ -973,20 +973,20 @@ async fn native_identity_mismatch_is_not_accepted_as_attached() {
 
 #[tokio::test]
 async fn web_port_uses_same_startup_and_forces_interactive_permissions() {
-    let context = Context::new();
-    let endpoint = Endpoint::new(&context, "fresh");
-    let mut server = context.server(endpoint.clone(), false).await;
-    let mut local = context.client(&server);
-    let startup = context.startup(local.client().unwrap().clone(), false);
+    let fixture = StartupFixture::new();
+    let endpoint = Endpoint::new(&fixture, "fresh");
+    let mut server = fixture.server(endpoint.clone(), false).await;
+    let mut local = fixture.client(&server);
+    let startup = fixture.startup(local.client().unwrap().clone(), false);
     let opened = bounded(WebStartup::open(&startup, &Stop::new()))
         .await
         .unwrap();
     assert_eq!(opened.session.id, "new-session");
     assert!(opened.remote.is_none());
     assert!(endpoint.calls.lock().unwrap().created[0].interactive_permissions);
-    assert_eq!(context.opens.load(Ordering::SeqCst), 1);
-    assert_eq!(context.configurations.load(Ordering::SeqCst), 1);
-    context.assert_diagnostics("success");
+    assert_eq!(fixture.opens.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.configurations.load(Ordering::SeqCst), 1);
+    fixture.assert_diagnostics("success");
     local.close();
     bounded(server.close()).await.unwrap();
 }
@@ -994,15 +994,15 @@ async fn web_port_uses_same_startup_and_forces_interactive_permissions() {
 // These root-selection tests do not establish physical filesystem authorization.
 #[tokio::test]
 async fn legacy_only_candidate_attaches_to_legacy_socket_in_place() {
-    let context = Context::new();
-    let _activation = context.admit_legacy();
-    let endpoint = Endpoint::new(&context, "connect");
-    let selected = context
+    let fixture = StartupFixture::new();
+    let _activation = fixture.admit_legacy();
+    let endpoint = Endpoint::new(&fixture, "connect");
+    let selected = fixture
         .roots
         .discover_session(
             &UserSessionId::parse("existing").unwrap(),
             true,
-            &context.root,
+            &fixture.root,
         )
         .unwrap()
         .unwrap();
@@ -1010,12 +1010,12 @@ async fn legacy_only_candidate_attaches_to_legacy_socket_in_place() {
     let mut server = GrpcServer::start_local(
         endpoint.clone(),
         selected.resolve_internal("parrot.sock").unwrap().path(),
-        context.diagnostics.clone(),
+        fixture.diagnostics.clone(),
     )
     .await
     .unwrap();
-    let mut local = context.client(&server);
-    let startup = context.startup(local.client().unwrap().clone(), false);
+    let mut local = fixture.client(&server);
+    let startup = fixture.startup(local.client().unwrap().clone(), false);
     let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, false, &Stop::new()))
         .await
         .unwrap();
@@ -1023,17 +1023,17 @@ async fn legacy_only_candidate_attaches_to_legacy_socket_in_place() {
     assert!(opened.remote.is_some());
     assert_eq!(endpoint.calls.lock().unwrap().attached.len(), 1);
     assert!(endpoint.calls.lock().unwrap().resumed.is_empty());
-    assert_eq!(context.opens.load(Ordering::SeqCst), 0);
-    assert_eq!(context.configurations.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.opens.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.configurations.load(Ordering::SeqCst), 0);
     assert!(
-        !context
+        !fixture
             .roots
             .current()
             .state()
             .join("sessions/existing")
             .exists()
     );
-    context.assert_diagnostics("success");
+    fixture.assert_diagnostics("success");
     drop(opened);
     local.close();
     bounded(server.close()).await.unwrap();
@@ -1041,24 +1041,24 @@ async fn legacy_only_candidate_attaches_to_legacy_socket_in_place() {
 
 #[tokio::test]
 async fn disabled_fallback_does_not_discover_or_attach_legacy_candidate() {
-    let context = Context::new();
-    let _activation = context.admit_legacy();
-    let legacy = Endpoint::new(&context, "connect");
+    let fixture = StartupFixture::new();
+    let _activation = fixture.admit_legacy();
+    let legacy = Endpoint::new(&fixture, "connect");
     let mut legacy_server = GrpcServer::start_local(
         legacy.clone(),
-        context
+        fixture
             .roots
             .legacy()
             .state()
             .join("sessions/existing/parrot.sock"),
-        context.diagnostics.clone(),
+        fixture.diagnostics.clone(),
     )
     .await
     .unwrap();
-    let fresh = Endpoint::new(&context, "fresh");
-    let mut local_server = context.server(fresh.clone(), false).await;
-    let mut local = context.client(&local_server);
-    let startup = context
+    let fresh = Endpoint::new(&fixture, "fresh");
+    let mut local_server = fixture.server(fresh.clone(), false).await;
+    let mut local = fixture.client(&local_server);
+    let startup = fixture
         .startup(local.client().unwrap().clone(), false)
         .with_legacy_path_read_fallback(false);
     let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, false, &Stop::new()))
@@ -1069,8 +1069,8 @@ async fn disabled_fallback_does_not_discover_or_attach_legacy_candidate() {
     assert!(legacy.calls.lock().unwrap().attached.is_empty());
     assert!(fresh.calls.lock().unwrap().resumed.is_empty());
     assert_eq!(fresh.calls.lock().unwrap().created.len(), 1);
-    assert_eq!(context.opens.load(Ordering::SeqCst), 1);
-    assert_eq!(context.configurations.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.opens.load(Ordering::SeqCst), 1);
+    assert_eq!(fixture.configurations.load(Ordering::SeqCst), 1);
     drop(opened);
     local.close();
     bounded(legacy_server.close()).await.unwrap();
@@ -1079,25 +1079,25 @@ async fn disabled_fallback_does_not_discover_or_attach_legacy_candidate() {
 
 #[tokio::test]
 async fn duplicate_session_candidate_prefers_current_root_and_socket() {
-    let context = Context::new();
-    let _legacy_activation = context.admit_legacy();
-    let _current_activation = context.admit(false);
-    let legacy = Endpoint::new(&context, "connect");
-    let current = Endpoint::new(&context, "connect");
+    let fixture = StartupFixture::new();
+    let _legacy_activation = fixture.admit_legacy();
+    let _current_activation = fixture.admit(false);
+    let legacy = Endpoint::new(&fixture, "connect");
+    let current = Endpoint::new(&fixture, "connect");
     let mut legacy_server = GrpcServer::start_local(
         legacy.clone(),
-        context
+        fixture
             .roots
             .legacy()
             .state()
             .join("sessions/existing/parrot.sock"),
-        context.diagnostics.clone(),
+        fixture.diagnostics.clone(),
     )
     .await
     .unwrap();
-    let mut current_server = context.server(current.clone(), true).await;
-    let mut local = context.client(&current_server);
-    let startup = context.startup(local.client().unwrap().clone(), false);
+    let mut current_server = fixture.server(current.clone(), true).await;
+    let mut local = fixture.client(&current_server);
+    let startup = fixture.startup(local.client().unwrap().clone(), false);
     let opened = bounded(startup.open(ChatSessionStart::ResumeLatest, true, &Stop::new()))
         .await
         .unwrap();
@@ -1105,8 +1105,8 @@ async fn duplicate_session_candidate_prefers_current_root_and_socket() {
     assert!(opened.remote.is_some());
     assert_eq!(current.calls.lock().unwrap().attached.len(), 1);
     assert!(legacy.calls.lock().unwrap().attached.is_empty());
-    assert_eq!(context.opens.load(Ordering::SeqCst), 0);
-    assert_eq!(context.configurations.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.opens.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.configurations.load(Ordering::SeqCst), 0);
     drop(opened);
     local.close();
     bounded(current_server.close()).await.unwrap();
@@ -1115,11 +1115,11 @@ async fn duplicate_session_candidate_prefers_current_root_and_socket() {
 
 #[tokio::test]
 async fn corrupt_current_duplicate_does_not_fall_back_to_valid_legacy() {
-    let context = Context::new();
-    let _legacy_activation = context.admit_legacy();
-    let _current_activation = context.admit(false);
+    let fixture = StartupFixture::new();
+    let _legacy_activation = fixture.admit_legacy();
+    let _current_activation = fixture.admit(false);
     std::fs::write(
-        context
+        fixture
             .roots
             .current()
             .state()
@@ -1127,65 +1127,65 @@ async fn corrupt_current_duplicate_does_not_fall_back_to_valid_legacy() {
         "{",
     )
     .unwrap();
-    let legacy = Endpoint::new(&context, "connect");
+    let legacy = Endpoint::new(&fixture, "connect");
     let mut legacy_server = GrpcServer::start_local(
         legacy.clone(),
-        context
+        fixture
             .roots
             .legacy()
             .state()
             .join("sessions/existing/parrot.sock"),
-        context.diagnostics.clone(),
+        fixture.diagnostics.clone(),
     )
     .await
     .unwrap();
-    let mut local = context.client(&legacy_server);
-    let startup = context.startup(local.client().unwrap().clone(), false);
+    let mut local = fixture.client(&legacy_server);
+    let startup = fixture.startup(local.client().unwrap().clone(), false);
     assert!(matches!(
         bounded(startup.open(ChatSessionStart::ResumeLatest, true, &Stop::new())).await,
         Err(StartupError::CorruptState)
     ));
     assert!(legacy.calls.lock().unwrap().attached.is_empty());
     assert!(legacy.calls.lock().unwrap().resumed.is_empty());
-    assert_eq!(context.opens.load(Ordering::SeqCst), 0);
-    assert_eq!(context.configurations.load(Ordering::SeqCst), 0);
-    context.assert_diagnostics("failure");
+    assert_eq!(fixture.opens.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.configurations.load(Ordering::SeqCst), 0);
+    fixture.assert_diagnostics("failure");
     local.close();
     bounded(legacy_server.close()).await.unwrap();
 }
 
 #[tokio::test]
 async fn web_router_adopts_actual_native_owner_from_same_startup() {
-    let context = Context::new();
-    let _activation = context.admit(false);
-    let endpoint = Endpoint::new(&context, "connect");
-    let mut owner_server = context.server(endpoint.clone(), true).await;
+    let fixture = StartupFixture::new();
+    let _activation = fixture.admit(false);
+    let endpoint = Endpoint::new(&fixture, "connect");
+    let mut owner_server = fixture.server(endpoint.clone(), true).await;
     // A distinct concrete local client is deliberately never opened by startup.
     let mut unused_local = GrpcTransportClient::connect(
-        &TransportAddress::Unix(context.root.join("unused.sock")),
+        &TransportAddress::Unix(fixture.root.join("unused.sock")),
         None,
         None,
-        context.diagnostics.clone(),
+        fixture.diagnostics.clone(),
     )
     .unwrap();
     let local = unused_local.client().unwrap().clone();
-    let startup = Arc::new(context.startup(local.clone(), false));
+    let startup = Arc::new(fixture.startup(local.clone(), false));
     let router = WebSessionRouter::new(
         local,
-        context.roots.clone(),
-        ordinary_workspace_resolver()(&context.root).unwrap(),
+        fixture.roots.clone(),
+        ordinary_workspace_resolver()(&fixture.root).unwrap(),
         startup,
-        context.diagnostics.clone(),
+        fixture.diagnostics.clone(),
     );
     let session = bounded(router.open_default(&Stop::new())).await.unwrap();
     assert_eq!(session.id, "existing");
     assert!(router.is_remote("existing"));
-    assert_eq!(context.opens.load(Ordering::SeqCst), 0);
-    assert_eq!(context.configurations.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.opens.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.configurations.load(Ordering::SeqCst), 0);
     let response = bounded(router.client_for("existing").attach_session(
         wire::AttachSessionRequest {
             user_session_id: "existing".into(),
-            working_directory: context.root.to_string_lossy().into_owned(),
+            working_directory: fixture.root.to_string_lossy().into_owned(),
             ..Default::default()
         },
     ))
@@ -1196,7 +1196,7 @@ async fn web_router_adopts_actual_native_owner_from_same_startup() {
     assert_eq!(endpoint.calls.lock().unwrap().attached.len(), 2);
     router.forget("existing");
     assert!(!router.is_remote("existing"));
-    assert!(context.log().contains("event=\"disconnect.complete\""));
+    assert!(fixture.log().contains("event=\"disconnect.complete\""));
     unused_local.close();
     bounded(owner_server.close()).await.unwrap();
 }

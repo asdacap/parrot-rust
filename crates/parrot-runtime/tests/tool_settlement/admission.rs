@@ -179,11 +179,11 @@ impl Tool for CancelDuringInvoke {
     fn invoke<'a>(
         &'a self,
         invocation: ToolInvocation,
-        context: InvocationContext<'a, SharedSecurity<Security>, TurnSelection<Security>>,
+        scope: InvocationScope<'a, SharedSecurity<Security>, TurnSelection<Security>>,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         // Cancellation here occurs synchronously, before the returned future is polled.
         self.signal.cancel();
-        self.inner.invoke(invocation, context)
+        self.inner.invoke(invocation, scope)
     }
 }
 #[tokio::test]
@@ -228,16 +228,16 @@ impl Tool for PreludePeer {
     fn invoke<'a>(
         &'a self,
         invocation: ToolInvocation,
-        context: InvocationContext<'a, SharedSecurity<Security>, TurnSelection<Security>>,
+        scope: InvocationScope<'a, SharedSecurity<Security>, TurnSelection<Security>>,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         Box::pin(async move {
             if invocation.call_id == "first" {
                 self.second_started.acquire().await.unwrap().forget();
-                let result = self.inner.invoke(invocation, context).await;
+                let result = self.inner.invoke(invocation, scope).await;
                 self.first_finished.add_permits(1);
                 result
             } else {
-                self.inner.invoke(invocation, context).await
+                self.inner.invoke(invocation, scope).await
             }
         })
     }

@@ -6,16 +6,16 @@ use std::sync::{
 use parrot_cli::{
     presenters::*,
     terminal_frames::{
-        LiveBufferItem, LiveBufferRenderContext, LiveBufferRetention, ScrollbackItem,
-        ScrollbackLayout, ScrollbackRenderContext,
+        LiveBufferItem, LiveBufferRenderOptions, LiveBufferRetention, ScrollbackItem,
+        ScrollbackLayout, ScrollbackRenderOptions,
     },
     terminal_layout::TerminalText,
 };
 
 use crate::support::animate;
 
-fn context(columns: usize, color: bool) -> ScrollbackRenderContext {
-    ScrollbackRenderContext {
+fn render_options(columns: usize, color: bool) -> ScrollbackRenderOptions {
+    ScrollbackRenderOptions {
         columns,
         color,
         inline_diff: true,
@@ -23,7 +23,7 @@ fn context(columns: usize, color: bool) -> ScrollbackRenderContext {
     }
 }
 fn scroll(item: &Presentation, columns: usize, color: bool) -> Vec<String> {
-    ScrollbackItem::render(item, context(columns, color)).unwrap()
+    ScrollbackItem::render(item, render_options(columns, color)).unwrap()
 }
 fn terminal(label: &str, block: ToolBlock) -> Presentation {
     Presentation::Tool(ToolReport::terminal(
@@ -55,7 +55,7 @@ fn display_values_sanitize_and_bound_labels_lines_and_utf8_details() {
     ));
     let live = LiveBufferItem::render(
         &live,
-        LiveBufferRenderContext {
+        LiveBufferRenderOptions {
             columns: 32768,
             color: false,
         },
@@ -84,7 +84,7 @@ fn wide_utf8_details_and_labels_are_bounded_without_splitting_scalars() {
     ));
     let rows = LiveBufferItem::render(
         &item,
-        LiveBufferRenderContext {
+        LiveBufferRenderOptions {
             columns: 32768,
             color: false,
         },
@@ -145,7 +145,7 @@ fn live_rendering_uses_source_spinner_styles_and_real_timer_closure_on_clone() {
         clock.store(index, Ordering::SeqCst);
         let unchanged_frame = LiveBufferItem::render(
             &item,
-            LiveBufferRenderContext {
+            LiveBufferRenderOptions {
                 columns: 80,
                 color: false,
             },
@@ -159,7 +159,7 @@ fn live_rendering_uses_source_spinner_styles_and_real_timer_closure_on_clone() {
         let animated = animate(&item, index);
         let rendered = LiveBufferItem::render(
             &animated,
-            LiveBufferRenderContext {
+            LiveBufferRenderOptions {
                 columns: 80,
                 color: true,
             },
@@ -334,9 +334,9 @@ fn wide_diff_pairs_removed_added_rows_and_narrow_diff_stays_inline() {
     let item = diff_item("edit", "file");
     let wide = ScrollbackItem::render(
         &item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             inline_diff: false,
-            ..context(80, false)
+            ..render_options(80, false)
         },
     )
     .unwrap();
@@ -344,9 +344,9 @@ fn wide_diff_pairs_removed_added_rows_and_narrow_diff_stays_inline() {
     assert!(wide[2].contains("1 -old") && wide[2].contains(" │ 1 +new"));
     let narrow = ScrollbackItem::render(
         &item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             inline_diff: false,
-            ..context(39, false)
+            ..render_options(39, false)
         },
     )
     .unwrap();
@@ -362,9 +362,9 @@ fn side_by_side_diff_pads_unicode_to_terminal_columns() {
     let item = terminal("edit", ToolBlock::from_diff(diff));
     let rows = ScrollbackItem::render(
         &item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             inline_diff: false,
-            ..context(80, false)
+            ..render_options(80, false)
         },
     )
     .unwrap();
@@ -405,9 +405,9 @@ fn side_by_side_diff_pads_unmatched_changes_and_keeps_context_pairs() {
     let item = terminal("edit", ToolBlock::from_diff(diff));
     let rows = ScrollbackItem::render(
         &item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             inline_diff: false,
-            ..context(80, false)
+            ..render_options(80, false)
         },
     )
     .unwrap();
@@ -433,9 +433,9 @@ fn diff_packing_compares_tool_and_path_by_value_not_arc_identity() {
     assert!(!same.continues(&first));
     let same_rows = ScrollbackItem::render(
         &same,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             previous_packing: packing.clone(),
-            ..context(80, false)
+            ..render_options(80, false)
         },
     )
     .unwrap();
@@ -443,9 +443,9 @@ fn diff_packing_compares_tool_and_path_by_value_not_arc_identity() {
     assert!(!same_rows.iter().any(|row| row.contains("write a")));
     let other_rows = ScrollbackItem::render(
         &other_path,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             previous_packing: packing,
-            ..context(80, false)
+            ..render_options(80, false)
         },
     )
     .unwrap();
@@ -520,7 +520,7 @@ fn out_of_range_structured_hunk_fails_instead_of_making_up_line_numbers() {
         "edit",
         ToolBlock::from_diff("--- a/file\n+++ b/file\n@@ -2147483648 +1 @@\n-old\n+new"),
     );
-    let error = ScrollbackItem::render(&item, context(80, false)).unwrap_err();
+    let error = ScrollbackItem::render(&item, render_options(80, false)).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
 }
 
@@ -534,7 +534,7 @@ fn decoration_reserves_source_content_columns_before_wrapping() {
         ToolBlock::empty(),
     );
     let rows = item
-        .render_scrollback_decorated(context(30, false), &decoration)
+        .render_scrollback_decorated(render_options(30, false), &decoration)
         .unwrap();
     assert!(rows[0].starts_with("  ✓ [child] ♟ "));
     assert!(rows[1].starts_with("    [child]   "));

@@ -241,7 +241,7 @@ async fn observe_idle(case_id: &str) -> Value {
             tokio::time::advance(Duration::from_secs(300)).await;
             let error = read.await.unwrap_err();
             assert_eq!(error, HttpError::Cancelled);
-            // Typed cancellation carries the caller context, not an exception object.
+            // Typed cancellation carries the caller token, not an exception object.
             json!({"completed_before_cancel": completed_before_cancel, "caller_token_preserved": token.is_cancelled(), "error":{"category":"System.OperationCanceledException","message":"The operation was canceled."}})
         }
         "idle.empty-eof-dispose" => {

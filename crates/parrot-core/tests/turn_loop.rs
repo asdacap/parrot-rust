@@ -2,12 +2,12 @@ use parrot_core::{
     AgentState, BoxFuture, Cancellation, CancellationToken, CompletionBlockerFeedback, ConfigKey,
     ConfigValue, Content, ContextConfiguration, ContextSnapshot, ConversationAddition,
     ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationReceipt,
-    ConversationTurn, DerivedContext, Error, ErrorCode, ErrorKind, EventPublisher, FinishReason,
-    InputAdmission, Message, Outcome, PromotedInput, PromptTemplate, Provider, ProviderRequest,
-    ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention, SkillProvider,
-    SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding, ToolCall,
-    ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult, ToolStatus,
-    Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
+    ConversationTurn, Error, ErrorCode, ErrorKind, EventPublisher, FinishReason, InputAdmission,
+    Message, Outcome, PreparedSkillPrompt, PromotedInput, PromptTemplate, Provider,
+    ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention,
+    SkillProvider, SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding,
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult,
+    ToolStatus, Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -474,7 +474,7 @@ impl Provider for MemoryProvider {
             if let Some(context) = compaction.contexts.pop_front() {
                 let mut request = self.request.lock().unwrap();
                 request.messages = context.messages;
-                request.context = context.state;
+                request.model = context.state;
             }
             if let Some(state) = compaction.effect_state_on_call.take() {
                 compaction.effect_state = Some(state);
@@ -522,7 +522,7 @@ impl Provider for MemoryProvider {
     }
 }
 
-struct RenderedContext {
+struct RenderedRequest {
     instructions: String,
     maximum_output_tokens: i32,
     messages: Vec<Message>,
@@ -538,13 +538,13 @@ struct InputEstimate {
 }
 
 #[derive(Clone)]
-struct MemoryContext {
+struct MemoryModel {
     configuration: ContextConfiguration,
 }
 
 struct CompactedContext {
     messages: Vec<Message>,
-    state: MemoryContext,
+    state: MemoryModel,
 }
 
 struct MemoryRequestData {
@@ -552,10 +552,10 @@ struct MemoryRequestData {
     estimates: Vec<InputEstimate>,
     estimate_script: VecDeque<i64>,
     estimated_input_tokens: i64,
-    context: MemoryContext,
+    model: MemoryModel,
     instructions: String,
     messages: Vec<Message>,
-    renderings: VecDeque<RenderedContext>,
+    renderings: VecDeque<RenderedRequest>,
 }
 
 #[derive(Default)]
@@ -580,7 +580,7 @@ struct MemoryState {
     request: Arc<Mutex<MemoryRequestData>>,
     prompts: Arc<Mutex<MemoryPromptData>>,
     skill_templates: Arc<Mutex<BTreeMap<ConfigKey, String>>>,
-    recorded_input_contexts: Vec<DerivedContext>,
+    recorded_skill_prompts: Vec<PreparedSkillPrompt>,
     tools: MemoryTools,
     provider: MemoryProvider,
     completion_blocker_feedback: Vec<CompletionBlockerFeedback>,
@@ -639,7 +639,7 @@ impl MemoryState {
             estimates: Vec::new(),
             estimate_script: VecDeque::new(),
             estimated_input_tokens: 0,
-            context: MemoryContext {
+            model: MemoryModel {
                 configuration: ContextConfiguration {
                     canonical_model: "memory/model".into(),
                     context_window: 0,
@@ -701,7 +701,7 @@ impl MemoryState {
                     "<skill-too-large>\n<name>{name}</name>\n<path>{path}</path>\n<message>The skill instructions exceed the {limit_bytes}-byte injection limit and were not loaded.</message>\n</skill-too-large>".into(),
                 ),
             ].into())),
-            recorded_input_contexts: Vec::new(),
+            recorded_skill_prompts: Vec::new(),
             trace: trace.clone(),
             tools: MemoryTools {
                 trace: trace.clone(),
@@ -815,8 +815,8 @@ impl MemoryState {
     }
     fn prime_context(&mut self, estimate: i64) {
         let mut request = self.request();
-        request.context.configuration.context_window = 1000;
-        request.context.configuration.maximum_output_tokens = 1;
+        request.model.configuration.context_window = 1000;
+        request.model.configuration.maximum_output_tokens = 1;
         request.messages = vec![Message {
             role: Role::User,
             contents: vec![Content::Text("question".into())],
@@ -920,8 +920,8 @@ impl States for MemoryState {
                             .collect::<String>();
                         self.status_steered.push(content);
                     }
-                    ConversationEvent::Notice { kind, .. } if kind == "skill_context" => {
-                        self.step("record_input_context")?;
+                    ConversationEvent::Notice { kind, .. } if kind == "skill_prompt" => {
+                        self.step("record_skill_prompt")?;
                         let content = addition.messages[0]
                             .contents
                             .iter()
@@ -930,7 +930,7 @@ impl States for MemoryState {
                                 _ => None,
                             })
                             .collect();
-                        self.recorded_input_contexts.push(DerivedContext {
+                        self.recorded_skill_prompts.push(PreparedSkillPrompt {
                             content,
                             loaded_paths: Vec::new(),
                         });
@@ -1017,7 +1017,7 @@ impl States for MemoryState {
                 ConfigKey::Context => {
                     self.trace.step("context_configuration", self.fail_at)?;
                     Ok(ConfigValue::Context(
-                        self.request().context.configuration.clone(),
+                        self.request().model.configuration.clone(),
                     ))
                 }
                 key => {
@@ -1107,7 +1107,7 @@ impl States for MemoryState {
                     let mut request = self.request();
                     if let Some(rendered) = request.renderings.pop_front() {
                         request.instructions = rendered.instructions;
-                        request.context.configuration.maximum_output_tokens =
+                        request.model.configuration.maximum_output_tokens =
                             rendered.maximum_output_tokens;
                         request.messages = rendered.messages;
                     }

@@ -37,7 +37,9 @@ pub use message::{
     ProviderRequest, ProviderResponse, Reasoning, Role,
 };
 pub use provider::{Provider, ProviderInvokeError, Tools};
-pub use skill::{DerivedContext, Skill, SkillContent, SkillMention, SkillProvider, SkillReference};
+pub use skill::{
+    PreparedSkillPrompt, Skill, SkillContent, SkillMention, SkillProvider, SkillReference,
+};
 pub use states::States;
 pub use status::{StatusKey, StatusOffer, StatusOffering, StatusStanding};
 pub use template::{MiniJinjaPromptTemplateEngine, ScalarPromptTemplateEngine};
