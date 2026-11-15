@@ -288,27 +288,6 @@ impl TurnEngine {
             }
         }
     }
-
-    /// Records an interrupted assistant turn through the same generic conversation operation.
-    pub async fn interrupt_turn(
-        states: &mut dyn States,
-        start_event_id: &str,
-    ) -> Result<Option<String>, Error> {
-        let content =
-            rendering::render_template(states, ConfigKey::InterruptedTemplate, &[]).await?;
-        let usage = states.read_usage_totals().await?;
-        let receipt = states
-            .add_conversation_messages(ConversationAddition {
-                messages: vec![Message::text(Role::Assistant, &content)],
-                persistence: ConversationPersistence::CloseTurn {
-                    start_event_id: start_event_id.to_owned(),
-                    finish_reason: FinishReason::Interrupted,
-                    usage,
-                },
-            })
-            .await?;
-        Ok(receipt.inserted.then_some(content))
-    }
 }
 
 async fn run_opened_turn(

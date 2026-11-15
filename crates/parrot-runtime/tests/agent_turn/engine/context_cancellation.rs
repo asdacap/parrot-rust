@@ -391,3 +391,108 @@ async fn oversized_recovery_summary_cancellation_records_failure_after_joining_t
     assert!(!events.iter().any(|event| event.has_compaction_finished()));
     runtime.close().await;
 }
+
+#[tokio::test]
+async fn interrupted_open_turn_closes_interrupted_from_turn_disposal() {
+    let fixture = Fixture::new();
+    fixture.seed().await;
+    let mut step = Step::complete("uncommitted answer");
+    let gate = Gate::new();
+    step.gate = Some(gate.clone());
+    let provider = Scripted::new(vec![step]);
+    let runtime = fixture
+        .runtime(
+            provider.clone(),
+            Arc::new(Tools::default()),
+            vec![],
+            Arc::new(Signal::new()),
+            0,
+        )
+        .await;
+    let sent = runtime
+        .send("question", protocol::Delivery::DELIVERY_STEER)
+        .await;
+    gate.entered().await;
+    assert!(!provider.requests.lock().unwrap().is_empty());
+    let interrupt = runtime.session.interrupt_handle().unwrap();
+    bounded(interrupt.join()).await.unwrap();
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Canceled
+    );
+    assert_interrupted(&fixture.events().await);
+    let interrupted = templates()
+        .render("agent-session.interrupted-note", &[], &NeverCancelled)
+        .unwrap();
+    let conversation = fixture.conversation().await;
+    assert!(conversation.messages().iter().any(|message| {
+        message.role == MessageRole::Assistant && message.content() == interrupted
+    }));
+    let activity = runtime.activity.live.tracker().capture();
+    assert_eq!(
+        activity
+            .recent
+            .iter()
+            .filter(|entry| entry.content == interrupted)
+            .count(),
+        1
+    );
+    runtime.close().await;
+}
+
+#[tokio::test]
+async fn suspended_open_turn_stays_open_without_interrupted_close() {
+    let fixture = Fixture::new();
+    fixture.seed().await;
+    let mut step = Step::complete("uncommitted answer");
+    let gate = Gate::new();
+    step.gate = Some(gate.clone());
+    let provider = Scripted::new(vec![step]);
+    let runtime = fixture
+        .runtime(
+            provider.clone(),
+            Arc::new(Tools::default()),
+            vec![],
+            Arc::new(Signal::new()),
+            0,
+        )
+        .await;
+    let sent = runtime
+        .send("question", protocol::Delivery::DELIVERY_STEER)
+        .await;
+    gate.entered().await;
+    assert!(!provider.requests.lock().unwrap().is_empty());
+    let suspending = runtime.session.suspend_handle();
+    bounded(suspending.join()).await.unwrap();
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Canceled
+    );
+    let events = fixture.events().await;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_turn_started())
+            .count(),
+        1
+    );
+    assert_eq!(
+        events.iter().filter(|event| event.has_turn_ended()).count(),
+        0
+    );
+    let interrupted = templates()
+        .render("agent-session.interrupted-note", &[], &NeverCancelled)
+        .unwrap();
+    let conversation = fixture.conversation().await;
+    assert!(!conversation.messages().iter().any(|message| {
+        message.role == MessageRole::Assistant && message.content() == interrupted
+    }));
+    let activity = runtime.activity.live.tracker().capture();
+    assert!(
+        activity
+            .recent
+            .iter()
+            .all(|entry| entry.content != interrupted)
+    );
+    runtime.close().await;
+}

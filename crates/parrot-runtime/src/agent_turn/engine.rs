@@ -913,11 +913,6 @@ where
                         if let Some(key) = &failed_key {
                             self.activity
                                 .turn_finished(&key.start_event_id, "cancelled", None);
-                            if !self.suspending.load(Ordering::Acquire) {
-                                core_loop::interrupt(self, work, key)
-                                    .await
-                                    .map_err(|error| error.lifecycle_error())?;
-                            }
                         }
                         Ok(Execution::canceled())
                     }

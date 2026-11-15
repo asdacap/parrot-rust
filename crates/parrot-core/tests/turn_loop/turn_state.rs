@@ -217,42 +217,6 @@ fn run_turn_opens_the_turn_and_presents_the_selected_model() {
 }
 
 #[test]
-fn interruption_supplies_the_recovered_start_event_and_terminal_content_without_activation() {
-    let mut state = MemoryState::new([]);
-    state.usage_totals = parrot_core::UsageTotals {
-        input_tokens: 100,
-        output_tokens: 20,
-    };
-    state.skill_templates.lock().unwrap().insert(
-        ConfigKey::InterruptedTemplate,
-        "interrupted response".into(),
-    );
-
-    assert_eq!(
-        finish(parrot_core::TurnEngine::interrupt_turn(
-            &mut state,
-            "recovered-start-event"
-        )),
-        Ok(Some("interrupted response".into()))
-    );
-    assert!(state.turn_ids.lock().unwrap().is_empty());
-    assert_eq!(
-        state.closed_turns,
-        [ConversationAddition {
-            messages: vec![Message::text(Role::Assistant, "interrupted response")],
-            persistence: ConversationPersistence::CloseTurn {
-                start_event_id: "recovered-start-event".into(),
-                finish_reason: FinishReason::Interrupted,
-                usage: parrot_core::UsageTotals {
-                    input_tokens: 100,
-                    output_tokens: 20,
-                },
-            },
-        }]
-    );
-}
-
-#[test]
 fn run_convenience_drains_real_pending_messages_and_returns_the_latest_answer() {
     let mut state = MemoryState::new([
         Reply::final_response("first answer"),

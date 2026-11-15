@@ -1,7 +1,8 @@
 use super::*;
 use parrot_core::{
-    ContextSnapshot as CoreContextSnapshot, Error as CoreError, ErrorKind, ProviderRequest,
-    ProviderResponse, States as CoreStates, ToolCatalog, ToolDefinition, TurnOptions,
+    ConfigKey, ContextSnapshot as CoreContextSnapshot, ConversationAddition,
+    ConversationPersistence, Error as CoreError, ErrorKind, FinishReason, Message, ProviderRequest,
+    ProviderResponse, Role, States as CoreStates, ToolCatalog, ToolDefinition, TurnOptions,
 };
 
 mod conversation;
@@ -276,8 +277,38 @@ impl<S: AccessSnapshot + 'static> parrot_core::Turn for RuntimeTurn<'_, S> {
                     *self.failed_key = Some(key);
                     backend.fail(notice.clone(), String::new()).await?;
                 }
-                Err(_) => {
+                Err(error) => {
                     *self.failed_key = Some(key);
+                    if error.kind == ErrorKind::Cancelled
+                        && !backend.suspending.load(Ordering::Acquire)
+                    {
+                        let work = self.states.work;
+                        let mut states = RuntimeStates::bind(
+                            backend,
+                            Arc::new(TurnBinding::new()),
+                            &NeverCancelled,
+                            work,
+                        );
+                        let content = states
+                            .get_config(ConfigKey::InterruptedTemplate)
+                            .await?
+                            .into_prompt_template()?
+                            .render(&[], parrot_core::CancellationToken::uncancelled())?;
+                        let usage = states.read_usage_totals().await?;
+                        let receipt = states
+                            .add_conversation_messages(ConversationAddition {
+                                messages: vec![Message::text(Role::Assistant, &content)],
+                                persistence: ConversationPersistence::CloseTurn {
+                                    start_event_id: self.start_event_id.clone(),
+                                    finish_reason: FinishReason::Interrupted,
+                                    usage,
+                                },
+                            })
+                            .await?;
+                        if receipt.inserted {
+                            backend.activity.assistant_message(&content);
+                        }
+                    }
                 }
             }
             Ok(())
@@ -332,25 +363,6 @@ where
         Err(error) => Err(TurnError::Core(error)),
     };
     (execution, failed_key)
-}
-
-pub(super) async fn interrupt<S>(
-    backend: &RuntimeBackend<S>,
-    work: &dyn DrainWork,
-    key: &TurnKey,
-) -> Result<(), TurnError>
-where
-    S: AccessSnapshot + 'static,
-{
-    let binding = Arc::new(TurnBinding::new());
-    let mut states = RuntimeStates::bind(backend, binding, &NeverCancelled, work);
-    if let Some(message) = parrot_core::TurnEngine::interrupt_turn(&mut states, &key.start_event_id)
-        .await
-        .map_err(TurnError::Core)?
-    {
-        backend.activity.assistant_message(&message);
-    }
-    Ok(())
 }
 
 #[cfg(test)]
