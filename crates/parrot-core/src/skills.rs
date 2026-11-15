@@ -21,6 +21,60 @@ impl SkillPreparation {
         inputs: &[PromotedInput],
         cancellation: CancellationToken<'_>,
     ) -> Result<PreparedSkillPrompt, Error> {
+        let selected = self
+            .detect_selected_skills(skill_provider, inputs, cancellation)
+            .await?;
+
+        if cancellation.is_cancelled() {
+            return Err(Error::cancelled());
+        }
+
+        if selected.is_empty() {
+            return Ok(PreparedSkillPrompt::default());
+        }
+
+        let preparation = SkillTemplates {
+            unavailable: states
+                .get_config(ConfigKey::SkillUnavailableTemplate)
+                .await?
+                .into_prompt_template()?,
+            selected: states
+                .get_config(ConfigKey::SkillSelectedTemplate)
+                .await?
+                .into_prompt_template()?,
+            too_large: states
+                .get_config(ConfigKey::SkillTooLargeTemplate)
+                .await?
+                .into_prompt_template()?,
+        };
+        let preparation = &preparation;
+        let mut rendering = SkillRendering::new(preparation)?;
+        for (skill, _) in selected {
+            if cancellation.is_cancelled() {
+                return Err(Error::cancelled());
+            }
+            match skill_provider.read_skill_content(&skill).await? {
+                SkillContent::Text(content) => rendering.selected(preparation, &skill, &content)?,
+                SkillContent::Unavailable(message) => {
+                    rendering.diagnostic(preparation, &skill.name, &message)?;
+                }
+            }
+        }
+        if cancellation.is_cancelled() {
+            return Err(Error::cancelled());
+        }
+        rendering.finish(preparation)
+    }
+
+    /// Detects skills newly selected by the promoted inputs and returns them in
+    /// input, mention and identity-tiebreak order, skipping skills already
+    /// selected on earlier turns.
+    async fn detect_selected_skills(
+        &mut self,
+        skill_provider: &dyn SkillProvider,
+        inputs: &[PromotedInput],
+        cancellation: CancellationToken<'_>,
+    ) -> Result<Vec<(Skill, usize)>, Error> {
         let mut selected = Vec::new();
         for input in inputs {
             let mut mentions = Vec::new();
@@ -57,47 +111,11 @@ impl SkillPreparation {
                 }
             }
         }
-        if cancellation.is_cancelled() {
-            return Err(Error::cancelled());
-        }
-        if selected.is_empty() {
-            return Ok(PreparedSkillPrompt::default());
-        }
         selected.sort_by(|(left, lp), (right, rp)| {
             lp.cmp(rp)
                 .then_with(|| left.id.encode_utf16().cmp(right.id.encode_utf16()))
         });
-        let preparation = SkillTemplates {
-            unavailable: states
-                .get_config(ConfigKey::SkillUnavailableTemplate)
-                .await?
-                .into_prompt_template()?,
-            selected: states
-                .get_config(ConfigKey::SkillSelectedTemplate)
-                .await?
-                .into_prompt_template()?,
-            too_large: states
-                .get_config(ConfigKey::SkillTooLargeTemplate)
-                .await?
-                .into_prompt_template()?,
-        };
-        let preparation = &preparation;
-        let mut rendering = SkillRendering::new(preparation)?;
-        for (skill, _) in selected {
-            if cancellation.is_cancelled() {
-                return Err(Error::cancelled());
-            }
-            match skill_provider.read_skill_content(&skill).await? {
-                SkillContent::Text(content) => rendering.selected(preparation, &skill, &content)?,
-                SkillContent::Unavailable(message) => {
-                    rendering.diagnostic(preparation, &skill.name, &message)?;
-                }
-            }
-        }
-        if cancellation.is_cancelled() {
-            return Err(Error::cancelled());
-        }
-        rendering.finish(preparation)
+        Ok(selected)
     }
 }
 
