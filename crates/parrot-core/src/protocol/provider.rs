@@ -23,6 +23,19 @@ impl From<Error> for ProviderInvokeError {
 /// Invokes models using the core protocol while owning transport and stream cleanup.
 /// Unsupported invocation and estimation capabilities return explicit errors.
 pub trait Provider: Send + Sync {
+    /// Compacts and finalizes conversation context before returning its replacement.
+    /// Returns no replacement for a successful no-op. An error may follow a durable commit.
+    fn compact<'a, 'c>(
+        &'a self,
+        _request: crate::CompactionRequest,
+        _cancellation: CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Option<Message>, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async { Err(Error::unsupported("Provider.compact")) })
+    }
+
     /// Estimates exactly the supplied request using model-specific token costs.
     fn estimate_input_tokens(
         &self,

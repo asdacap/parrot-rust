@@ -5,6 +5,7 @@ use super::tool::ToolDefinition;
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CompactionRequest {
     pub target: Option<ContextLimit>,
+    pub tools: Vec<ToolDefinition>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
