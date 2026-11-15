@@ -2,7 +2,7 @@ use super::{BoxFuture, CancellationToken, Error};
 
 /// Publishes core-selected notifications independently of conversation state.
 pub trait EventPublisher: Send + Sync {
-    /// Records and publishes the supplied event without adding conversation content.
+    /// Records and publishes the supplied notification.
     fn publish<'a>(
         &'a self,
         _event: crate::ConversationEvent,
