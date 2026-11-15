@@ -1,5 +1,5 @@
 use parrot_core::{
-    ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, Error, ErrorCode, ErrorKind,
+    ContextConfiguration, ContextLimit, ContextSnapshot, Error, ErrorCode, ErrorKind,
     OutputTokenError, RequestStatistic,
 };
 
@@ -11,12 +11,10 @@ impl Fixture {
     fn new(context_window: i32) -> Self {
         Self {
             configuration: ContextConfiguration {
-                model: ContextModel {
-                    canonical_model: "provider/model".into(),
-                    context_window,
-                    maximum_input_tokens: 0,
-                    maximum_output_tokens: 0,
-                },
+                canonical_model: "provider/model".into(),
+                context_window,
+                maximum_input_tokens: 0,
+                maximum_output_tokens: 0,
                 trigger_percent: 90,
                 context_limit: None,
             },
@@ -97,11 +95,11 @@ fn output_capacity_uses_model_limits_or_fallback_and_preserves_integer_headroom(
         (2000, 0, 1001, 1001, 948),
     ] {
         let mut fixture = Fixture::new(context);
-        fixture.configuration.model.maximum_output_tokens = output;
-        fixture.configuration.model.maximum_input_tokens = input;
+        fixture.configuration.maximum_output_tokens = output;
+        fixture.configuration.maximum_input_tokens = input;
         assert_eq!(
             RequestStatistic::default()
-                .calculate_maximum_output_tokens(&fixture.configuration.model, estimate),
+                .calculate_maximum_output_tokens(&fixture.configuration, estimate),
             Ok(expected)
         );
     }
@@ -120,7 +118,7 @@ fn actual_usage_calibration_reserves_five_percent_headroom() {
             expected_input
         );
         let output = calibration
-            .calculate_maximum_output_tokens(&fixture.configuration.model, estimate)
+            .calculate_maximum_output_tokens(&fixture.configuration, estimate)
             .unwrap();
         assert_eq!(output, expected_output);
         assert!(expected_input + i64::from(output) + (expected_input + 19) / 20 <= 180000);
@@ -141,20 +139,17 @@ fn compaction_boundary_keeps_full_requested_output_and_strict_headroom() {
     ] {
         let mut fixture = Fixture::new(context);
         fixture.configuration.trigger_percent = 100;
-        fixture.configuration.model.maximum_output_tokens = output;
+        fixture.configuration.maximum_output_tokens = output;
         let snapshot = ContextSnapshot::estimate(0, &fixture.configuration);
         let trigger = snapshot.trigger_tokens.unwrap();
-        let requested = fixture
-            .configuration
-            .model
-            .calculate_requested_output_tokens();
+        let requested = fixture.configuration.calculate_requested_output_tokens();
         let calibration = RequestStatistic::default();
         assert_eq!(
-            calibration.calculate_maximum_output_tokens(&fixture.configuration.model, trigger),
+            calibration.calculate_maximum_output_tokens(&fixture.configuration, trigger),
             Ok(requested)
         );
         let above =
-            calibration.calculate_maximum_output_tokens(&fixture.configuration.model, trigger + 1);
+            calibration.calculate_maximum_output_tokens(&fixture.configuration, trigger + 1);
         if output == 1 {
             assert_eq!(above, Err(OutputTokenError::NoOutputCapacity));
         } else {
@@ -175,11 +170,11 @@ fn output_exhaustion_preserves_typed_errors_messages_and_core_classification() {
         (1000, 0, 1500, OutputTokenError::NoOutputCapacity),
     ] {
         let mut fixture = Fixture::new(context);
-        fixture.configuration.model.maximum_input_tokens = input;
+        fixture.configuration.maximum_input_tokens = input;
         let mut calibration = RequestStatistic::default();
         calibration.observe_usage("provider/model", 1000, actual);
         assert_eq!(
-            calibration.calculate_maximum_output_tokens(&fixture.configuration.model, 1000),
+            calibration.calculate_maximum_output_tokens(&fixture.configuration, 1000),
             Err(expected)
         );
         let message = match expected {
@@ -203,22 +198,22 @@ fn output_exhaustion_preserves_typed_errors_messages_and_core_classification() {
 fn explicit_input_limits_are_strict_even_when_the_context_window_is_unknown() {
     for context_window in [0, 2000] {
         let mut fixture = Fixture::new(context_window);
-        fixture.configuration.model.maximum_input_tokens = 1000;
+        fixture.configuration.maximum_input_tokens = 1000;
         assert!(
             RequestStatistic::default()
-                .calculate_maximum_output_tokens(&fixture.configuration.model, 1000)
+                .calculate_maximum_output_tokens(&fixture.configuration, 1000)
                 .is_ok()
         );
         assert_eq!(
             RequestStatistic::default()
-                .calculate_maximum_output_tokens(&fixture.configuration.model, 1001),
+                .calculate_maximum_output_tokens(&fixture.configuration, 1001),
             Err(OutputTokenError::InputLimitExceeded)
         );
     }
     let fixture = Fixture::new(-1);
     assert_eq!(
         RequestStatistic::default()
-            .calculate_maximum_output_tokens(&fixture.configuration.model, i64::MAX),
+            .calculate_maximum_output_tokens(&fixture.configuration, i64::MAX),
         Ok(32768)
     );
 }
@@ -227,7 +222,7 @@ fn explicit_input_limits_are_strict_even_when_the_context_window_is_unknown() {
 fn snapshots_preserve_usage_clamping_and_strict_raw_trigger_boundaries() {
     let mut fixture = Fixture::new(1000);
     fixture.configuration.trigger_percent = 80;
-    fixture.configuration.model.maximum_output_tokens = 100;
+    fixture.configuration.maximum_output_tokens = 100;
     for (estimate, expected_usage, trigger) in [
         (-1, Some(0), false),
         (800, Some(80), false),
@@ -241,7 +236,7 @@ fn snapshots_preserve_usage_clamping_and_strict_raw_trigger_boundaries() {
         assert_eq!(snapshot.exceeds_trigger(), trigger);
         assert!(snapshot.is_available());
     }
-    fixture.configuration.model.context_window = 0;
+    fixture.configuration.context_window = 0;
     let unavailable = ContextSnapshot::estimate(1000, &fixture.configuration);
     assert!(!unavailable.is_available());
     assert_eq!(unavailable.usage_percent, None);
@@ -252,7 +247,7 @@ fn snapshots_preserve_usage_clamping_and_strict_raw_trigger_boundaries() {
 fn alias_overrides_preserve_total_window_and_cap_trigger_at_input_and_output_reserve() {
     for limit in [ContextLimit::Tokens(900), ContextLimit::Percentage(90)] {
         let mut fixture = Fixture::new(1000);
-        fixture.configuration.model.maximum_output_tokens = 100;
+        fixture.configuration.maximum_output_tokens = 100;
         fixture.configuration.context_limit = Some(limit);
         let snapshot = ContextSnapshot::estimate(850, &fixture.configuration);
         assert_eq!(snapshot.context_limit, 1000);
@@ -261,7 +256,7 @@ fn alias_overrides_preserve_total_window_and_cap_trigger_at_input_and_output_res
         assert_eq!(snapshot.usage_percent, Some(85));
         assert!(snapshot.has_context_limit_override);
         assert!(!snapshot.exceeds_trigger());
-        fixture.configuration.model.maximum_input_tokens = 700;
+        fixture.configuration.maximum_input_tokens = 700;
         let capped = ContextSnapshot::estimate(701, &fixture.configuration);
         assert_eq!(capped.trigger_tokens, Some(700));
         assert_eq!(capped.trigger_percent, 70);
@@ -273,7 +268,7 @@ fn alias_overrides_preserve_total_window_and_cap_trigger_at_input_and_output_res
 #[test]
 fn an_unknown_window_does_not_resolve_a_percentage_override_into_a_token_limit() {
     let mut fixture = Fixture::new(0);
-    fixture.configuration.model.maximum_input_tokens = 1000;
+    fixture.configuration.maximum_input_tokens = 1000;
     fixture.configuration.context_limit = Some(ContextLimit::Percentage(50));
     let snapshot = ContextSnapshot::estimate(1001, &fixture.configuration);
     assert!(snapshot.has_context_limit_override);
@@ -290,7 +285,7 @@ fn calibrated_compaction_only_uses_the_calibrated_trigger_when_input_limit_is_po
     calibration.observe_usage("provider/model", 50, 150);
     let unbounded = ContextSnapshot::estimate(50, &fixture.configuration);
     assert!(!unbounded.requires_compaction(&calibration, "provider/model"));
-    fixture.configuration.model.maximum_input_tokens = 200;
+    fixture.configuration.maximum_input_tokens = 200;
     let bounded = ContextSnapshot::estimate(50, &fixture.configuration);
     assert!(bounded.requires_compaction(&calibration, "provider/model"));
     assert!(!bounded.requires_compaction(&calibration, "other/model"));
@@ -301,7 +296,7 @@ fn calibrated_compaction_only_uses_the_calibrated_trigger_when_input_limit_is_po
 #[test]
 fn post_compaction_fit_check_is_raw_strict_and_preserves_its_special_error() {
     let mut fixture = Fixture::new(1000);
-    fixture.configuration.model.maximum_input_tokens = 200;
+    fixture.configuration.maximum_input_tokens = 200;
     assert_eq!(
         ContextSnapshot::estimate(200, &fixture.configuration).ensure_input_fits(),
         Ok(())
@@ -316,8 +311,8 @@ fn post_compaction_fit_check_is_raw_strict_and_preserves_its_special_error() {
         "The compacted conversation exceeds the selected model input limit."
     );
     assert!(error.response_body.is_empty());
-    fixture.configuration.model.context_window = 0;
-    fixture.configuration.model.maximum_input_tokens = 0;
+    fixture.configuration.context_window = 0;
+    fixture.configuration.maximum_input_tokens = 0;
     assert_eq!(
         ContextSnapshot::estimate(i64::MAX, &fixture.configuration).ensure_input_fits(),
         Ok(())

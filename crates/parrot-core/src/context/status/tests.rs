@@ -1,5 +1,5 @@
 use super::*;
-use crate::{CompactionFailure, ConfigKey, ConfigValue, ContextModel, ErrorCode};
+use crate::{CompactionFailure, ConfigKey, ConfigValue, ErrorCode};
 use std::{
     future::Future,
     sync::{
@@ -36,12 +36,10 @@ fn message(text: &str) -> Message {
 }
 fn configuration(input_limit: i32) -> ContextConfiguration {
     ContextConfiguration {
-        model: ContextModel {
-            canonical_model: "provider/model".into(),
-            context_window: input_limit,
-            maximum_input_tokens: input_limit,
-            maximum_output_tokens: 1,
-        },
+        canonical_model: "provider/model".into(),
+        context_window: input_limit,
+        maximum_input_tokens: input_limit,
+        maximum_output_tokens: 1,
         trigger_percent: 90,
         context_limit: None,
     }

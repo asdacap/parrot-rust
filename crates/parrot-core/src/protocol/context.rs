@@ -5,16 +5,11 @@ pub enum ContextLimit {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextModel {
+pub struct ContextConfiguration {
     pub canonical_model: String,
     pub context_window: i32,
     pub maximum_input_tokens: i32,
     pub maximum_output_tokens: i32,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ContextConfiguration {
-    pub model: ContextModel,
     pub trigger_percent: i32,
     pub context_limit: Option<ContextLimit>,
 }

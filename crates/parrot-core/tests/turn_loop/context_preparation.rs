@@ -69,13 +69,8 @@ fn core_records_each_final_request_before_rendering_and_retains_final_catalogs()
 fn raw_and_calibrated_triggers_compact_and_keep_sampled_instructions() {
     for calibrated in [false, true] {
         let mut state = MemoryState::new([Reply::final_response("answer")]);
-        state.request().context.configuration.model.context_window = 1000;
-        state
-            .request()
-            .context
-            .configuration
-            .model
-            .maximum_output_tokens = 100;
+        state.request().context.configuration.context_window = 1000;
+        state.request().context.configuration.maximum_output_tokens = 100;
         state.request().context.configuration.trigger_percent = 80;
         state.request().estimated_input_tokens = 100;
         if calibrated {
@@ -119,21 +114,16 @@ fn raw_and_calibrated_triggers_compact_and_keep_sampled_instructions() {
 #[test]
 fn separate_context_reads_use_updated_configuration_and_calibration() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.request().context.configuration.model.context_window = 1000;
-    state
-        .request()
-        .context
-        .configuration
-        .model
-        .maximum_output_tokens = 100;
+    state.request().context.configuration.context_window = 1000;
+    state.request().context.configuration.maximum_output_tokens = 100;
     state.request().estimated_input_tokens = 100;
     state
         .budget
         .last_request_statistic
         .observe_usage("memory/model", 0, 950);
     let mut compacted = state.request().context.clone();
-    compacted.configuration.model.context_window = 2000;
-    compacted.configuration.model.maximum_output_tokens = 200;
+    compacted.configuration.context_window = 2000;
+    compacted.configuration.maximum_output_tokens = 200;
     state.compact_with("summary");
     state.compactions.push_back(CompactedContext {
         messages: vec![Message {
@@ -174,13 +164,8 @@ fn automatic_compaction_failure_stops_before_provider_invocation() {
 #[test]
 fn equality_at_the_raw_trigger_does_not_compact_or_discard_requested_output() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.request().context.configuration.model.context_window = 1000;
-    state
-        .request()
-        .context
-        .configuration
-        .model
-        .maximum_output_tokens = 100;
+    state.request().context.configuration.context_window = 1000;
+    state.request().context.configuration.maximum_output_tokens = 100;
     state.request().context.configuration.trigger_percent = 80;
     state.request().estimated_input_tokens = 800;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
@@ -194,19 +179,9 @@ fn equality_at_the_raw_trigger_does_not_compact_or_discard_requested_output() {
 #[test]
 fn post_compaction_raw_input_failure_precedes_further_provider_effects() {
     let mut state = MemoryState::new([Reply::final_response("not invoked")]);
-    state.request().context.configuration.model.context_window = 1000;
-    state
-        .request()
-        .context
-        .configuration
-        .model
-        .maximum_input_tokens = 700;
-    state
-        .request()
-        .context
-        .configuration
-        .model
-        .maximum_output_tokens = 100;
+    state.request().context.configuration.context_window = 1000;
+    state.request().context.configuration.maximum_input_tokens = 700;
+    state.request().context.configuration.maximum_output_tokens = 100;
     state.request().estimated_input_tokens = 701;
     let context = state.request().context.clone();
     state.compactions.push_back(CompactedContext {
@@ -244,13 +219,8 @@ fn unknown_context_uses_output_configuration_without_inventing_reminder_or_compa
 #[test]
 fn model_output_limit_above_fallback_reaches_provider_request() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.request().context.configuration.model.context_window = 1000000;
-    state
-        .request()
-        .context
-        .configuration
-        .model
-        .maximum_output_tokens = 131072;
+    state.request().context.configuration.context_window = 1000000;
+    state.request().context.configuration.maximum_output_tokens = 131072;
     state.request().estimated_input_tokens = 1000;
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));

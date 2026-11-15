@@ -1,13 +1,13 @@
 use parrot_core::{
     AgentState, BoxFuture, Cancellation, CancellationToken, CompletionBlockerFeedback, ConfigKey,
-    ConfigValue, Content, ContextConfiguration, ContextModel, ContextSnapshot,
-    ConversationAddition, ConversationEvent, ConversationOrigin, ConversationPersistence,
-    ConversationReceipt, ConversationTurn, DerivedContext, Error, ErrorCode, ErrorKind,
-    EventPublisher, FinishReason, InputAdmission, Message, Outcome, PromotedInput, PromptTemplate,
-    Provider, ProviderRequest, ProviderResponse, Reasoning, Role, Skill, SkillContent,
-    SkillMention, SkillProvider, SkillReference, States, StatusKey, StatusOffer, StatusOffering,
-    StatusStanding, ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest,
-    ToolResult, ToolStatus, Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
+    ConfigValue, Content, ContextConfiguration, ContextSnapshot, ConversationAddition,
+    ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationReceipt,
+    ConversationTurn, DerivedContext, Error, ErrorCode, ErrorKind, EventPublisher, FinishReason,
+    InputAdmission, Message, Outcome, PromotedInput, PromptTemplate, Provider, ProviderRequest,
+    ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention, SkillProvider,
+    SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding, ToolCall,
+    ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult, ToolStatus,
+    Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -641,12 +641,10 @@ impl MemoryState {
             estimated_input_tokens: 0,
             context: MemoryContext {
                 configuration: ContextConfiguration {
-                    model: ContextModel {
-                        canonical_model: "memory/model".into(),
-                        context_window: 0,
-                        maximum_input_tokens: 0,
-                        maximum_output_tokens: 0,
-                    },
+                    canonical_model: "memory/model".into(),
+                    context_window: 0,
+                    maximum_input_tokens: 0,
+                    maximum_output_tokens: 0,
                     trigger_percent: 90,
                     context_limit: None,
                 },
@@ -817,8 +815,8 @@ impl MemoryState {
     }
     fn prime_context(&mut self, estimate: i64) {
         let mut request = self.request();
-        request.context.configuration.model.context_window = 1000;
-        request.context.configuration.model.maximum_output_tokens = 1;
+        request.context.configuration.context_window = 1000;
+        request.context.configuration.maximum_output_tokens = 1;
         request.messages = vec![Message {
             role: Role::User,
             contents: vec![Content::Text("question".into())],
@@ -1109,7 +1107,7 @@ impl States for MemoryState {
                     let mut request = self.request();
                     if let Some(rendered) = request.renderings.pop_front() {
                         request.instructions = rendered.instructions;
-                        request.context.configuration.model.maximum_output_tokens =
+                        request.context.configuration.maximum_output_tokens =
                             rendered.maximum_output_tokens;
                         request.messages = rendered.messages;
                     }

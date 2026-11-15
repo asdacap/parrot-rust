@@ -1,6 +1,5 @@
 use crate::{
-    ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, OutputTokenError,
-    RequestStatistic,
+    ContextConfiguration, ContextLimit, ContextSnapshot, OutputTokenError, RequestStatistic,
 };
 mod compaction_request;
 mod preparation;
@@ -53,7 +52,7 @@ impl ContextLimit {
     }
 }
 
-impl ContextModel {
+impl ContextConfiguration {
     pub const DEFAULT_REQUESTED_OUTPUT_TOKENS: i32 = 32 * 1024;
 
     pub fn calculate_input_limit(&self) -> i32 {
@@ -102,8 +101,8 @@ impl ContextSnapshot {
     }
 
     pub fn estimate(estimated_tokens: i64, configuration: &ContextConfiguration) -> Self {
-        let context_limit = configuration.model.context_window;
-        let input_limit = configuration.model.calculate_input_limit();
+        let context_limit = configuration.context_window;
+        let input_limit = configuration.calculate_input_limit();
         let usage_percent = (context_limit > 0).then(|| {
             if estimated_tokens >= i64::from(context_limit) {
                 100
@@ -201,17 +200,19 @@ impl RequestStatistic {
 
     pub fn calculate_maximum_output_tokens(
         &self,
-        model: &ContextModel,
+        configuration: &ContextConfiguration,
         estimate: i64,
     ) -> Result<i32, OutputTokenError> {
-        let input = self.estimate_input_tokens(&model.canonical_model, estimate);
-        if model.maximum_input_tokens > 0 && input > i64::from(model.calculate_input_limit()) {
+        let input = self.estimate_input_tokens(&configuration.canonical_model, estimate);
+        if configuration.maximum_input_tokens > 0
+            && input > i64::from(configuration.calculate_input_limit())
+        {
             return Err(OutputTokenError::InputLimitExceeded);
         }
-        let mut output = model.calculate_requested_output_tokens();
-        if model.context_window > 0 {
+        let mut output = configuration.calculate_requested_output_tokens();
+        if configuration.context_window > 0 {
             let headroom = input / 20 + i64::from(input % 20 > 0);
-            let available = i64::from(model.context_window) - input;
+            let available = i64::from(configuration.context_window) - input;
             if available <= headroom {
                 return Err(OutputTokenError::NoOutputCapacity);
             }
@@ -249,10 +250,10 @@ impl From<OutputTokenError> for Error {
 impl ContextConfiguration {
     /// Resolves the configured context threshold before output-token reservation.
     pub fn calculate_unreserved_trigger_tokens(&self) -> Option<i64> {
-        let input_limit = self.model.calculate_input_limit();
+        let input_limit = self.calculate_input_limit();
         match self.context_limit.as_ref() {
             Some(limit) => {
-                let tokens = limit.resolve_tokens(self.model.context_window);
+                let tokens = limit.resolve_tokens(self.context_window);
                 if input_limit > 0 {
                     tokens.map(|tokens| tokens.min(i64::from(input_limit)))
                 } else {
@@ -268,7 +269,7 @@ impl ContextConfiguration {
     pub fn calculate_trigger_tokens(&self) -> Option<i64> {
         match (
             self.calculate_unreserved_trigger_tokens(),
-            self.model.calculate_output_reserved_input_limit(),
+            self.calculate_output_reserved_input_limit(),
         ) {
             (Some(trigger), Some(safe_input_limit)) => Some(trigger.min(safe_input_limit)),
             (trigger, _) => trigger,
