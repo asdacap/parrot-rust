@@ -4,7 +4,6 @@
 //! `special_fields` intact when mutating or forwarding generated values.
 
 pub mod codec;
-pub mod metadata;
 
 /// Generated protobuf message types. Module names match schema filenames.
 pub mod messages {

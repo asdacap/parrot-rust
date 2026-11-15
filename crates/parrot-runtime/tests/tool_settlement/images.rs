@@ -151,7 +151,16 @@ async fn completed_tool_recovery_does_not_reconstruct_missing_image_steers() {
             .unwrap()
             .is_none()
     );
-    assert!(harness.state.read_recovery().await.unwrap().is_none());
+    assert!(
+        harness
+            .runtime_state
+            .get_mut()
+            .tool_conversation
+            .read_recovery()
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert_eq!(fixture.history.conversation().await.unwrap().len(), 2);
 }
 
