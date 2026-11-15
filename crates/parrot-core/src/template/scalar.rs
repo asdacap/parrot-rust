@@ -109,36 +109,3 @@ impl ScalarPromptTemplateEngine {
         Ok(output)
     }
 }
-
-/// Validates a catalog call without imposing a map's sorting order on source argument names.
-/// `names` and `required` retain the exact supplied order for duplicate/diagnostic behavior.
-pub fn validate_arguments(
-    path: &str,
-    allowed: &BTreeSet<String>,
-    required: &[String],
-    names: &[String],
-) -> Result<(), Error> {
-    let mut seen = BTreeSet::new();
-    for name in names {
-        if !seen.insert(name.as_str()) {
-            return Err(Error::template(format!(
-                "{path} received duplicate argument '{name}'"
-            )));
-        }
-    }
-    for name in names {
-        if !allowed.contains(name) {
-            return Err(Error::template(format!(
-                "{path} does not allow argument '{name}'"
-            )));
-        }
-    }
-    for name in required {
-        if !seen.contains(name.as_str()) {
-            return Err(Error::template(format!(
-                "{path} requires argument '{name}'"
-            )));
-        }
-    }
-    Ok(())
-}
