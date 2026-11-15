@@ -51,7 +51,9 @@ use std::sync::{
 };
 use tokio::sync::Mutex;
 
+mod compaction;
 mod core_loop;
+use compaction::RuntimeCompactionEffects;
 
 pub type Publisher = dyn EventPublisher<Event = Event, Error = BrokerError>;
 
@@ -251,11 +253,13 @@ where
         target: Option<&crate::compaction::ContextSize>,
         cancellation: &dyn Cancellation,
     ) -> Result<crate::compaction::ContextCompactionResult, TurnError> {
-        let mut guard = self.state.lock().await;
-        let state = &mut *guard;
-        state.restore_agent_state(self.agent_state.as_ref()).await?;
-        let snapshot = self.snapshot(selection)?;
-        let definitions = snapshot.definitions().to_vec();
+        cancellation.check().map_err(|_| TurnError::Cancelled)?;
+        self.state
+            .lock()
+            .await
+            .restore_agent_state(self.agent_state.as_ref())
+            .await?;
+        let definitions = self.snapshot(selection)?.definitions().to_vec();
         let status = self.status.bind(selection);
         let events = ContextEmitter::new(
             &self.history,
@@ -263,25 +267,61 @@ where
             &self.broker,
             self.event_id.as_ref(),
         );
-        state
-            .context
+        let estimate = || async {
+            let mut guard = self.state.lock().await;
+            let state = &mut *guard;
+            state
+                .context
+                .estimate_context(
+                    EpochInput {
+                        selection: &selection.model,
+                        tools: &definitions,
+                        conversation: &mut state.conversation,
+                        agent_state: &mut state.agent_state,
+                        prompt: &self.prompt,
+                        sessions: &self.sessions,
+                        status: status.as_ref(),
+                        events: &events,
+                    },
+                    cancellation,
+                )
+                .await
+        };
+        let before = estimate().await?;
+        if before.input_limit <= 0 {
+            return Ok(crate::compaction::ContextCompactionResult {
+                context: before,
+                reduced: false,
+            });
+        }
+        let mut effects = RuntimeCompactionEffects {
+            state: &self.state,
+            prompt: &self.prompt,
+            selection: &selection.model,
+            status: status.as_ref(),
+            events,
+        };
+        let replacement = self
+            .compactor
+            .provider
             .compact(
-                EpochInput {
-                    selection: &selection.model,
-                    tools: &definitions,
-                    conversation: &mut state.conversation,
-                    agent_state: &mut state.agent_state,
-                    prompt: &self.prompt,
-                    sessions: &self.sessions,
-                    status: status.as_ref(),
-                    events: &events,
+                &selection.model,
+                parrot_core::CompactionRequest {
+                    target: target.map(Into::into),
+                    tools: definitions.clone(),
                 },
-                target,
+                &self.sessions,
+                &mut effects,
                 cancellation,
             )
             .await
-            .map_err(TurnError::Context)
+            .map_err(TurnError::Core)?;
+        Ok(crate::compaction::ContextCompactionResult {
+            context: estimate().await?,
+            reduced: replacement.is_some(),
+        })
     }
+
     fn event(&self) -> Event {
         Event {
             id: (self.event_id)(),

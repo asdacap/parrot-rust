@@ -8,6 +8,10 @@ use parrot_storage::conversation::ConversationOrigin;
 
 pub(super) struct RuntimeProvider<'a, S: AccessSnapshot> {
     pub(super) binding: &'a TurnBinding<S>,
+    pub(super) state: &'a Mutex<State>,
+    pub(super) prompt: &'a SessionPrompt,
+    pub(super) status: &'a dyn TurnStatus<S>,
+    pub(super) compactor: &'a crate::compaction::Compactor,
     pub(super) sessions: &'a ProviderSessions,
     pub(super) history: &'a AgentHistoryView,
     pub(super) publisher: &'a Publisher,
@@ -58,6 +62,37 @@ struct StreamProgress {
 }
 
 impl<S: AccessSnapshot> parrot_core::Provider for RuntimeProvider<'_, S> {
+    fn compact<'a, 'c>(
+        &'a self,
+        request: parrot_core::CompactionRequest,
+        cancellation: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Option<parrot_core::Message>, CoreError>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            let selection = self.binding.capture_selection().map_err(CoreError::from)?;
+            let status = self.status.bind(&selection);
+            let mut effects = RuntimeCompactionEffects {
+                state: self.state,
+                prompt: self.prompt,
+                selection: &selection.model,
+                status: status.as_ref(),
+                events: self.events,
+            };
+            self.compactor
+                .provider
+                .compact(
+                    &selection.model,
+                    request,
+                    self.sessions,
+                    &mut effects,
+                    &cancellation,
+                )
+                .await
+        })
+    }
+
     fn estimate_input_tokens(
         &self,
         instructions: &str,

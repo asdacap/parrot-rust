@@ -226,7 +226,7 @@ impl TurnError {
             return ErrorCode::Cancelled;
         }
         match self {
-            Self::Core(error) => error.code,
+            Self::Core(error) | Self::Context(ContextError::Core(error)) => error.code,
             Self::Provider(error) | Self::ProviderCall(ProviderCallError::Provider(error)) => {
                 failure_code(error)
             }

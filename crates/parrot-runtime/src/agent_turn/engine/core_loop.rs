@@ -43,7 +43,7 @@ impl<S: AccessSnapshot> TurnBinding<S> {
     }
 }
 
-fn adapt_operation<'a, T: Send + 'a>(
+pub(super) fn adapt_operation<'a, T: Send + 'a>(
     operation: impl std::future::Future<Output = Result<T, TurnError>> + Send + 'a,
 ) -> BoxFuture<'a, Result<T, CoreError>> {
     Box::pin(async move { operation.await.map_err(Into::into) })
@@ -187,6 +187,10 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
             let turn = parrot_core::open_turn(&hooks, &publisher, token).await?;
             let provider = RuntimeProvider {
                 binding: &binding,
+                state: &backend.state,
+                prompt: &backend.prompt,
+                status: backend.status.as_ref(),
+                compactor: &backend.compactor,
                 sessions: &backend.sessions,
                 history: &backend.history,
                 publisher: backend.publisher.as_ref(),

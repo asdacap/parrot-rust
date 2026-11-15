@@ -105,6 +105,7 @@ pub struct CompactionResult {
 pub struct Compactor {
     planner: Arc<CompactionPlanner>,
     templates: Arc<PromptTemplateCatalog>,
+    pub(crate) provider: parrot_provider::compaction::Compactor,
 }
 impl Compactor {
     pub fn new(
@@ -119,9 +120,23 @@ impl Compactor {
         };
         settings.summary_instructions = render("compaction.summary-instructions")?;
         settings.summary_prefix = render("compaction.summary-prefix")?;
+        let provider = parrot_provider::compaction::Compactor::new(
+            parrot_provider::compaction::CompactionSettings {
+                trigger_percent: settings.trigger_percent,
+                target_percent: settings.target_percent,
+                maximum_input_tokens: settings.maximum_input_tokens,
+                summary_output_tokens: settings.summary_output_tokens,
+                summary_instructions: settings.summary_instructions.clone(),
+                summary_prefix: settings.summary_prefix.clone(),
+            },
+            profiles.clone(),
+            templates.clone(),
+        )
+        .map_err(CompactionError::from)?;
         Ok(Self {
             planner: Arc::new(CompactionPlanner::new(settings, profiles)),
             templates,
+            provider,
         })
     }
 
