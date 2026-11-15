@@ -225,7 +225,10 @@ where
                                 .check()
                                 .map_err(|_| AttachmentError::Cancelled)?;
                             writeln!(error, "parrot: cannot attach '{path}': {failure}")?;
-                            return Ok(None);
+                            (
+                                wire::message_content_part::Content::Text(format!("@{path}")),
+                                String::new(),
+                            )
                         }
                         Err(failure) => return Err(failure),
                     }
@@ -237,8 +240,9 @@ where
                 ..Default::default()
             });
         }
-        // Preparing never admits a prompt. Earlier successful image uploads stay
-        // stored if a later reference fails, matching the pinned sequential loop.
+        // A reference that cannot be attached becomes its plain text form.
+        // Earlier successful image uploads stay stored, matching the pinned
+        // sequential loop.
         Ok(Some(request))
     }
 
