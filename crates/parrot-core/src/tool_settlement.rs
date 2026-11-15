@@ -1,33 +1,11 @@
 use crate::{
     BoxFuture, CancellationToken, ConfigKey, ConversationAddition, ConversationPersistence, Error,
-    Message, Role, States, ToolCall, ToolCallReceipt, ToolResult, ToolResultMetadata, ToolStatus,
-    Tools, TurnFlags, rendering::render_template,
+    Message, Role, States, ToolCall, ToolCallReceipt, ToolExecutionRequest, ToolResult,
+    ToolResultMetadata, ToolSettlement, ToolStatus, Tools, TurnFlags, rendering::render_template,
 };
-use std::{collections::HashMap, marker::PhantomData};
+use std::collections::HashMap;
 
-#[derive(Debug)]
-pub struct ToolExecutionRequest {
-    pub calls: Vec<ToolCall>,
-    pub receipt: ToolCallReceipt,
-    pub flags: TurnFlags,
-    pub starts_batch: bool,
-    pub cancel_remaining: bool,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ToolRecovery {
-    pub sequence: i64,
-    pub calls: Vec<ToolCall>,
-    pub results: Vec<ToolResult<Vec<u8>>>,
-}
-
-#[derive(Default)]
-pub struct ToolSettlement<M> {
-    pending: Option<ToolBatch>,
-    metadata: PhantomData<M>,
-}
-
-struct ToolBatch {
+pub(crate) struct ToolBatch {
     sequence: i64,
     calls: Vec<ToolCall>,
     index: usize,

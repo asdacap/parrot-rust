@@ -24,3 +24,11 @@ pub struct DerivedContext {
     pub content: String,
     pub loaded_paths: Vec<String>,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SkillMention {
+    pub name: String,
+    pub path: Option<String>,
+    /// UTF-16 code-unit offset within the input text.
+    pub position: usize,
+}

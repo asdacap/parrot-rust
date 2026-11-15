@@ -1,19 +1,11 @@
 use crate::{
     CancellationToken, ConfigKey, Content, DerivedContext, Error, PromotedInput, PromptTemplate,
-    Skill, SkillContent, SkillReference, States,
+    Skill, SkillContent, SkillMention, SkillReference, States,
 };
 use std::{collections::HashSet, sync::Arc};
 
 const MAXIMUM_SKILL_BYTES: usize = 8 * 1024;
 const MAXIMUM_TURN_BYTES: usize = 1024 * 1024;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SkillMention {
-    pub name: String,
-    pub path: Option<String>,
-    /// UTF-16 code-unit offset within the input text.
-    pub position: usize,
-}
 
 #[derive(Default)]
 pub(crate) struct SkillPreparation {

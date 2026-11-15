@@ -51,3 +51,9 @@ pub struct RequestStatistic {
     pub(crate) estimated_input_tokens: i64,
     pub(crate) actual_input_tokens: i32,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OutputTokenError {
+    InputLimitExceeded,
+    NoOutputCapacity,
+}

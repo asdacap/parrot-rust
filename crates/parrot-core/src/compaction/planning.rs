@@ -1,7 +1,7 @@
 use crate::{
     CompactionConfiguration, CompactionGroup, CompactionHistoryGroup, CompactionInput,
-    CompactionPlan, ContextLimit, Error, ErrorCode, ErrorDetail, Message, PlanningError, Role,
-    ToolDefinition,
+    CompactionPlan, CompactionPolicy, ContextLimit, Error, ErrorCode, ErrorDetail, Message,
+    PlanningError, Role, ToolDefinition,
 };
 use std::fmt;
 
@@ -47,12 +47,6 @@ impl CompactionConfiguration {
             self.context.model.calculate_output_reserved_input_limit(),
         )
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CompactionPolicy {
-    pub trigger_tokens: Option<i64>,
-    pub target_tokens: Option<i64>,
 }
 
 impl CompactionPolicy {

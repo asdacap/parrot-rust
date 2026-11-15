@@ -10,8 +10,9 @@ mod planning;
 mod preparation;
 mod request;
 mod scratch;
+pub use crate::CompactionPolicy;
 pub use fitting::{compact_conversation, fit_compaction, fit_status};
-pub use planning::{CompactionPolicy, group_messages, is_complete};
+pub use planning::{group_messages, is_complete};
 pub use preparation::prepare_compaction;
 
 impl CompactionGroup {

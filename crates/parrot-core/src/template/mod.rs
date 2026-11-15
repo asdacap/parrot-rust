@@ -6,8 +6,9 @@ mod scalar;
 #[cfg(test)]
 mod tests;
 
-pub use minijinja::MiniJinjaPromptTemplateEngine;
-pub use scalar::{ScalarPromptTemplateEngine, validate_arguments};
+pub use crate::{MiniJinjaPromptTemplateEngine, ScalarPromptTemplateEngine};
+pub(crate) use scalar::Part;
+pub use scalar::validate_arguments;
 
 use crate::{CancellationToken, Error, PromptTemplate};
 use serde_json::{Map, Value};

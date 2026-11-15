@@ -1,4 +1,4 @@
-use super::Error;
+use super::{Error, TurnFlags};
 use std::fmt::Debug;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -103,4 +103,26 @@ impl ToolResult<Vec<u8>> {
 pub struct ToolCatalog {
     pub normal: Vec<ToolDefinition>,
     pub final_phase: Vec<ToolDefinition>,
+}
+
+#[derive(Debug)]
+pub struct ToolExecutionRequest {
+    pub calls: Vec<ToolCall>,
+    pub receipt: ToolCallReceipt,
+    pub flags: TurnFlags,
+    pub starts_batch: bool,
+    pub cancel_remaining: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolRecovery {
+    pub sequence: i64,
+    pub calls: Vec<ToolCall>,
+    pub results: Vec<ToolResult<Vec<u8>>>,
+}
+
+#[derive(Default)]
+pub struct ToolSettlement<M> {
+    pub(crate) pending: Option<crate::tool_settlement::ToolBatch>,
+    pub(crate) metadata: std::marker::PhantomData<M>,
 }

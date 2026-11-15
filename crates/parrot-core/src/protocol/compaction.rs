@@ -103,3 +103,9 @@ pub enum PlanningError {
     GroupExceedsBudget,
     TokenOverflow,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompactionPolicy {
+    pub trigger_tokens: Option<i64>,
+    pub target_tokens: Option<i64>,
+}

@@ -1,4 +1,7 @@
-use crate::{ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, RequestStatistic};
+use crate::{
+    ContextConfiguration, ContextLimit, ContextModel, ContextSnapshot, OutputTokenError,
+    RequestStatistic,
+};
 mod preparation;
 pub use preparation::compact_context;
 pub(crate) use preparation::prepare_request;
@@ -222,12 +225,6 @@ impl RequestStatistic {
         }
         Ok(output)
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum OutputTokenError {
-    InputLimitExceeded,
-    NoOutputCapacity,
 }
 
 impl fmt::Display for OutputTokenError {
