@@ -1,4 +1,25 @@
 //! Awaited conversation compaction with provider-owned execution and publication.
+mod engine;
+mod execution;
+mod fitting;
+mod model;
+mod planning;
+mod preparation;
+mod scratch;
+mod service;
+use execution::Execution;
+pub use service::{Compactor, estimate_input_tokens};
+
+#[cfg(test)]
+mod engine_tests;
+#[cfg(test)]
+mod fitting_tests;
+#[cfg(test)]
+mod operation_tests;
+#[cfg(test)]
+mod planning_tests;
+#[cfg(test)]
+mod test_support;
 use parrot_core::{ContextSnapshot, ConversationState, Error, Message, StatusOffering};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 
