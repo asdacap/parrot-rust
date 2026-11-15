@@ -1,6 +1,5 @@
 //! Turn orchestration with core-owned provider, tool, state, and event contracts.
 
-pub mod budget;
 mod context;
 mod conversation;
 mod history_groups;
