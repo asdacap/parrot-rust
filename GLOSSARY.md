@@ -1,14 +1,17 @@
 # Parrot workspace
 
-Workspace identity and context used by Parrot.
+Workspace identity and conversation terminology used by Parrot.
 
 ## Language
 
 **Project workspace**:
-A project's launch location together with its resolved identity, repository context and candidate write-scope roots. The project workspace does not itself confer permission.
+A project's launch location together with its resolved identity, repository information and candidate write-scope roots. The project workspace does not itself confer permission.
 _Avoid_: Session root, current directory
 
 ## Conversation language
+
+**Context**:
+An LLM's conversation history. The term is reserved for this meaning, not general application state or repository information.
 
 **Conversation turn**:
 A user's input and the response messages and tool activity that follow it. A compacted conversation view may retain only part of the turn.

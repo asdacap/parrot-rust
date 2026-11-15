@@ -158,5 +158,6 @@ changes. Do not use broad cleanup commands.
 
 ## Nomenclature
 
+- Use "context" only for an LLM's conversation history, as defined in [GLOSSARY.md](GLOSSARY.md#conversation-language). Use specific names for other state or information.
 - A user-conversation-turn is from first message to final message.
 - A step is one provider request and its response.
