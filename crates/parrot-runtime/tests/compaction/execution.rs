@@ -1251,6 +1251,7 @@ async fn summary_and_fixed_retained_history_are_checked_against_final_selected_i
 async fn provider_response_body_stays_concrete_and_does_not_traverse_wrapped_causes() {
     use parrot_provider::http_stream::{HttpError, HttpFailure};
     let failure = Error::Http(HttpError::Response(HttpFailure {
+        retry_after: None,
         status: 413,
         error_type: "context".into(),
         error_code: "too_large".into(),

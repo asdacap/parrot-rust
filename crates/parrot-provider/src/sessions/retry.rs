@@ -11,6 +11,7 @@ pub enum Failure {
         attempts: u64,
     },
     Http {
+        retry_after: Option<Duration>,
         status: i32,
         error_type: String,
         code: String,
@@ -23,6 +24,7 @@ pub enum Failure {
     },
     RequestTooLarge,
     Upgrade {
+        retry_after: Option<Duration>,
         status: i32,
     },
     WebSocketTransport,
@@ -46,7 +48,7 @@ impl fmt::Display for Failure {
             Self::Http { status, .. } => write!(f, "provider returned HTTP {status}"),
             Self::Response { .. } => f.write_str("provider stream error"),
             Self::RequestTooLarge => f.write_str("provider request too large"),
-            Self::Upgrade { status } => write!(f, "WebSocket upgrade returned HTTP {status}"),
+            Self::Upgrade { status, .. } => write!(f, "WebSocket upgrade returned HTTP {status}"),
             Self::WebSocketTransport => f.write_str("WebSocket transport failure"),
             Self::Configuration => f.write_str("provider configuration failure"),
             Self::Protocol => f.write_str("provider protocol failure"),
@@ -108,6 +110,26 @@ impl RetryPolicy {
     }
 
     pub fn classify(&mut self, failure: &Failure, cancelled: bool) -> Result<RetryAction, Failure> {
+        let mut action = self.classify_local(failure, cancelled)?;
+        if let Failure::Http {
+            retry_after: Some(delay),
+            ..
+        }
+        | Failure::Upgrade {
+            retry_after: Some(delay),
+            ..
+        } = failure
+        {
+            action.delay = action.delay.max(*delay);
+        }
+        Ok(action)
+    }
+
+    fn classify_local(
+        &mut self,
+        failure: &Failure,
+        cancelled: bool,
+    ) -> Result<RetryAction, Failure> {
         if self.output_emitted || cancelled || matches!(failure, Failure::Cancelled) {
             return Err(failure.clone());
         }
@@ -159,7 +181,7 @@ impl RetryPolicy {
                     Err(failure.clone())
                 }
             }
-            Failure::Upgrade { status } => {
+            Failure::Upgrade { status, .. } => {
                 if !retryable_status(*status) {
                     return Err(failure.clone());
                 }

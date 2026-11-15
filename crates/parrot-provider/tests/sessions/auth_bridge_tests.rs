@@ -682,6 +682,7 @@ fn typed_http_cases() -> Vec<(
         (
             HttpError::ProviderHttp(message.clone()),
             Failure::Http {
+                retry_after: None,
                 status: 0,
                 error_type: String::new(),
                 code: String::new(),

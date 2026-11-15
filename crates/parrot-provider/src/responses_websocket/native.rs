@@ -78,6 +78,14 @@ impl NativeConnector {
         let status = response.status().as_u16();
         if status != 101 {
             return Err(WebSocketError::Upgrade {
+                retry_after: crate::retry_after::parse(
+                    response
+                        .headers()
+                        .get_all("retry-after")
+                        .iter()
+                        .map(|value| value.to_str().unwrap_or_default()),
+                    std::time::SystemTime::now(),
+                ),
                 status,
                 message: format!("provider: websocket upgrade returned HTTP {status}"),
             });
@@ -96,6 +104,7 @@ impl NativeConnector {
             || response_headers.contains_key("sec-websocket-protocol")
         {
             return Err(WebSocketError::Upgrade {
+                retry_after: None,
                 status,
                 message: "provider: invalid websocket upgrade response".into(),
             });

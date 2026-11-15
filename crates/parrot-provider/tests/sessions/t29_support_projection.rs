@@ -266,6 +266,7 @@ fn socket(frames: Vec<String>) -> (Arc<SocketRecord>, Connection) {
 }
 fn upgrade(value: &Upgrade) -> Connection {
     Connection::Failure(ws::WebSocketError::Upgrade {
+        retry_after: None,
         status: value.status,
         message: value.message.clone(),
     })

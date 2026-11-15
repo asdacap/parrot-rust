@@ -323,11 +323,21 @@ async fn parse_error(
     counter: &ResponseByteCounter,
     cancellation: &dyn Cancellation,
 ) -> Result<HttpError, HttpError> {
+    let received_at = std::time::SystemTime::now();
+    let retry_after = crate::retry_after::parse(
+        response
+            .headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("retry-after"))
+            .map(|(_, value)| value.as_str()),
+        received_at,
+    );
     let bytes = match read_at_most(&mut *response.body, MAX_ERROR_BYTES + 4, cancellation).await {
         Ok(bytes) => bytes,
         Err(error) if cancellation.is_cancelled() => return Err(error),
         Err(_) => {
             return Ok(HttpError::Response(HttpFailure {
+                retry_after,
                 status: response.status,
                 error_type: String::new(),
                 error_code: String::new(),
@@ -350,6 +360,7 @@ async fn parse_error(
         }
     };
     Ok(HttpError::Response(HttpFailure {
+        retry_after,
         status: response.status,
         error_type: sanitize(&fields.0, 128),
         error_code: sanitize(&fields.1, 128),

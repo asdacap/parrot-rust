@@ -1,5 +1,5 @@
 use crate::responses::ResponsesError;
-use std::fmt;
+use std::{fmt, time::Duration};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SocketErrorCode {
@@ -12,6 +12,7 @@ pub enum SocketErrorCode {
 pub enum WebSocketError {
     Cancelled,
     Upgrade {
+        retry_after: Option<Duration>,
         status: u16,
         message: String,
     },

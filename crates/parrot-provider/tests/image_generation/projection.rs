@@ -911,6 +911,7 @@ async fn bucket(c: &Value) -> Result<(Value, Value), Error> {
 fn failure(kind: &str) -> Option<Error> {
     let http = |status, ty: &str, detail: &str| {
         Error::Http(HttpError::Response(HttpFailure {
+            retry_after: None,
             status,
             error_type: ty.into(),
             error_code: String::new(),
@@ -1241,6 +1242,7 @@ async fn linking(c: &Value) -> Result<(Value, Value), Error> {
     };
     if matches!(mode, "missing" | "inline" | "second-rejection") {
         problem = Some(Error::Http(HttpError::Response(HttpFailure {
+            retry_after: None,
             status: 400,
             error_type: "invalid_request_error".into(),
             error_code: String::new(),

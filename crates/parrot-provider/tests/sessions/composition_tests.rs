@@ -189,6 +189,7 @@ fn socket(frames: Vec<String>) -> (Arc<SocketRecord>, Connect) {
 }
 fn upgrade(status: u16) -> Connect {
     Connect::Fail(ws::WebSocketError::Upgrade {
+        retry_after: None,
         status,
         message: "private-sentinel".into(),
     })
@@ -1032,6 +1033,7 @@ async fn both_provider_factories_report_physical_attempts_order_exact_bytes_and_
             let (second_record, second) = socket(vec![completed.clone()]);
             let connector = Connector::new(if behavior == "fallback" {
                 vec![Connect::Fail(ws::WebSocketError::Upgrade {
+                    retry_after: None,
                     status: 404,
                     message: "private-sentinel-upgrade".into(),
                 })]
@@ -1123,6 +1125,7 @@ async fn actual_compatible_transport_errors_keep_typed_classification_and_privat
             },
             "wire_protocol" => ws::WebSocketError::Wire("private-sentinel".into()),
             "websocket_upgrade" => ws::WebSocketError::Upgrade {
+                retry_after: None,
                 status: 503,
                 message: "private-sentinel".into(),
             },

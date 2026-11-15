@@ -297,3 +297,43 @@ async fn explicitly_injected_proxy_stays_loopback_and_does_not_contact_origin() 
     assert!(request.starts_with("GET http://offline-origin.invalid/v1/models HTTP/1.1\r\n"));
     assert!(!request.to_lowercase().contains("authorization:"));
 }
+
+#[tokio::test]
+async fn real_http_errors_preserve_retry_after_and_reject_duplicate_values() {
+    for (headers, expected) in [
+        ("rEtRy-AfTeR: 15\r\n", Some(Duration::from_secs(15))),
+        ("Retry-After: 10\r\nRetry-After: 15\r\n", None),
+    ] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                let mut byte = [0; 1];
+                socket.read_exact(&mut byte).await.unwrap();
+                request.push(byte[0]);
+            }
+            socket.write_all(format!("HTTP/1.1 429 Rejected\r\n{headers}Content-Length: 0\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+        });
+        let transport = ReqwestTransport::new(ProviderHttpClient::standard(
+            reqwest::Client::builder().no_proxy().build().unwrap(),
+        ));
+        let error = get(
+            &transport,
+            Url::parse(&format!("http://{address}/responses")).unwrap(),
+            vec![],
+            Duration::from_secs(5),
+            1024,
+            &Never,
+        )
+        .await
+        .unwrap_err();
+        let HttpError::Response(failure) = error else {
+            panic!("expected HTTP response error")
+        };
+        assert_eq!(failure.status, 429);
+        assert_eq!(failure.retry_after, expected);
+        server.await.unwrap();
+    }
+}

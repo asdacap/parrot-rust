@@ -625,6 +625,7 @@ async fn unsupported_upgrade_falls_back_to_original_http_callback_once() {
         &trace,
         false,
         Err(WebSocketError::Upgrade {
+            retry_after: None,
             status: 404,
             message: "unsupported".into(),
         }),
@@ -650,7 +651,7 @@ async fn unsupported_upgrade_falls_back_to_original_http_callback_once() {
             "start",
             "auth",
             "connect",
-            "failed:Upgrade { status: 404, message: \"unsupported\" }",
+            "failed:Upgrade { retry_after: None, status: 404, message: \"unsupported\" }",
             "http-original"
         ]
     );

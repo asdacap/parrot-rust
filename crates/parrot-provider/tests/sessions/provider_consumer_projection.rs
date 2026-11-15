@@ -120,6 +120,7 @@ impl Connector for UnsupportedConnector {
         Box::pin(async {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Err(WebSocketError::Upgrade {
+                retry_after: None,
                 status: 404,
                 message: "missing".into(),
             })

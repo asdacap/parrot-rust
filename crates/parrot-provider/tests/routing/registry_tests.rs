@@ -455,6 +455,7 @@ async fn refresh_catches_only_source_failure_classes_at_both_provider_boundaries
         Error::Http(HttpError::HeaderTimeout(Duration::from_secs(1))),
         Error::Http(HttpError::RequestTooLarge(10)),
         Error::Http(HttpError::Response(HttpFailure {
+            retry_after: None,
             status: 503,
             error_type: String::new(),
             error_code: String::new(),

@@ -112,6 +112,7 @@ pub fn injected_failure(name: &str) -> Option<Error> {
         "" => return None,
         "provider" => Error::Provider("synthetic provider failure".into()),
         "http" => Error::Http(HttpError::Response(HttpFailure {
+            retry_after: None,
             status: 503,
             error_type: String::new(),
             error_code: String::new(),
