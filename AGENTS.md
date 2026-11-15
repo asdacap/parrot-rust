@@ -32,6 +32,10 @@ method is already obvious.
 - Prefer async workflow over manual state machine.
 - No optional parameter.
 - Robust lazy validation. Try not to validate early, rather make later validation handling robust.
+- Do not add a narrow error handler when a wider fallback later in the flow already
+handles the failure. A narrow handler earns its place only when it changes the
+observable outcome, such as keeping context or ordering the wider fallback would
+lose. Otherwise the same failure flows to the same place twice.
 - Lazy materialization. This follows the same spirit as lazy validation. Do not pre-optimize state, only compile them
 right before the information is needed.
 - A user session (and all its component including all agent sessions) data is scoped within that user session. Do not
@@ -137,6 +141,11 @@ Clippy's `all` lint group.
 
 - **Do not deviate from the plan.** If the plan is wrong, stop and say so rather
   than improvising a fix.
+- **One enforcement point per invariant.** Before adding a call that restores,
+  re-checks, or guards something, name the single place the invariant is already
+  enforced. If you can name it, trust it and do not repeat the call elsewhere.
+  If you cannot name it, stop and investigate until you can. When unsure the
+  single point is enough, prove it with a regression test, not a second call.
 - **Never turn a rule off.** Not inline, not per-file, not repository-wide.
   Lint-suppression attributes such as `#[allow(...)]` and `#[expect(...)]` are not
   permitted, and neither is weakening the lint configuration in `Cargo.toml`.
