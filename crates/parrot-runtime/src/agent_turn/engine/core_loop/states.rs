@@ -16,7 +16,6 @@ pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) templates: &'a PromptTemplateCatalog,
     pub(super) publisher: &'a Publisher,
     pub(super) usage: &'a SessionUsageRecorder,
-    pub(super) compactor: &'a crate::compaction::Compactor,
     pub(super) event_id: &'a Arc<dyn Fn() -> String + Send + Sync>,
     pub(super) events: ContextEmitter<'a>,
     pub(super) binding: &'a TurnBinding<S>,
@@ -44,7 +43,6 @@ impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
             templates: &backend.templates,
             publisher: backend.publisher.as_ref(),
             usage: &backend.usage,
-            compactor: &backend.compactor,
             event_id: &backend.event_id,
             events: ContextEmitter::new(
                 &backend.history,
@@ -291,14 +289,6 @@ where
                             .capture_context_configuration(&selection.model),
                     ))
                 }
-                ConfigKey::Compaction => {
-                    let selection = self.binding.capture_selection()?;
-                    Ok(ConfigValue::Compaction(
-                        self.compactor
-                            .planner()
-                            .capture_compaction_configuration(&selection.model, None),
-                    ))
-                }
                 key => self
                     .templates
                     .get_template(
@@ -355,26 +345,6 @@ where
                 .await
                 .map_err(TurnError::Context)?;
             Ok(slots)
-        })
-    }
-    fn write_to_scratch<'a, 'c>(
-        &'a self,
-        contents: &'a [u8],
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<String, CoreError>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            self.state
-                .lock()
-                .await
-                .context
-                .borrow_blobs()
-                .write_to_scratch(contents, &cancellation)
-                .map(|path| path.to_string_lossy().into_owned())
-                .map_err(crate::compaction::CompactionError::from)
-                .map_err(Into::into)
         })
     }
 
@@ -507,22 +477,6 @@ where
                 .read_conversation_state(&state.conversation)
                 .await
                 .map_err(Into::into)
-        })
-    }
-    fn finalize_compaction(
-        &mut self,
-        result: Result<Option<parrot_core::FittedCompaction>, CoreError>,
-    ) -> BoxFuture<'_, Result<(), CoreError>> {
-        Box::pin(async move {
-            let compacted = result?;
-            let mut guard = self.state.lock().await;
-            let state = &mut *guard;
-            state
-                .context
-                .record_epoch_compaction(&mut state.conversation, &self.events, Ok(compacted))
-                .await
-                .map_err(TurnError::from)
-                .map_err(CoreError::from)
         })
     }
 }

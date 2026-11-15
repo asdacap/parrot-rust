@@ -1,10 +1,10 @@
 //! Awaited context epochs over the authoritative storage history.
-use super::execution::{NativeErrors, describe_error};
-use super::{
-    CompactionError, CompactionObserver, Compactor, ContextSize, ContextSnapshot, PlanningError,
-};
+use super::effects::{NativeErrors, describe_error};
+use super::{CompactionError, CompactionObserver, ContextSize, ContextSnapshot};
 use crate::prompt_context::{PromptError, SessionPrompt};
-use parrot_core::{ContextConfiguration as CoreContextConfiguration, NeverCancelled};
+use parrot_core::{
+    ContextConfiguration as CoreContextConfiguration, NeverCancelled, PlanningError,
+};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
@@ -16,7 +16,7 @@ use parrot_domain::{
     },
     values::identifiers::Identifier,
 };
-use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_provider::compaction::{Compactor, estimate_input_tokens};
 use parrot_provider::{
     routing::aliases::ResolvedModelSelection,
     sessions::{Content, Message, ProviderSessions, Role, Tool, ToolCall},
@@ -25,7 +25,7 @@ use parrot_storage::conversation::{
     AgentConversation, AgentHistoryView, CompactionSnapshot, EventError, MessageRole, ModelContent,
     ModelMessage,
 };
-use std::{fmt, sync::Arc};
+use std::fmt;
 
 #[derive(Debug)]
 pub enum ContextError {
@@ -157,20 +157,10 @@ pub struct ContextCompactionResult {
 pub struct ContextController {
     compactor: Compactor,
     history: AgentHistoryView,
-    blobs: parrot_storage::artifacts::compaction::CompactionGroupBlobStore,
 }
 impl ContextController {
-    pub fn new(
-        compactor: Compactor,
-        history: AgentHistoryView,
-        blobs: parrot_storage::artifacts::compaction::CompactionGroupBlobStore,
-        _templates: Arc<PromptTemplateCatalog>,
-    ) -> Self {
-        Self {
-            compactor,
-            history,
-            blobs,
-        }
+    pub fn new(compactor: Compactor, history: AgentHistoryView) -> Self {
+        Self { compactor, history }
     }
     pub fn compactor(&self) -> &Compactor {
         &self.compactor
@@ -179,9 +169,7 @@ impl ContextController {
         &self,
         selection: &ResolvedModelSelection,
     ) -> CoreContextConfiguration {
-        self.compactor
-            .planner()
-            .capture_context_configuration(selection)
+        self.compactor.capture_context_configuration(selection)
     }
 
     pub async fn ensure_epoch(
@@ -235,7 +223,7 @@ impl ContextController {
         target: Option<&ContextSize>,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<EpochResult> {
-        let compactor = self.compactor.provider.clone();
+        let compactor = self.compactor.clone();
         let errors = NativeErrors::new();
         let selection = input.selection;
         let sessions = input.sessions;
@@ -259,50 +247,6 @@ impl ContextController {
         })
     }
 
-    pub(crate) async fn report_epoch_started(
-        &self,
-        events: &dyn ContextEvents,
-    ) -> ContextResult<()> {
-        let mut started = self.event()?;
-        started.set_compaction_started(CompactionStarted::new());
-        events.emit(started, &NeverCancelled).await
-    }
-
-    pub(crate) async fn report_epoch_saving(
-        &self,
-        events: &dyn ContextEvents,
-        cancellation: &dyn Cancellation,
-    ) -> ContextResult<()> {
-        let mut saving = self.event()?;
-        saving.set_compaction_progress(CompactionProgressEvent {
-            phase: CompactionPhase::COMPACTION_PHASE_SAVING.into(),
-            ..CompactionProgressEvent::new()
-        });
-        events.emit(saving, cancellation).await
-    }
-
-    pub(crate) async fn report_epoch_finished(
-        &self,
-        events: &dyn ContextEvents,
-    ) -> ContextResult<()> {
-        let mut finished = self.event()?;
-        finished.set_compaction_finished(CompactionFinished::new());
-        events.emit(finished, &NeverCancelled).await
-    }
-
-    pub(crate) async fn fail_epoch_compaction(
-        &self,
-        message: String,
-        events: &dyn ContextEvents,
-    ) -> ContextResult<()> {
-        let mut failed = self.event()?;
-        failed.set_compaction_failed(CompactionFailed {
-            message,
-            ..CompactionFailed::new()
-        });
-        events.emit(failed, &NeverCancelled).await
-    }
-
     pub(crate) async fn publish_compaction(
         &self,
         event: parrot_provider::compaction::CompactionEvent,
@@ -310,36 +254,47 @@ impl ContextController {
         cancellation: &dyn Cancellation,
     ) -> ContextResult<()> {
         use parrot_provider::compaction::CompactionEvent;
+        let mut published = Event::new();
         match event {
-            CompactionEvent::Started => self.report_epoch_started(events).await,
-            CompactionEvent::Saving => self.report_epoch_saving(events, cancellation).await,
-            CompactionEvent::Finished => self.report_epoch_finished(events).await,
-            CompactionEvent::Failed(message) => self.fail_epoch_compaction(message, events).await,
-            CompactionEvent::Progress(progress) => events
-                .observe_progress(
-                    CompactionProgressEvent {
-                        phase: CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
-                        completed_groups: progress.completed_groups as u64,
-                        total_groups: progress.total_groups as u64,
-                        ..CompactionProgressEvent::new()
-                    },
-                    cancellation,
-                )
-                .await
-                .map_err(CompactionError::from)
-                .map_err(ContextError::from),
-            CompactionEvent::Retry(event) => events
-                .observe(&event, cancellation)
-                .await
-                .map_err(CompactionError::from)
-                .map_err(ContextError::from),
+            CompactionEvent::Started => published.set_compaction_started(CompactionStarted::new()),
+            CompactionEvent::Saving => published.set_compaction_progress(CompactionProgressEvent {
+                phase: CompactionPhase::COMPACTION_PHASE_SAVING.into(),
+                ..CompactionProgressEvent::new()
+            }),
+            CompactionEvent::Finished => {
+                published.set_compaction_finished(CompactionFinished::new())
+            }
+            CompactionEvent::Failed(message) => published.set_compaction_failed(CompactionFailed {
+                message,
+                ..CompactionFailed::new()
+            }),
+            CompactionEvent::Progress(progress) => {
+                return events
+                    .observe_progress(
+                        CompactionProgressEvent {
+                            phase: CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into(),
+                            completed_groups: progress.completed_groups as u64,
+                            total_groups: progress.total_groups as u64,
+                            ..CompactionProgressEvent::new()
+                        },
+                        cancellation,
+                    )
+                    .await
+                    .map_err(CompactionError::from)
+                    .map_err(ContextError::from);
+            }
+            CompactionEvent::Retry(event) => {
+                return events
+                    .observe(&event, cancellation)
+                    .await
+                    .map_err(CompactionError::from)
+                    .map_err(ContextError::from);
+            }
         }
-    }
-
-    pub(crate) fn borrow_blobs(
-        &mut self,
-    ) -> &mut parrot_storage::artifacts::compaction::CompactionGroupBlobStore {
-        &mut self.blobs
+        let identity = self.event()?;
+        published.id = identity.id;
+        published.agent_session_id = identity.agent_session_id;
+        events.emit(published, cancellation).await
     }
 
     pub(crate) async fn read_conversation_state(
@@ -409,28 +364,6 @@ impl ContextController {
         Ok(history)
     }
 
-    pub(crate) async fn record_epoch_compaction(
-        &mut self,
-        conversation: &mut AgentConversation,
-        events: &dyn ContextEvents,
-        result: ContextResult<Option<parrot_core::FittedCompaction>>,
-    ) -> ContextResult<()> {
-        if let Some(compacted) = result? {
-            self.commit_replacement(
-                conversation,
-                events,
-                parrot_provider::compaction::ReplacementCommit {
-                    message: compacted.result.summary,
-                    watermark: compacted.result.watermark,
-                    status: compacted.status,
-                    notice: compacted.notice,
-                },
-            )
-            .await?;
-        }
-        Ok(())
-    }
-
     pub(crate) async fn commit_replacement(
         &self,
         conversation: &mut AgentConversation,
@@ -465,12 +398,20 @@ impl ContextController {
         input: &EpochInput<'_>,
         instructions: &str,
     ) -> ContextResult<ContextSnapshot> {
-        Ok(self.compactor.planner().estimate_selected_context(
-            input.selection,
+        let configuration = self
+            .compactor
+            .capture_context_configuration(input.selection);
+        let messages = provider_messages(input.conversation)
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<_>>();
+        let estimated = estimate_input_tokens(
+            &input.selection.canonical_model,
             instructions,
             input.tools,
-            &provider_messages(input.conversation),
-        )?)
+            &messages,
+        )?;
+        Ok(ContextSnapshot::estimate(estimated, &configuration))
     }
     fn event(&self) -> ContextResult<Event> {
         Ok(Event {

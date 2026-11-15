@@ -17,6 +17,7 @@ use parrot_domain::{
     },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_provider::compaction::{CompactionSettings, Compactor};
 use parrot_provider::{
     catalogs::Model,
     routing::{
@@ -44,7 +45,6 @@ use parrot_runtime::{
     prompt_context::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
-    artifacts::compaction::CompactionGroupBlobStore,
     conversation::{AgentHistoryView, ConversationMessage, ConversationRepository, MessageRole},
     database::SessionDatabase,
     events::{ConversationPart, EventRepository, NeverCancelled},
@@ -269,13 +269,7 @@ impl Histories {
             templates.clone(),
         )
         .unwrap();
-        let blobs = CompactionGroupBlobStore::for_session(
-            self.repository.events().database().selected_root(),
-            "scratch",
-            Arc::new(Names),
-        )
-        .unwrap();
-        ContextController::new(compactor, history, blobs, templates)
+        ContextController::new(compactor, history)
     }
     pub async fn append(&self, history: &AgentHistoryView, text: &str) {
         let mut event = Event::new();

@@ -11,7 +11,7 @@ pub(super) struct RuntimeProvider<'a, S: AccessSnapshot> {
     pub(super) state: &'a Mutex<State>,
     pub(super) prompt: &'a SessionPrompt,
     pub(super) status: &'a dyn TurnStatus<S>,
-    pub(super) compactor: &'a crate::compaction::Compactor,
+    pub(super) compactor: &'a parrot_provider::compaction::Compactor,
     pub(super) sessions: &'a ProviderSessions,
     pub(super) history: &'a AgentHistoryView,
     pub(super) publisher: &'a Publisher,
@@ -81,7 +81,6 @@ impl<S: AccessSnapshot> parrot_core::Provider for RuntimeProvider<'_, S> {
                 events: self.events,
             };
             self.compactor
-                .provider
                 .compact(
                     &selection.model,
                     request,
@@ -100,46 +99,12 @@ impl<S: AccessSnapshot> parrot_core::Provider for RuntimeProvider<'_, S> {
         messages: &[parrot_core::Message],
     ) -> Result<i64, CoreError> {
         let selection = self.binding.capture_selection()?;
-        crate::compaction::CompactionEstimates::new(&selection.model)
-            .estimate_input_tokens(instructions, definitions, messages)
-            .map_err(Into::into)
-    }
-    fn summarize<'a, 'c>(
-        &'a self,
-        request: ProviderRequest,
-        cancellation: parrot_core::CancellationToken<'c>,
-    ) -> BoxFuture<'a, Result<parrot_core::SummaryResponse, CoreError>>
-    where
-        'c: 'a,
-    {
-        Box::pin(async move {
-            let selection = self.binding.capture_selection()?;
-            let result: Result<_, crate::compaction::CompactionError> = async {
-                cancellation
-                    .check()
-                    .map_err(|_| crate::compaction::CompactionError::Cancelled)?;
-                let session = self
-                    .sessions
-                    .get(selection.model.canonical_model.provider.clone())
-                    .await?;
-                let mut stream = session.call(request.into())?;
-                let result = async {
-                    let mut summary = crate::compaction::SummaryText::default();
-                    while let Some(event) = stream.next(&cancellation).await? {
-                        summary.observe(&event)?;
-                        if matches!(event.base_event(), sessions::Event::Retry { .. }) {
-                            self.events.observe(&event, &cancellation).await?;
-                        }
-                    }
-                    Ok(summary.finish())
-                }
-                .await;
-                stream.close().await?;
-                result
-            }
-            .await;
-            result.map_err(Into::into)
-        })
+        parrot_provider::compaction::estimate_input_tokens(
+            &selection.model.canonical_model,
+            instructions,
+            definitions,
+            messages,
+        )
     }
 
     fn invoke<'a, 'c>(

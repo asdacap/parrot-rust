@@ -180,7 +180,6 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                     backend.event_id.as_ref(),
                 ),
                 prompt: &backend.prompt,
-                state: &backend.state,
                 cancellation,
             };
             let token = parrot_core::CancellationToken::new(cancellation);
@@ -313,7 +312,7 @@ mod tests {
             TurnError::Cancelled,
             TurnError::Service("cancelled is only message text".into()),
             TurnError::Provider(sessions::Error::Cancelled),
-            TurnError::Planning(crate::compaction::PlanningError::GroupExceedsBudget),
+            TurnError::Planning(parrot_core::PlanningError::GroupExceedsBudget),
             TurnError::ProviderCall(provider_call::ProviderCallError::Output(
                 std::io::Error::from(std::io::ErrorKind::PermissionDenied),
             )),

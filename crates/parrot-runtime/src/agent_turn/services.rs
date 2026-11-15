@@ -196,7 +196,7 @@ pub enum TurnError {
     ProviderCall(ProviderCallError),
     Provider(sessions::Error),
     Context(ContextError),
-    Planning(crate::compaction::PlanningError),
+    Planning(parrot_core::PlanningError),
     Prompt(PromptError),
     Publication(OperationError<BrokerError>),
     Service(String),
@@ -249,18 +249,9 @@ impl TurnError {
             Self::Context(ContextError::Compaction(
                 crate::compaction::CompactionError::InvalidOperation(_),
             )) => ErrorCode::InvalidOperation,
-            Self::Context(ContextError::Compaction(crate::compaction::CompactionError::Blob(
+            Self::Context(ContextError::Compaction(crate::compaction::CompactionError::Core(
                 error,
-            ))) => match error.kind {
-                parrot_storage::artifacts::compaction::CompactionErrorKind::Io => error
-                    .native_error
-                    .as_ref()
-                    .map_or(ErrorCode::Io, ErrorCode::from_io),
-                parrot_storage::artifacts::compaction::CompactionErrorKind::InvalidOperation => {
-                    ErrorCode::InvalidOperation
-                }
-                _ => ErrorCode::Unexpected,
-            },
+            ))) => error.code,
             _ => ErrorCode::Unexpected,
         }
     }
@@ -280,10 +271,6 @@ impl TurnError {
                 ContextError::Compaction(crate::compaction::CompactionError::Provider(error)) => {
                     provider_cancelled(error)
                 }
-                ContextError::Compaction(crate::compaction::CompactionError::Blob(error)) => {
-                    error.kind
-                        == parrot_storage::artifacts::compaction::CompactionErrorKind::Cancelled
-                }
                 _ => false,
             };
         }
@@ -296,9 +283,9 @@ impl TurnError {
         )
     }
 }
-fn planning_code(error: crate::compaction::PlanningError) -> ErrorCode {
+fn planning_code(error: parrot_core::PlanningError) -> ErrorCode {
     match error {
-        crate::compaction::PlanningError::TokenOverflow => ErrorCode::Unexpected,
+        parrot_core::PlanningError::TokenOverflow => ErrorCode::Unexpected,
         _ => ErrorCode::InvalidOperation,
     }
 }

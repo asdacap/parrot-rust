@@ -37,6 +37,7 @@ mod fixture {
     use parrot_foundation::template_catalog::PromptTemplateCatalog;
     use parrot_provider::{
         catalogs::Model,
+        compaction::{CompactionSettings, Compactor},
         routing::{
             aliases::{ModelAliasCatalog, ModelRouter, ModelRouting, ResolvedModelSelection},
             registry::ProviderRegistry,
@@ -55,10 +56,7 @@ mod fixture {
             provider_call::{OutputWriter, ProviderActivity},
             services::*,
         },
-        compaction::{
-            CompactionSettings, Compactor, ContextController, ContextResult, ContextSnapshot,
-            ContextStatus,
-        },
+        compaction::{ContextController, ContextResult, ContextSnapshot, ContextStatus},
         event_broker::EventBroker,
         prompt_context::{PromptResult, SystemPrompt},
         tool_settlement::{
@@ -67,7 +65,7 @@ mod fixture {
         },
     };
     use parrot_storage::{
-        artifacts::{compaction::CompactionGroupBlobStore, output_blobs::ToolOutputBlobStore},
+        artifacts::output_blobs::ToolOutputBlobStore,
         conversation::{AgentHistoryView, ConversationRepository, HistoryForkBoundary},
         database::SessionDatabase,
         diagnostics::{DiagnosticEvent, FailureKind},

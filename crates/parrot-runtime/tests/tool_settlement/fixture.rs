@@ -12,6 +12,7 @@ pub use parrot_domain::{
     values::config::ModelProfiles,
 };
 pub use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_provider::compaction::{CompactionSettings, Compactor};
 pub use parrot_provider::{
     catalogs::Model,
     routing::{
@@ -27,7 +28,6 @@ pub use parrot_runtime::{
     prompt_context::{PromptResult, SystemPrompt},
 };
 pub use parrot_storage::{
-    artifacts::compaction::CompactionGroupBlobStore,
     conversation::{AgentHistoryView, ConversationMessage, ConversationRepository, MessageRole},
     database::SessionDatabase,
     events::{ConversationPart, EventRepository, NeverCancelled},
@@ -187,13 +187,7 @@ impl Fixture {
             templates.clone(),
         )
         .unwrap();
-        let blobs = CompactionGroupBlobStore::for_session(
-            self.repository.events().database().selected_root(),
-            "scratch",
-            Arc::new(Names),
-        )
-        .unwrap();
-        ContextController::new(compactor, self.history.clone(), blobs, templates)
+        ContextController::new(compactor, self.history.clone())
     }
     pub async fn events(&self) -> Vec<Event> {
         self.repository.events().replay().await.unwrap()

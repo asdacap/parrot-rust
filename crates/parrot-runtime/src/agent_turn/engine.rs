@@ -119,7 +119,7 @@ pub struct RuntimeBackend<S: AccessSnapshot + 'static> {
     prompt: SessionPrompt,
     conversation: ConversationReadView,
     materialized_tools: std::sync::Mutex<Option<ToolSnapshot<S>>>,
-    compactor: crate::compaction::Compactor,
+    compactor: parrot_provider::compaction::Compactor,
     notices: Notices,
     execution_activity: std::sync::Mutex<Option<i64>>,
 }
@@ -226,11 +226,21 @@ where
                     .messages()
                     .iter()
                     .map(provider_message)
+                    .map(Into::into)
                     .collect::<Vec<_>>();
-                self.compactor
-                    .planner()
-                    .estimate_selected_context(&selection.model, instructions, &tools, &messages)
-                    .map_err(TurnError::Planning)
+                let estimated = parrot_provider::compaction::estimate_input_tokens(
+                    &selection.model.canonical_model,
+                    instructions,
+                    &tools,
+                    &messages,
+                )
+                .map_err(TurnError::Core)?;
+                Ok::<_, TurnError>(parrot_core::ContextSnapshot::estimate(
+                    estimated,
+                    &self
+                        .compactor
+                        .capture_context_configuration(&selection.model),
+                ))
             })
             .await??;
         Ok(super::observation::ObservedContext { selection, context })
@@ -303,7 +313,6 @@ where
         };
         let replacement = self
             .compactor
-            .provider
             .compact(
                 &selection.model,
                 parrot_core::CompactionRequest {

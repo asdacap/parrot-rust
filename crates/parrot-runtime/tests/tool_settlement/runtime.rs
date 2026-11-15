@@ -98,6 +98,55 @@ async fn actual_runtime_retains_tool_factory_and_core_compaction_reaches_next_pr
 }
 
 #[tokio::test]
+async fn opaque_compaction_replacement_reaches_next_provider_request_after_reload() {
+    let fixture = Fixture::new();
+    fixture.seed().await;
+    let history = fixture.history.conversation().await.unwrap();
+    let watermark = history[history.len() - 2].sequence;
+    let mut message = ConversationMessage::text(MessageRole::Assistant, "");
+    message.parts.clear();
+    message.provider_content = parrot_storage::events::ProviderContent {
+        provider_id: "scripted".into(),
+        content: "{\"continuation\":\"opaque-token\"}".into(),
+    };
+    fixture
+        .repository
+        .save_compaction(
+            "agent".into(),
+            parrot_storage::conversation::CompactionSnapshot { message, watermark },
+        )
+        .await
+        .unwrap();
+    let provider = Scripted::new(vec![Step::complete("answer using opaque continuation")]);
+    let (session, _) = runtime(&fixture, &provider, vec![]).await;
+    let sent = send(&session).await;
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    let requests = provider.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    let replacement = requests[0]
+        .messages
+        .iter()
+        .find(|message| message.provider_id == "scripted")
+        .unwrap();
+    assert_eq!(replacement.role, parrot_provider::sessions::Role::Assistant);
+    assert!(replacement.content().is_empty());
+    assert_eq!(
+        replacement.provider_content,
+        "{\"continuation\":\"opaque-token\"}"
+    );
+    assert!(
+        !requests[0]
+            .messages
+            .iter()
+            .any(|message| message.content().starts_with("seed-0-"))
+    );
+    bounded(session.close()).await.unwrap();
+}
+
+#[tokio::test]
 async fn actual_runtime_interrupt_joins_core_compaction_without_self_queue_or_second_drain() {
     let fixture = Fixture::new();
     fixture.seed().await;

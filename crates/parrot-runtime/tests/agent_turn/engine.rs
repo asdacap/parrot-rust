@@ -4,7 +4,6 @@ use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
         events::EventPublisher,
-        filenames::FilenameGenerator,
         paths::{ResolvedRead, RootOrigin, SelectedSessionRoot},
         security::AccessSnapshot,
         storage::Committed,
@@ -13,6 +12,7 @@ use parrot_domain::{
     values::config::ModelProfiles,
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_provider::compaction::{CompactionSettings, Compactor};
 use parrot_provider::{
     catalogs::Model,
     routing::{
@@ -35,7 +35,6 @@ use parrot_runtime::{
     prompt_context::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
-    artifacts::compaction::CompactionGroupBlobStore,
     conversation::{
         AgentConversation, AgentHistoryView, ConversationMessage, ConversationRepository,
         MessageRole,
@@ -97,12 +96,7 @@ impl Gate {
         self.release.add_permits(1);
     }
 }
-struct Names;
-impl FilenameGenerator for Names {
-    fn next_filename(&self) -> String {
-        format!("{}.dat", id())
-    }
-}
+
 fn templates() -> Arc<PromptTemplateCatalog> {
     let env = [
         ("HOME", "/tmp/t46/home"),
@@ -187,13 +181,7 @@ impl Fixture {
             templates.clone(),
         )
         .unwrap();
-        let blobs = CompactionGroupBlobStore::for_session(
-            self.repository.events().database().selected_root(),
-            "scratch",
-            Arc::new(Names),
-        )
-        .unwrap();
-        ContextController::new(compactor, self.history.clone(), blobs, templates)
+        ContextController::new(compactor, self.history.clone())
     }
     async fn seed(&self) {
         for index in 0..6 {
