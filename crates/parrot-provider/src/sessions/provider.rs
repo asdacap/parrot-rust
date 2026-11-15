@@ -836,11 +836,11 @@ fn decode_chatgpt_models(provider_id: &str, body: &str) -> Result<Vec<Model>, Ca
                 .and_then(|v| v.get().parse().ok())
                 .unwrap_or(0)
         };
-        let mut context = integer("context_window");
-        if context == 0 {
-            context = integer("max_context_window");
+        let mut window = integer("context_window");
+        if window == 0 {
+            window = integer("max_context_window");
         }
-        if id.is_empty() || context <= 0 {
+        if id.is_empty() || window <= 0 {
             return Err(CatalogError(format!(
                 "provider: model catalog contains invalid listed model \"{id}\""
             )));
@@ -876,7 +876,7 @@ fn decode_chatgpt_models(provider_id: &str, body: &str) -> Result<Vec<Model>, Ca
         }
         let mut model = Model::new(&id, provider_id);
         model.name = name.unwrap_or(id);
-        model.context_window = context;
+        model.context_window = window;
         model.fields = fields;
         model.capabilities = ModelCapabilities {
             tools: true,

@@ -566,7 +566,7 @@ async fn multiple_choice_replies_in_source_option_order_with_or_without_timing()
 }
 
 #[tokio::test]
-async fn custom_question_context_and_optionless_answers_continue_in_order_source_rows() {
+async fn custom_question_header_and_optionless_answers_continue_in_order_source_rows() {
     for multiple in [false, true] {
         for optionless in [false, true] {
             let mut question = pending("question-request");

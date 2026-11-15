@@ -12,7 +12,7 @@ already admitted input does not duplicate it, but can wake pending work.
 
 Steers join the current conversation together. A queued message starts its own
 turn when no steer is ready and the previous conversation no longer needs a
-response. Prompt preparation, status, skill context, and tool-restoration notices
+response. Prompt preparation, status, skill prompts, and tool-restoration notices
 precede the provider request that uses them. Selected skill bodies are loaded
 once per stable skill identity within a turn.
 

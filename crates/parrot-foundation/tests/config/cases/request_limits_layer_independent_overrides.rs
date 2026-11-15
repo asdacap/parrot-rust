@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 
 #[test]
 fn source_assertions() {
@@ -7,9 +7,9 @@ fn source_assertions() {
         ("image_bytes_per_read", 2),
         ("provider_request_bytes", i32::MAX),
     ] {
-        let context = Context::new();
-        let defaults = context.configured("").unwrap().runtime.request_limits;
-        let configured = context
+        let fixture = ConfigFixture::new();
+        let defaults = fixture.configured("").unwrap().runtime.request_limits;
+        let configured = fixture
             .configured(&format!("request_limits:\n  {key}: {value}\n"))
             .unwrap()
             .runtime

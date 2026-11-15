@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use parrot_cli::terminal_frames::{
-    ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRender, LiveBufferRenderContext,
-    LiveBufferRetention, ScrollbackItem, ScrollbackLayout, ScrollbackRenderContext,
+    ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions,
+    LiveBufferRetention, ScrollbackItem, ScrollbackLayout, ScrollbackRenderOptions,
     TerminalCellStyleSpan, TerminalFrameRenderer, TerminalLine, TerminalStyle,
 };
 
@@ -47,7 +47,7 @@ impl Write for Output {
 #[derive(Clone)]
 struct Live(LiveBufferRender);
 impl LiveBufferItem for Live {
-    fn render(&self, _: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, _: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         Ok(self.0.clone())
     }
 }
@@ -327,16 +327,16 @@ impl ScrollbackItem for Scrollback {
                 .and_then(|id| id.downcast_ref::<u32>().copied())
                 == self.sequence
     }
-    fn render(&self, context: ScrollbackRenderContext) -> io::Result<Vec<String>> {
+    fn render(&self, options: ScrollbackRenderOptions) -> io::Result<Vec<String>> {
         if let Some(expected) = self.expected_previous {
             assert_eq!(
-                context
+                options
                     .previous_packing
                     .and_then(|id| id.downcast_ref::<u32>().copied()),
                 Some(expected)
             );
         }
-        assert!(context.inline_diff);
+        assert!(options.inline_diff);
         Ok(if self.text.is_empty() {
             vec![]
         } else {
@@ -518,7 +518,7 @@ fn base_style_changes_repaint_only_changed_row_and_padding_uses_background() {
 
 struct BrokenLive;
 impl LiveBufferItem for BrokenLive {
-    fn render(&self, _: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, _: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         Err(io::Error::other("render failed"))
     }
 }

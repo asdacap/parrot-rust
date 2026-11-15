@@ -94,7 +94,7 @@ impl DiagnosticClock for MonotonicDiagnosticClock {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CallContext {
+pub struct CallIdentity {
     pub agent_session_id: String,
     pub correlation_id: String,
     pub provider_id: String,
@@ -220,14 +220,14 @@ impl CallTrace {
     pub fn start(
         sink: Arc<dyn DiagnosticSink>,
         clock: Arc<dyn DiagnosticClock>,
-        context: CallContext,
+        identity: CallIdentity,
         dumper: Option<Arc<LastRequestDumper>>,
     ) -> Self {
         let mut entry = DiagnosticEvent::provider("call_started", DiagnosticSeverity::Information);
-        entry.agent_session_id = Some(context.agent_session_id);
-        entry.correlation_id = Some(context.correlation_id);
-        entry.provider_id = Some(context.provider_id);
-        entry.model_id = Some(context.model_id);
+        entry.agent_session_id = Some(identity.agent_session_id);
+        entry.correlation_id = Some(identity.correlation_id);
+        entry.provider_id = Some(identity.provider_id);
+        entry.model_id = Some(identity.model_id);
         Self {
             trace: TraceState::start(sink, clock, entry, "call_finished"),
             dumper,

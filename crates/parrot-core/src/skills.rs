@@ -1,6 +1,7 @@
 use crate::{
-    CancellationToken, ConfigKey, Content, DerivedContext, Error, PromotedInput, PromptTemplate,
-    Skill, SkillContent, SkillMention, SkillProvider, SkillReference, States,
+    CancellationToken, ConfigKey, Content, Error, PreparedSkillPrompt, PromotedInput,
+    PromptTemplate, Skill, SkillContent, SkillProvider, SkillReference, States,
+    parse_skill_mentions,
 };
 use std::{collections::HashSet, sync::Arc};
 
@@ -19,7 +20,7 @@ impl SkillPreparation {
         skill_provider: &dyn SkillProvider,
         inputs: &[PromotedInput],
         cancellation: CancellationToken<'_>,
-    ) -> Result<DerivedContext, Error> {
+    ) -> Result<PreparedSkillPrompt, Error> {
         let mut selected = Vec::new();
         for input in inputs {
             let mut mentions = Vec::new();
@@ -60,7 +61,7 @@ impl SkillPreparation {
             return Err(Error::cancelled());
         }
         if selected.is_empty() {
-            return Ok(DerivedContext::default());
+            return Ok(PreparedSkillPrompt::default());
         }
         selected.sort_by(|(left, lp), (right, rp)| {
             lp.cmp(rp)
@@ -145,7 +146,7 @@ fn unavailable(preparation: &SkillTemplates, name: &str, message: &str) -> Resul
 }
 
 struct SkillRendering {
-    context: DerivedContext,
+    prompt: PreparedSkillPrompt,
     content_budget: usize,
     omitted: i32,
 }
@@ -169,28 +170,22 @@ impl SkillRendering {
                 )
             })?;
         Ok(Self {
-            context: DerivedContext::default(),
+            prompt: PreparedSkillPrompt::default(),
             content_budget,
             omitted: 0,
         })
     }
 
     fn fits(&self, value: &str) -> bool {
-        self.context.content.len()
-            + if self.context.content.is_empty() {
-                0
-            } else {
-                2
-            }
-            + value.len()
+        self.prompt.content.len() + if self.prompt.content.is_empty() { 0 } else { 2 } + value.len()
             <= self.content_budget
     }
 
     fn append(&mut self, value: &str) {
-        if !self.context.content.is_empty() {
-            self.context.content.push_str("\n\n");
+        if !self.prompt.content.is_empty() {
+            self.prompt.content.push_str("\n\n");
         }
-        self.context.content.push_str(value);
+        self.prompt.content.push_str(value);
     }
 
     fn notice(&mut self, value: &str) {
@@ -240,7 +235,7 @@ impl SkillRendering {
         )?;
         if self.fits(&value) {
             self.append(&value);
-            self.context.loaded_paths.push(skill.path.clone());
+            self.prompt.loaded_paths.push(skill.path.clone());
         } else {
             self.diagnostic(
                 preparation,
@@ -251,7 +246,7 @@ impl SkillRendering {
         Ok(())
     }
 
-    fn finish(mut self, preparation: &SkillTemplates) -> Result<DerivedContext, Error> {
+    fn finish(mut self, preparation: &SkillTemplates) -> Result<PreparedSkillPrompt, Error> {
         if self.omitted > 0 {
             let summary = unavailable(
                 preparation,
@@ -262,102 +257,12 @@ impl SkillRendering {
                 ),
             )?;
             self.append(&summary);
-            if self.context.content.len() > MAXIMUM_TURN_BYTES {
+            if self.prompt.content.len() > MAXIMUM_TURN_BYTES {
                 return Err(Error::failed(
                     "The selected-skill context exceeds the active-turn prompt budget.",
                 ));
             }
         }
-        Ok(self.context)
+        Ok(self.prompt)
     }
-}
-
-fn word(character: u8) -> bool {
-    character.is_ascii_alphanumeric() || character == b'_'
-}
-
-fn name_character(character: u8) -> bool {
-    word(character) || matches!(character, b':' | b'-')
-}
-
-fn linked_mention(text: &str, start: usize) -> Option<(usize, &str, &str)> {
-    let rest = text.get(start..)?.strip_prefix("[$")?;
-    let name_end = rest.find([']', '\r', '\n'])?;
-    if name_end == 0 || !rest[name_end..].starts_with("](") {
-        return None;
-    }
-    let path = &rest[name_end + 2..];
-    let path_end = path.find(')')?;
-    if path_end == 0 {
-        return None;
-    }
-    let end = start + 2 + name_end + 2 + path_end + 1;
-    if text
-        .as_bytes()
-        .get(end)
-        .copied()
-        .is_some_and(name_character)
-    {
-        return None;
-    }
-    Some((end, rest[..name_end].trim(), path[..path_end].trim()))
-}
-
-/// Finds bare and linked skill mentions, including inside Markdown and code.
-/// Bare environment-variable names retain their existing exclusions.
-pub fn parse_skill_mentions(text: &str) -> Vec<SkillMention> {
-    const ENVIRONMENT_NAMES: &[&str] = &[
-        "HOME",
-        "PATH",
-        "USER",
-        "SHELL",
-        "PWD",
-        "TMP",
-        "TMPDIR",
-        "PARROT_HOST_TMPDIR",
-        "TEMP",
-        "LANG",
-        "TERM",
-        "XDG_CONFIG_HOME",
-    ];
-    let mut mentions = Vec::new();
-    let mut start = 0;
-    let mut position = 0;
-    while start < text.len() {
-        let previous_is_word = start > 0 && word(text.as_bytes()[start - 1]);
-        let matched = if previous_is_word {
-            None
-        } else if let Some((end, name, path)) = linked_mention(text, start) {
-            Some((end, name, Some(path.to_owned())))
-        } else if text.as_bytes()[start] == b'$' {
-            let mut end = start + 1;
-            while text
-                .as_bytes()
-                .get(end)
-                .copied()
-                .is_some_and(name_character)
-            {
-                end += 1;
-            }
-            (end > start + 1).then(|| (end, &text[start + 1..end], None))
-        } else {
-            None
-        };
-        if let Some((end, name, path)) = matched {
-            if path.is_some() || !ENVIRONMENT_NAMES.contains(&name) {
-                mentions.push(SkillMention {
-                    name: name.into(),
-                    path,
-                    position,
-                });
-            }
-            position += text[start..end].encode_utf16().count();
-            start = end;
-        } else {
-            let character = text[start..].chars().next().expect("in-bounds character");
-            position += character.len_utf16();
-            start += character.len_utf8();
-        }
-    }
-    mentions
 }

@@ -364,7 +364,7 @@ fn promotion_returns_exact_multimodal_input_without_request_preparation() {
     assert!(state.skill_lookups.lock().unwrap().is_empty());
     assert!(state.skill_reads.lock().unwrap().is_empty());
     assert!(state.request().rendered_instructions.is_empty());
-    assert!(state.recorded_input_contexts.is_empty());
+    assert!(state.recorded_skill_prompts.is_empty());
     assert!(state.provider.requests.lock().unwrap().is_empty());
 }
 
@@ -374,7 +374,7 @@ fn skill_read_and_recording_failures_preserve_promoted_inputs_without_invoking_p
         "resolve_skill_references",
         "read_skill_content",
         "render_template",
-        "record_input_context",
+        "record_skill_prompt",
     ] {
         let mut state = MemoryState::new([Reply::final_response("not invoked")]);
         state.pending_messages.clear();
@@ -395,7 +395,7 @@ fn skill_read_and_recording_failures_preserve_promoted_inputs_without_invoking_p
             state.last_turn.as_ref().unwrap().messages[0].contents,
             [Content::Text("use $selected".into())]
         );
-        assert!(state.recorded_input_contexts.is_empty());
+        assert!(state.recorded_skill_prompts.is_empty());
         assert!(state.request().rendered_instructions.is_empty());
         assert!(state.request().messages.is_empty());
         assert!(state.provider.requests.lock().unwrap().is_empty());
@@ -411,7 +411,7 @@ fn input_without_skill_mentions_adds_no_derived_message_or_loaded_event() {
     state.pending_messages.clear();
     state.enqueue_message(Delivery::Steer, "ordinary input");
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert!(state.recorded_input_contexts.is_empty());
+    assert!(state.recorded_skill_prompts.is_empty());
     assert!(state.loaded_skill_paths().is_empty());
 }
 
@@ -430,9 +430,9 @@ fn core_loads_skill_rows_without_native_input_preparation() {
     ));
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.recorded_input_contexts.len(), 1);
+    assert_eq!(state.recorded_skill_prompts.len(), 1);
     assert_eq!(
-        state.recorded_input_contexts[0].content,
+        state.recorded_skill_prompts[0].content,
         "<skill>\n<name>selected</name>\n<path>/skills/selected/SKILL.md</path>\ninstructions from the skill row\n</skill>"
     );
     assert_eq!(state.loaded_skill_paths(), ["/skills/selected/SKILL.md"]);

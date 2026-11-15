@@ -1,7 +1,7 @@
 use crate::presenters::*;
 use crate::terminal_layout::ToolYamlFormatter;
 use parrot_domain::protocol::messages::parrot::{ListedSkillScope, Skill, SkillRootLocation};
-use parrot_runtime::prompt_context::normalize_skill_path;
+use parrot_runtime::prompt_assembly::normalize_skill_path;
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -12,7 +12,7 @@ use std::{
 #[derive(Default)]
 pub struct SkillReadPathFormatter {
     working_directory: String,
-    context: RwLock<SkillReadContext>,
+    index: RwLock<SkillReadIndex>,
 }
 impl SkillReadPathFormatter {
     pub fn new(
@@ -22,31 +22,28 @@ impl SkillReadPathFormatter {
     ) -> Self {
         Self {
             working_directory,
-            context: RwLock::new(SkillReadContext::new(root_locations, skills)),
+            index: RwLock::new(SkillReadIndex::new(root_locations, skills)),
         }
     }
-    pub fn replace_context(&self, root_locations: Vec<SkillRootLocation>, skills: &[Skill]) {
+    pub fn replace_index(&self, root_locations: Vec<SkillRootLocation>, skills: &[Skill]) {
         *self
-            .context
+            .index
             .write()
             .unwrap_or_else(|error| error.into_inner()) =
-            SkillReadContext::new(root_locations, skills);
+            SkillReadIndex::new(root_locations, skills);
     }
     fn shorten(&self, path: &str) -> Option<String> {
         let path = normalize_skill_path(path, Some(&self.working_directory)).ok()?;
-        self.context
+        self.index
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .shorten(&path)
     }
     fn format_skill_read(&self, path: &str, result: &str) -> Option<String> {
         let normalized = normalize_skill_path(path, Some(&self.working_directory)).ok()?;
-        let context = self
-            .context
-            .read()
-            .unwrap_or_else(|error| error.into_inner());
-        let name = context.names.get(&normalized)?;
-        let display_path = context.shorten(&normalized).unwrap_or_else(|| path.into());
+        let index = self.index.read().unwrap_or_else(|error| error.into_inner());
+        let name = index.names.get(&normalized)?;
+        let display_path = index.shorten(&normalized).unwrap_or_else(|| path.into());
         let mut range = None;
         for line in result.lines() {
             let Some(number) = line
@@ -72,11 +69,11 @@ impl SkillReadPathFormatter {
 }
 
 #[derive(Default)]
-struct SkillReadContext {
+struct SkillReadIndex {
     root_locations: Vec<SkillRootLocation>,
     names: HashMap<String, String>,
 }
-impl SkillReadContext {
+impl SkillReadIndex {
     fn new(root_locations: Vec<SkillRootLocation>, skills: &[Skill]) -> Self {
         let names = skills
             .iter()

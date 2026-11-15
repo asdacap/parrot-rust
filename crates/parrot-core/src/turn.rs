@@ -5,7 +5,7 @@ use crate::{
     ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationTurn, Error,
     ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome, Provider, Role,
     SkillProvider, States, ToolCallReceipt, Tools, TurnEngine, TurnHooks, TurnLifecycle,
-    TurnServices, context, execute_tools, rendering, skills, steer_status,
+    TurnServices, context, rendering, skills, status::steer_status, tool_settlement::execute_tools,
 };
 
 struct ExecutionServices<'a> {
@@ -59,23 +59,23 @@ async fn execute_turn(
                 })
                 .await?;
         }
-        let context = skills
+        let skill_prompt = skills
             .prepare(states, services.skills, &inputs, cancellation)
             .await?;
-        if !context.content.is_empty() {
+        if !skill_prompt.content.is_empty() {
             states
                 .add_conversation_messages(ConversationAddition {
-                    messages: vec![Message::text(Role::User, context.content)],
+                    messages: vec![Message::text(Role::User, skill_prompt.content)],
                     persistence: ConversationPersistence::Append {
                         origin: ConversationOrigin::System,
                         event: ConversationEvent::Notice {
-                            kind: "skill_context".into(),
+                            kind: "skill_prompt".into(),
                             notice: String::new(),
                         },
                     },
                 })
                 .await?;
-            for path in context.loaded_paths {
+            for path in skill_prompt.loaded_paths {
                 services
                     .publisher
                     .publish(ConversationEvent::SkillLoaded { path }, cancellation)

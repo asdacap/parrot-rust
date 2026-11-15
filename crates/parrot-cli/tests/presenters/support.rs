@@ -4,21 +4,21 @@ use std::time::Duration;
 
 use parrot_cli::presenters::{
     EnhancedSessionPresenter, Presentation, PresentationUpdate, PresenterResult,
-    SessionReplayContext, ToolPresenterRegistry, tools::read::SkillReadPathFormatter,
+    SessionReplayState, ToolPresenterRegistry, tools::read::SkillReadPathFormatter,
 };
 use parrot_domain::protocol::messages::parrot as wire;
 
 /// Drives a session presenter like the enhanced frontend: each event is
 /// applied and then the live items are materialized. A harness that owns its
-/// replay context advances it before the presenter, as the prepared stream does.
+/// replay state advances it before the presenter, as the prepared stream does.
 pub struct SessionHarness {
     presenter: EnhancedSessionPresenter,
-    replay: Option<Arc<Mutex<SessionReplayContext>>>,
+    replay: Option<Arc<Mutex<SessionReplayState>>>,
 }
 
 impl SessionHarness {
     pub fn new(columns: usize, color: bool, replaying: bool) -> Self {
-        let replay = Arc::new(Mutex::new(SessionReplayContext::new(replaying)));
+        let replay = Arc::new(Mutex::new(SessionReplayState::new(replaying)));
         Self {
             presenter: EnhancedSessionPresenter::with_registry(
                 columns,
@@ -33,7 +33,7 @@ impl SessionHarness {
         }
     }
 
-    /// The caller owns the presenter's replay context and advances it itself.
+    /// The caller owns the presenter's replay state and advances it itself.
     pub fn external(presenter: EnhancedSessionPresenter) -> Self {
         Self {
             presenter,

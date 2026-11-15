@@ -7,7 +7,7 @@ use parrot_storage::{
 
 #[tokio::test]
 async fn provider_template_failure_retains_native_prompt_error_and_terminal_publication() {
-    use parrot_runtime::prompt_context::{SystemPromptProvider, TemplateSystemPromptProvider};
+    use parrot_runtime::prompt_assembly::{SystemPromptProvider, TemplateSystemPromptProvider};
 
     let fixture = Fixture::new();
     let history = fixture.history();
@@ -50,7 +50,7 @@ async fn provider_template_failure_retains_native_prompt_error_and_terminal_publ
 
     assert!(matches!(
         error,
-        ContextError::Prompt(parrot_runtime::prompt_context::PromptError::Template(_))
+        ContextError::Prompt(parrot_runtime::prompt_assembly::PromptError::Template(_))
     ));
     assert!(provider.requests.lock().unwrap().is_empty());
     {
@@ -503,6 +503,7 @@ async fn oversized_durable_history_is_truncated_only_in_summary_requests_without
             trigger_percent: 90,
             target_percent: 30,
             maximum_input_tokens: 2000,
+            maximum_output_tokens: 0,
             summary_output_tokens: 100,
             summary_instructions: String::new(),
             summary_prefix: String::new(),

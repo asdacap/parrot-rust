@@ -76,7 +76,7 @@ impl Session for CaptureProvider {
 }
 
 #[tokio::test]
-async fn production_requests_include_host_context_and_explicit_or_inherited_scope() {
+async fn production_requests_include_host_instructions_and_explicit_or_inherited_scope() {
     let mut fixture = Fixture::new();
     let global = fixture.roots.current().config().join("AGENTS.md");
     std::fs::create_dir_all(global.parent().unwrap()).unwrap();

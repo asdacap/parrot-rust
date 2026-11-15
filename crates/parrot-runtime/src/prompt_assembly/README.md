@@ -1,6 +1,6 @@
-# Prompt context and skills
+# Prompt assembly and skills
 
-Prompt context combines configured system prompts, model guidance, identity,
+Prompt assembly combines configured system prompts, model guidance, identity,
 standing instructions, AGENTS files, environment information, and skill metadata.
 Descriptions of permissions remain prompt text and never grant authority.
 
@@ -38,7 +38,7 @@ Displayed paths use the selected session resources and agent scratch identity.
 Path compression prefers longer parents and respects literal environment
 overrides. The platform identifier reflects the native operating system and
 architecture. Available command names are sorted ordinally. The expected `bwrap`
-entry is suppressed on macOS. Git context uses the resolved project workspace.
+entry is suppressed on macOS. Git details use the resolved project workspace.
 These displayed values do not authorize filesystem or command access.
 
 ## Skill discovery
@@ -62,7 +62,7 @@ refresh. The refreshed metadata is visible to later reads in the same prompt
 epoch. Body reads use fresh authorization against the expected physical target.
 Unavailable reads return diagnostics rather than an invented skill body.
 
-## Turn-scoped skill context
+## Turn-scoped skill prompt
 
 A turn captures its skill catalog. Selected skill identities are deduplicated
 before their bodies are read, and loaded content is ordered consistently. The
@@ -85,7 +85,7 @@ intent, so no manually maintained source version is required.
 
 ## Capability limits
 
-Prompt context requires authorized reads and installation. Inert descriptions and
+Prompt assembly requires authorized reads and installation. Inert descriptions and
 resolved-path reports do not prove filesystem enforcement. Configuration and
 credentials do not gain legacy fallback from prompt discovery. Known blocked
 captured-file approval widening remains unresolved by this component.

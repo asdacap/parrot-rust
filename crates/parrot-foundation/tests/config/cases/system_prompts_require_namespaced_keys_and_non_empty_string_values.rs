@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for content in [
@@ -15,7 +15,7 @@ fn source_assertions() {
         "system_prompts:\n  'custom:guidance ': value\n",
         "system_prompts:\n  \"custom:guidance\\tbad\": value\n",
     ] {
-        let context = Context::new();
-        assert!(context.configured(content).is_err(), "{content}");
+        let fixture = ConfigFixture::new();
+        assert!(fixture.configured(content).is_err(), "{content}");
     }
 }

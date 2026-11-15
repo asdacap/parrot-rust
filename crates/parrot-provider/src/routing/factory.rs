@@ -56,7 +56,7 @@ impl ProviderImplementation {
     }
 }
 
-pub struct ProviderBuildContext<'a> {
+pub struct ProviderBuildInputs<'a> {
     pub id: &'a str,
     pub config: &'a ProviderConfig,
     pub credentials: &'a dyn CredentialSources,
@@ -73,33 +73,33 @@ pub struct BuiltProvider {
     pub implementation: ProviderImplementation,
 }
 
-pub fn build_provider(context: ProviderBuildContext<'_>) -> Result<BuiltProvider, Error> {
-    let implementation = ProviderImplementation::resolve(context.id, context.config);
-    let config = context.config;
-    let models = read_declared(context.id, &config.models);
-    let defaults = read_defaults(context.id, &config.model_defaults);
+pub fn build_provider(inputs: ProviderBuildInputs<'_>) -> Result<BuiltProvider, Error> {
+    let implementation = ProviderImplementation::resolve(inputs.id, inputs.config);
+    let config = inputs.config;
+    let models = read_declared(inputs.id, &config.models);
+    let defaults = read_defaults(inputs.id, &config.model_defaults);
     let provider: Arc<dyn Provider> = match implementation {
         ProviderImplementation::ChatGpt => {
-            let mut options = ChatGptOptions::new(context.credentials.oauth("chatgpt"));
+            let mut options = ChatGptOptions::new(inputs.credentials.oauth("chatgpt"));
             options.models = models;
             options.model_defaults = defaults;
-            options.external_models = context.external_models.to_vec();
+            options.external_models = inputs.external_models.to_vec();
             options.disable_websocket = config.disable_websocket;
-            options.maximum_request_bytes = context.maximum_request_bytes;
+            options.maximum_request_bytes = inputs.maximum_request_bytes;
             options.header_timeout_ms = i64::from(config.header_timeout_ms);
             options.stream_idle_timeout_ms = i64::from(config.stream_idle_timeout_ms);
             Arc::new(ChatGptProvider::new_with_images(
                 options,
-                context.transport,
-                context.images,
-                context.connector,
+                inputs.transport,
+                inputs.images,
+                inputs.connector,
             )?)
         }
         ProviderImplementation::Anthropic => {
             let keys = Arc::new(AnthropicApiKeySource::new(
-                context.credentials.api_key(context.id, &config.api_key_env),
+                inputs.credentials.api_key(inputs.id, &config.api_key_env),
             ));
-            let mut options = AnthropicOptions::new(context.id, &config.base_url, keys);
+            let mut options = AnthropicOptions::new(inputs.id, &config.base_url, keys);
             options.headers = config
                 .headers
                 .iter()
@@ -109,12 +109,12 @@ pub fn build_provider(context: ProviderBuildContext<'_>) -> Result<BuiltProvider
             options.allow_insecure_remote = config.allow_insecure_remote;
             options.models = models;
             options.model_defaults = defaults;
-            options.external_models = context.external_models.to_vec();
-            options.maximum_request_bytes = context.maximum_request_bytes;
+            options.external_models = inputs.external_models.to_vec();
+            options.maximum_request_bytes = inputs.maximum_request_bytes;
             options.header_timeout_ms = i64::from(config.header_timeout_ms);
             options.stream_idle_timeout_ms = i64::from(config.stream_idle_timeout_ms);
             let provider =
-                AnthropicProvider::new(options, context.transport).map_err(map_provider_error)?;
+                AnthropicProvider::new(options, inputs.transport).map_err(map_provider_error)?;
             Arc::new(AnthropicBridge::new(Arc::new(provider)))
         }
         _ => {
@@ -124,7 +124,7 @@ pub fn build_provider(context: ProviderBuildContext<'_>) -> Result<BuiltProvider
             ) {
                 return Err(Error::Provider(format!(
                     "provider: unsupported provider type \"{}\" for \"{}\"",
-                    config.provider_type, context.id
+                    config.provider_type, inputs.id
                 )));
             }
             let protocol = match config.protocol.as_str() {
@@ -133,14 +133,14 @@ pub fn build_provider(context: ProviderBuildContext<'_>) -> Result<BuiltProvider
                 value => {
                     return Err(Error::Provider(format!(
                         "provider: unsupported protocol \"{value}\" for \"{}\"",
-                        context.id
+                        inputs.id
                     )));
                 }
             };
             let mut options = CompatibleOptions::new(
-                context.id,
+                inputs.id,
                 &config.base_url,
-                context.credentials.api_key(context.id, &config.api_key_env),
+                inputs.credentials.api_key(inputs.id, &config.api_key_env),
             );
             options.protocol = protocol;
             options.headers = config
@@ -151,12 +151,12 @@ pub fn build_provider(context: ProviderBuildContext<'_>) -> Result<BuiltProvider
             options.allow_insecure_localhost = config.allow_insecure_localhost;
             options.allow_insecure_remote = config.allow_insecure_remote;
             options.disable_websocket = config.disable_websocket;
-            options.maximum_request_bytes = context.maximum_request_bytes;
+            options.maximum_request_bytes = inputs.maximum_request_bytes;
             options.header_timeout_ms = i64::from(config.header_timeout_ms);
             options.stream_idle_timeout_ms = i64::from(config.stream_idle_timeout_ms);
             options.models = models;
             options.model_defaults = defaults;
-            options.external_models = context.external_models.to_vec();
+            options.external_models = inputs.external_models.to_vec();
             options.session_header.clone_from(&config.session_header);
             match implementation {
                 ProviderImplementation::OpenAi => {
@@ -182,13 +182,13 @@ pub fn build_provider(context: ProviderBuildContext<'_>) -> Result<BuiltProvider
             );
             usage_options.allow_insecure_localhost = options.allow_insecure_localhost;
             usage_options.allow_insecure_remote = options.allow_insecure_remote;
-            let usage_transport = context.transport.clone();
+            let usage_transport = inputs.transport.clone();
             let compatible: Arc<dyn Provider> =
                 Arc::new(OpenAICompatibleProvider::new_with_images(
                     options,
-                    context.transport,
-                    context.images,
-                    context.connector,
+                    inputs.transport,
+                    inputs.images,
+                    inputs.connector,
                 )?);
             match implementation {
                 ProviderImplementation::OpenCodeGo => Arc::new(UsageReportingProvider::new(

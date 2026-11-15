@@ -26,7 +26,7 @@ use parrot_provider::{
 };
 use parrot_runtime::{
     interactions::*,
-    prompt_context::{SkillMetadata, SkillSnapshot},
+    prompt_assembly::{SkillMetadata, SkillSnapshot},
 };
 use parrot_storage::{
     artifacts::ImageArtifactMetadata,

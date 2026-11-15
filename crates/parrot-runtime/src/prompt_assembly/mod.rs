@@ -28,7 +28,7 @@ mod sections;
 mod skills_discovery;
 pub use skills_discovery::{
     MAXIMUM_SKILL_FILE_BYTES, SkillCatalog, SkillConfigurationSource, SkillConfigurationWriter,
-    SkillDiscoveryContext, SkillLoadError, SkillSnapshot, discover_skills, read_skill_file,
+    SkillLoadError, SkillPathBases, SkillSnapshot, discover_skills, read_skill_file,
     resolve_skill_roots,
 };
 mod agent_skills;

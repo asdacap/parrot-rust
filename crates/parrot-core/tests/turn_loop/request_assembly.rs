@@ -12,7 +12,7 @@ fn state_supplies_fresh_rendered_instructions_on_each_request() {
         .push_back(vec!["retry".into()]);
     state.request().renderings = ["first state instructions", "updated state instructions"]
         .into_iter()
-        .map(|instructions| RenderedContext {
+        .map(|instructions| RenderedRequest {
             instructions: instructions.into(),
             maximum_output_tokens: 100,
             messages: Vec::new(),
@@ -84,7 +84,7 @@ fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparati
         },
     ];
     let instructions = "prepared instructions \n\tunchanged".to_owned();
-    state.request().renderings.push_back(RenderedContext {
+    state.request().renderings.push_back(RenderedRequest {
         instructions: instructions.clone(),
         maximum_output_tokens: 1379,
         messages: messages.clone(),
@@ -124,7 +124,7 @@ fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparati
 }
 
 #[test]
-fn oversized_compaction_retries_prepare_and_read_fresh_context_and_messages() {
+fn oversized_compaction_retries_prepare_and_read_fresh_instructions_and_messages() {
     let mut state = MemoryState::new([
         Reply::TooLarge("oversized"),
         Reply::final_response("answer"),
@@ -140,12 +140,12 @@ fn oversized_compaction_retries_prepare_and_read_fresh_context_and_messages() {
         ..Message::default()
     }];
     state.request().renderings = [
-        RenderedContext {
+        RenderedRequest {
             instructions: "before compaction".into(),
             maximum_output_tokens: 91,
             messages: before.clone(),
         },
-        RenderedContext {
+        RenderedRequest {
             instructions: "after compaction".into(),
             maximum_output_tokens: 4093,
             messages: after.clone(),
@@ -169,7 +169,7 @@ fn oversized_compaction_retries_prepare_and_read_fresh_context_and_messages() {
 }
 
 #[test]
-fn tool_followup_reads_messages_and_context_again_after_results_are_recorded() {
+fn tool_followup_reads_messages_and_instructions_again_after_results_are_recorded() {
     let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     let messages = vec![Message {
         role: Role::Tool,
@@ -178,12 +178,12 @@ fn tool_followup_reads_messages_and_context_again_after_results_are_recorded() {
         ..Message::default()
     }];
     state.request().renderings = [
-        RenderedContext {
+        RenderedRequest {
             instructions: "initial".into(),
             maximum_output_tokens: 83,
             messages: vec![],
         },
-        RenderedContext {
+        RenderedRequest {
             instructions: "followup".into(),
             maximum_output_tokens: 41,
             messages: messages.clone(),

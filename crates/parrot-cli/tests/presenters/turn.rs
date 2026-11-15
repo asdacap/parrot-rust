@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use parrot_cli::presenters::EnhancedTurnRenderer;
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackRenderOptions,
 };
 use parrot_domain::protocol::messages::parrot::{self as wire, event::Payload};
 use protobuf::Message;
@@ -56,7 +56,7 @@ pub(crate) fn commits(items: &[Arc<dyn ScrollbackItem>], columns: usize) -> Stri
     items
         .iter()
         .flat_map(|item| {
-            item.render(ScrollbackRenderContext {
+            item.render(ScrollbackRenderOptions {
                 columns,
                 color: false,
                 inline_diff: true,
@@ -74,7 +74,7 @@ pub(crate) fn live(items: &[Arc<dyn LiveBufferItem>], columns: usize) -> String 
     items
         .iter()
         .flat_map(|item| {
-            item.render(LiveBufferRenderContext {
+            item.render(LiveBufferRenderOptions {
                 columns,
                 color: false,
             })

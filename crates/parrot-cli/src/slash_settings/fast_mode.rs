@@ -1,6 +1,6 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 
-use crate::slash_sessions::{CommandContext, SlashCommand, SlashFailure};
+use crate::slash_sessions::{CommandEnvironment, SlashCommand, SlashFailure};
 
 pub struct FastCommand;
 
@@ -16,25 +16,28 @@ impl SlashCommand for FastCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let enabled = match arguments.trim() {
-                "" => !context.session.get_fast_mode(cancellation).await?,
+                "" => !environment.session.get_fast_mode(cancellation).await?,
                 "on" => true,
                 "off" => false,
                 _ => {
-                    context
+                    environment
                         .dialog
                         .show_error("Usage: /fast [on|off]", cancellation)
                         .await?;
                     return Ok(());
                 }
             };
-            let enabled = context.session.set_fast_mode(enabled, cancellation).await?;
+            let enabled = environment
+                .session
+                .set_fast_mode(enabled, cancellation)
+                .await?;
             let state = if enabled { "on" } else { "off" };
-            context
+            environment
                 .dialog
                 .show(
                     &[format!(

@@ -1,6 +1,6 @@
 use super::{FetchError, Request, WebFetcher};
 use parrot_domain::contracts::async_ops::{BoxFuture, OperationError};
-use parrot_domain::contracts::security::{AccessSnapshot, InvocationContext};
+use parrot_domain::contracts::security::{AccessSnapshot, InvocationScope};
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -20,7 +20,7 @@ pub struct Output {
 pub struct WebFetchTool<Security, Selection> {
     fetcher: Arc<WebFetcher>,
     definition: ConfiguredToolDefinition,
-    context: PhantomData<fn() -> (Security, Selection)>,
+    marker: PhantomData<fn() -> (Security, Selection)>,
 }
 
 impl<Security, Selection> WebFetchTool<Security, Selection> {
@@ -28,7 +28,7 @@ impl<Security, Selection> WebFetchTool<Security, Selection> {
         Self {
             fetcher,
             definition,
-            context: PhantomData,
+            marker: PhantomData,
         }
     }
 }
@@ -58,13 +58,13 @@ impl<Security: AccessSnapshot + 'static, Selection: Send + 'static> Tool
     fn invoke<'a>(
         &'a self,
         invocation: Invocation,
-        context: InvocationContext<'a, Security, Selection>,
+        scope: InvocationScope<'a, Security, Selection>,
     ) -> BoxFuture<'a, Result<Output, OperationError<FetchError>>> {
         Box::pin(async move {
             let result = match Request::parse(&invocation.arguments_json) {
                 Ok(request) => self
                     .fetcher
-                    .fetch(request, context.cancellation())
+                    .fetch(request, scope.cancellation())
                     .await
                     .map(|result| Output { text: result.text }),
                 Err(error) => Err(OperationError::Failed(error)),
@@ -77,7 +77,7 @@ impl<Security: AccessSnapshot + 'static, Selection: Send + 'static> Tool
                         .render(
                             "tool-result.error",
                             &[("message".to_owned(), serde_json::Value::String(message))],
-                            context.cancellation(),
+                            scope.cancellation(),
                         )
                         .map_err(|error| match error {
                             OperationError::Cancelled => OperationError::Cancelled,

@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for content in [
@@ -14,7 +14,7 @@ fn source_assertions() {
         "cli_utilities:\n  expected: ['bin/git']\n",
         "cli_utilities:\n  extra: []\n",
     ] {
-        let context = Context::new();
-        assert!(context.configured(content).is_err(), "{content}");
+        let fixture = ConfigFixture::new();
+        assert!(fixture.configured(content).is_err(), "{content}");
     }
 }

@@ -1,9 +1,9 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let configuration = context
+    let fixture = ConfigFixture::new();
+    let configuration = fixture
         .configured("profiles:\n  plan:\n    prompt: Custom plan guidance\n    max_turns: 7\n")
         .unwrap();
     let profile = &configuration.runtime.profiles["plan"];

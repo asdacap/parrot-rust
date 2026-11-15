@@ -17,7 +17,7 @@ use parrot_provider::{
     responses_websocket::{ConnectedSocket, Connector, Headers, WebSocketError},
     routing::{
         auth::FoundationCredentials,
-        factory::{ProviderBuildContext, build_provider},
+        factory::{ProviderBuildInputs, build_provider},
         usage::{KimiUsageReporter, OpenCodeGoUsageReporter},
     },
     sessions::{
@@ -374,7 +374,7 @@ async fn run_observation(case: &Value, composed: bool) -> Result<Value, String> 
         Arc::new(UsageReportingProvider::new(compatible, reporter))
     } else {
         let config = provider_config();
-        match build_provider(ProviderBuildContext {
+        match build_provider(ProviderBuildInputs {
             id,
             config: &config,
             credentials: &credentials,

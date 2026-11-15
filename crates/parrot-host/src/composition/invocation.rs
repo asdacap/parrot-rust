@@ -1,8 +1,8 @@
-//! Retained context-tool routing. Status observes the already-borrowed drain.
+//! Retained invocation-tool routing. Status observes the already-borrowed drain.
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
-        security::{AccessSnapshot, InvocationContext},
+        security::{AccessSnapshot, InvocationScope},
         tools::Tool,
     },
     values::{context::ContextSnapshot, progress::ProgressUpdate},
@@ -11,8 +11,8 @@ use parrot_runtime::{
     agent_turn::services::{TurnError, TurnSelection},
     compaction::EpochInput,
     tool_settlement::{
-        BorrowedTool, BorrowedToolContext, SharedSecurity, ToolFailure, ToolInvocation,
-        ToolMetadata, ToolOutput,
+        BorrowedTool, BorrowedToolState, SharedSecurity, ToolFailure, ToolInvocation, ToolMetadata,
+        ToolOutput,
     },
 };
 use parrot_tools::{
@@ -44,11 +44,11 @@ struct InlineRoute {
 }
 
 /// Owned selection handed to the retained tool. Borrowed resources stay in its invocation.
-pub struct ContextSelection<S: AccessSnapshot> {
+pub struct InvocationSelection<S: AccessSnapshot> {
     pub turn: TurnSelection<S>,
     route: Option<InlineRoute>,
 }
-impl<S: AccessSnapshot> Clone for ContextSelection<S> {
+impl<S: AccessSnapshot> Clone for InvocationSelection<S> {
     fn clone(&self) -> Self {
         Self {
             turn: self.turn.clone(),
@@ -56,7 +56,7 @@ impl<S: AccessSnapshot> Clone for ContextSelection<S> {
         }
     }
 }
-impl<S: AccessSnapshot> ContextSelection<S> {
+impl<S: AccessSnapshot> InvocationSelection<S> {
     pub fn external(turn: TurnSelection<S>) -> Self {
         Self { turn, route: None }
     }
@@ -80,21 +80,21 @@ impl<S: AccessSnapshot> ContextSelection<S> {
                 .send(InlineRequest::Estimate { reply })
                 .await
                 .map_err(|_| {
-                    OperationError::Failed(failure("The context invocation has ended."))
+                    OperationError::Failed(failure("The borrowed invocation has ended."))
                 })?;
-            response
-                .await
-                .map_err(|_| OperationError::Failed(failure("The context invocation has ended.")))?
+            response.await.map_err(|_| {
+                OperationError::Failed(failure("The borrowed invocation has ended."))
+            })?
         })
     }
 }
 
-/// Delegates retained session operations while status uses the invocation's borrowed context.
-pub struct ContextServices<S: AccessSnapshot, O: SessionServices> {
+/// Delegates retained session operations while status uses the invocation's borrowed resources.
+pub struct InvocationServices<S: AccessSnapshot, O: SessionServices> {
     ancillary: Arc<O>,
     marker: std::marker::PhantomData<fn() -> S>,
 }
-impl<S: AccessSnapshot, O: SessionServices> ContextServices<S, O> {
+impl<S: AccessSnapshot, O: SessionServices> InvocationServices<S, O> {
     pub fn new(ancillary: Arc<O>) -> Self {
         Self {
             ancillary,
@@ -102,13 +102,13 @@ impl<S: AccessSnapshot, O: SessionServices> ContextServices<S, O> {
         }
     }
 }
-impl<S, O> SessionServices for ContextServices<S, O>
+impl<S, O> SessionServices for InvocationServices<S, O>
 where
     S: AccessSnapshot + 'static,
-    O: SessionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>>,
+    O: SessionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>,
 {
     type Security = SharedSecurity<S>;
-    type Selection = ContextSelection<S>;
+    type Selection = InvocationSelection<S>;
     fn set_reminder<'a>(
         &'a self,
         title: &'a str,
@@ -137,14 +137,14 @@ where
     }
     fn runtime_status<'a>(
         &'a self,
-        selection: &'a ContextSelection<S>,
+        selection: &'a InvocationSelection<S>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, OperationResult<String, Failure>> {
         self.ancillary.runtime_status(selection, cancellation)
     }
     fn statistics_status<'a>(
         &'a self,
-        selection: &'a ContextSelection<S>,
+        selection: &'a InvocationSelection<S>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, OperationResult<String, Failure>> {
         self.ancillary.statistics_status(selection, cancellation)
@@ -154,13 +154,13 @@ where
 type RetainedSessionTool<S> = dyn Tool<
         Definition = parrot_domain::values::tools::ConfiguredToolDefinition,
         Invocation = parrot_tools::session::Invocation,
-        Selection = ContextSelection<S>,
+        Selection = InvocationSelection<S>,
         Security = SharedSecurity<S>,
         Output = parrot_tools::session::Output,
         Error = Failure,
     >;
 enum CompactToolHandle<S: AccessSnapshot + 'static> {
-    Catalog(Arc<catalog::RetainedTool<SharedSecurity<S>, ContextSelection<S>>>),
+    Catalog(Arc<catalog::RetainedTool<SharedSecurity<S>, InvocationSelection<S>>>),
     Session(Arc<RetainedSessionTool<S>>),
 }
 pub struct RetainedCompactTool<S: AccessSnapshot + 'static> {
@@ -169,22 +169,22 @@ pub struct RetainedCompactTool<S: AccessSnapshot + 'static> {
 }
 impl<S: AccessSnapshot + 'static> RetainedCompactTool<S> {
     pub fn new(
-        factory: &catalog::Factory<SharedSecurity<S>, ContextSelection<S>>,
+        factory: &catalog::Factory<SharedSecurity<S>, InvocationSelection<S>>,
     ) -> Result<Self, Failure> {
         Self::from_factory(factory, "compact_context")
     }
     pub fn status(
-        factory: &catalog::Factory<SharedSecurity<S>, ContextSelection<S>>,
+        factory: &catalog::Factory<SharedSecurity<S>, InvocationSelection<S>>,
     ) -> Result<Self, Failure> {
         Self::from_factory(factory, "status")
     }
     fn from_factory(
-        factory: &catalog::Factory<SharedSecurity<S>, ContextSelection<S>>,
+        factory: &catalog::Factory<SharedSecurity<S>, InvocationSelection<S>>,
         name: &str,
     ) -> Result<Self, Failure> {
         if factory.name() != name {
             return Err(failure(format!(
-                "The borrowed context adapter requires the {name} factory."
+                "The borrowed invocation adapter requires the {name} factory."
             )));
         }
         Ok(Self {
@@ -203,7 +203,8 @@ impl<S: AccessSnapshot + 'static> RetainedCompactTool<S> {
         tool: Arc<parrot_tools::session::SessionTool<O>>,
     ) -> Result<Self, Failure>
     where
-        O: SessionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>> + 'static,
+        O: SessionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>
+            + 'static,
     {
         Self::from_session_kind(tool, "compact_context")
     }
@@ -211,7 +212,8 @@ impl<S: AccessSnapshot + 'static> RetainedCompactTool<S> {
         tool: Arc<parrot_tools::session::SessionTool<O>>,
     ) -> Result<Self, Failure>
     where
-        O: SessionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>> + 'static,
+        O: SessionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>
+            + 'static,
     {
         Self::from_session_kind(tool, "status")
     }
@@ -220,11 +222,12 @@ impl<S: AccessSnapshot + 'static> RetainedCompactTool<S> {
         name: &str,
     ) -> Result<Self, Failure>
     where
-        O: SessionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>> + 'static,
+        O: SessionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>
+            + 'static,
     {
         if tool.name() != name {
             return Err(failure(format!(
-                "The borrowed context adapter requires the {name} tool."
+                "The borrowed invocation adapter requires the {name} tool."
             )));
         }
         Ok(Self {
@@ -249,17 +252,17 @@ impl<S: AccessSnapshot + 'static> BorrowedTool<S> for RetainedCompactTool<S> {
     fn invoke<'a>(
         &'a self,
         invocation: ToolInvocation,
-        context: BorrowedToolContext<'a, S>,
+        state: BorrowedToolState<'a, S>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, OperationResult<ToolOutput, ToolFailure>> {
         Box::pin(async move {
             let (sender, mut requests) = mpsc::channel::<InlineRequest>(1);
-            let scoped = ContextSelection {
-                turn: context.selection.clone(),
+            let scoped = InvocationSelection {
+                turn: state.selection.clone(),
                 route: Some(InlineRoute { sender }),
             };
             let selected = catalog::Selection {
-                requested_model: context
+                requested_model: state
                     .selection
                     .model
                     .requested_selector
@@ -268,7 +271,7 @@ impl<S: AccessSnapshot + 'static> BorrowedTool<S> for RetainedCompactTool<S> {
                     .into(),
                 scoped,
             };
-            let security = SharedSecurity(context.selection.security.clone());
+            let security = SharedSecurity(state.selection.security.clone());
             let call = catalog::Invocation {
                 call_id: invocation.call_id,
                 assistant_sequence: invocation.assistant_sequence,
@@ -278,14 +281,13 @@ impl<S: AccessSnapshot + 'static> BorrowedTool<S> for RetainedCompactTool<S> {
             };
             let invoke: BoxFuture<'_, OperationResult<catalog::Output, catalog::Error>> =
                 match &self.tool {
-                    CompactToolHandle::Catalog(tool) => tool.invoke(
-                        call,
-                        InvocationContext::new(security, selected, cancellation),
-                    ),
+                    CompactToolHandle::Catalog(tool) => {
+                        tool.invoke(call, InvocationScope::new(security, selected, cancellation))
+                    }
                     CompactToolHandle::Session(tool) => Box::pin(async move {
                         tool.invoke(
                             call.into(),
-                            InvocationContext::new(security, selected.scoped, cancellation),
+                            InvocationScope::new(security, selected.scoped, cancellation),
                         )
                         .await
                         .map(Into::into)
@@ -307,15 +309,15 @@ impl<S: AccessSnapshot + 'static> BorrowedTool<S> for RetainedCompactTool<S> {
                         });
                     }
                     Some(InlineRequest::Estimate { reply }) = requests.recv() => {
-                        let result = context.resources.context.estimate_context(EpochInput {
-                            selection: &context.selection.model,
-                            tools: context.definitions,
-                            conversation: context.resources.conversation,
-                            agent_state: context.resources.agent_state,
-                            prompt: context.resources.prompt,
-                            sessions: context.resources.sessions,
-                            status: context.resources.status,
-                            events: context.resources.events,
+                        let result = state.resources.context.estimate_context(EpochInput {
+                            selection: &state.selection.model,
+                            tools: state.definitions,
+                            conversation: state.resources.conversation,
+                            agent_state: state.resources.agent_state,
+                            prompt: state.resources.prompt,
+                            sessions: state.resources.sessions,
+                            status: state.resources.status,
+                            events: state.resources.events,
                         }, cancellation).await
                             .map_err(|error| turn_failure(TurnError::Context(error)));
                         let _ = reply.send(result);

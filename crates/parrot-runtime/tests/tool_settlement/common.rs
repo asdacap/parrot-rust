@@ -2,7 +2,7 @@ use super::*;
 pub use parrot_domain::{
     contracts::{
         async_ops::{Cancelled, Clock},
-        security::InvocationContext,
+        security::InvocationScope,
         tools::{ParallelSafety, Tool},
     },
     values::{activity::AgentSessionActivity, tools::ConfiguredToolDefinition},
@@ -194,7 +194,7 @@ impl Tool for RecordingTool {
     fn invoke<'a>(
         &'a self,
         invocation: ToolInvocation,
-        context: InvocationContext<'a, SharedSecurity<Security>, TurnSelection<Security>>,
+        scope: InvocationScope<'a, SharedSecurity<Security>, TurnSelection<Security>>,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         Box::pin(async move {
             let events = self.history.repository().events().replay().await.unwrap();
@@ -204,12 +204,12 @@ impl Tool for RecordingTool {
                 .unwrap()
                 .as_ref()
                 .and_then(|activity| activity.capture().current_tool);
-            let captured = context.security().snapshot().version;
+            let captured = scope.security().snapshot().version;
             self.calls.lock().unwrap().push(Observation {
                 id: invocation.call_id.clone(),
                 security: captured,
-                profile: context.selection().profile.id.clone(),
-                requested: context.selection().model.requested_selector.value.clone(),
+                profile: scope.selection().profile.id.clone(),
+                requested: scope.selection().model.requested_selector.value.clone(),
                 active,
                 starts: events
                     .iter()
@@ -230,13 +230,13 @@ impl Tool for RecordingTool {
                 gate.wait(if self.ignore_cancel {
                     &NeverCancelled
                 } else {
-                    context.cancellation()
+                    scope.cancellation()
                 })
                 .await
                 .map_err(|_| OperationError::Cancelled)?;
             }
             assert_eq!(
-                context.security().snapshot().version,
+                scope.security().snapshot().version,
                 captured,
                 "running immutable capture changed"
             );

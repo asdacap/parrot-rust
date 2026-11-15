@@ -1,10 +1,10 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for expected in [2, i32::MAX] {
-        let context = Context::new();
+        let fixture = ConfigFixture::new();
         assert_eq!(
-            context
+            fixture
                 .configured(&format!("agent_tasks:\n  maximum_attempts: {expected}\n"))
                 .unwrap()
                 .runtime

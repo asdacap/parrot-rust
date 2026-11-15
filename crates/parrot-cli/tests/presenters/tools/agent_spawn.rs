@@ -1,6 +1,6 @@
 use parrot_cli::presenters::{tools::agent_spawn::AgentSpawnToolPresenter, *};
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackRenderOptions,
 };
 
 fn rendered(
@@ -18,7 +18,7 @@ fn rendered(
         .unwrap();
     ScrollbackItem::render(
         &item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns,
             color,
             inline_diff: true,
@@ -44,7 +44,7 @@ fn useful_live_and_terminal_details() {
     assert_eq!(
         LiveBufferItem::render(
             &live,
-            LiveBufferRenderContext {
+            LiveBufferRenderOptions {
                 columns: 512,
                 color: false
             }

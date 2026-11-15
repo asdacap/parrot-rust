@@ -213,7 +213,7 @@ fn assert_terminal(sink: &Sink, outcome: &str, code: Option<&str>) {
 }
 
 #[tokio::test]
-async fn lazy_call_forwards_wrapped_events_tokens_retries_and_request_context() {
+async fn lazy_call_forwards_wrapped_events_tokens_retries_and_request_correlation() {
     let (session, sink, counts) = fixture(None, None);
     let mut stream = session.call(request()).unwrap();
     assert!(sink.entries().is_empty());

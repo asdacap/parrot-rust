@@ -151,14 +151,14 @@ impl Tool for DynamicTool {
     fn invoke<'a>(
         &'a self,
         invocation: ToolInvocation,
-        context: InvocationContext<'a, SharedSecurity<Security>, TurnSelection<Security>>,
+        scope: InvocationScope<'a, SharedSecurity<Security>, TurnSelection<Security>>,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         Box::pin(async move {
             self.gates[&invocation.call_id]
-                .wait(context.cancellation())
+                .wait(scope.cancellation())
                 .await
                 .map_err(|_| OperationError::Cancelled)?;
-            self.inner.invoke(invocation, context).await
+            self.inner.invoke(invocation, scope).await
         })
     }
 }

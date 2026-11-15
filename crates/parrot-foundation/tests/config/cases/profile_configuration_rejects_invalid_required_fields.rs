@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for content in [
@@ -8,7 +8,7 @@ fn source_assertions() {
         "profiles:\n  build:\n    max_turns: not-a-number\n",
         "profiles:\n  build:\n    max_turns: 1.5\n",
     ] {
-        let context = Context::new();
-        assert!(context.configured(content).is_err());
+        let fixture = ConfigFixture::new();
+        assert!(fixture.configured(content).is_err());
     }
 }

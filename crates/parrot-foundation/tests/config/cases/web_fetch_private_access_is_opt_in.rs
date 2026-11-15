@@ -1,9 +1,9 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let missing = Context::new();
+    let missing = ConfigFixture::new();
     assert!(!missing.load().unwrap().runtime.web_fetch_allow_private);
-    let configured = Context::new();
+    let configured = ConfigFixture::new();
     assert!(
         configured
             .configured("web_fetch:\n  allow_private: true\n")

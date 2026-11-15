@@ -1,8 +1,8 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let configuration = context
+    let fixture = ConfigFixture::new();
+    let configuration = fixture
         .configured("profiles:\n  thinker:\n    allowed_tools: []\n")
         .unwrap();
     assert_eq!(

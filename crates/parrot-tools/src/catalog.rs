@@ -9,7 +9,7 @@ use parrot_domain::{
         filesystem::{AuthorizedMutationService, AuthorizedReadService},
         interactions::{AgentCommunication, QuestionRequester},
         runtime::{AgentRuntime, TaskController},
-        security::{AccessSnapshot, InvocationContext},
+        security::{AccessSnapshot, InvocationScope},
         tools::{ParallelSafety, Tool},
     },
     values::tools::{ConfiguredToolDefinition, MissingToolDefinition, ToolDefinitionCatalog},
@@ -316,17 +316,13 @@ where
     fn invoke<'a>(
         &'a self,
         invocation: Invocation,
-        context: InvocationContext<'a, Self::Security, Selection<T>>,
+        scope: InvocationScope<'a, Self::Security, Selection<T>>,
     ) -> BoxFuture<'a, Result<Output, OperationError<Error>>> {
-        let selection = (self.selection)(context.selection());
-        let context = InvocationContext::new(
-            context.security().clone(),
-            selection,
-            context.cancellation(),
-        );
+        let selection = (self.selection)(scope.selection());
+        let scope = InvocationScope::new(scope.security().clone(), selection, scope.cancellation());
         Box::pin(async move {
             self.tool
-                .invoke(invocation.into(), context)
+                .invoke(invocation.into(), scope)
                 .await
                 .map(Into::into)
                 .map_err(|e| match e {

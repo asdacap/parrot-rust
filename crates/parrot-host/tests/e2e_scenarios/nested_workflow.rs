@@ -14,7 +14,7 @@ async fn catalog_task_worker_nested_child_wait_and_durable_progress_join_togethe
     let user = fixture.user();
     let registry = user.registry().unwrap();
     let controller = root
-        .get_service::<ScopedTaskController<Security, ContextSelection<Security>>>()
+        .get_service::<ScopedTaskController<Security, InvocationSelection<Security>>>()
         .unwrap();
     let gate = Arc::new(Semaphore::new(0));
     script(

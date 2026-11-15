@@ -17,7 +17,7 @@ use crate::{
         EpochInput, provider_message,
     },
     event_broker::{BrokerError, EventBroker},
-    prompt_context::{SessionPrompt, SystemPrompt},
+    prompt_assembly::{SessionPrompt, SystemPrompt},
 };
 use parrot_domain::values::tools::ToolCycleImageBudget;
 use parrot_domain::{

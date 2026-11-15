@@ -7,7 +7,7 @@ use tonic::Code;
 
 use crate::{
     dispatch::dialog::{DialogOption, SlashDialog},
-    slash_sessions::{CommandContext, SlashCommand, SlashFailure},
+    slash_sessions::{CommandEnvironment, SlashCommand, SlashFailure},
 };
 
 use super::{load, model_wizard::ModelWizard, rpc};
@@ -234,12 +234,12 @@ impl SlashCommand for ModelAliasCommand {
     fn run<'a>(
         &'a self,
         _arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
-            match self.run_inner(context.dialog, cancellation).await {
-                Err(SlashFailure::Rpc(status)) => context
+            match self.run_inner(environment.dialog, cancellation).await {
+                Err(SlashFailure::Rpc(status)) => environment
                     .dialog
                     .show_error(status.message(), cancellation)
                     .await

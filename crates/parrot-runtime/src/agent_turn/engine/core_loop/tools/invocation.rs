@@ -1,6 +1,6 @@
 use super::*;
 use parrot_domain::{
-    contracts::{async_ops::OperationError, security::InvocationContext},
+    contracts::{async_ops::OperationError, security::InvocationScope},
     protocol::messages::parrot::{Delivery, InputAdmitted, MessageContentPart, ToolStarted},
 };
 use parrot_storage::{
@@ -110,7 +110,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                         let security = SharedSecurity(invocation_selection.security.clone());
                         tool.invoke(
                             invocation,
-                            InvocationContext::new(security, invocation_selection, cancellation),
+                            InvocationScope::new(security, invocation_selection, cancellation),
                         )
                         .await
                     }
@@ -123,7 +123,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                         })?;
                         tool.invoke(
                             invocation,
-                            BorrowedToolContext {
+                            BorrowedToolState {
                                 selection: &invocation_selection,
                                 resources: reborrow(&mut resources),
                                 definitions: snapshot.definitions(),

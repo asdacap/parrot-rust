@@ -45,8 +45,8 @@ fn decode_model(id: &str, provider_id: &str, item: &Value) -> Model {
         model.name = name.to_owned();
         fields.insert(ModelMetadataFields::NAME);
     }
-    if let Some(context) = json_read::signed_i32(item, "context_length") {
-        model.context_window = context;
+    if let Some(window) = json_read::signed_i32(item, "context_length") {
+        model.context_window = window;
         fields.insert(ModelMetadataFields::CONTEXT_WINDOW);
     }
     if let Some(provider) = item.get("top_provider")

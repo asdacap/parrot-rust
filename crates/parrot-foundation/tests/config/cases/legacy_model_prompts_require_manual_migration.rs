@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for content in [
@@ -6,8 +6,8 @@ fn source_assertions() {
         "model_augment_system_prompts: null",
         "model_augment_system_prompts:\n  provider/model: Legacy prompt\nmodel_profiles:\n  provider/model:\n    system_prompt: New prompt",
     ] {
-        let context = Context::new();
-        let message = context.configured(content).unwrap_err().to_string();
+        let fixture = ConfigFixture::new();
+        let message = fixture.configured(content).unwrap_err().to_string();
         assert!(message.contains("model_augment_system_prompts is no longer supported"));
         assert!(message.contains("model_profiles.<selector>.system_prompt"));
     }

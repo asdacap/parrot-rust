@@ -15,7 +15,7 @@ use std::path::Path;
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_domain::contracts::paths::ResolvedRead;
-use parrot_domain::contracts::security::{AccessSnapshot, InvocationContext};
+use parrot_domain::contracts::security::{AccessSnapshot, InvocationScope};
 use parrot_tools::agents::{AgentSelection, ToolInvocation};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -64,8 +64,10 @@ fn invocation(arguments: &str) -> ToolInvocation {
         call_id: "call-9".into(),
     }
 }
-fn context(cancellation: &dyn Cancellation) -> InvocationContext<'_, Security, AgentSelection> {
-    InvocationContext::new(
+fn invocation_scope(
+    cancellation: &dyn Cancellation,
+) -> InvocationScope<'_, Security, AgentSelection> {
+    InvocationScope::new(
         Security(42),
         AgentSelection {
             requested_model: "captured/model".into(),

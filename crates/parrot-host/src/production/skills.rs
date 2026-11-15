@@ -2,7 +2,7 @@ use parrot_domain::{
     contracts::packaged_files::{InstallMissingError, InstallMissingErrorKind},
     values::identifiers::Identifier,
 };
-use parrot_runtime::prompt_context::{
+use parrot_runtime::prompt_assembly::{
     PACKAGED_SKILL_ASSETS, PackagedSkillsError, hash_packaged_skills,
 };
 use std::{fs, io, io::Write, path::Path};

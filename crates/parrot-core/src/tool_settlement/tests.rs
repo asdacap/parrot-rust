@@ -1,8 +1,9 @@
-use parrot_core::{
+use super::execute_tools;
+use crate::{
     BoxFuture, CancellationToken, ConfigKey, ConfigValue, Content, ConversationAddition,
     ConversationPersistence, ConversationReceipt, Error, Message, PromptTemplate, Role, States,
     ToolCall, ToolCallReceipt, ToolCatalog, ToolExecutionRequest, ToolRecovery, ToolResult,
-    ToolSettlement, ToolStatus, Tools, TurnFlags, execute_tools,
+    ToolSettlement, ToolStatus, Tools, TurnFlags,
 };
 use std::{
     future::Future,

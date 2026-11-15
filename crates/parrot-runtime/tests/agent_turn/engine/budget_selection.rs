@@ -214,6 +214,7 @@ impl BudgetRuntime {
                 trigger_percent: i32::MAX,
                 target_percent: 30,
                 maximum_input_tokens: 60000,
+                maximum_output_tokens: 0,
                 summary_output_tokens: 1024,
                 summary_instructions: String::new(),
                 summary_prefix: String::new(),
@@ -649,7 +650,7 @@ async fn intermediate_usage_calibrates_later_requests_even_when_the_stream_fails
 #[tokio::test]
 async fn actual_input_and_exhausted_context_fail_before_any_provider_request_with_typed_diagnostics()
  {
-    for (context, input_limit, message) in [
+    for (context_window, input_limit, message) in [
         (400_000, 1, "input limit"),
         (
             1,
@@ -663,7 +664,7 @@ async fn actual_input_and_exhausted_context_fail_before_any_provider_request_wit
             &fixture,
             &provider,
             BudgetLimits {
-                context_window: context,
+                context_window,
                 maximum_input_tokens: input_limit,
                 maximum_output_tokens: 0,
             },

@@ -31,7 +31,7 @@ use parrot_runtime::{
     children::*,
     compaction::*,
     event_broker::EventBroker,
-    prompt_context::{PromptResult, SystemPrompt},
+    prompt_assembly::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
     conversation::{AgentHistoryView, ConversationMessage, ConversationRepository, MessageRole},
@@ -238,6 +238,7 @@ impl Histories {
                 trigger_percent: 95,
                 target_percent: 30,
                 maximum_input_tokens: 60000,
+                maximum_output_tokens: 0,
                 summary_output_tokens: 1024,
                 summary_instructions: String::new(),
                 summary_prefix: String::new(),

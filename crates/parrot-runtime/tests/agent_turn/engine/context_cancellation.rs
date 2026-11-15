@@ -77,7 +77,7 @@ impl SystemPrompt for FailingEpochPrompt {
 
     fn sample_epoch<'a>(&'a mut self, _: &'a dyn Cancellation) -> BoxFuture<'a, PromptResult<()>> {
         Box::pin(async {
-            Err(parrot_runtime::prompt_context::PromptError::Context(
+            Err(parrot_runtime::prompt_assembly::PromptError::Context(
                 "epoch initialization failed".into(),
             ))
         })

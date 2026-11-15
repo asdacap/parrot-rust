@@ -1,15 +1,15 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_foundation::config::models::ProviderModelAliasDefaults;
 
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let baseline = context
+    let fixture = ConfigFixture::new();
+    let baseline = fixture
         .configured("")
         .unwrap()
         .models
         .provider_model_alias_defaults;
-    let defaults = context.configured("provider_model_alias_defaults:\n  chatgpt:\n    low_llm: chatgpt/custom-low\n  local:\n    low_llm: local/low\n    medium_llm: local/medium\n    high_llm: local/high\n    xhigh_llm: local/xhigh\n").unwrap().models.provider_model_alias_defaults;
+    let defaults = fixture.configured("provider_model_alias_defaults:\n  chatgpt:\n    low_llm: chatgpt/custom-low\n  local:\n    low_llm: local/low\n    medium_llm: local/medium\n    high_llm: local/high\n    xhigh_llm: local/xhigh\n").unwrap().models.provider_model_alias_defaults;
     assert_eq!(defaults["chatgpt"].low_model_string, "chatgpt/custom-low");
     assert_eq!(
         defaults["chatgpt"].xhigh_model_string,

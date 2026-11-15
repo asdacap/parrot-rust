@@ -1,8 +1,8 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let configuration = context
+    let fixture = ConfigFixture::new();
+    let configuration = fixture
         .configured("providers:\n  openai:\n    header_timeout_ms: 2500\n")
         .unwrap();
     let provider = &configuration.models.providers["openai"];

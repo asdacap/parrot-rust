@@ -5,7 +5,7 @@ use std::sync::Arc;
 const PRECEDENCE: &str = "This task is your current assignment and supersedes prior task instructions. Inherited parent history is context, not additional assignments.";
 
 #[tokio::test]
-async fn delivered_default_assignment_places_precedence_after_dependency_context() {
+async fn delivered_default_assignment_places_precedence_after_dependency_summaries() {
     let h = Harness::new();
     let root = h.root("owner").await;
     set(
@@ -56,7 +56,7 @@ fn composite_assignment_uses_the_same_default_precedence_without_reinterpreting_
 }
 
 #[test]
-fn assignment_context_formats_empty_and_multiple_siblings_and_dependencies() {
+fn assignment_header_formats_empty_and_multiple_siblings_and_dependencies() {
     let runner = TaskRunner::new(
         TaskConfiguration::defaults(templates()),
         Arc::new(Parser::default()),
@@ -96,7 +96,7 @@ fn assignment_context_formats_empty_and_multiple_siblings_and_dependencies() {
 }
 
 #[test]
-fn assignment_context_bounds_sibling_descriptions_before_rendering() {
+fn assignment_header_bounds_sibling_descriptions_before_rendering() {
     let runner = TaskRunner::new(
         TaskConfiguration::defaults(templates()),
         Arc::new(Parser::default()),
@@ -115,7 +115,7 @@ fn assignment_context_bounds_sibling_descriptions_before_rendering() {
 }
 
 #[test]
-fn assignment_context_override_receives_lists_and_interpolation_stays_literal() {
+fn assignment_header_override_receives_lists_and_interpolation_stays_literal() {
     let catalog = templates_with_content(
         "prompt_templates:\n  agent-task.assignment-context:\n    template: 'CUSTOM {{ task_name }}|{{ description }}|{{ acceptance_criteria }}|{{ dependencies|length }}|{{ siblings|length }}'\n",
     );

@@ -1,18 +1,18 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_domain::values::config::PathPlatform;
 
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let canonical = context.directory.join("skill/SKILL.md");
-    let alternate = context.directory.join("skill/../skill/SKILL.md");
-    let other = context.directory.join("other/SKILL.md");
-    let mut configuration = context.configured(&format!("theme: dark\nskills:\n  entries:\n    - path: '{}'\n      enabled: false\n    - path: '{}'\n      enabled: false\n    - path: '{}'\n      enabled: false\n", alternate.display(), canonical.display(), other.display())).unwrap();
+    let fixture = ConfigFixture::new();
+    let canonical = fixture.directory.join("skill/SKILL.md");
+    let alternate = fixture.directory.join("skill/../skill/SKILL.md");
+    let other = fixture.directory.join("other/SKILL.md");
+    let mut configuration = fixture.configured(&format!("theme: dark\nskills:\n  entries:\n    - path: '{}'\n      enabled: false\n    - path: '{}'\n      enabled: false\n    - path: '{}'\n      enabled: false\n", alternate.display(), canonical.display(), other.display())).unwrap();
     configuration
         .set_skill_enabled(canonical.to_str().unwrap(), true)
         .unwrap();
-    let persisted = context.saved();
-    let reloaded = context.load().unwrap();
+    let persisted = fixture.saved();
+    let reloaded = fixture.load().unwrap();
     assert!(persisted.contains("theme: dark"));
     assert_eq!(reloaded.runtime.skills.entries.len(), 2);
     let enabled = |path: &std::path::Path| {
@@ -21,7 +21,7 @@ fn source_assertions() {
             .skills
             .is_enabled(
                 path.to_str().unwrap(),
-                context.directory.to_str().unwrap(),
+                fixture.directory.to_str().unwrap(),
                 PathPlatform::Unix,
             )
             .unwrap()
@@ -36,5 +36,5 @@ fn source_assertions() {
         configuration.runtime.skills.entries,
         reloaded.runtime.skills.entries
     );
-    assert!(!std::path::PathBuf::from(format!("{}.tmp", context.path.display())).is_file());
+    assert!(!std::path::PathBuf::from(format!("{}.tmp", fixture.path.display())).is_file());
 }

@@ -37,7 +37,7 @@ impl Tool for PersistentEffectTool {
     fn invoke<'a>(
         &'a self,
         _: ToolInvocation,
-        _: InvocationContext<'a, SharedSecurity<Security>, TurnSelection<Security>>,
+        _: InvocationScope<'a, SharedSecurity<Security>, TurnSelection<Security>>,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         Box::pin(async move {
             let previous: usize =

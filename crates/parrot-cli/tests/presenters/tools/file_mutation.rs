@@ -1,11 +1,11 @@
 use parrot_cli::presenters::{tools::file_mutation::FileMutationToolPresenter, *};
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackRenderOptions,
 };
 fn rows(item: &Presentation) -> Vec<String> {
     ScrollbackItem::render(
         item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns: 80,
             color: false,
             inline_diff: true,
@@ -92,7 +92,7 @@ fn mutation_labels_only_path_and_does_not_show_secret_content() {
         let live = presenter.present_live(&call, 0).unwrap();
         let text = LiveBufferItem::render(
             &live,
-            LiveBufferRenderContext {
+            LiveBufferRenderOptions {
                 columns: 32768,
                 color: false,
             },

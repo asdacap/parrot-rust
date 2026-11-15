@@ -21,7 +21,7 @@ use parrot_domain::{
             MutationTarget, ReadRequest,
         },
         paths::ResolvedRead,
-        security::{AccessSnapshot, InvocationContext, RestrictableAccessSnapshot},
+        security::{AccessSnapshot, InvocationScope, RestrictableAccessSnapshot},
         tools::Tool,
     },
     values::{
@@ -35,7 +35,6 @@ use parrot_foundation::{
 };
 use parrot_host::composition::{
     agents::AgentSessionServices,
-    context::ContextSelection,
     factory::{
         scope::{AgentOutput, AgentSourceConfig, AuthoritativeAgentSource},
         tasks::ScopedTaskController,
@@ -45,6 +44,7 @@ use parrot_host::composition::{
             durable_permission_factory,
         },
     },
+    invocation::InvocationSelection,
     protocol::{self, HostedSession, HostedSessionFactory, RpcCode, RpcError},
 };
 use parrot_provider::{
@@ -74,8 +74,8 @@ use parrot_runtime::{
     plan_mode::{
         MaterializedModeProfile, ModeRegistry, ModeResult, RetainedModePolicyMaterializer,
     },
-    prompt_context::{
-        AgentIdentityDescription, PromptResult, SkillCatalog, SkillDiscoveryContext,
+    prompt_assembly::{
+        AgentIdentityDescription, PromptResult, SkillCatalog, SkillPathBases,
         StaticSystemPromptProvider, SystemPrompt, SystemPromptProvider,
     },
     task_scheduler::{TaskScheduler, TaskSession},
@@ -404,7 +404,7 @@ impl SystemPrompt for BlockingStatusPrompt {
                 .store(true, std::sync::atomic::Ordering::SeqCst);
             cancellation
                 .check()
-                .map_err(|_| parrot_runtime::prompt_context::PromptError::Cancelled)?;
+                .map_err(|_| parrot_runtime::prompt_assembly::PromptError::Cancelled)?;
             self.read_system_prompts(selection)
         })
     }
@@ -440,7 +440,7 @@ impl Transport for NoExternal {
 }
 impl PermissionServices for NoExternal {
     type Security = SharedSecurity<Security>;
-    type Selection = ContextSelection<Security>;
+    type Selection = InvocationSelection<Security>;
     fn resolve_target(&self, requested: &str) -> Result<WriteTarget, Failure> {
         Ok(WriteTarget {
             path: requested.into(),
@@ -650,7 +650,7 @@ impl UserSkills<Security> for ObservedSkills {
         &'a self,
         security: &'a Security,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, protocol::Result<parrot_runtime::prompt_context::SkillSnapshot>> {
+    ) -> BoxFuture<'a, protocol::Result<parrot_runtime::prompt_assembly::SkillSnapshot>> {
         Box::pin(async move {
             let snapshot = self.actual.refresh(security, cancellation).await?;
             if let Some(barrier) = &self.barrier {
@@ -683,13 +683,13 @@ impl UserSkills<Security> for ObservedSkills {
         path: &'a str,
         enabled: bool,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, protocol::Result<parrot_runtime::prompt_context::SkillMetadata>> {
+    ) -> BoxFuture<'a, protocol::Result<parrot_runtime::prompt_assembly::SkillMetadata>> {
         self.actual.configure(security, path, enabled, cancellation)
     }
     fn new_agent(
         &self,
         selection: Arc<dyn SelectionSource<Security>>,
-    ) -> BoxFuture<'_, parrot_runtime::prompt_context::PromptResult<AgentSkillBindings>> {
+    ) -> BoxFuture<'_, parrot_runtime::prompt_assembly::PromptResult<AgentSkillBindings>> {
         self.actual.new_agent(selection)
     }
 }
@@ -919,7 +919,7 @@ impl Fixture {
                         catalog: Arc::new(SkillCatalog::new(
                             reader.clone(),
                             Vec::new(),
-                            SkillDiscoveryContext {
+                            SkillPathBases {
                                 working_directory: workspace.launch_directory().into(),
                                 platform: PathPlatform::Unix,
                             },
@@ -1028,7 +1028,7 @@ async fn actual_factory_binds_same_identity_selection_scheduler_and_task_owner_b
         .unwrap();
     assert!(Arc::ptr_eq(&session, &services.session));
     let tasks = root
-        .get_service::<ScopedTaskController<Security, ContextSelection<Security>>>()
+        .get_service::<ScopedTaskController<Security, InvocationSelection<Security>>>()
         .unwrap();
     let scheduler = root
         .get_service::<TaskScheduler<Security, TaskArtifactParserAdapter>>()

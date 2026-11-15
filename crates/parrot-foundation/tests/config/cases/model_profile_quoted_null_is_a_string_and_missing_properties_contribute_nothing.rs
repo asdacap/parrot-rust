@@ -1,10 +1,10 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_domain::values::config::ModelProfileConfig;
 
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let configuration = context.configured("model_profiles:\n  provider/model:\n    usage: 'null'\n    system_prompt: '~'\n  provider/empty: {}\n").unwrap();
+    let fixture = ConfigFixture::new();
+    let configuration = fixture.configured("model_profiles:\n  provider/model:\n    usage: 'null'\n    system_prompt: '~'\n  provider/empty: {}\n").unwrap();
     assert_eq!(
         configuration
             .models
@@ -20,7 +20,7 @@ fn source_assertions() {
         ModelProfileConfig::default()
     );
     assert_eq!(
-        context
+        fixture
             .configured("")
             .unwrap()
             .models

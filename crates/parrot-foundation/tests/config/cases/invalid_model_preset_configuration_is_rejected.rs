@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for content in [
@@ -14,7 +14,7 @@ fn source_assertions() {
         "model_presets:\n  named:\n    model: provider/model\n    model_aliases:\n      alias: [provider/model]\n",
         "model_presets:\n  named:\n    model: provider/model\n    model_aliases: {}\n    extra: value\n",
     ] {
-        let context = Context::new();
-        assert!(context.configured(content).is_err());
+        let fixture = ConfigFixture::new();
+        assert!(fixture.configured(content).is_err());
     }
 }

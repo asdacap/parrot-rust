@@ -1,4 +1,4 @@
-use crate::{fixtures, support::Context};
+use crate::{fixtures, support::ConfigFixture};
 use parrot_foundation::config::{templates, yaml};
 
 fn descriptor(engine: Option<&str>) -> String {
@@ -35,15 +35,15 @@ fn a008_discriminator_accepts_only_scalar_and_explicit_minijinja() {
 
 #[test]
 fn a008_scriban_is_rejected_with_manual_guide_and_user_yaml_is_not_rewritten() {
-    let context = Context::new();
+    let fixture = ConfigFixture::new();
     let content = descriptor(Some("scriban"));
-    context.write(&content);
-    let error = context.load().unwrap_err();
+    fixture.write(&content);
+    let error = fixture.load().unwrap_err();
     assert_eq!(
         error.0,
         "prompt_templates.custom.native.engine: Scriban is no longer supported; manually migrate the template to MiniJinja native syntax and set engine: minijinja (see docs/template-migration-guide.md)"
     );
-    assert_eq!(context.saved(), content);
+    assert_eq!(fixture.saved(), content);
 }
 
 #[test]

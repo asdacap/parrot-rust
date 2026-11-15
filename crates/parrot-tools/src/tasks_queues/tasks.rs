@@ -5,7 +5,7 @@ use parrot_domain::{
         async_ops::{BoxFuture, OperationError, OperationResult},
         filesystem::{AuthorizedReadService, FileReadErrorKind},
         runtime::TaskController,
-        security::InvocationContext,
+        security::InvocationScope,
         tools::{ParallelSafety, Tool},
     },
     values::{
@@ -91,10 +91,10 @@ where
     pub async fn execute(
         &self,
         invocation: ToolInvocation,
-        context: InvocationContext<'_, R::Security, S>,
+        scope: InvocationScope<'_, R::Security, S>,
     ) -> OperationResult<ToolOutput, ToolFailure> {
         match self.kind {
-            TaskToolKind::Set => self.set(invocation, context).await,
+            TaskToolKind::Set => self.set(invocation, scope).await,
             TaskToolKind::Get => self
                 .get(&invocation.arguments_json)
                 .await
@@ -105,7 +105,7 @@ where
     async fn set(
         &self,
         invocation: ToolInvocation,
-        context: InvocationContext<'_, R::Security, S>,
+        scope: InvocationScope<'_, R::Security, S>,
     ) -> OperationResult<ToolOutput, ToolFailure> {
         let identity = TaskCallIdentity {
             assistant_sequence: invocation.assistant_sequence,
@@ -113,7 +113,7 @@ where
         };
         match self
             .controller
-            .lookup_accepted(&identity, context.cancellation())
+            .lookup_accepted(&identity, scope.cancellation())
             .await
         {
             Ok(Some(response)) => return Ok(ToolOutput::text(response.text)),
@@ -138,8 +138,8 @@ where
             input.raw("tasks").is_some(),
             input.raw("tasks").unwrap_or("null"),
             self.reader.as_ref(),
-            context.security(),
-            context.cancellation(),
+            scope.security(),
+            scope.cancellation(),
         )
         .await
         {
@@ -149,13 +149,13 @@ where
         };
         let update = TaskUpdate {
             tasks,
-            selection: context.selection().clone(),
+            selection: scope.selection().clone(),
             history_boundary: BeforeToolBatch {
                 assistant_sequence: invocation.assistant_sequence,
                 call_id: invocation.call_id,
             },
         };
-        match self.controller.update(update, context.cancellation()).await {
+        match self.controller.update(update, scope.cancellation()).await {
             Ok(response) => Ok(ToolOutput::text(response.text)),
             Err(OperationError::Failed(error)) if error.task_caught() => {
                 Ok(ToolOutput::error(error))
@@ -235,9 +235,9 @@ where
     fn invoke<'a>(
         &'a self,
         invocation: Self::Invocation,
-        context: InvocationContext<'a, Self::Security, Self::Selection>,
+        scope: InvocationScope<'a, Self::Security, Self::Selection>,
     ) -> BoxFuture<'a, OperationResult<Self::Output, Self::Error>> {
-        Box::pin(self.execute(invocation, context))
+        Box::pin(self.execute(invocation, scope))
     }
 }
 

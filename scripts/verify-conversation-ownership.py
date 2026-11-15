@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FUNCTION = re.compile(r"\bfn\s+(\w+)\s*(?:<[^;{}]*>)?\s*\(")
 ADDITION = re.compile(r"\bconversation\s*\.\s*add\s*\(")
 SPECIALIZED = {
-    "record_input_context",
+    "record_skill_prompt",
     "record_steer",
     "record_context_reminder",
     "publish_context_reminder",

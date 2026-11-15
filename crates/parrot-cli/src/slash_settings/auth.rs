@@ -12,7 +12,7 @@ use tonic::{Code, Status};
 use super::{check_cancelled, settings::preset_usage};
 use crate::{
     dispatch::dialog::{DialogOption, SlashDialog, load},
-    slash_sessions::{CommandContext, SlashCommand, SlashFailure},
+    slash_sessions::{CommandEnvironment, SlashCommand, SlashFailure},
 };
 
 /// The production caller supplies the selected NEW configuration/credential root.
@@ -401,13 +401,13 @@ impl SlashCommand for AuthCommand {
     fn run<'a>(
         &'a self,
         _arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             self.run_operation(
                 "interactive",
-                Box::pin(self.select_action(context.dialog, cancellation)),
+                Box::pin(self.select_action(environment.dialog, cancellation)),
             )
             .await
             .map(|_| ())
@@ -434,13 +434,13 @@ impl SlashCommand for AuthPresetSetCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             check_cancelled(cancellation)?;
             if validate_preset_name(arguments).is_err() {
-                context
+                environment
                     .dialog
                     .show_error(&preset_usage(self.name()), cancellation)
                     .await?;
@@ -454,7 +454,7 @@ impl SlashCommand for AuthPresetSetCommand {
                     .await
                     .map_err(store_failure)?;
                 if names.is_empty() {
-                    context
+                    environment
                         .dialog
                         .show_error("no credentials are stored", cancellation)
                         .await?;
@@ -465,7 +465,7 @@ impl SlashCommand for AuthPresetSetCommand {
                     .save(arguments, &self.services.credentials, cancellation)
                     .await
                     .map_err(store_failure)?;
-                context
+                environment
                     .dialog
                     .show(
                         &[format!(
@@ -478,7 +478,7 @@ impl SlashCommand for AuthPresetSetCommand {
                 Ok(())
             }
             .await;
-            show_auth_failure(context.dialog, result, cancellation).await
+            show_auth_failure(environment.dialog, result, cancellation).await
         })
     }
 }
@@ -536,7 +536,7 @@ impl SlashCommand for AuthPresetSelectCommand {
     fn run<'a>(
         &'a self,
         arguments: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
@@ -544,13 +544,13 @@ impl SlashCommand for AuthPresetSelectCommand {
             let result = async {
                 let selected;
                 let arguments = if arguments.trim().is_empty() {
-                    context
+                    environment
                         .activity
                         .wait_until_idle(cancellation)
                         .await
                         .map_err(AuthFailure::from)?;
                     let names = load(
-                        context.dialog,
+                        environment.dialog,
                         "Loading presets…",
                         async {
                             self.services
@@ -563,7 +563,7 @@ impl SlashCommand for AuthPresetSelectCommand {
                     )
                     .await?;
                     if names.is_empty() {
-                        context
+                        environment
                             .dialog
                             .show_error("no credential presets are saved", cancellation)
                             .await?;
@@ -573,7 +573,7 @@ impl SlashCommand for AuthPresetSelectCommand {
                         .iter()
                         .map(|name| DialogOption::new(name, name, ""))
                         .collect::<Vec<_>>();
-                    let Some(picked) = context
+                    let Some(picked) = environment
                         .dialog
                         .select("Select a credential preset", &options, cancellation)
                         .await?
@@ -584,7 +584,7 @@ impl SlashCommand for AuthPresetSelectCommand {
                     selected.as_str()
                 } else {
                     if validate_preset_name(arguments).is_err() {
-                        context
+                        environment
                             .dialog
                             .show_error(&preset_usage(self.name()), cancellation)
                             .await?;
@@ -601,7 +601,7 @@ impl SlashCommand for AuthPresetSelectCommand {
                             "auth: credential preset not found".into(),
                         ));
                     }
-                    context
+                    environment
                         .activity
                         .wait_until_idle(cancellation)
                         .await
@@ -609,7 +609,7 @@ impl SlashCommand for AuthPresetSelectCommand {
                     arguments
                 };
                 if !self
-                    .preserve_current(arguments, context.dialog, cancellation)
+                    .preserve_current(arguments, environment.dialog, cancellation)
                     .await?
                 {
                     return Ok(());
@@ -619,7 +619,7 @@ impl SlashCommand for AuthPresetSelectCommand {
                     .apply(arguments, &self.services.credentials, cancellation)
                     .await
                     .map_err(store_failure)?;
-                context
+                environment
                     .dialog
                     .show(
                         &[format!("Credential preset selected: {arguments}")],
@@ -629,7 +629,7 @@ impl SlashCommand for AuthPresetSelectCommand {
                 Ok(())
             }
             .await;
-            show_auth_failure(context.dialog, result, cancellation).await
+            show_auth_failure(environment.dialog, result, cancellation).await
         })
     }
 }

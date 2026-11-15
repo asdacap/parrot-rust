@@ -1,6 +1,6 @@
 use parrot_cli::presenters::tools::queue_take::QueueTakeToolPresenter;
 use parrot_cli::presenters::*;
-use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderContext};
+use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderOptions};
 fn render(args: &str, result: &str, width: usize) -> Vec<String> {
     let item = QueueTakeToolPresenter
         .present_terminal(
@@ -15,7 +15,7 @@ fn render(args: &str, result: &str, width: usize) -> Vec<String> {
         .unwrap();
     ScrollbackItem::render(
         &item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns: width,
             color: false,
             inline_diff: false,

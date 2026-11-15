@@ -3,7 +3,7 @@ use parrot_cli::presenters::{
     *,
 };
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackRenderOptions,
 };
 use parrot_domain::protocol::messages::parrot::{ListedSkillScope, Skill, SkillRootLocation};
 use std::sync::Arc;
@@ -23,7 +23,7 @@ fn rendered_with(
     let item = presenter.present_terminal(call, terminal).unwrap().unwrap();
     ScrollbackItem::render(
         &item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns: 32768,
             color,
             inline_diff: true,
@@ -101,7 +101,7 @@ fn other_read_failures_show_full_request_yaml_not_raw_json() {
         assert_eq!(
             LiveBufferItem::render(
                 &live,
-                LiveBufferRenderContext {
+                LiveBufferRenderOptions {
                     columns: 32768,
                     color: false
                 }
@@ -353,7 +353,7 @@ fn skill_reads_use_normal_rendered_styles_and_preserve_original_failure_details(
     for color in [false, true] {
         let rendered = LiveBufferItem::render(
             &live,
-            LiveBufferRenderContext {
+            LiveBufferRenderOptions {
                 columns: 32768,
                 color,
             },
@@ -442,7 +442,7 @@ fn registry_injects_session_skill_paths_and_replacement_clears_stale_aliases() {
     };
     assert_eq!(report.label, "read $USER_SKILLS/solidifier/SKILL.md");
     assert_eq!(report.metadata.style, ToolPresentationStyle::Default);
-    skill_paths.replace_context(Vec::new(), &[]);
+    skill_paths.replace_index(Vec::new(), &[]);
     let Presentation::Tool(report) = registry.present_live(&call, 0).unwrap() else {
         panic!("tool")
     };
@@ -645,7 +645,7 @@ fn discovered_names_preserve_other_read_labels_and_statuses() {
 }
 
 #[test]
-fn replacing_skill_context_replaces_names_and_aliases_together() {
+fn replacing_skill_index_replaces_names_and_aliases_together() {
     let paths = Arc::new(SkillReadPathFormatter::new(
         "/server/work".into(),
         vec![SkillRootLocation {
@@ -670,7 +670,7 @@ fn replacing_skill_context_replaces_names_and_aliases_together() {
         rendered_with(&presenter, &call, &terminal, false),
         ["✓ read skill before ($USER_SKILLS/folder/SKILL.md L1-L1)"]
     );
-    paths.replace_context(
+    paths.replace_index(
         vec![SkillRootLocation {
             path: "/server/skills".into(),
             scope: ListedSkillScope::SKILL_SCOPE_SYSTEM.into(),
@@ -686,7 +686,7 @@ fn replacing_skill_context_replaces_names_and_aliases_together() {
         rendered_with(&presenter, &call, &terminal, false),
         ["✓ read skill after ($SYSTEM_SKILLS/folder/SKILL.md L1-L1)"]
     );
-    paths.replace_context(Vec::new(), &[]);
+    paths.replace_index(Vec::new(), &[]);
     assert_eq!(
         rendered_with(&presenter, &call, &terminal, false),
         ["✓ read /server/skills/folder/SKILL.md"]

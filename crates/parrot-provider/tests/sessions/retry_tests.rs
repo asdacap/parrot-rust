@@ -20,7 +20,7 @@ fn response(error_type: &str, code: &str, detail: &str) -> Failure {
         detail: detail.into(),
     }
 }
-fn context(context: &str, total: &str, input: &str, completion: &str) -> String {
+fn context_detail(context: &str, total: &str, input: &str, completion: &str) -> String {
     format!(
         "Requested token count exceeds the model's maximum context length of {context} tokens. You requested a total of {total} tokens: {input} tokens from the input messages and {completion} tokens for the completion."
     )
@@ -83,7 +83,7 @@ fn provider_errors_original25_explicit_context_counts() {
     for (window, total, input, completion, maximum, expected) in cases {
         let detail = format!(
             "litellm.BadRequestError: OpenAIException - {} Please reduce your prompt.",
-            context(window, total, input, completion)
+            context_detail(window, total, input, completion)
         );
         let http_detail = format!("{detail} Fallback failed: {detail}");
         let failures = [
@@ -300,7 +300,7 @@ fn http_overload_precedes_usage_but_response_usage_precedes_overload() {
 
 #[test]
 fn visible_output_and_cancellation_suppress_all_retries_without_mutation() {
-    let detail = context("180000", "180514", "147746", "32768");
+    let detail = context_detail("180000", "180514", "147746", "32768");
     let failures = [
         Failure::HeaderTimeout,
         Failure::WebSocketTransport,
@@ -345,7 +345,7 @@ fn reset_after_fallback_only_resets_stream_budget() {
     let mut policy = RetryPolicy::new(32768, 1);
     policy.classify(&Failure::HeaderTimeout, false).unwrap();
     policy.classify(&http(503, "", "", ""), false).unwrap();
-    let detail = context("180000", "180514", "147746", "32768");
+    let detail = context_detail("180000", "180514", "147746", "32768");
     let context_failure = http(400, "", "", &detail);
     policy.classify(&context_failure, false).unwrap();
     for _ in 0..5 {
@@ -451,7 +451,7 @@ fn context_structured_fields_and_pattern_status_rules_are_exact() {
         "",
         "context length exceeded"
     )));
-    let detail = context("180000", "180514", "147746", "32768");
+    let detail = context_detail("180000", "180514", "147746", "32768");
     assert!(is_context_length_exceeded(&http(400, "", "", &detail)));
     assert!(!is_context_length_exceeded(&http(429, "", "", &detail)));
     assert!(is_context_length_exceeded(&response("", "", &detail)));
@@ -482,7 +482,7 @@ fn explicit_context_counts_only_reduce_to_positive_capacity() {
     for (window, total, input, completion, maximum, expected) in cases {
         let detail = format!(
             "prefix {} fallback suffix",
-            context(window, total, input, completion)
+            context_detail(window, total, input, completion)
         );
         for failure in [
             http(400, "null", "400", &detail),
@@ -495,7 +495,7 @@ fn explicit_context_counts_only_reduce_to_positive_capacity() {
 
 #[test]
 fn context_recovery_is_once_and_does_not_consume_other_retry_budgets() {
-    let detail = context("180000", "180514", "147746", "32768");
+    let detail = context_detail("180000", "180514", "147746", "32768");
     for failure in [
         http(400, "null", "400", &detail),
         response("null", "400", &detail),
@@ -526,7 +526,7 @@ fn context_recovery_is_once_and_does_not_consume_other_retry_budgets() {
 
 #[test]
 fn context_reduction_requires_source_counts_and_preserves_first_match_semantics() {
-    let valid = context("180000", "180514", "147746", "32768");
+    let valid = context_detail("180000", "180514", "147746", "32768");
     for detail in [
         "context length exceeded".into(),
         "Requested token count exceeds the model's maximum context length of 180000 tokens.".into(),
@@ -540,7 +540,7 @@ fn context_reduction_requires_source_counts_and_preserves_first_match_semantics(
             None
         );
     }
-    let overflowing = context("99999999999999999", "180514", "147746", "32768");
+    let overflowing = context_detail("99999999999999999", "180514", "147746", "32768");
     let detail = format!("{overflowing} {valid}");
     assert!(is_context_length_exceeded(&http(400, "", "", &detail)));
     assert_eq!(
@@ -564,7 +564,7 @@ fn context_reduction_requires_source_counts_and_preserves_first_match_semantics(
 
 #[test]
 fn context_reduction_precedes_http_overload_when_eligible() {
-    let detail = context("180000", "180514", "147746", "32768");
+    let detail = context_detail("180000", "180514", "147746", "32768");
     let failure = http(400, "overloaded_error", "", &detail);
     let mut policy = RetryPolicy::new(32768, 5);
     assert_eq!(

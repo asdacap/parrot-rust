@@ -48,8 +48,8 @@ name = "plan_mode"
 path = "tests/plan_mode/main.rs"
 
 [[test]]
-name = "prompt_context"
-path = "tests/prompt_context/main.rs"
+name = "prompt_assembly"
+path = "tests/prompt_assembly/main.rs"
 
 [[test]]
 name = "task_scheduler"

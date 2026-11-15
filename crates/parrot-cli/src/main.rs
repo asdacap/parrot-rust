@@ -49,7 +49,7 @@ use parrot_host::{
         token::TransportToken,
         transport::{GrpcServer, GrpcTransportClient},
     },
-    production::{ProductionHost, ProductionHostConfig, ProductionReadContext},
+    production::{ProductionHost, ProductionHostConfig, ProductionReadAccess},
     web::router::WebClient,
 };
 use parrot_provider::routing::builder::ProviderRegistryBuilder;
@@ -722,7 +722,7 @@ impl Application {
         };
         let workspace =
             ordinary_workspace_resolver()(&std::env::current_dir()?).map_err(command_failure)?;
-        let reads = ProductionReadContext::new(
+        let reads = ProductionReadAccess::new(
             &configuration.lock().expect("configuration poisoned"),
             workspace,
         )

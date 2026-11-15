@@ -6,7 +6,7 @@ use parrot_domain::contracts::interactions::{
     AgentAskReply, AgentCommunication, QuestionDefinition, QuestionOption, QuestionReplyKind,
     QuestionRequester,
 };
-use parrot_domain::contracts::security::{AccessSnapshot, InvocationContext};
+use parrot_domain::contracts::security::{AccessSnapshot, InvocationScope};
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -58,7 +58,7 @@ where
     fn invoke<'a>(
         &'a self,
         invocation: Self::Invocation,
-        context: InvocationContext<'a, S, AgentSelection>,
+        scope: InvocationScope<'a, S, AgentSelection>,
     ) -> BoxFuture<'a, Result<String, OperationError<AgentToolError>>> {
         Box::pin(async move {
             let wire = match parse_questions(&invocation.arguments_json) {
@@ -84,7 +84,7 @@ where
                 .collect();
             match self
                 .requester
-                .ask(questions.clone(), context.cancellation())
+                .ask(questions.clone(), scope.cancellation())
                 .await
             {
                 Ok(reply) if reply.kind == QuestionReplyKind::UserAway => render(
@@ -159,7 +159,7 @@ where
     fn invoke<'a>(
         &'a self,
         invocation: Self::Invocation,
-        context: InvocationContext<'a, S, AgentSelection>,
+        scope: InvocationScope<'a, S, AgentSelection>,
     ) -> BoxFuture<'a, Result<String, OperationError<AgentToolError>>> {
         Box::pin(async move {
             let input = match AskInput::parse(&invocation.arguments_json) {
@@ -168,7 +168,7 @@ where
             };
             match self
                 .communication
-                .ask(&input.name, input.message, context.cancellation())
+                .ask(&input.name, input.message, scope.cancellation())
                 .await?
             {
                 AgentAskReply::Replied(message) => render(
@@ -231,10 +231,10 @@ where
     fn invoke<'a>(
         &'a self,
         invocation: Self::Invocation,
-        context: InvocationContext<'a, S, AgentSelection>,
+        scope: InvocationScope<'a, S, AgentSelection>,
     ) -> BoxFuture<'a, Result<String, OperationError<AgentToolError>>> {
         Box::pin(async move {
-            context
+            scope
                 .cancellation()
                 .check()
                 .map_err(|_| OperationError::Cancelled)?;

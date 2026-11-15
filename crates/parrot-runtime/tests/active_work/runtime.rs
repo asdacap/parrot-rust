@@ -42,7 +42,7 @@ use parrot_runtime::{
     compaction::ContextStatus,
     event_broker::{BrokerError, EventBroker},
     interactions::*,
-    prompt_context::{PromptResult, SystemPrompt},
+    prompt_assembly::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
     conversation::{AgentHistoryView, MessageRole},

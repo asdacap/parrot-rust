@@ -7,7 +7,7 @@ use tonic::Code;
 
 use crate::dispatch::dialog::{DialogOption, SlashDialog, load};
 
-use super::{CommandContext, SlashCommand, SlashFailure, native_call};
+use super::{CommandEnvironment, SlashCommand, SlashFailure, native_call};
 
 #[derive(Clone)]
 pub struct ModeSelection {
@@ -71,17 +71,24 @@ impl SlashCommand for ModeCommand {
     fn run<'a>(
         &'a self,
         _: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
-            let Some(selected) = self.selection.select(context.dialog, cancellation).await? else {
+            let Some(selected) = self
+                .selection
+                .select(environment.dialog, cancellation)
+                .await?
+            else {
                 return Ok(());
             };
-            context.activity.wait_until_idle(cancellation).await?;
-            context.session.select_mode(&selected, cancellation).await?;
-            (context.refresh_skills)(cancellation).await?;
-            context
+            environment.activity.wait_until_idle(cancellation).await?;
+            environment
+                .session
+                .select_mode(&selected, cancellation)
+                .await?;
+            (environment.refresh_skills)(cancellation).await?;
+            environment
                 .dialog
                 .show(&[format!("mode is now {selected}")], cancellation)
                 .await?;
@@ -108,13 +115,13 @@ impl SlashCommand for ModesCommand {
     fn run<'a>(
         &'a self,
         _: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let mut client = self.client.clone();
             let listed = load(
-                context.dialog,
+                environment.dialog,
                 "Loading modes…",
                 native_call(
                     client.list_modes(wire::ListModesRequest::new()),
@@ -124,7 +131,7 @@ impl SlashCommand for ModesCommand {
             )
             .await?;
             let lines: Vec<_> = listed.modes.into_iter().map(|mode| mode.id).collect();
-            context.dialog.show(&lines, cancellation).await?;
+            environment.dialog.show(&lines, cancellation).await?;
             Ok(())
         })
     }
@@ -148,13 +155,13 @@ impl SlashCommand for SessionsCommand {
     fn run<'a>(
         &'a self,
         _: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let mut client = self.client.clone();
             let listed = load(
-                context.dialog,
+                environment.dialog,
                 "Loading sessions…",
                 native_call(
                     client.list_sessions(wire::ListSessionsRequest::new()),
@@ -166,7 +173,7 @@ impl SlashCommand for SessionsCommand {
             let mut listed = match listed {
                 Ok(listed) => listed,
                 Err(SlashFailure::Rpc(status)) if status.code() == Code::Unimplemented => {
-                    context
+                    environment
                         .dialog
                         .show_error(
                             "session listing is unavailable on this server",
@@ -191,7 +198,7 @@ impl SlashCommand for SessionsCommand {
                 .sessions
                 .into_iter()
                 .map(|item| {
-                    let marker = if item.user_session_id == context.session.id() {
+                    let marker = if item.user_session_id == environment.session.id() {
                         "*"
                     } else {
                         " "
@@ -218,7 +225,7 @@ impl SlashCommand for SessionsCommand {
                     )
                 })
                 .collect();
-            context.dialog.show(&lines, cancellation).await?;
+            environment.dialog.show(&lines, cancellation).await?;
             Ok(())
         })
     }
@@ -242,17 +249,17 @@ impl SlashCommand for StatusCommand {
     fn run<'a>(
         &'a self,
         _: &'a str,
-        context: &'a mut CommandContext<'_>,
+        environment: &'a mut CommandEnvironment<'_>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             let mut client = self.client.clone();
             let status = load(
-                context.dialog,
+                environment.dialog,
                 "Loading status…",
                 native_call(
                     client.session_status(wire::SessionStatusRequest {
-                        user_session_id: context.session.id().into(),
+                        user_session_id: environment.session.id().into(),
                         ..Default::default()
                     }),
                     cancellation,
@@ -270,7 +277,7 @@ impl SlashCommand for StatusCommand {
                     } else {
                         "no status is available yet for this session"
                     };
-                    context.dialog.show_error(message, cancellation).await?;
+                    environment.dialog.show_error(message, cancellation).await?;
                     return Ok(());
                 }
                 Err(failure) => return Err(failure),
@@ -283,7 +290,7 @@ impl SlashCommand for StatusCommand {
             if lines.is_empty() {
                 lines.push("no status is currently available".into());
             }
-            context.dialog.print(&lines, cancellation).await?;
+            environment.dialog.print(&lines, cancellation).await?;
             Ok(())
         })
     }

@@ -737,12 +737,12 @@ impl SessionStore {
             .await
     }
     fn resolve_workspace(&self, id: Option<&UserSessionId>) -> Result<PathBuf, SessionStoreError> {
-        let context = startup_context(id)?;
+        let event = startup_event(id)?;
         let started = Instant::now();
-        self.stage(&context, "workspace", "start", started, None);
+        self.stage(&event, "workspace", "start", started, None);
         let result = self.workspace.resolve(&self.launch_directory);
         self.stage(
-            &context,
+            &event,
             "workspace",
             if result.is_ok() {
                 "complete"
@@ -759,9 +759,9 @@ impl SessionStore {
         id: Option<&UserSessionId>,
         operation: impl FnOnce() -> std::io::Result<SessionAdmission>,
     ) -> Result<SessionAdmission, SessionStoreError> {
-        let mut context = startup_context(id)?;
+        let mut event = startup_event(id)?;
         let started = Instant::now();
-        self.stage(&context, "acquire", "start", started, None);
+        self.stage(&event, "acquire", "start", started, None);
         let result = operation()
             .map_err(SessionStoreError::failure)
             .and_then(|admission| {
@@ -774,14 +774,14 @@ impl SessionStore {
                 }
             });
         if let Ok(admission) = &result {
-            context.user_session_id = admission
+            event.user_session_id = admission
                 .admission
                 .session_id
                 .as_ref()
                 .map(|id| id.value().to_owned());
         }
         self.stage(
-            &context,
+            &event,
             "acquire",
             if result.is_ok() {
                 "complete"
@@ -818,8 +818,8 @@ impl SessionStore {
                     admission.admission.disposition,
                 ))?;
         let started = Instant::now();
-        let context = startup_context(Some(&id))?;
-        self.stage(&context, "resources", "start", started, None);
+        let event = startup_event(Some(&id))?;
+        self.stage(&event, "resources", "start", started, None);
         let resources = (|| {
             let root = admission
                 .selected_root
@@ -837,7 +837,7 @@ impl SessionStore {
             Ok::<_, SessionStoreError>((root, diagnostics, index))
         })();
         self.stage(
-            &context,
+            &event,
             "resources",
             if resources.is_ok() {
                 "complete"
@@ -849,10 +849,10 @@ impl SessionStore {
         );
         let (_root, diagnostics, index) = resources?;
         let started = Instant::now();
-        self.stage(&context, "database", "start", started, None);
+        self.stage(&event, "database", "start", started, None);
         let lease = SessionResourceLease::open(index, activation, diagnostics).await;
         self.stage(
-            &context,
+            &event,
             "database",
             if lease.is_ok() { "complete" } else { "failure" },
             started,
@@ -861,7 +861,7 @@ impl SessionStore {
         let lease = lease?;
         let mut opening_resources = OpeningResources(Some(lease.clone()));
         let started = Instant::now();
-        self.stage(&context, "metadata_read", "start", started, None);
+        self.stage(&event, "metadata_read", "start", started, None);
         let selected = (|| {
             let existing = lease.index.find().map_err(SessionStoreError::failure)?;
             if (fresh && existing.is_some()) || (!fresh && existing.is_none()) {
@@ -904,11 +904,11 @@ impl SessionStore {
         })();
         let (existing, initialization) = match selected {
             Ok(selected) => {
-                self.stage(&context, "metadata_read", "complete", started, None);
+                self.stage(&event, "metadata_read", "complete", started, None);
                 selected
             }
             Err(error) => {
-                self.stage(&context, "metadata_read", "failure", started, Some(&error));
+                self.stage(&event, "metadata_read", "failure", started, Some(&error));
                 lease.write_diagnostic(&failure_event("open", &error));
                 let _ = lease.close().await;
                 return Err(error);
@@ -918,7 +918,7 @@ impl SessionStore {
         let owned_lease = lease.clone();
         let result = lease.cleanup.initialize(Box::pin(async move {
             owned
-                .initialize_owned(owned_lease, workspace, existing, initialization, context)
+                .initialize_owned(owned_lease, workspace, existing, initialization, event)
                 .await
         }))?;
         let opened = result
@@ -933,11 +933,11 @@ impl SessionStore {
         workspace: PathBuf,
         existing: Option<SessionMeta>,
         initialization: SessionInitialization,
-        context: DiagnosticEvent,
+        startup: DiagnosticEvent,
     ) -> InitializationResult {
         let mut stage = "initialize";
         let mut started = Instant::now();
-        self.stage(&context, stage, "start", started, None);
+        self.stage(&startup, stage, "start", started, None);
         let mut session = None;
         let result = async {
             if existing.is_none() {
@@ -966,10 +966,10 @@ impl SessionStore {
                     .create(lease.clone(), initialization.clone())
                     .await?,
             );
-            self.stage(&context, stage, "complete", started, None);
+            self.stage(&startup, stage, "complete", started, None);
             stage = "metadata_publish";
             started = Instant::now();
-            self.stage(&context, stage, "start", started, None);
+            self.stage(&startup, stage, "start", started, None);
             let constructed = session.as_ref().expect("constructed session");
             lease
                 .index
@@ -979,7 +979,7 @@ impl SessionStore {
                 .index
                 .record_opened(&timestamp())
                 .map_err(SessionStoreError::failure)?;
-            self.stage(&context, stage, "complete", started, None);
+            self.stage(&startup, stage, "complete", started, None);
             let mut event = DiagnosticEvent::new(
                 "session",
                 if existing.is_some() {
@@ -1002,7 +1002,7 @@ impl SessionStore {
                 resources: lease,
             }),
             Err(error) => {
-                self.stage(&context, stage, "failure", started, Some(&error));
+                self.stage(&startup, stage, "failure", started, Some(&error));
                 lease.write_diagnostic(&failure_event("open", &error));
                 Err((error, session))
             }
@@ -1010,14 +1010,14 @@ impl SessionStore {
     }
     fn stage(
         &self,
-        context: &DiagnosticEvent,
+        template: &DiagnosticEvent,
         stage: &str,
         phase: &str,
         started: Instant,
         error: Option<&SessionStoreError>,
     ) {
         let cancelled = matches!(error, Some(SessionStoreError::Cancelled));
-        let mut event = context.clone();
+        let mut event = template.clone();
         event.operation = format!("{stage}_{phase}");
         event.severity = if error.is_some() && !cancelled {
             DiagnosticSeverity::Error
@@ -1042,11 +1042,11 @@ impl SessionStore {
         self.global.write(&event);
     }
 }
-fn startup_context(id: Option<&UserSessionId>) -> Result<DiagnosticEvent, SessionStoreError> {
-    let mut context = DiagnosticEvent::new("session", "", DiagnosticSeverity::Information);
-    context.user_session_id = id.map(|id| id.value().to_owned());
-    context.correlation_id = Some(super::runtime::random_id().map_err(SessionStoreError::failure)?);
-    Ok(context)
+fn startup_event(id: Option<&UserSessionId>) -> Result<DiagnosticEvent, SessionStoreError> {
+    let mut event = DiagnosticEvent::new("session", "", DiagnosticSeverity::Information);
+    event.user_session_id = id.map(|id| id.value().to_owned());
+    event.correlation_id = Some(super::runtime::random_id().map_err(SessionStoreError::failure)?);
+    Ok(event)
 }
 fn nonempty(value: Option<&str>) -> Option<&str> {
     value.filter(|value| !value.is_empty())

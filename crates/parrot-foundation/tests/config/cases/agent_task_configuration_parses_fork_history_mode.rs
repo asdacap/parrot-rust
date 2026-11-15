@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_foundation::config::runtime::AgentTaskForkHistoryMode;
 #[test]
 fn source_assertions() {
@@ -7,9 +7,9 @@ fn source_assertions() {
         ("parent", AgentTaskForkHistoryMode::Parent),
         ("empty", AgentTaskForkHistoryMode::Empty),
     ] {
-        let context = Context::new();
+        let fixture = ConfigFixture::new();
         assert_eq!(
-            context
+            fixture
                 .configured(&format!("agent_tasks:\n  fork_history_mode: {value}\n"))
                 .unwrap()
                 .runtime

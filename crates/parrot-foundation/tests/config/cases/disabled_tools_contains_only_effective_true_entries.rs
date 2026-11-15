@@ -1,8 +1,8 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let disabled = context
+    let fixture = ConfigFixture::new();
+    let disabled = fixture
         .configured(
             "disabled_tools:\n  web_fetch: true\n  agent_spawn: false\n  future_tool: true\n",
         )

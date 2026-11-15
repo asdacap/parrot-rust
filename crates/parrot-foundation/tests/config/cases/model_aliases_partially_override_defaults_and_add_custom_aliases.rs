@@ -1,9 +1,9 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_foundation::config::models::{ModelAliasConfig, ModelAliasIconConfig};
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let configuration = context.configured("model_aliases:\n  low_llm:\n    model_string: openai/gpt-5\n  xhigh_llm:\n    usage: Specialized strategic work\n  local:\n    model_string: ollama/qwen3\n    usage: Local implementation work\n    augment_system_prompt: Use local tools first.\n").unwrap();
+    let fixture = ConfigFixture::new();
+    let configuration = fixture.configured("model_aliases:\n  low_llm:\n    model_string: openai/gpt-5\n  xhigh_llm:\n    usage: Specialized strategic work\n  local:\n    model_string: ollama/qwen3\n    usage: Local implementation work\n    augment_system_prompt: Use local tools first.\n").unwrap();
     let aliases = &configuration.models.model_aliases;
     assert_eq!(aliases["low_llm"], ModelAliasConfig {
         model_string: "openai/gpt-5".into(),

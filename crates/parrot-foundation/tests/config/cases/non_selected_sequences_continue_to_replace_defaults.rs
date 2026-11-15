@@ -1,8 +1,8 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let configuration = context.configured("profiles:\n  thinker:\n    allowed_tools: [read]\nproviders:\n  chatgpt:\n    model_defaults:\n      gpt-5.6-sol:\n        output: [custom]\n").unwrap();
+    let fixture = ConfigFixture::new();
+    let configuration = fixture.configured("profiles:\n  thinker:\n    allowed_tools: [read]\nproviders:\n  chatgpt:\n    model_defaults:\n      gpt-5.6-sol:\n        output: [custom]\n").unwrap();
     assert_eq!(
         configuration.runtime.profiles["thinker"]
             .allowed_tools

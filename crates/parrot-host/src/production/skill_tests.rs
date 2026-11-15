@@ -1,5 +1,5 @@
 use super::*;
-use parrot_runtime::prompt_context::{PACKAGED_SKILL_ASSETS, hash_packaged_skills};
+use parrot_runtime::prompt_assembly::{PACKAGED_SKILL_ASSETS, hash_packaged_skills};
 
 fn skill(root: &Path, name: &str, description: &str) -> PathBuf {
     let path = root.join(name).join("SKILL.md");
@@ -409,7 +409,7 @@ fn failed_refresh_does_not_advance_or_create_version_marker() {
 
         assert!(matches!(
             error,
-            parrot_runtime::prompt_context::PackagedSkillsError::Write(_)
+            parrot_runtime::prompt_assembly::PackagedSkillsError::Write(_)
         ));
         assert_eq!(
             std::fs::read(root.join(first.relative_path)).unwrap(),
@@ -477,7 +477,7 @@ fn packaged_install_failure_keeps_the_source_write_error_boundary() {
     let error = crate::production::skills::install_packaged_skills(&root).unwrap_err();
     assert!(matches!(
         error,
-        parrot_runtime::prompt_context::PackagedSkillsError::Write(_)
+        parrot_runtime::prompt_assembly::PackagedSkillsError::Write(_)
     ));
     assert_eq!(error.to_string(), "unable to write packaged skills");
     assert_eq!(std::fs::read(&root).unwrap(), b"preserve this file");

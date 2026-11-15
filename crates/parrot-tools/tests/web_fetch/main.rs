@@ -5,7 +5,7 @@ mod source_rows;
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
 use parrot_domain::contracts::paths::ResolvedRead;
-use parrot_domain::contracts::security::{AccessSnapshot, InvocationContext};
+use parrot_domain::contracts::security::{AccessSnapshot, InvocationScope};
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
 use parrot_tools::web_fetch::{
@@ -738,7 +738,7 @@ async fn actual_tool_uses_definition_parallel_default_plain_result_and_errors() 
     assert_eq!(
         tool.invoke(
             invocation("[]"),
-            InvocationContext::new(NoFilesystemAccess, (), &NeverCancel)
+            InvocationScope::new(NoFilesystemAccess, (), &NeverCancel)
         )
         .await
         .unwrap()
@@ -748,7 +748,7 @@ async fn actual_tool_uses_definition_parallel_default_plain_result_and_errors() 
     assert_eq!(
         tool.invoke(
             invocation(r#"{"url":"https://example.com","method":"POST"}"#),
-            InvocationContext::new(NoFilesystemAccess, (), &NeverCancel)
+            InvocationScope::new(NoFilesystemAccess, (), &NeverCancel)
         )
         .await
         .unwrap()
@@ -758,7 +758,7 @@ async fn actual_tool_uses_definition_parallel_default_plain_result_and_errors() 
     assert_eq!(
         tool.invoke(
             invocation(r#"{"url":"http://127.0.0.1/tool","method":"get"}"#),
-            InvocationContext::new(NoFilesystemAccess, (), &NeverCancel)
+            InvocationScope::new(NoFilesystemAccess, (), &NeverCancel)
         )
         .await
         .unwrap()

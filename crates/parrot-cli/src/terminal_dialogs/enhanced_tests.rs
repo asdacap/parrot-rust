@@ -2,15 +2,15 @@
 //! These use the real FrameView, T73 presenter, and T71 renderer; no key is read.
 
 use super::*;
-use crate::presenters::SessionReplayContext;
-use crate::terminal_frames::ScrollbackRenderContext;
+use crate::presenters::SessionReplayState;
+use crate::terminal_frames::ScrollbackRenderOptions;
 use std::sync::atomic::AtomicUsize;
 
 fn session_presenter(columns: usize) -> EnhancedSessionPresenter {
     EnhancedSessionPresenter::with_registry(
         columns,
         false,
-        Arc::new(Mutex::new(SessionReplayContext::new(false))),
+        Arc::new(Mutex::new(SessionReplayState::new(false))),
         Arc::new(ToolPresenterRegistry::standard_with_skill_read_paths(
             Vec::new(),
             Arc::new(SkillReadPathFormatter::default()),
@@ -278,7 +278,7 @@ impl ScrollbackItem for CommitItem {
         false
     }
 
-    fn render(&self, _: ScrollbackRenderContext) -> io::Result<Vec<String>> {
+    fn render(&self, _: ScrollbackRenderOptions) -> io::Result<Vec<String>> {
         let invocation = self.rendered.fetch_add(1, Ordering::SeqCst);
         if self.fail_first && invocation == 0 {
             return Err(io::Error::other("injected scrollback sink render failure"));
@@ -518,7 +518,7 @@ fn replacement_cleanup_commits_unfinished_reasoning_without_leaving_it_live() {
     .unwrap();
     assert_eq!(output.text().matches("✦ Old planning").count(), 1);
     assert!(!replacement.snapshot().unwrap().iter().any(|item| {
-        item.render(LiveBufferRenderContext {
+        item.render(LiveBufferRenderOptions {
             columns: 80,
             color: false,
         })
@@ -536,14 +536,14 @@ struct CountedLiveValue {
     tick: AtomicUsize,
 }
 impl LiveBufferItem for CountedLiveValue {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         self.rendered.fetch_add(1, Ordering::SeqCst);
         Ok(LiveBufferRender {
             lines: vec![crate::terminal_frames::TerminalLine::new(
                 format!(
                     "tick-{} width-{}",
                     self.tick.load(Ordering::SeqCst),
-                    context.columns
+                    options.columns
                 ),
                 crate::terminal_frames::TerminalStyle::default(),
             )],

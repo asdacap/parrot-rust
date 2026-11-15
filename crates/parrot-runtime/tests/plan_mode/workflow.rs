@@ -299,7 +299,7 @@ async fn real_history_checkpoint_does_not_serialize_or_revive_the_workflow_owner
 }
 
 #[test]
-fn source_text_bom_decoding_is_shared_with_prompt_context() {
+fn source_text_bom_decoding_is_shared_with_prompt_assembly() {
     let fixture = Fixture::new();
     let (workflow, parser) = fixture.workflow();
     workflow.prepare().unwrap();

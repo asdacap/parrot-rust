@@ -36,13 +36,13 @@ pub struct LiveBufferRender {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LiveBufferRenderContext {
+pub struct LiveBufferRenderOptions {
     pub columns: usize,
     pub color: bool,
 }
 
 pub trait LiveBufferItem: Send + Sync {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender>;
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender>;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -55,7 +55,7 @@ pub enum ScrollbackLayout {
 }
 
 #[derive(Clone)]
-pub struct ScrollbackRenderContext {
+pub struct ScrollbackRenderOptions {
     pub columns: usize,
     pub color: bool,
     pub inline_diff: bool,
@@ -83,7 +83,7 @@ pub trait ScrollbackItem: Send + Sync {
         false
     }
     fn continues(&self, previous: &dyn ScrollbackItem) -> bool;
-    fn render(&self, context: ScrollbackRenderContext) -> io::Result<Vec<String>>;
+    fn render(&self, options: ScrollbackRenderOptions) -> io::Result<Vec<String>>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

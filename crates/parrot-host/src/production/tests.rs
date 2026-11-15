@@ -3,7 +3,7 @@ mod images;
 #[path = "plan_tests.rs"]
 mod plan;
 #[path = "prompt_tests.rs"]
-mod prompt_context;
+mod prompt_assembly;
 #[path = "skill_tests.rs"]
 mod skills;
 

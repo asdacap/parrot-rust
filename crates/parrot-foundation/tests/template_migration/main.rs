@@ -1,5 +1,5 @@
 //! Fixed bundled-template migration evidence, not general Scriban compatibility.
-use parrot_core::{CancellationToken, template::MiniJinjaPromptTemplateEngine};
+use parrot_core::{CancellationToken, MiniJinjaPromptTemplateEngine};
 use serde_json::{Map, Value};
 use std::{fs, path::PathBuf};
 

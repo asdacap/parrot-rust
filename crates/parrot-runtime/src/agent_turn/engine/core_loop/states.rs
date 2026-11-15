@@ -287,13 +287,13 @@ where
                 key => self
                     .templates
                     .get_template(
-                        crate::prompt_context::get_prompt_template_id(key).ok_or_else(|| {
+                        crate::prompt_assembly::get_prompt_template_id(key).ok_or_else(|| {
                             TurnError::Service("unsupported template configuration key".into())
                         })?,
                     )
                     .map(ConfigValue::PromptTemplate)
                     .map_err(|error| {
-                        TurnError::Prompt(crate::prompt_context::PromptError::Template(
+                        TurnError::Prompt(crate::prompt_assembly::PromptError::Template(
                             error.to_string(),
                         ))
                     }),

@@ -308,8 +308,8 @@ impl AuthorizedReadService for Fake {
         })
     }
 }
-fn context() -> SkillDiscoveryContext {
-    SkillDiscoveryContext {
+fn path_bases() -> SkillPathBases {
+    SkillPathBases {
         working_directory: "/work".into(),
         platform: PathPlatform::Unix,
     }
@@ -326,7 +326,7 @@ async fn discover(fake: &Fake, roots: &[SkillRoot]) -> SkillSnapshot {
         fake,
         roots,
         &SkillConfiguration::default(),
-        &context(),
+        &path_bases(),
         &policy(),
         &Cancel::no(),
     )
@@ -547,7 +547,7 @@ async fn discovery_bfs_order_duplicates_disabled_and_optional_display_metadata_m
             root("/second", SkillScope::User, true),
         ],
         &configuration,
-        &context(),
+        &path_bases(),
         &policy(),
         &Cancel::no(),
     )
@@ -801,7 +801,7 @@ async fn errors_isolate_io_invalid_utf8_oversize_and_optional_metadata_not_unexp
         "invalid path",
     );
     assert!(
-        matches!(discover_skills(&fake, &[root("/skills", SkillScope::User, true)], &SkillConfiguration::default(), &context(), &policy(), &Cancel::no()).await, Err(OperationError::Failed(error)) if error.kind == FileReadErrorKind::InvalidPath)
+        matches!(discover_skills(&fake, &[root("/skills", SkillScope::User, true)], &SkillConfiguration::default(), &path_bases(), &policy(), &Cancel::no()).await, Err(OperationError::Failed(error)) if error.kind == FileReadErrorKind::InvalidPath)
     );
 }
 
@@ -853,7 +853,7 @@ async fn cancellation_and_denial_propagate_without_fallback_or_caching_partial_d
             fake.as_ref(),
             &[root("/skills", SkillScope::User, true)],
             &SkillConfiguration::default(),
-            &context(),
+            &path_bases(),
             &policy(),
             &cancelled
         )
@@ -867,7 +867,7 @@ async fn cancellation_and_denial_propagate_without_fallback_or_caching_partial_d
             fake.as_ref(),
             &[root("/skills", SkillScope::User, true)],
             &SkillConfiguration::default(),
-            &context(),
+            &path_bases(),
             &policy(),
             &Cancel::no()
         )
@@ -883,7 +883,7 @@ async fn cancellation_and_denial_propagate_without_fallback_or_caching_partial_d
         fake.as_ref(),
         &[root("/skills", SkillScope::User, true)],
         &SkillConfiguration::default(),
-        &context(),
+        &path_bases(),
         &denied,
         &Cancel::no(),
     )
@@ -936,7 +936,7 @@ async fn catalog_cache_keys_manual_and_configuration_generations_not_changed_val
     let catalog = SkillCatalog::new(
         fake.clone(),
         vec![root("/skills", SkillScope::User, true)],
-        context(),
+        path_bases(),
         Arc::new(move || source.lock().unwrap().clone()),
     );
     let first = catalog.capture(&policy(), &Cancel::no()).await.unwrap();
@@ -999,7 +999,7 @@ async fn failed_resampling_keeps_prior_snapshot_and_never_caches_partial_discove
     let catalog = SkillCatalog::new(
         fake.clone(),
         vec![root("/skills", SkillScope::User, true)],
-        context(),
+        path_bases(),
         Arc::new(|| (SkillConfiguration::default(), 0)),
     );
     let first = catalog.capture(&policy(), &Cancel::no()).await.unwrap();
@@ -1028,7 +1028,7 @@ async fn catalog_configure_persists_canonical_path_and_preserves_errors() {
     let catalog = SkillCatalog::new(
         fake.clone(),
         vec![root("/skills", SkillScope::User, true)],
-        context(),
+        path_bases(),
         Arc::new(move || source.lock().unwrap().clone()),
     )
     .with_configuration(Arc::new(move |path, enabled| {
@@ -1051,7 +1051,7 @@ async fn catalog_configure_persists_canonical_path_and_preserves_errors() {
     let no_writer = SkillCatalog::new(
         fake.clone(),
         vec![root("/skills", SkillScope::User, true)],
-        context(),
+        path_bases(),
         Arc::new(|| (SkillConfiguration::default(), 0)),
     );
     assert!(

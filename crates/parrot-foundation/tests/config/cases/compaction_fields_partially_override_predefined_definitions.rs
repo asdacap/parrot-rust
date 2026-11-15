@@ -1,25 +1,25 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let baseline = context.configured("").unwrap().runtime.compaction;
-    let trigger = context
+    let fixture = ConfigFixture::new();
+    let baseline = fixture.configured("").unwrap().runtime.compaction;
+    let trigger = fixture
         .configured("compaction:\n  trigger_percent: 80\n")
         .unwrap()
         .runtime
         .compaction;
-    let target = context
+    let target = fixture
         .configured("compaction:\n  target_percent: 20\n")
         .unwrap()
         .runtime
         .compaction;
-    let maximum = context
+    let maximum = fixture
         .configured("compaction:\n  maximum_input_tokens: 2048\n")
         .unwrap()
         .runtime
         .compaction;
-    let summary = context
+    let summary = fixture
         .configured("compaction:\n  summary_output_tokens: 512\n")
         .unwrap()
         .runtime

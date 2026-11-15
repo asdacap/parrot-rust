@@ -18,7 +18,7 @@ use parrot_host::web::router::WebClient;
 use parrot_runtime::agent_turn::lifecycle::Signal;
 use tonic::{Status, Streaming};
 
-use crate::presenters::SessionReplayContext;
+use crate::presenters::SessionReplayState;
 
 struct StreamCancellation {
     lifetime: Arc<dyn Cancellation>,
@@ -43,7 +43,7 @@ impl Cancellation for StreamCancellation {
 pub struct PreparedSessionStream {
     stream: Option<Streaming<wire::Event>>,
     first: Option<wire::Event>,
-    replay: Arc<Mutex<SessionReplayContext>>,
+    replay: Arc<Mutex<SessionReplayState>>,
     stop: Arc<Signal>,
     cancelled: BoxFuture<'static, ()>,
 }
@@ -99,7 +99,7 @@ impl PreparedSessionStream {
         Ok(Self::new(stream, Some(first), true, stop, cancellation))
     }
 
-    pub fn replay_context(&self) -> Arc<Mutex<SessionReplayContext>> {
+    pub fn replay_state(&self) -> Arc<Mutex<SessionReplayState>> {
         self.replay.clone()
     }
 
@@ -128,7 +128,7 @@ impl PreparedSessionStream {
         Self {
             stream: Some(stream),
             first,
-            replay: Arc::new(Mutex::new(SessionReplayContext::new(replaying))),
+            replay: Arc::new(Mutex::new(SessionReplayState::new(replaying))),
             stop,
             cancelled: Box::pin(async move { cancellation.cancelled().await }),
         }
@@ -156,7 +156,7 @@ impl Stream for PreparedSessionStream {
             Poll::Ready(Some(Ok(event))) => {
                 this.replay
                     .lock()
-                    .expect("session replay context poisoned")
+                    .expect("session replay state poisoned")
                     .observe(&event);
                 Poll::Ready(Some(Ok(event)))
             }

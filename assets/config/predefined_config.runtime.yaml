@@ -192,11 +192,15 @@ agent_ask_timeout_ms: 300000
 # Milliseconds exec_command waits before yielding when run_async is false or omitted.
 exec_command_yield_after_ms: 10000
 
-# Limits for each compaction request.
+# Compaction thresholds, and the hard cap on the output tokens requested from any model.
+# The cap bounds the output capacity reserved from the context window, so a model that
+# declares a large maximum output cannot drive the compaction trigger far below
+# trigger_percent. Zero disables the cap.
 compaction:
   trigger_percent: 95
   target_percent: 30
   maximum_input_tokens: 60000
+  maximum_output_tokens: 100000
   summary_output_tokens: 12000
 
 # Complete model-facing definitions for built-in tools. User configuration may override

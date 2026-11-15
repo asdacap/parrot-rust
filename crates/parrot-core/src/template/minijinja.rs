@@ -53,7 +53,7 @@ impl MiniJinjaPromptTemplateEngine {
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
-        let context = arguments
+        let bindings = arguments
             .iter()
             .map(|(name, value)| {
                 self.convert_value(value)
@@ -69,13 +69,13 @@ impl MiniJinjaPromptTemplateEngine {
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
-        let context = context?;
+        let bindings = bindings?;
         let rendered = self
             .environment
             .get_template(&self.name)
             .and_then(|template| {
                 template
-                    .render_captured_to(context, &mut writer)
+                    .render_captured_to(bindings, &mut writer)
                     .map(|_| ())
             });
         let cancelled = cancellation.is_cancelled();

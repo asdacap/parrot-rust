@@ -9,7 +9,7 @@ use std::{
 };
 
 use super::support::{Artifacts, NoCancel, Selection, Services, Snapshot};
-use parrot_domain::contracts::{async_ops::BoxFuture, security::InvocationContext};
+use parrot_domain::contracts::{async_ops::BoxFuture, security::InvocationScope};
 use parrot_foundation::{config::Configuration, template_catalog::PromptTemplateCatalog};
 use parrot_provider::sessions::model::Tool;
 use parrot_tools::{
@@ -216,7 +216,7 @@ impl Fixture {
         let tool = self.find(name).unwrap().create();
         tool.invoke(
             invocation,
-            InvocationContext::new(
+            InvocationScope::new(
                 Snapshot { id: 71 },
                 catalog::Selection {
                     requested_model: "captured-alias".into(),

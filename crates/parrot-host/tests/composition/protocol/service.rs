@@ -12,7 +12,7 @@ use parrot_domain::{
 use parrot_host::composition::protocol::*;
 use parrot_runtime::{
     interactions::*,
-    prompt_context::{SkillLoadError, SkillMetadata, SkillScope},
+    prompt_assembly::{SkillLoadError, SkillMetadata, SkillScope},
 };
 use parrot_storage::{events::ConversationPart, history_files::SessionCatalog};
 use protobuf::Message;

@@ -1,5 +1,5 @@
-use parrot_core::template::{ScalarPromptTemplateEngine, validate_arguments};
 use parrot_core::{CancellationToken, Error};
+use parrot_core::{ScalarPromptTemplateEngine, validate_arguments};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_foundation::config::{configuration::source_predefined_content, node::Node, yaml};
 use serde_json::Value;

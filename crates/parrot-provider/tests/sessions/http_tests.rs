@@ -154,7 +154,7 @@ fn trace(sink: Arc<Sink>, dump: Option<Arc<LastRequestDumper>>) -> Arc<CallTrace
     Arc::new(CallTrace::start(
         sink,
         Arc::new(MonotonicDiagnosticClock::default()),
-        CallContext {
+        CallIdentity {
             agent_session_id: "a".into(),
             correlation_id: "c".into(),
             provider_id: "p".into(),

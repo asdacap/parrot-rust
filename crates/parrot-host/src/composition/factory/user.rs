@@ -49,7 +49,7 @@ use parrot_runtime::{
         ModeCompletionOutcome, ModeRegistry, ModeWorkflowFactory, RetainedModePolicyMaterializer,
         SessionMode, UserSessionModes,
     },
-    prompt_context::{
+    prompt_assembly::{
         AgentSkills, PromptResult, SkillCatalog, SkillMetadata, SkillSnapshot, StandingInstruction,
     },
     task_scheduler::{TaskConcurrencyBudget, TaskScheduler},
@@ -112,7 +112,7 @@ pub trait UserSkills<S: RestrictableAccessSnapshot + 'static>: Send + Sync {
 }
 pub struct AgentSkillBindings {
     pub skills: Arc<dyn TurnSkills>,
-    pub prompt: Arc<dyn parrot_runtime::prompt_context::SystemPromptProvider>,
+    pub prompt: Arc<dyn parrot_runtime::prompt_assembly::SystemPromptProvider>,
 }
 
 pub struct UserServices<S: RestrictableAccessSnapshot + 'static> {
@@ -2298,7 +2298,8 @@ where
                 self.working_directory.clone(),
             )?));
             let prompt = Arc::new(
-                parrot_runtime::prompt_context::AgentSkillPromptProvider::new(skills.clone()).await,
+                parrot_runtime::prompt_assembly::AgentSkillPromptProvider::new(skills.clone())
+                    .await,
             );
             Ok(AgentSkillBindings { skills, prompt })
         })

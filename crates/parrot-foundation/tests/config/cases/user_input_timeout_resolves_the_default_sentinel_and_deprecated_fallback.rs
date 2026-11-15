@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for (yaml, expected) in [
@@ -11,10 +11,10 @@ fn source_assertions() {
             1250,
         ),
     ] {
-        let context = Context::new();
+        let fixture = ConfigFixture::new();
         let configuration = match yaml {
-            None => context.load(),
-            Some(yaml) => context.configured(yaml),
+            None => fixture.load(),
+            Some(yaml) => fixture.configured(yaml),
         }
         .unwrap();
         assert_eq!(configuration.runtime.user_input_timeout_ms, expected);

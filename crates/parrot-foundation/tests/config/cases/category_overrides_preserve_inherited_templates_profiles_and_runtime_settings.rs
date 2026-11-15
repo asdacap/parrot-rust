@@ -1,12 +1,12 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_foundation::config::{ConfigError, Configuration};
 #[test]
 fn source_assertions() {
-    let baseline_context = Context::new();
-    let baseline = baseline_context.load().unwrap();
-    assert!(!baseline_context.path.exists());
-    let context = Context::new();
-    context.write("prompt_templates:\n  agent-task.stop-canceled:\n    template: Task canceled by owner.\n  agent-session.child-completion:\n    template: '{agent_name}: {result}'\nprofiles:\n  build:\n    usage: Custom foreground usage\nlive_buffer_rows: 37\nagent_tasks:\n  maximum_attempts: 7\n");
+    let baseline_fixture = ConfigFixture::new();
+    let baseline = baseline_fixture.load().unwrap();
+    assert!(!baseline_fixture.path.exists());
+    let fixture = ConfigFixture::new();
+    fixture.write("prompt_templates:\n  agent-task.stop-canceled:\n    template: Task canceled by owner.\n  agent-session.child-completion:\n    template: '{agent_name}: {result}'\nprofiles:\n  build:\n    usage: Custom foreground usage\nlive_buffer_rows: 37\nagent_tasks:\n  maximum_attempts: 7\n");
     let mut known = crate::fixtures::fixture_templates("").unwrap();
     known.get_mut("agent-task.stop-canceled").unwrap().text = "Task canceled by owner.".into();
     known
@@ -14,9 +14,9 @@ fn source_assertions() {
         .unwrap()
         .text = "{agent_name}: {result}".into();
     let configuration = Configuration::load(
-        &context.path,
-        &context.predefined,
-        &context.environment,
+        &fixture.path,
+        &fixture.predefined,
+        &fixture.environment,
         |spec| {
             let id = spec
                 .path

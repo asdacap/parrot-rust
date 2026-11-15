@@ -36,7 +36,6 @@ use parrot_foundation::{
     config::Configuration, paths::AgentScratchDirectory, template_catalog::PromptTemplateCatalog,
 };
 use parrot_host::composition::{
-    context::ContextSelection,
     factory::{
         scope::{AgentSourceConfig, AuthoritativeAgentSource},
         user::{
@@ -45,6 +44,7 @@ use parrot_host::composition::{
             durable_permission_factory,
         },
     },
+    invocation::InvocationSelection,
     protocol::{
         self, HostedSession, HostedSessionFactory, ParrotService, RpcError, SessionHost,
         SessionListener, models::ModelOperations,
@@ -69,8 +69,8 @@ use parrot_runtime::{
     plan_mode::{
         MaterializedModeProfile, ModeRegistry, ModeResult, RetainedModePolicyMaterializer,
     },
-    prompt_context::{
-        PromptResult, SkillCatalog, SkillDiscoveryContext, SkillMetadata, SkillSnapshot,
+    prompt_assembly::{
+        PromptResult, SkillCatalog, SkillMetadata, SkillPathBases, SkillSnapshot,
         StaticSystemPromptProvider,
     },
     tool_settlement::SharedSecurity,
@@ -209,7 +209,7 @@ impl Transport for DenyExternal {
 }
 impl PermissionServices for DenyExternal {
     type Security = SharedSecurity<Security>;
-    type Selection = ContextSelection<Security>;
+    type Selection = InvocationSelection<Security>;
     fn resolve_target(&self, requested: &str) -> Result<WriteTarget, Failure> {
         Ok(WriteTarget {
             path: requested.into(),
@@ -563,7 +563,7 @@ impl Fixture {
                         catalog: Arc::new(SkillCatalog::new(
                             reader.clone(),
                             Vec::new(),
-                            SkillDiscoveryContext {
+                            SkillPathBases {
                                 working_directory: workspace.launch_directory().into(),
                                 platform: PathPlatform::Unix,
                             },

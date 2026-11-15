@@ -48,13 +48,13 @@ impl ToolCallPresentation {
         (self.agent_reference_resolver)(reference)
     }
     pub fn shorten_path(&self, path: &str) -> String {
-        let Ok(normalized) = parrot_runtime::prompt_context::normalize_skill_path(path, None)
+        let Ok(normalized) = parrot_runtime::prompt_assembly::normalize_skill_path(path, None)
         else {
             return path.to_owned();
         };
         let mut matched: Option<(usize, String)> = None;
         for (name, root) in &self.path_variables {
-            let Ok(root) = parrot_runtime::prompt_context::normalize_skill_path(root, None) else {
+            let Ok(root) = parrot_runtime::prompt_assembly::normalize_skill_path(root, None) else {
                 continue;
             };
             let Ok(suffix) = Path::new(&normalized).strip_prefix(&root) else {

@@ -5,7 +5,7 @@ use crate::{
 use std::future::Future;
 
 /// Fits a new system status message after the request's existing messages.
-pub async fn fit_status(
+pub(crate) async fn fit_status(
     request: &ProviderRequest,
     configuration: &ContextConfiguration,
     states: &dyn States,

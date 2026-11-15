@@ -6,7 +6,7 @@ use crate::{
             ParentCompletion, SelectionSource, SessionIdentity, TurnProfile, TurnSelection,
         },
     },
-    prompt_context::PromptScope,
+    prompt_assembly::PromptScope,
 };
 use parrot_domain::{
     contracts::{

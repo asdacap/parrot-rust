@@ -1,24 +1,24 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_foundation::config::runtime::SandboxRuleAction;
 #[test]
 fn source_assertions() {
-    let mut context = Context::new();
-    let home = context
+    let mut fixture = ConfigFixture::new();
+    let home = fixture
         .directory
         .join("home")
         .to_string_lossy()
         .into_owned();
-    let cache = context
+    let cache = fixture
         .directory
         .join("cache")
         .to_string_lossy()
         .into_owned();
-    context.environment = [
+    fixture.environment = [
         ("HOME".to_owned(), home.clone()),
         ("XDG_CACHE_HOME".to_owned(), cache.clone()),
     ]
     .into();
-    let configuration = context.load().unwrap();
+    let configuration = fixture.load().unwrap();
     let expected = [
         "/tmp".to_owned(),
         cache,

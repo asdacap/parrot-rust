@@ -1,7 +1,7 @@
 use std::io;
 
 use crate::terminal_frames::{
-    ScrollbackItem, ScrollbackLayout, ScrollbackRenderContext, TerminalStyle,
+    ScrollbackItem, ScrollbackLayout, ScrollbackRenderOptions, TerminalStyle,
 };
 use crate::terminal_layout::TerminalText;
 
@@ -60,14 +60,14 @@ impl ScrollbackItem for ImmediateScrollbackValue {
     fn continues(&self, _previous: &dyn ScrollbackItem) -> bool {
         false
     }
-    fn render(&self, context: ScrollbackRenderContext) -> io::Result<Vec<String>> {
+    fn render(&self, options: ScrollbackRenderOptions) -> io::Result<Vec<String>> {
         match self.layout {
             ScrollbackLayout::User | ScrollbackLayout::Assistant => {
                 let user = self.layout == ScrollbackLayout::User;
                 let prefix = self.prefix;
                 let clean = TerminalText::sanitize(&self.lines[0]);
                 let clean = clean.trim_end_matches(['\r', '\n']);
-                let style = TerminalStyle::new(if !context.color {
+                let style = TerminalStyle::new(if !options.color {
                     ""
                 } else if user {
                     "\x1b[32m\x1b[1m"
@@ -76,7 +76,7 @@ impl ScrollbackItem for ImmediateScrollbackValue {
                 });
                 Ok(TerminalText::layout_words_hanging(
                     &format!("{prefix}{clean}"),
-                    context.columns,
+                    options.columns,
                     &" ".repeat(TerminalText::width(prefix)),
                 )
                 .into_iter()
@@ -84,7 +84,7 @@ impl ScrollbackItem for ImmediateScrollbackValue {
                 .collect())
             }
             _ if self.muted => {
-                let style = TerminalStyle::new(if context.color { "\x1b[38;5;245m" } else { "" });
+                let style = TerminalStyle::new(if options.color { "\x1b[38;5;245m" } else { "" });
                 Ok(self
                     .lines
                     .iter()

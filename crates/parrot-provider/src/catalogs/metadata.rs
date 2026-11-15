@@ -19,8 +19,8 @@ pub(crate) fn decode(
         fields.insert(ModelMetadataFields::NAME);
     }
     for field in context_fields {
-        if let Some(context) = json_read::nonnegative_i32(metadata, field) {
-            model.context_window = context;
+        if let Some(window) = json_read::nonnegative_i32(metadata, field) {
+            model.context_window = window;
             fields.insert(ModelMetadataFields::CONTEXT_WINDOW);
             break;
         }

@@ -46,7 +46,7 @@ impl Tool for BudgetTool {
     fn invoke<'a>(
         &'a self,
         invocation: ToolInvocation,
-        _: InvocationContext<'a, SharedSecurity<Security>, TurnSelection<Security>>,
+        _: InvocationScope<'a, SharedSecurity<Security>, TurnSelection<Security>>,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         Box::pin(async move {
             let accepted = invocation

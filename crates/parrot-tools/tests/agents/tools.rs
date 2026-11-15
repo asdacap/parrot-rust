@@ -8,7 +8,7 @@ use parrot_tools::agents::input::{ForkSelection, WaitInput};
 use parrot_tools::agents::status::StatusSnapshot;
 use parrot_tools::agents::*;
 
-use super::{CANCELLED, NEVER, Security, context, invocation, templates};
+use super::{CANCELLED, NEVER, Security, invocation, invocation_scope, templates};
 
 #[derive(Default)]
 pub(super) struct Runtime {
@@ -137,7 +137,7 @@ fn tool(kind: AgentToolKind, runtime: Arc<Runtime>) -> AgentTool<Runtime, Models
 async fn spawn_uses_captured_model_security_and_exact_before_batch_metadata() {
     let runtime = Arc::new(Runtime::default());
     let tool = tool(AgentToolKind::Spawn, runtime.clone());
-    let result = tool.invoke(invocation(r#"{"prompt":"work","agent":"worker","name":"  Child Helper!  ","scope":"bounded","fork":"full"}"#), context(&NEVER)).await.unwrap();
+    let result = tool.invoke(invocation(r#"{"prompt":"work","agent":"worker","name":"  Child Helper!  ","scope":"bounded","fork":"full"}"#), invocation_scope(&NEVER)).await.unwrap();
     assert_eq!(
         result,
         r#"{"name":"child-helper","kind":"agent","status":"running","depth":1,"output":"/out/live.dat"}"#
@@ -160,7 +160,7 @@ async fn explicit_model_resolves_and_invalid_alias_prevents_spawn() {
     let tool = tool(AgentToolKind::Spawn, runtime.clone());
     tool.invoke(
         invocation(r#"{"prompt":"p","agent":"worker","name":"n","model":"fast"}"#),
-        context(&NEVER),
+        invocation_scope(&NEVER),
     )
     .await
     .unwrap();
@@ -168,7 +168,7 @@ async fn explicit_model_resolves_and_invalid_alias_prevents_spawn() {
     let result = tool
         .invoke(
             invocation(r#"{"prompt":"p","agent":"worker","name":"n","model":"broken"}"#),
-            context(&NEVER),
+            invocation_scope(&NEVER),
         )
         .await
         .unwrap();
@@ -191,7 +191,7 @@ async fn spawn_maps_profile_depth_provider_failures_but_does_not_swallow_service
         let result = tool(AgentToolKind::Spawn, runtime)
             .invoke(
                 invocation(r#"{"prompt":"p","agent":"worker","name":"n"}"#),
-                context(&NEVER),
+                invocation_scope(&NEVER),
             )
             .await
             .unwrap();
@@ -202,7 +202,7 @@ async fn spawn_maps_profile_depth_provider_failures_but_does_not_swallow_service
     let result = tool(AgentToolKind::Spawn, runtime)
         .invoke(
             invocation(r#"{"prompt":"p","agent":"worker","name":"n"}"#),
-            context(&NEVER),
+            invocation_scope(&NEVER),
         )
         .await;
     assert_eq!(
@@ -224,7 +224,7 @@ async fn malformed_and_oversized_input_never_reaches_services() {
     ] {
         assert!(
             tool(kind, runtime.clone())
-                .invoke(invocation("{}"), context(&NEVER))
+                .invoke(invocation("{}"), invocation_scope(&NEVER))
                 .await
                 .unwrap()
                 .starts_with("error: ")
@@ -233,7 +233,7 @@ async fn malformed_and_oversized_input_never_reaches_services() {
     let arguments = serde_json::json!({"name":"worker","message":"界".repeat(10923)}).to_string();
     assert_eq!(
         tool(AgentToolKind::Send, runtime.clone())
-            .invoke(invocation(&arguments), context(&NEVER))
+            .invoke(invocation(&arguments), invocation_scope(&NEVER))
             .await
             .unwrap(),
         "error: agent message exceeds 32768 UTF-8 bytes; split it into smaller messages"
@@ -248,7 +248,7 @@ async fn send_preserves_parent_policy_and_exact_utf8_boundary() {
     let runtime = Arc::new(Runtime::default());
     let args = serde_json::json!({"name":"parent/parent", "message":"x".repeat(32768)}).to_string();
     let result = tool(AgentToolKind::Send, runtime.clone())
-        .invoke(invocation(&args), context(&NEVER))
+        .invoke(invocation(&args), invocation_scope(&NEVER))
         .await
         .unwrap();
     assert_eq!(result, r#"{"name":"worker","message_id":"msg-9"}"#);
@@ -273,7 +273,10 @@ async fn interrupt_direct_child_request_is_uncancelled_and_returns_acknowledgeme
     let runtime = Arc::new(Runtime::default());
     let tool = tool(AgentToolKind::Interrupt, runtime.clone());
     let result = tool
-        .invoke(invocation(r#"{"name":"  worker  "}"#), context(&CANCELLED))
+        .invoke(
+            invocation(r#"{"name":"  worker  "}"#),
+            invocation_scope(&CANCELLED),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -289,7 +292,7 @@ async fn interrupt_direct_child_request_is_uncancelled_and_returns_acknowledgeme
     for name in ["", "   "] {
         let args = serde_json::json!({"name":name}).to_string();
         assert_eq!(
-            tool.invoke(invocation(&args), context(&NEVER))
+            tool.invoke(invocation(&args), invocation_scope(&NEVER))
                 .await
                 .unwrap(),
             "error: no child agent given"
@@ -299,16 +302,19 @@ async fn interrupt_direct_child_request_is_uncancelled_and_returns_acknowledgeme
         "direct child not found: missing".into(),
     ));
     assert_eq!(
-        tool.invoke(invocation(r#"{"name":"missing"}"#), context(&NEVER))
-            .await
-            .unwrap(),
+        tool.invoke(
+            invocation(r#"{"name":"missing"}"#),
+            invocation_scope(&NEVER)
+        )
+        .await
+        .unwrap(),
         "error: direct child not found: missing"
     );
     let before = runtime.interrupts.lock().unwrap().len();
     assert!(
         tool.invoke(
             invocation(r#"{"name":"worker","extra":1}"#),
-            context(&NEVER)
+            invocation_scope(&NEVER)
         )
         .await
         .unwrap()
@@ -322,7 +328,7 @@ async fn wait_passes_duration_and_cancellation_without_text_error_conversion() {
     let runtime = Arc::new(Runtime::default());
     let tool = tool(AgentToolKind::Wait, runtime.clone());
     assert_eq!(
-        tool.invoke(invocation("{}"), context(&NEVER))
+        tool.invoke(invocation("{}"), invocation_scope(&NEVER))
             .await
             .unwrap(),
         "wait interrupted"
@@ -334,7 +340,8 @@ async fn wait_passes_duration_and_cancellation_without_text_error_conversion() {
         }]
     );
     assert_eq!(
-        tool.invoke(invocation("{}"), context(&CANCELLED)).await,
+        tool.invoke(invocation("{}"), invocation_scope(&CANCELLED))
+            .await,
         Err(OperationError::Cancelled)
     );
     assert_eq!(runtime.waits.lock().unwrap().len(), 1);
@@ -345,20 +352,26 @@ async fn status_keeps_retained_cursor_and_registry_errors() {
     let runtime = Arc::new(Runtime::default());
     let tool = tool(AgentToolKind::Status, runtime);
     let first = tool
-        .invoke(invocation(r#"{"name":"worker"}"#), context(&CANCELLED))
+        .invoke(
+            invocation(r#"{"name":"worker"}"#),
+            invocation_scope(&CANCELLED),
+        )
         .await
         .unwrap();
     assert!(first.starts_with("Agent status\nName: worker"));
     assert_eq!(
-        tool.invoke(invocation(r#"{"name":"   "}"#), context(&NEVER))
+        tool.invoke(invocation(r#"{"name":"   "}"#), invocation_scope(&NEVER))
             .await
             .unwrap(),
         "error: no child agent given"
     );
     assert_eq!(
-        tool.invoke(invocation(r#"{"name":"missing"}"#), context(&NEVER))
-            .await
-            .unwrap(),
+        tool.invoke(
+            invocation(r#"{"name":"missing"}"#),
+            invocation_scope(&NEVER)
+        )
+        .await
+        .unwrap(),
         "error: child agent not found: missing"
     );
 }
@@ -411,13 +424,13 @@ async fn configured_error_and_interrupt_templates_are_used_without_touching_json
         false,
     );
     assert_eq!(
-        tool.invoke(invocation("{}"), context(&NEVER))
+        tool.invoke(invocation("{}"), invocation_scope(&NEVER))
             .await
             .unwrap(),
         "error: Tool arguments require a string 'name'."
     );
     assert!(
-        tool.invoke(invocation(r#"{"name":"worker"}"#), context(&NEVER))
+        tool.invoke(invocation(r#"{"name":"worker"}"#), invocation_scope(&NEVER))
             .await
             .unwrap()
             .starts_with("Interrupt requested")

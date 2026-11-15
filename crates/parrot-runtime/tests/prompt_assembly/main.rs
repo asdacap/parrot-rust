@@ -17,7 +17,7 @@ use parrot_provider::{
     routing::{aliases::*, registry::ProviderRegistry},
     sessions::{Content, Error, Provider, Session},
 };
-use parrot_runtime::prompt_context::*;
+use parrot_runtime::prompt_assembly::*;
 use std::{
     collections::BTreeMap,
     sync::{

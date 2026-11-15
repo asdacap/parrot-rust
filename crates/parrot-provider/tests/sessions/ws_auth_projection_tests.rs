@@ -115,7 +115,7 @@ async fn actual_retry_fallback_sends_original_request_with_actual_raw_body_and_h
     );
 }
 #[tokio::test(start_paused = true)]
-async fn actual_diagnostic_session_request_context_remains_distinct_from_generic_counterpart() {
+async fn actual_diagnostic_session_request_classification_remains_distinct_from_generic() {
     let output = run(true).await;
     let result = observation(&output, "ws-raw_session-auth_always");
     assert_eq!(result["error"]["generic_classification"], "io");

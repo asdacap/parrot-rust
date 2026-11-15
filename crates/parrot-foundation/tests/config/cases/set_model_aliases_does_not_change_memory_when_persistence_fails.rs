@@ -1,10 +1,10 @@
-use crate::support::{Context, transact};
+use crate::support::{ConfigFixture, transact};
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let mut config = context.load().unwrap();
+    let fixture = ConfigFixture::new();
+    let mut config = fixture.load().unwrap();
     let defaults = config.models.provider_model_alias_defaults["chatgpt"].clone();
-    std::fs::create_dir(&context.path).unwrap();
+    std::fs::create_dir(&fixture.path).unwrap();
     assert!(
         transact(&mut config, |transaction| transaction
             .set_model_aliases(&defaults))
