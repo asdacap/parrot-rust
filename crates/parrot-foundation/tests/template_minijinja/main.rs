@@ -1,4 +1,4 @@
-use parrot_core::template::MiniJinjaPromptTemplateEngine;
+use parrot_core::MiniJinjaPromptTemplateEngine;
 use parrot_core::{CancellationToken, Error, ErrorKind};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use serde_json::{Map, Value, json};

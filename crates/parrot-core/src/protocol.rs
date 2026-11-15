@@ -28,7 +28,7 @@ pub use context::{
 pub use conversation::{
     ConversationAddition, ConversationEvent, ConversationHistoryItem, ConversationOrigin,
     ConversationPersistence, ConversationPublication, ConversationReceipt, ConversationState,
-    ConversationSummary, HistoryGroup, HistoryGroupMember, UsageTotals,
+    ConversationSummary, HistoryGroup, HistoryGroupMember, UsageTotals, assemble_history_groups,
 };
 pub use error::{Error, ErrorCode, ErrorDetail, ErrorKind};
 pub use event::EventPublisher;
@@ -39,10 +39,14 @@ pub use message::{
 pub use provider::{Provider, ProviderInvokeError, Tools};
 pub use skill::{
     PreparedSkillPrompt, Skill, SkillContent, SkillMention, SkillProvider, SkillReference,
+    parse_skill_mentions,
 };
 pub use states::States;
-pub use status::{StatusKey, StatusOffer, StatusOffering, StatusStanding};
-pub use template::{MiniJinjaPromptTemplateEngine, ScalarPromptTemplateEngine};
+pub use status::{
+    StatusKey, StatusOffer, StatusOffering, StatusStanding, join_status_offering,
+    status_steering_needed,
+};
+pub use template::{MiniJinjaPromptTemplateEngine, ScalarPromptTemplateEngine, validate_arguments};
 pub use tool::{
     ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolRecovery,
     ToolResult, ToolSettlement, ToolStatus,

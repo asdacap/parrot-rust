@@ -1,4 +1,4 @@
-use parrot_core::template::{MiniJinjaPromptTemplateEngine, ScalarPromptTemplateEngine};
+use parrot_core::{MiniJinjaPromptTemplateEngine, ScalarPromptTemplateEngine};
 use parrot_foundation::config::{
     ConfigError, Result,
     configuration::{Configuration, source_predefined_content},

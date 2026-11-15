@@ -143,7 +143,7 @@ impl ToolSettlement {
 }
 
 /// Settles the full tool batch and returns its first successful compaction request.
-pub async fn execute_tools(
+pub(crate) async fn execute_tools(
     states: &mut dyn States,
     tools: &dyn Tools,
     calls: Vec<ToolCall>,
@@ -185,3 +185,6 @@ pub async fn execute_tools(
         }
     }))
 }
+
+#[cfg(test)]
+mod tests;

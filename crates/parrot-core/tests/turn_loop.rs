@@ -476,9 +476,7 @@ impl Provider for MemoryProvider {
                 request.messages = context.messages;
                 request.model = context.state;
             }
-            if let Some(state) = compaction.effect_state_on_call.take() {
-                compaction.effect_state = Some(state);
-            } else if result.as_ref().is_ok_and(Option::is_some) {
+            if result.as_ref().is_ok_and(Option::is_some) {
                 let mut state = compaction.saved_state.clone();
                 state.last_request_statistic.reset();
                 compaction.effect_state = Some(state);

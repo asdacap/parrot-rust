@@ -6,11 +6,12 @@ mod scalar;
 #[cfg(test)]
 mod tests;
 
-pub use crate::{MiniJinjaPromptTemplateEngine, ScalarPromptTemplateEngine};
 pub(crate) use scalar::Part;
-pub use scalar::validate_arguments;
 
-use crate::{CancellationToken, Error, PromptTemplate};
+use crate::{
+    CancellationToken, Error, MiniJinjaPromptTemplateEngine, PromptTemplate,
+    ScalarPromptTemplateEngine, validate_arguments,
+};
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 
