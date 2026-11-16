@@ -42,7 +42,7 @@ use parrot_runtime::{
     children::*,
     compaction::*,
     event_broker::EventBroker,
-    prompt_context::{PromptResult, SystemPrompt},
+    prompt_assembly::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
     conversation::{AgentHistoryView, ConversationMessage, ConversationRepository, MessageRole},
@@ -261,6 +261,7 @@ impl Histories {
                 trigger_percent: 95,
                 target_percent: 30,
                 maximum_input_tokens: 60000,
+                maximum_output_tokens: 0,
                 summary_output_tokens: 1024,
                 summary_instructions: String::new(),
                 summary_prefix: String::new(),
@@ -427,8 +428,8 @@ impl SessionActivity for Activity {
         Duration::ZERO
     }
     fn finish_execution(&self, _: i64, _: &Execution) {}
-    fn turn_started(&self, _: &str) {}
-    fn turn_finished(&self, _: &str, _: &str, _: Option<&str>) {}
+    fn turn_started(&self) {}
+    fn turn_finished(&self, _: &str, _: Option<&str>) {}
     fn assistant_message(&self, _: &str) {}
 }
 pub type Backend = RuntimeBackend<Security>;

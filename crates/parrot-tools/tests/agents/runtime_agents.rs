@@ -41,7 +41,7 @@ async fn actual_spawn_preserves_captured_alias_fork_batch_running_and_normalized
         append(&root, ConversationMessage::text(MessageRole::User, "before captured batch")).await;
         let sequence = spawn_batch(&root).await;
         append(&root, ConversationMessage::text(MessageRole::User, "after captured batch")).await;
-        let captured = context(&root, &NeverCancelled);
+        let captured = invocation_scope(&root, &NeverCancelled);
         let mut changed = root.selection().current().unwrap();
         changed.model = h.models.0.resolve("slow").unwrap();
         root.session().update_selection(changed).unwrap();
@@ -70,19 +70,19 @@ async fn actual_spawn_preserves_captured_alias_fork_batch_running_and_normalized
         assert!(seeded.contains(&"before captured batch".into()));
         assert!(seeded.contains(&"first prompt".into()));
         assert!(!seeded.iter().any(|text| text.contains("after captured") || text.contains("current spawn batch")));
-        let busy = tool.invoke(invocation(json!({"prompt":"busy", "agent":"worker", "name":"RESEARCH note"})), context(&root, &NeverCancelled)).await.unwrap();
+        let busy = tool.invoke(invocation(json!({"prompt":"busy", "agent":"worker", "name":"RESEARCH note"})), invocation_scope(&root, &NeverCancelled)).await.unwrap();
         assert!(busy.contains("busy"), "{busy}");
         assert_eq!(root.children().snapshot_children().len(), 1);
         let mut wrong_call = invocation(json!({"prompt":"work", "agent":"worker", "name":"wrong-boundary", "fork":"full"}));
         wrong_call.assistant_sequence = sequence;
         wrong_call.call_id = "unavailable-call".into();
-        let rejected = tool.invoke(wrong_call, context(&root, &NeverCancelled)).await.unwrap();
+        let rejected = tool.invoke(wrong_call, invocation_scope(&root, &NeverCancelled)).await.unwrap();
         assert!(rejected.contains("captured fork tool batch is unavailable"), "{rejected}");
         assert!(root.children().find("wrong-boundary").is_none());
         gate.open();
         assert_eq!(services(&child).settle().await.status, ExecutionStatus::Succeeded);
         let original = services(&child);
-        let reused = tool.invoke(invocation(json!({"prompt":"follow up", "agent":"revised", "name":"Research Note", "model":"slow", "fork":"absent-checkpoint", "scope":"must not replace scope"})), context(&root, &NeverCancelled)).await.unwrap();
+        let reused = tool.invoke(invocation(json!({"prompt":"follow up", "agent":"revised", "name":"Research Note", "model":"slow", "fork":"absent-checkpoint", "scope":"must not replace scope"})), invocation_scope(&root, &NeverCancelled)).await.unwrap();
         assert_eq!(serde_json::from_str::<Value>(&reused).unwrap()["name"], "research-note");
         let resumed = root.children().resolve("research-note").unwrap();
         assert!(Arc::ptr_eq(&child, &resumed));
@@ -106,11 +106,11 @@ async fn actual_spawn_rejects_ineligible_profiles_unknown_models_and_fifth_depth
         let root = h.root("root").await;
         let tool = h.tool(AgentToolKind::Spawn, &root, false);
         for profile in ["foreground", "not-agent-selectable", "missing"] {
-            let text = tool.invoke(invocation(json!({"prompt":"work", "agent":profile, "name":"rejected"})), context(&root, &NeverCancelled)).await.unwrap();
+            let text = tool.invoke(invocation(json!({"prompt":"work", "agent":profile, "name":"rejected"})), invocation_scope(&root, &NeverCancelled)).await.unwrap();
             assert!(text.starts_with("error:"), "{text}");
             assert!(text.contains("not agent selectable"), "{text}");
         }
-        let text = tool.invoke(invocation(json!({"prompt":"work", "agent":"worker", "name":"rejected", "model":"missing-alias"})), context(&root, &NeverCancelled)).await.unwrap();
+        let text = tool.invoke(invocation(json!({"prompt":"work", "agent":"worker", "name":"rejected", "model":"missing-alias"})), invocation_scope(&root, &NeverCancelled)).await.unwrap();
         assert!(text.starts_with("error:"), "{text}");
         assert!(root.children().snapshot_children().is_empty());
         let mut parent = root.clone();
@@ -118,7 +118,7 @@ async fn actual_spawn_rejects_ineligible_profiles_unknown_models_and_fifth_depth
             parent = h.child(&parent, &format!("level-{depth}")).await;
             assert_eq!(parent.identity().session.depth, depth);
         }
-        let text = h.tool(AgentToolKind::Spawn, &parent, false).invoke(invocation(json!({"prompt":"too deep", "agent":"worker", "name":"level-5"})), context(&parent, &NeverCancelled)).await.unwrap();
+        let text = h.tool(AgentToolKind::Spawn, &parent, false).invoke(invocation(json!({"prompt":"too deep", "agent":"worker", "name":"level-5"})), invocation_scope(&parent, &NeverCancelled)).await.unwrap();
         assert!(text.contains("depth limit"), "{text}");
         assert!(parent.children().snapshot_children().is_empty());
         assert!(h.provider.requests.lock().unwrap().is_empty());
@@ -140,7 +140,7 @@ async fn actual_send_resolves_scope_paths_parent_aliases_and_enforces_every_ance
             let text = denied
                 .invoke(
                     invocation(json!({"name":name, "message":"blocked"})),
-                    context(&leaf, &NeverCancelled),
+                    invocation_scope(&leaf, &NeverCancelled),
                 )
                 .await
                 .unwrap();
@@ -159,7 +159,7 @@ async fn actual_send_resolves_scope_paths_parent_aliases_and_enforces_every_ance
             let text = permitted
                 .invoke(
                     invocation(json!({"name":name, "message":format!("allowed {name}")})),
-                    context(&leaf, &NeverCancelled),
+                    invocation_scope(&leaf, &NeverCancelled),
                 )
                 .await
                 .unwrap();
@@ -182,7 +182,7 @@ async fn actual_send_resolves_scope_paths_parent_aliases_and_enforces_every_ance
             let text = denied
                 .invoke(
                     invocation(json!({"name":name, "message":format!("scoped {name}")})),
-                    context(&leaf, &NeverCancelled),
+                    invocation_scope(&leaf, &NeverCancelled),
                 )
                 .await
                 .unwrap();
@@ -199,7 +199,7 @@ async fn actual_send_resolves_scope_paths_parent_aliases_and_enforces_every_ance
             let text = denied
                 .invoke(
                     invocation(json!({"name":name, "message":"no canonical lookup"})),
-                    context(&leaf, &NeverCancelled),
+                    invocation_scope(&leaf, &NeverCancelled),
                 )
                 .await
                 .unwrap();
@@ -227,7 +227,7 @@ async fn actual_send_reports_followup_vs_steering_and_accepts_exact_utf8_boundar
         let fresh = tool
             .invoke(
                 invocation(json!({"name":"child", "message":boundary})),
-                context(&root, &NeverCancelled),
+                invocation_scope(&root, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -243,7 +243,7 @@ async fn actual_send_reports_followup_vs_steering_and_accepts_exact_utf8_boundar
         let steering = tool
             .invoke(
                 invocation(json!({"name":"child", "message":"steer while running"})),
-                context(&root, &NeverCancelled),
+                invocation_scope(&root, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -259,7 +259,7 @@ async fn actual_send_reports_followup_vs_steering_and_accepts_exact_utf8_boundar
         let rejected = tool
             .invoke(
                 invocation(json!({"name":"child", "message":format!("{boundary}x")})),
-                context(&root, &NeverCancelled),
+                invocation_scope(&root, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -273,7 +273,7 @@ async fn actual_send_reports_followup_vs_steering_and_accepts_exact_utf8_boundar
         let followup = tool
             .invoke(
                 invocation(json!({"name":"child", "message":"idle follow up"})),
-                context(&root, &NeverCancelled),
+                invocation_scope(&root, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -311,7 +311,7 @@ async fn actual_send_compares_live_sibling_selections_without_claiming_filesyste
             let text = tool
                 .invoke(
                     invocation(json!({"name":name, "message":"must not arrive"})),
-                    context(&sender, &NeverCancelled),
+                    invocation_scope(&sender, &NeverCancelled),
                 )
                 .await
                 .unwrap();
@@ -326,7 +326,7 @@ async fn actual_send_compares_live_sibling_selections_without_claiming_filesyste
         let text = tool
             .invoke(
                 invocation(json!({"name":"../target", "message":"now permitted"})),
-                context(&sender, &NeverCancelled),
+                invocation_scope(&sender, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -365,7 +365,7 @@ async fn actual_interrupt_is_direct_only_returns_before_unwind_and_ignores_calle
         h.tool(AgentToolKind::Send, &root, false)
             .invoke(
                 invocation(json!({"name":"child", "message":"running"})),
-                context(&root, &NeverCancelled),
+                invocation_scope(&root, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -379,7 +379,10 @@ async fn actual_interrupt_is_direct_only_returns_before_unwind_and_ignores_calle
             &grandchild.identity().session.session_id,
         ] {
             let text = interrupt
-                .invoke(invocation(json!({"name":name})), context(&root, &CANCELLED))
+                .invoke(
+                    invocation(json!({"name":name})),
+                    invocation_scope(&root, &CANCELLED),
+                )
                 .await
                 .unwrap();
             assert!(text.starts_with("error:"), "{name}: {text}");
@@ -388,7 +391,7 @@ async fn actual_interrupt_is_direct_only_returns_before_unwind_and_ignores_calle
         let text = interrupt
             .invoke(
                 invocation(json!({"name":"  child  "})),
-                context(&root, &CANCELLED),
+                invocation_scope(&root, &CANCELLED),
             )
             .await
             .unwrap();
@@ -436,7 +439,7 @@ async fn actual_status_reads_running_scope_and_only_its_active_direct_children()
         h.tool(AgentToolKind::Send, &child, false)
             .invoke(
                 invocation(json!({"name":"active", "message":"work"})),
-                context(&child, &NeverCancelled),
+                invocation_scope(&child, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -449,7 +452,7 @@ async fn actual_status_reads_running_scope_and_only_its_active_direct_children()
         h.tool(AgentToolKind::Send, &active, false)
             .invoke(
                 invocation(json!({"name":"grandchild", "message":"deep work"})),
-                context(&active, &NeverCancelled),
+                invocation_scope(&active, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -458,7 +461,7 @@ async fn actual_status_reads_running_scope_and_only_its_active_direct_children()
         let summary = status
             .invoke(
                 invocation(json!({"name":"child"})),
-                context(&root, &NeverCancelled),
+                invocation_scope(&root, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -470,7 +473,7 @@ async fn actual_status_reads_running_scope_and_only_its_active_direct_children()
         let running = status
             .invoke(
                 invocation(json!({"name":"child/active"})),
-                context(&root, &NeverCancelled),
+                invocation_scope(&root, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -505,7 +508,7 @@ async fn actual_status_scope_aliases_share_per_session_cursor_and_bound_recent_n
             });
             send.invoke(
                 invocation(json!({"name":"child", "message":format!("request-{index}")})),
-                context(&root, &NeverCancelled),
+                invocation_scope(&root, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -515,7 +518,7 @@ async fn actual_status_scope_aliases_share_per_session_cursor_and_bound_recent_n
         let first = status
             .invoke(
                 invocation(json!({"name":"child"})),
-                context(&root, &CANCELLED),
+                invocation_scope(&root, &CANCELLED),
             )
             .await
             .unwrap();
@@ -529,7 +532,7 @@ async fn actual_status_scope_aliases_share_per_session_cursor_and_bound_recent_n
         let again = status
             .invoke(
                 invocation(json!({"name":"/root/child"})),
-                context(&root, &NeverCancelled),
+                invocation_scope(&root, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -546,7 +549,7 @@ async fn actual_status_scope_aliases_share_per_session_cursor_and_bound_recent_n
             });
             send.invoke(
                 invocation(json!({"name":"sibling", "message":"work"})),
-                context(&root, &NeverCancelled),
+                invocation_scope(&root, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -555,7 +558,7 @@ async fn actual_status_scope_aliases_share_per_session_cursor_and_bound_recent_n
         let independent = status
             .invoke(
                 invocation(json!({"name":"sibling"})),
-                context(&root, &NeverCancelled),
+                invocation_scope(&root, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -568,7 +571,7 @@ async fn actual_status_scope_aliases_share_per_session_cursor_and_bound_recent_n
         });
         send.invoke(
             invocation(json!({"name":"child", "message":"large answer"})),
-            context(&root, &NeverCancelled),
+            invocation_scope(&root, &NeverCancelled),
         )
         .await
         .unwrap();
@@ -576,7 +579,7 @@ async fn actual_status_scope_aliases_share_per_session_cursor_and_bound_recent_n
         let bounded = status
             .invoke(
                 invocation(json!({"name":"/root/child"})),
-                context(&root, &NeverCancelled),
+                invocation_scope(&root, &NeverCancelled),
             )
             .await
             .unwrap();
@@ -595,7 +598,7 @@ async fn actual_status_scope_aliases_share_per_session_cursor_and_bound_recent_n
             let denied = status
                 .invoke(
                     invocation(json!({"name":name})),
-                    context(&root, &NeverCancelled),
+                    invocation_scope(&root, &NeverCancelled),
                 )
                 .await
                 .unwrap();

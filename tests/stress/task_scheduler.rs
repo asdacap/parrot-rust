@@ -49,7 +49,7 @@ fn declaration(payload: &str, hidden: bool) -> Task {
 }
 
 async fn exercise(seed: u64, index: usize, cancelled_observer: bool, hidden: bool) {
-    let context = format!(
+    let label = format!(
         "T77 domain=task_replacement_race seed=0x{seed:016x} case={index} cancelled_observer={cancelled_observer} hidden={hidden}"
     );
     let fixture = Fixture::with_profiles(false, false, None, None, Arc::new(ChildProfiles)).await;
@@ -132,7 +132,7 @@ async fn exercise(seed: u64, index: usize, cancelled_observer: bool, hidden: boo
                 replacement.wait(&cancelled).await,
                 Err(ChildError::Cancelled)
             ),
-            "{context}"
+            "{label}"
         );
     } else {
         // Dropping this observation future does not own the admitted scheduler operation.
@@ -176,34 +176,34 @@ async fn exercise(seed: u64, index: usize, cancelled_observer: bool, hidden: boo
     .await;
     bounded(hosted.close()).await.unwrap();
     assert_database_closed(&user);
-    assert!(registered, "{context}");
-    assert_eq!(while_held.len(), 1, "{context}");
-    assert_eq!(while_held[0].state, ExecutionStatus::Running, "{context}");
-    assert_eq!(while_held[0].hidden, hidden, "{context}");
-    assert_eq!(while_held[0].result, None, "{context}");
-    assert_eq!(completed.len(), 1, "{context}");
+    assert!(registered, "{label}");
+    assert_eq!(while_held.len(), 1, "{label}");
+    assert_eq!(while_held[0].state, ExecutionStatus::Running, "{label}");
+    assert_eq!(while_held[0].hidden, hidden, "{label}");
+    assert_eq!(while_held[0].result, None, "{label}");
+    assert_eq!(completed.len(), 1, "{label}");
     assert_eq!(
         completed[0].payload,
         TaskPayload::Instruction(new_marker.clone()),
-        "{context}"
+        "{label}"
     );
     assert_eq!(
         completed[0].result.as_deref(),
         Some(new_marker.as_str()),
-        "{context}"
+        "{label}"
     );
     assert!(
         completed[0].hidden,
-        "source auto-hides the resolved graph: {context}"
+        "source auto-hides the resolved graph: {label}"
     );
-    assert!(completed[0].failure.is_none(), "{context}");
+    assert!(completed[0].failure.is_none(), "{label}");
     assert!(
         !registry.contains(&old_child) && !registry.contains(&new_child),
-        "{context}"
+        "{label}"
     );
     assert!(
         !old_child.session().is_active() && !new_child.session().is_active(),
-        "{context}"
+        "{label}"
     );
-    assert!(fixture.scripts.lock().unwrap().is_empty(), "{context}");
+    assert!(fixture.scripts.lock().unwrap().is_empty(), "{label}");
 }

@@ -1,7 +1,7 @@
 //! Awaited context epochs over the authoritative storage history.
 use super::effects::{NativeErrors, describe_error};
 use super::{CompactionError, CompactionObserver, ContextSize, ContextSnapshot};
-use crate::prompt_context::{PromptError, SessionPrompt};
+use crate::prompt_assembly::{PromptError, SessionPrompt};
 use parrot_core::{
     ContextConfiguration as CoreContextConfiguration, NeverCancelled, PlanningError,
 };
@@ -12,7 +12,7 @@ use parrot_domain::{
     },
     protocol::messages::parrot::{
         AgentNotice, CompactionFailed, CompactionFinished, CompactionPhase,
-        CompactionProgressEvent, CompactionStarted, Event,
+        CompactionProgressEvent, CompactionStarted, CompactionTrigger, Event,
     },
     values::identifiers::Identifier,
 };
@@ -229,6 +229,7 @@ impl ContextController {
         let sessions = input.sessions;
         let prompt = input.prompt;
         let request = parrot_core::CompactionRequest {
+            trigger: parrot_core::CompactionTrigger::UserRequested,
             target: target.map(Into::into),
             tools: input.tools.to_vec(),
         };
@@ -256,7 +257,12 @@ impl ContextController {
         use parrot_provider::compaction::CompactionEvent;
         let mut published = Event::new();
         match event {
-            CompactionEvent::Started => published.set_compaction_started(CompactionStarted::new()),
+            CompactionEvent::Started(trigger) => {
+                published.set_compaction_started(CompactionStarted {
+                    trigger: compaction_trigger(trigger).into(),
+                    ..CompactionStarted::new()
+                })
+            }
             CompactionEvent::Saving => published.set_compaction_progress(CompactionProgressEvent {
                 phase: CompactionPhase::COMPACTION_PHASE_SAVING.into(),
                 ..CompactionProgressEvent::new()
@@ -553,6 +559,19 @@ impl From<parrot_core::Error> for ContextError {
     }
 }
 
+fn compaction_trigger(trigger: parrot_core::CompactionTrigger) -> CompactionTrigger {
+    match trigger {
+        parrot_core::CompactionTrigger::Automatic => {
+            CompactionTrigger::COMPACTION_TRIGGER_AUTOMATIC
+        }
+        parrot_core::CompactionTrigger::ModelRequested => {
+            CompactionTrigger::COMPACTION_TRIGGER_MODEL_REQUESTED
+        }
+        parrot_core::CompactionTrigger::UserRequested => {
+            CompactionTrigger::COMPACTION_TRIGGER_USER_REQUESTED
+        }
+    }
+}
 fn reborrow<'a>(input: &'a mut EpochInput<'_>) -> EpochInput<'a> {
     EpochInput {
         selection: input.selection,

@@ -31,7 +31,7 @@ impl CompletionSink for Sink {
 }
 
 #[tokio::test]
-async fn original_blob_directory_fault_keeps_real_error_context_and_elapsedless_tombstone() {
+async fn original_blob_directory_fault_keeps_real_error_source_and_elapsedless_tombstone() {
     let directory = std::env::temp_dir().join(format!(
         "parrot-owner-fault-{}",
         Identifier::event_id().unwrap()

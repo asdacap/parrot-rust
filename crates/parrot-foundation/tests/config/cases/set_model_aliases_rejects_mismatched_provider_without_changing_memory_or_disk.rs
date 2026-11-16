@@ -1,11 +1,11 @@
-use crate::support::{Context, transact};
+use crate::support::{ConfigFixture, transact};
 use parrot_foundation::config::models::ProviderModelAliasDefaults;
 
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let mut configuration = context.configured("theme: dark\n").unwrap();
-    let before = context.saved();
+    let fixture = ConfigFixture::new();
+    let mut configuration = fixture.configured("theme: dark\n").unwrap();
+    let before = fixture.saved();
     let defaults = ProviderModelAliasDefaults {
         provider_id: "chatgpt".into(),
         low_model_string: "chatgpt/low".into(),
@@ -23,5 +23,5 @@ fn source_assertions() {
             .model_string
             .is_empty()
     );
-    assert_eq!(context.saved(), before);
+    assert_eq!(fixture.saved(), before);
 }

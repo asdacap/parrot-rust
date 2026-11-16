@@ -1,7 +1,7 @@
 //! Agent-local recovery snapshots. One shared store belongs to each agent scope.
 
 mod files;
-mod legacy;
+mod v1;
 
 use files::AgentStateDirectory;
 use parrot_domain::{
@@ -154,7 +154,7 @@ impl State {
         }
         let version: Version = serde_json::from_slice(&bytes).map_err(corrupt)?;
         let snapshot = match version.schema_version {
-            1 => serde_json::from_slice::<legacy::LegacyAgentStateSnapshot>(&bytes)
+            1 => serde_json::from_slice::<v1::V1AgentStateSnapshot>(&bytes)
                 .map_err(corrupt)?
                 .normalize(),
             AGENT_STATE_VERSION => serde_json::from_slice(&bytes).map_err(corrupt)?,

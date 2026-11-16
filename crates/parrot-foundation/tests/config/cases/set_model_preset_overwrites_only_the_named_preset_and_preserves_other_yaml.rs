@@ -1,9 +1,9 @@
-use crate::support::{Context, transact};
+use crate::support::{ConfigFixture, transact};
 use parrot_foundation::config::models::ModelPresetConfig;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let mut config=context.configured("theme: dark\nmodel_presets:\n  preserved:\n    model: provider/old\n    model_aliases: {}\n  work:\n    model: provider/old\n    model_aliases:\n      high_llm: provider/old\n").unwrap();
+    let fixture = ConfigFixture::new();
+    let mut config=fixture.configured("theme: dark\nmodel_presets:\n  preserved:\n    model: provider/old\n    model_aliases: {}\n  work:\n    model: provider/old\n    model_aliases:\n      high_llm: provider/old\n").unwrap();
     transact(&mut config, |transaction| {
         transaction.set_model_preset(
             "work",
@@ -19,12 +19,12 @@ fn source_assertions() {
         )
     })
     .unwrap();
-    let reloaded = context.load().unwrap();
+    let reloaded = fixture.load().unwrap();
     assert_eq!(reloaded.models.model_presets["work"].model, "high_llm");
     assert!(reloaded.models.model_presets["work"].model_aliases["custom_llm"].is_empty());
     assert_eq!(
         reloaded.models.model_presets["preserved"].model,
         "provider/old"
     );
-    assert!(context.saved().contains("theme: dark"));
+    assert!(fixture.saved().contains("theme: dark"));
 }

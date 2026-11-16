@@ -27,11 +27,11 @@ impl Tool for CounterTool {
     fn invoke<'a>(
         &'a self,
         invocation: ToolInvocation,
-        context: InvocationContext<'a, SharedSecurity<Security>, TurnSelection<Security>>,
+        scope: InvocationScope<'a, SharedSecurity<Security>, TurnSelection<Security>>,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         Box::pin(async move {
             self.effects.fetch_add(1, Ordering::SeqCst);
-            self.recording.invoke(invocation, context).await
+            self.recording.invoke(invocation, scope).await
         })
     }
 }

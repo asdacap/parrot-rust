@@ -95,7 +95,7 @@ pub fn find_request_usage(
     agent: &str,
     call: &str,
 ) -> Result<Option<RequestUsageRecorded>, EventError> {
-    let mut read = tx.prepare("SELECT payload FROM event WHERE agent_session = ?1 AND request_id IS NOT NULL ORDER BY sequence DESC;")?;
+    let mut read = tx.prepare("SELECT payload FROM event WHERE agent_session = ?1 AND kind = 'request_usage_recorded' ORDER BY sequence DESC;")?;
     let mut rows = read.query([agent])?;
     while let Some(row) = rows.next()? {
         let event = Event::parse_from_bytes(&row.get::<_, Vec<u8>>(0)?)?;

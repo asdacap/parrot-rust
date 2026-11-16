@@ -112,13 +112,11 @@ function PendingQuestionCard({
                 )
               })}
             </div>
-            {question.custom && (
-              <Input
-                placeholder="Custom answer"
-                value={drafts[questionIndex]?.custom ?? ""}
-                onChange={(event) => { updateDraft(questionIndex, (draft) => ({ ...draft, custom: event.target.value })) }}
-              />
-            )}
+            <Input
+              placeholder="Custom answer"
+              value={drafts[questionIndex]?.custom ?? ""}
+              onChange={(event) => { updateDraft(questionIndex, (draft) => ({ ...draft, custom: event.target.value })) }}
+            />
           </div>
         ))}
         <div className="flex items-center gap-2">

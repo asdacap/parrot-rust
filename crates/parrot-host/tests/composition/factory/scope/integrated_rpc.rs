@@ -652,7 +652,6 @@ async fn question_and_permission_rpcs_resolve_the_actual_brokers_and_same_durabl
                         header: "actual question".into(),
                         prompt: "Choose a response".into(),
                         options: vec![],
-                        custom: true,
                         multiple: false,
                     }],
                     &NeverCancelled,

@@ -9,7 +9,7 @@ use parrot_domain::{
             AuthorizedMutationService, AuthorizedReadService, FileReadError, FileReadErrorKind,
             LinkPolicy, MutationRequest, ReadRequest,
         },
-        security::{AccessSnapshot, InvocationContext},
+        security::{AccessSnapshot, InvocationScope},
         tools::{ParallelSafety, Tool},
     },
     values::tools::ConfiguredToolDefinition,
@@ -62,10 +62,10 @@ where
     async fn execute(
         &self,
         invocation: &Invocation,
-        context: &InvocationContext<'_, P::Security, P::Selection>,
+        scope: &InvocationScope<'_, P::Security, P::Selection>,
     ) -> OperationResult<Output, Failure> {
         let cancellation = ImageCancellation {
-            parent: context.cancellation(),
+            parent: scope.cancellation(),
             deadline: tokio::time::Instant::now() + Duration::from_secs(600),
         };
         cancellation
@@ -119,7 +119,7 @@ where
             create: true,
         };
         self.filesystem
-            .inspect_for_mutation(&mutation, context.security(), &cancellation)
+            .inspect_for_mutation(&mutation, scope.security(), &cancellation)
             .await
             .map_err(file_error)?;
         let mut references = Vec::new();
@@ -141,7 +141,7 @@ where
             };
             let reference = self
                 .filesystem
-                .read(&request, context.security(), &cancellation)
+                .read(&request, scope.security(), &cancellation)
                 .await
                 .map_err(file_error)?;
             total += reference.bytes.len();
@@ -163,7 +163,7 @@ where
         let result = self
             .provider
             .generate(
-                context.selection(),
+                scope.selection(),
                 ImageGenerationRequest {
                     prompt: prompt.to_owned(),
                     references,
@@ -182,7 +182,7 @@ where
         })?;
         let output = self
             .filesystem
-            .write_for_mutation(&mutation, &result.data, context.security(), &cancellation)
+            .write_for_mutation(&mutation, &result.data, scope.security(), &cancellation)
             .await
             .map_err(file_error)?;
         text_output(invocation, &output.physical_path.to_string_lossy())
@@ -214,10 +214,10 @@ where
     fn invoke<'a>(
         &'a self,
         invocation: Invocation,
-        context: InvocationContext<'a, P::Security, P::Selection>,
+        scope: InvocationScope<'a, P::Security, P::Selection>,
     ) -> BoxFuture<'a, OperationResult<Output, Failure>> {
         Box::pin(async move {
-            match self.execute(&invocation, &context).await {
+            match self.execute(&invocation, &scope).await {
                 Err(OperationError::Failed(error))
                     if matches!(
                         error.kind,

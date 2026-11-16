@@ -123,7 +123,7 @@ async fn pending_catalog_question_is_cancelled_and_joined_by_close_before_reacti
         tool_reply(
             "t76-pending-question",
             "question",
-            json!({"questions":[{"prompt":"bounded pending question","custom":true}]}),
+            json!({"questions":[{"prompt":"bounded pending question"}]}),
         ),
         None,
     );

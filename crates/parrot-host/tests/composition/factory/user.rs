@@ -18,7 +18,7 @@ use parrot_provider::{
     },
     sessions::{Content, Error, Provider, Session},
 };
-use parrot_runtime::prompt_context::{AgentIdentityDescription, SkillDiscoveryContext};
+use parrot_runtime::prompt_assembly::{AgentIdentityDescription, SkillPathBases};
 use parrot_storage::conversation::{ConversationMessage, ConversationOrigin, MessageRole};
 use std::{
     collections::BTreeMap,
@@ -277,7 +277,7 @@ async fn user_skill_binding_shares_actual_agent_skills_with_its_prompt_product()
     let catalog = Arc::new(SkillCatalog::new(
         reader.clone(),
         Vec::new(),
-        SkillDiscoveryContext {
+        SkillPathBases {
             working_directory: "/synthetic/workspace".into(),
             platform: PathPlatform::Unix,
         },
@@ -560,7 +560,7 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
         catalog: Arc::new(SkillCatalog::new(
             reader.clone(),
             Vec::new(),
-            SkillDiscoveryContext {
+            SkillPathBases {
                 working_directory: resources.workspace().launch_directory().to_path_buf(),
                 platform: PathPlatform::Unix,
             },
@@ -654,7 +654,7 @@ async fn record_history_occupant(
         },
         parent_name: "main".into(),
         name_path: vec!["main".into(), "worker".into()],
-        prompt_scope: parrot_runtime::prompt_context::PromptScope::empty(
+        prompt_scope: parrot_runtime::prompt_assembly::PromptScope::empty(
             histories.services.templates.clone(),
         ),
         templates: histories.services.templates.clone(),

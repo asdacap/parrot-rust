@@ -17,8 +17,8 @@ use super::{
     TaskAgentLine, ToolPresenterRegistry,
 };
 use crate::terminal_frames::{
-    ItemIdentity, LiveBufferItem, LiveBufferRender, LiveBufferRenderContext, LiveBufferRetention,
-    ScrollbackItem, ScrollbackLayout, ScrollbackRenderContext,
+    ItemIdentity, LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions, LiveBufferRetention,
+    ScrollbackItem, ScrollbackLayout, ScrollbackRenderOptions,
 };
 use crate::terminal_layout::{
     EnhancedFinalMessageRenderer, TerminalCellStyleSpan, TerminalLine, TerminalStyle, TerminalText,
@@ -134,28 +134,28 @@ impl From<Arc<super::Presentation>> for ActivityItem {
 impl ActivityItem {
     fn render_live(
         &self,
-        context: LiveBufferRenderContext,
+        options: LiveBufferRenderOptions,
         decoration: &super::ActivityDecoration,
     ) -> io::Result<LiveBufferRender> {
         match self {
-            Self::Value(value) => value.render_live(context, decoration),
-            Self::Tool(value) => value.render_live_decorated(context, decoration),
+            Self::Value(value) => value.render_live(options, decoration),
+            Self::Tool(value) => value.render_live_decorated(options, decoration),
         }
     }
     fn render_scrollback(
         &self,
-        context: ScrollbackRenderContext,
+        options: ScrollbackRenderOptions,
         decoration: &super::ActivityDecoration,
     ) -> io::Result<Vec<String>> {
         match self {
-            Self::Value(value) => value.render_scrollback(context, decoration),
-            Self::Tool(value) => value.render_scrollback_decorated(context, decoration),
+            Self::Value(value) => value.render_scrollback(options, decoration),
+            Self::Tool(value) => value.render_scrollback_decorated(options, decoration),
         }
     }
 }
 impl LiveBufferItem for ActivityItem {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
-        self.render_live(context, &super::ActivityDecoration::default())
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
+        self.render_live(options, &super::ActivityDecoration::default())
     }
 }
 impl ScrollbackItem for ActivityItem {
@@ -195,25 +195,25 @@ impl ScrollbackItem for ActivityItem {
     fn continues(&self, _: &dyn ScrollbackItem) -> bool {
         false
     }
-    fn render(&self, context: ScrollbackRenderContext) -> io::Result<Vec<String>> {
-        self.render_scrollback(context, &super::ActivityDecoration::default())
+    fn render(&self, options: ScrollbackRenderOptions) -> io::Result<Vec<String>> {
+        self.render_scrollback(options, &super::ActivityDecoration::default())
     }
 }
 
 impl ActivityValue {
     fn render_live(
         &self,
-        context: LiveBufferRenderContext,
+        options: LiveBufferRenderOptions,
         decoration: &super::ActivityDecoration,
     ) -> io::Result<LiveBufferRender> {
-        let columns = decoration.content_columns(context.columns);
-        let marker_style = style(context.color, "\x1b[48;5;236m\x1b[36m");
-        let muted_style = style(context.color, "\x1b[48;5;236m\x1b[38;5;245m");
+        let columns = decoration.content_columns(options.columns);
+        let marker_style = style(options.color, "\x1b[48;5;236m\x1b[36m");
+        let muted_style = style(options.color, "\x1b[48;5;236m\x1b[38;5;245m");
         let (marker, content, retention, base_style) = match self {
             Self::ReasoningRow(row) => {
                 return Ok(LiveBufferRender {
                     lines: row
-                        .render(context.columns)
+                        .render(options.columns)
                         .into_iter()
                         .map(|line| TerminalLine::new(line, muted_style.clone()))
                         .collect(),
@@ -231,7 +231,7 @@ impl ActivityValue {
                 marker.clone(),
                 vec![viewport(text, columns)],
                 LiveBufferRetention::Tail,
-                style(context.color, "\x1b[48;5;236m\x1b[38;5;252m"),
+                style(options.color, "\x1b[48;5;236m\x1b[38;5;252m"),
             ),
             Self::NeutralAgent(name) => (
                 "♟".to_owned(),
@@ -376,7 +376,7 @@ impl ActivityValue {
                                         TerminalText::width(
                                             &text[start..start + overlap_end - overlap_start],
                                         ),
-                                        icon_style(context.color, icon.color),
+                                        icon_style(options.color, icon.color),
                                     ));
                                 }
                                 source_offset = source_start + content.len();
@@ -385,7 +385,7 @@ impl ActivityValue {
                         rows.push(TerminalLine::with_spans(
                             text,
                             task_style(
-                                context.color,
+                                options.color,
                                 row.status
                                     .as_ref()
                                     .and_then(|status| status.enum_value().ok()),
@@ -417,9 +417,9 @@ impl ActivityValue {
                 return Ok(LiveBufferRender {
                     lines: self
                         .render_scrollback(
-                            ScrollbackRenderContext {
-                                columns: context.columns,
-                                color: context.color,
+                            ScrollbackRenderOptions {
+                                columns: options.columns,
+                                color: options.color,
                                 inline_diff: false,
                                 previous_packing: None,
                             },
@@ -445,10 +445,10 @@ impl ActivityValue {
     }
     fn render_scrollback(
         &self,
-        context: ScrollbackRenderContext,
+        options: ScrollbackRenderOptions,
         decoration: &super::ActivityDecoration,
     ) -> io::Result<Vec<String>> {
-        let columns = decoration.content_columns(context.columns);
+        let columns = decoration.content_columns(options.columns);
         let (marker, content) = match self {
             Self::Notice { marker, text } => (
                 marker.as_str(),
@@ -456,9 +456,9 @@ impl ActivityValue {
             ),
             Self::ReasoningRow(row) => {
                 return Ok(row
-                    .render(context.columns)
+                    .render(options.columns)
                     .into_iter()
-                    .map(|line| style(context.color, "\x1b[38;5;245m").apply(&line))
+                    .map(|line| style(options.color, "\x1b[38;5;245m").apply(&line))
                     .collect());
             }
             Self::Final(markdown) => {
@@ -466,7 +466,7 @@ impl ActivityValue {
                     markdown,
                     "",
                     columns,
-                    context.color,
+                    options.color,
                     true,
                 )
                 .map(|lines| decoration.apply("●", lines))
@@ -497,7 +497,7 @@ impl ActivityValue {
                         TerminalText::layout_words_hanging(&row.text, columns, &row.hanging_indent);
                     styles.extend(std::iter::repeat_n(
                         task_style(
-                            context.color,
+                            options.color,
                             row.status
                                 .as_ref()
                                 .and_then(|status| status.enum_value().ok()),
@@ -519,13 +519,13 @@ impl ActivityValue {
         Ok(decoration
             .apply(marker, content)
             .into_iter()
-            .map(|line| style(context.color, "\x1b[38;5;245m").apply(&line))
+            .map(|line| style(options.color, "\x1b[38;5;245m").apply(&line))
             .collect())
     }
 }
 impl LiveBufferItem for ActivityValue {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
-        self.render_live(context, &super::ActivityDecoration::default())
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
+        self.render_live(options, &super::ActivityDecoration::default())
     }
 }
 impl ScrollbackItem for ActivityValue {
@@ -542,8 +542,8 @@ impl ScrollbackItem for ActivityValue {
     fn continues(&self, _: &dyn ScrollbackItem) -> bool {
         false
     }
-    fn render(&self, context: ScrollbackRenderContext) -> io::Result<Vec<String>> {
-        self.render_scrollback(context, &super::ActivityDecoration::default())
+    fn render(&self, options: ScrollbackRenderOptions) -> io::Result<Vec<String>> {
+        self.render_scrollback(options, &super::ActivityDecoration::default())
     }
 }
 fn utf16_byte_index(value: &str, index: usize) -> usize {
@@ -591,14 +591,14 @@ struct HierarchicalScrollbackValue {
     label: Option<String>,
 }
 impl LiveBufferItem for HierarchicalLiveValue {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         let decoration = super::ActivityDecoration::describe(
-            context.columns,
+            options.columns,
             self.depth,
             self.label.as_deref(),
             self.icon.as_ref().map_or("", |icon| icon.glyph.as_str()),
         );
-        let mut rendered = self.value.render_live(context, &decoration)?;
+        let mut rendered = self.value.render_live(options, &decoration)?;
         if let (Some(icon), Some(first)) = (&self.icon, rendered.lines.first()) {
             let glyph_width = TerminalText::width(decoration.adornment_field.trim_end());
             if glyph_width > 0 {
@@ -608,7 +608,7 @@ impl LiveBufferItem for HierarchicalLiveValue {
                         + 2
                         + TerminalText::width(&decoration.label_field),
                     glyph_width,
-                    icon_style(context.color, icon.color),
+                    icon_style(options.color, icon.color),
                 ));
                 rendered.lines[0] =
                     TerminalLine::with_spans(first.text(), first.style().clone(), spans);
@@ -639,14 +639,14 @@ impl ScrollbackItem for HierarchicalScrollbackValue {
     fn continues(&self, _: &dyn ScrollbackItem) -> bool {
         false
     }
-    fn render(&self, context: ScrollbackRenderContext) -> io::Result<Vec<String>> {
+    fn render(&self, options: ScrollbackRenderOptions) -> io::Result<Vec<String>> {
         let decoration = super::ActivityDecoration::describe(
-            context.columns,
+            options.columns,
             self.depth,
             self.label.as_deref(),
             "",
         );
-        self.value.render_scrollback(context, &decoration)
+        self.value.render_scrollback(options, &decoration)
     }
 }
 fn icon_style(color: bool, icon: wire::TurnModelAliasIconColor) -> TerminalStyle {
@@ -1072,10 +1072,11 @@ impl RawActivityView {
                     }
                 }
             }
-            Some(Payload::CompactionStarted(_)) => {
+            Some(Payload::CompactionStarted(started)) => {
                 let state = self.state(owner);
                 if state.activities.insert(COMPACTION_ACTIVITY_ID.to_owned()) {
                     state.compaction_progress = None;
+                    state.compaction_trigger = Some(started.trigger.enum_value_or_default());
                     self.activities
                         .push((owner.clone(), COMPACTION_ACTIVITY_ID.to_owned()));
                 }
@@ -1087,15 +1088,20 @@ impl RawActivityView {
                 }
             }
             Some(Payload::CompactionFinished(_)) | Some(Payload::CompactionFailed(_)) => {
-                self.state(owner).compaction_progress = None;
+                let origin = {
+                    let state = self.state(owner);
+                    state.compaction_progress = None;
+                    super::rendering::compaction_trigger_suffix(state.compaction_trigger.take())
+                };
                 if self.state(owner).activities.remove(COMPACTION_ACTIVITY_ID) {
                     self.activities
                         .retain(|(id, activity)| id != owner || activity != COMPACTION_ACTIVITY_ID);
                     let (marker, text) = match published.payload.as_ref() {
-                        Some(Payload::CompactionFailed(failed)) => {
-                            ("✗", format!("compaction failed: {}", failed.message))
-                        }
-                        _ => ("✓", "compaction finished".to_owned()),
+                        Some(Payload::CompactionFailed(failed)) => (
+                            "✗",
+                            format!("compaction failed{origin}: {}", failed.message),
+                        ),
+                        _ => ("✓", format!("compaction finished{origin}")),
                     };
                     let notice = Arc::new(ActivityValue::Notice {
                         marker: marker.to_owned(),

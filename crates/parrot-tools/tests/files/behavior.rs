@@ -7,7 +7,7 @@ use parrot_domain::contracts::{
         EntryKind, FileReadError, FileReadErrorKind, LinkPolicy, MutationRequest, MutationTarget,
         ReadRequest,
     },
-    security::InvocationContext,
+    security::InvocationScope,
     tools::{ParallelSafety, Tool},
 };
 use parrot_tools::files::{
@@ -137,7 +137,7 @@ async fn read_dispatches_original_expanded_path_expected_target_and_captured_sna
     let result = tool
         .invoke(
             invocation(json!({"path":"${SCRATCH}/alias.txt"})),
-            InvocationContext::new(Snapshot(42), (), &NoCancel),
+            InvocationScope::new(Snapshot(42), (), &NoCancel),
         )
         .await
         .unwrap();
@@ -176,7 +176,7 @@ async fn read_propagates_second_authorized_operation_failure_without_rendering_b
     let result = tool
         .invoke(
             invocation(json!({"path":"alias"})),
-            InvocationContext::new(Snapshot(43), (), &NoCancel),
+            InvocationScope::new(Snapshot(43), (), &NoCancel),
         )
         .await;
     assert_eq!(
@@ -478,7 +478,7 @@ async fn directory_listing_sorts_ordinally_filters_failed_entries_and_marks_dire
     let result = tool
         .invoke(
             invocation(json!({"path":"dir"})),
-            InvocationContext::new(Snapshot(44), (), &NoCancel),
+            InvocationScope::new(Snapshot(44), (), &NoCancel),
         )
         .await
         .unwrap();
@@ -654,14 +654,14 @@ async fn mutations_repeat_original_requested_path_and_snapshot_and_edit_renders_
                     invocation(
                         json!({"path":"$ROOT/alias","old_string":"before","new_string":"after"}),
                     ),
-                    InvocationContext::new(Snapshot(45), (), &NoCancel),
+                    InvocationScope::new(Snapshot(45), (), &NoCancel),
                 )
                 .await
         } else {
             WriteTool::new(service.clone(), paths, definition())
                 .invoke(
                     invocation(json!({"path":"$ROOT/alias","content":"after\n"})),
-                    InvocationContext::new(Snapshot(45), (), &NoCancel),
+                    InvocationScope::new(Snapshot(45), (), &NoCancel),
                 )
                 .await
         }
@@ -695,7 +695,7 @@ async fn later_invocations_use_their_new_snapshot_and_preserve_bytes_after_repor
     let first = tool
         .invoke(
             invocation(json!({"path":"/external/new.txt", "content":"new"})),
-            InvocationContext::new(Snapshot(1), (), &NoCancel),
+            InvocationScope::new(Snapshot(1), (), &NoCancel),
         )
         .await
         .unwrap();
@@ -707,7 +707,7 @@ async fn later_invocations_use_their_new_snapshot_and_preserve_bytes_after_repor
     let second = tool
         .invoke(
             invocation(json!({"path":"/external/new.txt", "content":"changed"})),
-            InvocationContext::new(Snapshot(2), (), &NoCancel),
+            InvocationScope::new(Snapshot(2), (), &NoCancel),
         )
         .await
         .unwrap();
@@ -987,7 +987,7 @@ async fn glob_recurses_real_directories_reports_symlink_directories_without_foll
     let result = tool
         .invoke(
             invocation(json!({"path":"root","pattern":"**"})),
-            InvocationContext::new(Snapshot(47), (), &NoCancel),
+            InvocationScope::new(Snapshot(47), (), &NoCancel),
         )
         .await
         .unwrap();

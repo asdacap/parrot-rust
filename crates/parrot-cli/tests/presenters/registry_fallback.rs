@@ -1,12 +1,12 @@
 use parrot_cli::presenters::{tools::generic::GenericToolPresenter, *};
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackRenderOptions,
 };
 
 fn live(item: Presentation) -> Vec<String> {
     LiveBufferItem::render(
         &item,
-        LiveBufferRenderContext {
+        LiveBufferRenderOptions {
             columns: 32768,
             color: false,
         },
@@ -20,7 +20,7 @@ fn live(item: Presentation) -> Vec<String> {
 fn rows(item: Presentation) -> Vec<String> {
     ScrollbackItem::render(
         &item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns: 32768,
             color: false,
             inline_diff: true,
@@ -71,7 +71,7 @@ fn actual_registry_spawn_preserves_full_prompt_under_nested_activity_decoration(
         result: "{}".into(),
         ..Default::default()
     };
-    let context = || ScrollbackRenderContext {
+    let options = || ScrollbackRenderOptions {
         columns: 24,
         color: false,
         inline_diff: false,
@@ -82,7 +82,7 @@ fn actual_registry_spawn_preserves_full_prompt_under_nested_activity_decoration(
         .unwrap()
         .unwrap()
         .render_scrollback_decorated(
-            context(),
+            options(),
             &ActivityDecoration::describe(24, 1, Some("child"), ""),
         )
         .unwrap();
@@ -139,7 +139,7 @@ fn actual_registry_spawn_preserves_full_prompt_under_nested_activity_decoration(
         ))
         .unwrap();
     assert_eq!(update.commits.len(), 1);
-    assert_eq!(update.commits[0].render(context()).unwrap(), expected);
+    assert_eq!(update.commits[0].render(options()).unwrap(), expected);
 }
 
 #[test]

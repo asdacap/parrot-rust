@@ -12,7 +12,7 @@ use parrot_domain::{
 use parrot_host::composition::protocol::*;
 use parrot_runtime::{
     interactions::*,
-    prompt_context::{SkillLoadError, SkillMetadata, SkillScope},
+    prompt_assembly::{SkillLoadError, SkillMetadata, SkillScope},
 };
 use parrot_storage::{events::ConversationPart, history_files::SessionCatalog};
 use protobuf::Message;
@@ -1201,14 +1201,12 @@ async fn question_calls_use_real_broker_preserve_options_order_and_map_errors() 
                             },
                         ],
                         multiple: true,
-                        custom: false,
                     },
                     QuestionDefinition {
                         header: "Reason".into(),
                         prompt: "Explain".into(),
                         options: vec![],
                         multiple: false,
-                        custom: true,
                     },
                 ],
                 active().as_ref(),
@@ -1232,9 +1230,8 @@ async fn question_calls_use_real_broker_preserve_options_order_and_map_errors() 
             pending.questions[0].header.as_str(),
             pending.questions[0].prompt.as_str(),
             pending.questions[0].multiple,
-            pending.questions[0].custom
         ),
-        ("Decision", "Pick colours", true, false)
+        ("Decision", "Pick colours", true)
     );
     assert_eq!(
         pending.questions[0]
@@ -1311,7 +1308,6 @@ async fn question_calls_use_real_broker_preserve_options_order_and_map_errors() 
                     prompt: "Reject me".into(),
                     options: vec![],
                     multiple: false,
-                    custom: true,
                 }],
                 active().as_ref(),
             )
@@ -2194,7 +2190,7 @@ async fn closed_storage_session_resumes_exact_identity_and_new_create_is_always_
 
 #[tokio::test]
 async fn unsupported_schema_resume_is_failed_precondition_without_replacing_or_mutating_session() {
-    for version in [0_i64, 5, 6, 7, 8, 9, 11] {
+    for version in [0_i64, 5, 6, 7, 8, 9, 10] {
         let f = Fixture::new();
         let original = f.create().await;
         let id = original.id();
@@ -2708,7 +2704,6 @@ async fn question_timeout_presence_preserves_source_rows_without_wall_clock_timi
                             description: "".into(),
                         }],
                         multiple: false,
-                        custom: false,
                     }],
                     active().as_ref(),
                 )

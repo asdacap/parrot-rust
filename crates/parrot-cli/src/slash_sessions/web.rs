@@ -7,13 +7,13 @@ use parrot_domain::{
 use parrot_foundation::config::Configuration;
 use parrot_host::web::{
     dialog::WebSlashDialog,
-    slash::{WebSlashContext, WebSlashFactory, WebSlashFailure, WebSlashRegistry},
+    slash::{WebSlashBindings, WebSlashFactory, WebSlashFailure, WebSlashRegistry},
 };
 use tonic::Status;
 
 use super::{
-    CallbackSessionBinding, CommandContext, PollingSlashActivity, RpcSlashSession, SkillRefresh,
-    SlashActivity, SlashCommandRegistry, SlashCommands, SlashFailure, SlashSession,
+    CallbackSessionBinding, CommandEnvironment, PollingSlashActivity, RpcSlashSession,
+    SkillRefresh, SlashActivity, SlashCommandRegistry, SlashCommands, SlashFailure, SlashSession,
 };
 use crate::{
     dispatch::dialog::{DialogOption, SlashDialog},
@@ -120,8 +120,8 @@ impl WebCommandFactory {
     }
 }
 impl WebSlashFactory for WebCommandFactory {
-    fn create(&self, context: WebSlashContext) -> Box<dyn WebSlashRegistry> {
-        let dialog = context.dialog.clone();
+    fn create(&self, bindings: WebSlashBindings) -> Box<dyn WebSlashRegistry> {
+        let dialog = bindings.dialog.clone();
         let binding = CallbackSessionBinding(Arc::new(move |session, c| {
             let dialog = dialog.clone();
             Box::pin(async move {
@@ -132,27 +132,27 @@ impl WebSlashFactory for WebCommandFactory {
             })
         }));
         let session = RpcSlashSession::new(
-            context.client.clone(),
-            context.initial_session,
+            bindings.client.clone(),
+            bindings.initial_session,
             self.configuration.clone(),
             true,
             Box::new(binding),
         );
         let registry = SlashCommands::create(
             SettingsServices {
-                client: context.client,
+                client: bindings.client,
                 auth: self.auth.clone(),
             },
             None,
             &self.version,
         );
-        let activity = PollingSlashActivity(Arc::new(move || context.activity.is_busy()));
+        let activity = PollingSlashActivity(Arc::new(move || bindings.activity.is_busy()));
         // The pinned WebSlashService deliberately has no terminal skill menu.
         let refresh: SkillRefresh = Arc::new(|_| Box::pin(async { Ok(()) }));
         Box::new(WebCommandRegistry {
             registry,
             session,
-            dialog: BrowserSlashDialog(context.dialog),
+            dialog: BrowserSlashDialog(bindings.dialog),
             activity: Box::new(activity),
             refresh,
         })
@@ -184,7 +184,7 @@ impl WebSlashRegistry for WebCommandRegistry {
         c: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), WebSlashFailure>> {
         Box::pin(async move {
-            let mut context = CommandContext {
+            let mut environment = CommandEnvironment {
                 session: &mut self.session,
                 activity: self.activity.as_ref(),
                 dialog: &mut self.dialog,
@@ -192,7 +192,7 @@ impl WebSlashRegistry for WebCommandRegistry {
                 commands: &[],
             };
             self.registry
-                .dispatch(text, &mut context, c)
+                .dispatch(text, &mut environment, c)
                 .await
                 .map_err(|failure| match failure {
                     SlashFailure::Rpc(status) => WebSlashFailure::Rpc(status),

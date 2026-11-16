@@ -467,7 +467,7 @@ fn custom_context_template() -> &'static str {
     "prompt_templates:\n  status.context:\n    template: '{% if available %}{{ usage }}{% else %}missing{% endif %}|{{ estimated_tokens }}|{{ context_limit }}|{{ cadence }}|{{ trigger }}'\n"
 }
 #[tokio::test]
-async fn selection_reports_canonical_requested_selector_and_literal_parent_context() {
+async fn selection_reports_canonical_requested_selector_and_literal_parent_session() {
     let templates = catalog("");
     let provider = SelectionStatusProvider { templates };
     let mut query = query();
@@ -959,7 +959,7 @@ async fn runtime_tree_reports_idle_root_custom_model_cycles_and_unknown_owners_w
     assert_eq!(text, "Runtime:\n- agent: main\n  - agent: worker");
 }
 #[tokio::test]
-async fn runtime_status_preserves_additional_context_order_exclusions_and_per_call_isolation() {
+async fn runtime_status_preserves_additional_provider_order_exclusions_and_per_call_isolation() {
     let runtime = RuntimeStatus::new(
         catalog(""),
         clock(),

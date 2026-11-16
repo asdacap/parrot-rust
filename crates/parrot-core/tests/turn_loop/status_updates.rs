@@ -6,7 +6,7 @@ fn initial_status_includes_every_slot_even_with_empty_non_auto_hashes() {
     state.status_offering = status_offer(&[("profile", false, ""), ("tasks", false, "")]);
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.status_steered, ["fitted status"]);
+    assert_eq!(state.status_steered, ["profile\n\ntasks"]);
     assert_eq!(
         state.budget.standing_statuses,
         status_standing(&[("profile", ""), ("tasks", "")])

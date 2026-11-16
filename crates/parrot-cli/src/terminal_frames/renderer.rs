@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use super::surface::TerminalSurface;
 use super::{
-    ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRenderContext, LiveBufferRetention,
-    ScrollbackItem, ScrollbackLayout, ScrollbackRenderContext, TerminalFrame, TerminalLine,
+    ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRenderOptions, LiveBufferRetention,
+    ScrollbackItem, ScrollbackLayout, ScrollbackRenderOptions, TerminalFrame, TerminalLine,
     TerminalStyle,
 };
 use crate::terminal_layout::TerminalText;
@@ -118,13 +118,13 @@ impl<W: Write + Send> TerminalFrameRenderer<W> {
         } else {
             pending.push(item);
         }
-        let context = ScrollbackRenderContext {
+        let options = ScrollbackRenderOptions {
             columns: width,
             color: self.color,
             inline_diff: self.inline_diff,
             previous_packing: None,
         };
-        let lines = state.render_scrollback(&emitted, context)?;
+        let lines = state.render_scrollback(&emitted, options)?;
         let available = if lines.is_empty() {
             state.rendered_height.max(1)
         } else {
@@ -161,13 +161,13 @@ impl<W: Write + Send> TerminalFrameRenderer<W> {
         width: usize,
         height: usize,
     ) -> io::Result<TerminalFrame> {
-        let context = LiveBufferRenderContext {
+        let options = LiveBufferRenderOptions {
             columns: width,
             color: self.color,
         };
         let rendered = items
             .iter()
-            .map(|item| item.render(context))
+            .map(|item| item.render(options))
             .collect::<io::Result<Vec<_>>>()?;
         if rendered.iter().filter(|item| item.caret.is_some()).count() != 1 {
             return Err(invalid("The live buffer must contain exactly one caret."));
@@ -268,12 +268,12 @@ impl<W: Write> State<W> {
     fn render_scrollback(
         &mut self,
         items: &[Arc<dyn ScrollbackItem>],
-        mut context: ScrollbackRenderContext,
+        mut options: ScrollbackRenderOptions,
     ) -> io::Result<Vec<String>> {
         let mut output = Vec::new();
         for item in items {
-            context.previous_packing = self.last_packing.clone();
-            let rendered = item.render(context.clone())?;
+            options.previous_packing = self.last_packing.clone();
+            let rendered = item.render(options.clone())?;
             let layout = item.layout();
             let needs_gap = match layout {
                 ScrollbackLayout::User | ScrollbackLayout::Assistant => !self.committed_gap,

@@ -1,8 +1,9 @@
-use parrot_core::{
+use super::execute_tools;
+use crate::{
     BoxFuture, CancellationToken, ConfigKey, ConfigValue, Content, ConversationAddition,
     ConversationPersistence, ConversationReceipt, Error, Message, PromptTemplate, Role, States,
     ToolCall, ToolCallReceipt, ToolCatalog, ToolExecutionRequest, ToolRecovery, ToolResult,
-    ToolSettlement, ToolStatus, Tools, TurnFlags, execute_tools,
+    ToolSettlement, ToolStatus, Tools, TurnFlags,
 };
 use std::{
     future::Future,
@@ -12,9 +13,9 @@ use std::{
 
 fn finish<F: Future>(future: F) -> F::Output {
     let waker = Waker::noop();
-    let mut context = Context::from_waker(waker);
+    let mut cx = Context::from_waker(waker);
     let mut future = std::pin::pin!(future);
-    match future.as_mut().poll(&mut context) {
+    match future.as_mut().poll(&mut cx) {
         Poll::Ready(result) => result,
         Poll::Pending => panic!("in-memory settlement must complete immediately"),
     }

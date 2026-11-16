@@ -78,6 +78,39 @@ pub struct AgentState {
     pub(crate) settlement_extensions: i32,
 }
 
+/// Source turn-request and bounded settlement budget, distinct from token limits.
+impl AgentState {
+    /// Clears the per-turn request count when a new turn starts.
+    pub fn begin_turn(&mut self) {
+        self.provider_requests = 0;
+    }
+
+    /// Resets the invocation budget, keeping the phase, standing statuses and
+    /// last request statistics.
+    pub fn restart(&mut self) {
+        self.provider_requests = 0;
+        self.settlement_extensions = 0;
+    }
+
+    pub fn admit(&mut self, maximum: i32) -> Option<TurnFlags> {
+        if self.provider_requests >= maximum.wrapping_add(self.settlement_extensions) {
+            return None;
+        }
+        let final_phase = self.provider_requests.wrapping_add(1) >= maximum;
+        Some(TurnFlags { final_phase })
+    }
+
+    pub fn count_request(&mut self) -> i32 {
+        self.provider_requests = self.provider_requests.wrapping_add(1);
+        self.provider_requests
+    }
+
+    pub fn try_extend_settlement(&mut self) -> bool {
+        self.settlement_extensions = self.settlement_extensions.wrapping_add(1);
+        self.settlement_extensions <= 4
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TurnFlags {
     pub final_phase: bool,
@@ -110,14 +143,13 @@ pub trait Turn: Send {
     ) -> BoxFuture<'a, Result<(), Error>>;
 }
 
-/// Borrows the published identity and services needed to execute one turn.
+/// Borrows the services needed to execute one turn.
 pub struct TurnServices<'a> {
-    pub start_event_id: &'a str,
     pub states: &'a mut dyn States,
     pub skills: &'a dyn SkillProvider,
     pub tools: &'a dyn Tools,
     pub provider: &'a dyn Provider,
-    pub publisher: &'a dyn EventPublisher,
+    pub event_publisher: &'a dyn EventPublisher,
     pub hooks: &'a dyn TurnHooks,
 }
 
@@ -126,7 +158,7 @@ pub trait TurnHooks: Send + Sync {
     /// Captures the initial model selection and notifies provider sessions before publication.
     fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<crate::TurnModel, Error>>;
     /// Starts runtime activity and prepares the prompt epoch and skill snapshot after publication.
-    fn activate_conversation_turn(&self, start_event_id: &str) -> BoxFuture<'_, Result<(), Error>>;
+    fn activate_conversation_turn(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Captures settings for the next step without changing in-flight operations.
     fn begin_step(&self) -> BoxFuture<'_, Result<(), Error>>;
 }

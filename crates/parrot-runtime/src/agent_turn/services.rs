@@ -3,7 +3,7 @@ use super::provider_call::{OutputWriter, ProviderActivity, ProviderCallError};
 use crate::{
     compaction::{ContextController, ContextError, ContextEvents, ContextStatus},
     event_broker::BrokerError,
-    prompt_context::{AgentSkills, PromptError, PromptResult},
+    prompt_assembly::{AgentSkills, PromptError, PromptResult},
 };
 use parrot_core::ErrorCode;
 use parrot_domain::contracts::{
@@ -69,26 +69,26 @@ pub struct TurnResources<'a> {
     pub conversation: &'a mut parrot_storage::conversation::AgentConversation,
     pub agent_state: &'a mut parrot_core::AgentState,
     pub context: &'a mut ContextController,
-    pub prompt: &'a crate::prompt_context::SessionPrompt,
+    pub prompt: &'a crate::prompt_assembly::SessionPrompt,
     pub sessions: &'a sessions::ProviderSessions,
     pub status: &'a dyn ContextStatus,
     pub events: &'a dyn ContextEvents,
     pub usage: &'a super::usage::SessionUsageRecorder,
 }
 
-/// Observes native completion context on demand.
+/// Observes native completion state on demand.
 pub trait CompletionStateSource: Send + Sync {
-    /// Reads context for pending asks without deciding whether the turn may finish.
+    /// Reads pending-ask reminders without deciding whether the turn may finish.
     fn get_pending_ask_reminder<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Option<String>, TurnError>>;
-    /// Reads context for active work, retaining present observations with empty text.
+    /// Reads active-work reminders, retaining present observations with empty text.
     fn get_active_work_reminder<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Option<String>, TurnError>>;
-    /// Renders context for the currently uncleared native exit reminders.
+    /// Renders the currently uncleared native exit reminders.
     fn get_exit_reminder<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,
@@ -168,8 +168,8 @@ pub trait SessionActivity: ProviderActivity {
     fn execution_duration(&self) -> std::time::Duration;
     fn finish_execution(&self, execution: i64, outcome: &super::lifecycle::Execution);
     /// Safe bounded classification only; never provider bodies/raw error metadata.
-    fn turn_started(&self, turn_id: &str);
-    fn turn_finished(&self, turn_id: &str, outcome: &str, error_code: Option<&str>);
+    fn turn_started(&self);
+    fn turn_finished(&self, outcome: &str, error_code: Option<&str>);
     fn assistant_message(&self, message: &str);
 }
 

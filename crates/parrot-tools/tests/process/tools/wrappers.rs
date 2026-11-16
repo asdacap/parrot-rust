@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
 use parrot_domain::contracts::paths::ResolvedRead;
-use parrot_domain::contracts::security::{AccessSnapshot, InvocationContext};
+use parrot_domain::contracts::security::{AccessSnapshot, InvocationScope};
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::protocol::messages::parrot::{Delivery, InputSource};
 use parrot_domain::values::tools::{ConfiguredToolDefinition, ToolDefinitionCatalog};
@@ -459,7 +459,7 @@ impl Fixture {
             LIMIT,
             self.tool(kind).invoke(
                 ProcessInvocation::new("wrapper-call", arguments, self.templates.clone()),
-                InvocationContext::new(self.security.clone(), (), &NeverCancelled),
+                InvocationScope::new(self.security.clone(), (), &NeverCancelled),
             ),
         )
         .await
@@ -824,7 +824,7 @@ async fn exec_stderr_summary_uses_invocation_templates_after_yielding() {
             .tool(ProcessToolKind::ExecCommand)
             .invoke(
                 invocation,
-                InvocationContext::new(fixture.security.clone(), (), &NeverCancelled),
+                InvocationScope::new(fixture.security.clone(), (), &NeverCancelled),
             )
             .await
             .unwrap();
@@ -1489,7 +1489,7 @@ async fn cancellation_releases_observation_but_keeps_the_real_process_owned() {
                 r#"{"name":"cancel-observation","input":""}"#,
                 fixture.templates.clone(),
             ),
-            InvocationContext::new(fixture.security.clone(), (), &cancellation),
+            InvocationScope::new(fixture.security.clone(), (), &cancellation),
         )
         .await;
     assert!(matches!(result, Err(OperationError::Cancelled)));
@@ -1842,7 +1842,7 @@ async fn cancelling_an_active_exec_wait_releases_claim_without_detaching_ownersh
     let tool = fixture.tool(ProcessToolKind::ExecCommand);
     let wait = tool.invoke(
         ProcessInvocation::new("cancel-active", json!({"command":"while [ ! -f \"$WORKDIR/release-active\" ]; do sleep 0.01; done; printf survived","name":"active-wait"}).to_string(), fixture.templates.clone()),
-        InvocationContext::new(fixture.security.clone(), (), &cancellation),
+        InvocationScope::new(fixture.security.clone(), (), &cancellation),
     );
     let cancel = async {
         tokio::time::timeout(LIMIT, async {
@@ -1874,7 +1874,7 @@ async fn precancelled_exec_keeps_the_started_process_owned_until_observed() {
     cancellation.cancel();
     let result = fixture.tool(ProcessToolKind::ExecCommand).invoke(
         ProcessInvocation::new("precancelled", json!({"command":"while [ ! -f \"$WORKDIR/release-pre\" ]; do sleep 0.01; done; printf complete","name":"precancelled"}).to_string(), fixture.templates.clone()),
-        InvocationContext::new(fixture.security.clone(), (), &cancellation),
+        InvocationScope::new(fixture.security.clone(), (), &cancellation),
     ).await;
     assert!(matches!(result, Err(OperationError::Cancelled)));
     assert_eq!(fixture.owner.observe_active().len(), 1);
@@ -1902,7 +1902,7 @@ async fn precancelled_interrupt_does_not_signal_or_consume_the_owner() {
                 r#"{"name":"no-signal","signal":9}"#,
                 fixture.templates.clone(),
             ),
-            InvocationContext::new(fixture.security.clone(), (), &cancellation),
+            InvocationScope::new(fixture.security.clone(), (), &cancellation),
         )
         .await;
     assert!(matches!(result, Err(OperationError::Cancelled)));
@@ -1920,7 +1920,7 @@ async fn monitor_ignores_the_invocation_token_and_owns_a_separate_report() {
     cancellation.cancel();
     let result = fixture.tool(ProcessToolKind::Monitor).invoke(
         ProcessInvocation::new("cancel-monitor", r#"{"command":"printf 'token-independent\\n'","description":"own lifetime","name":"token-watch"}"#, fixture.templates.clone()),
-        InvocationContext::new(fixture.security.clone(), (), &cancellation),
+        InvocationScope::new(fixture.security.clone(), (), &cancellation),
     ).await.unwrap();
     assert_eq!(
         result.yielded_process.unwrap().activity_kind,
@@ -1954,7 +1954,7 @@ async fn invocation_error_templates_format_parser_errors() {
         .tool(ProcessToolKind::ExecCommand)
         .invoke(
             invocation,
-            InvocationContext::new(fixture.security.clone(), (), &NeverCancelled),
+            InvocationScope::new(fixture.security.clone(), (), &NeverCancelled),
         )
         .await
         .unwrap();

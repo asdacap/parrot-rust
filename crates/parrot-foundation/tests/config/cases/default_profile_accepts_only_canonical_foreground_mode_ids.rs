@@ -1,10 +1,10 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for id in ["general", "coordinator", "build", "plan", "query"] {
-        let context = Context::new();
+        let fixture = ConfigFixture::new();
         assert_eq!(
-            context
+            fixture
                 .configured(&format!("default_profile: {id}\n"))
                 .unwrap()
                 .runtime

@@ -1,7 +1,7 @@
 use crate::support::animate;
 use parrot_cli::presenters::tools::wait::WaitToolPresenter;
 use parrot_cli::presenters::*;
-use parrot_cli::terminal_frames::{LiveBufferItem, LiveBufferRenderContext};
+use parrot_cli::terminal_frames::{LiveBufferItem, LiveBufferRenderOptions};
 use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
@@ -29,17 +29,17 @@ fn wait_counts_down_same_live_item_across_animated_frames() {
         let live = presenter
             .present_live(&ToolCallPresentation::new("wait", args), 0)
             .unwrap();
-        let context = LiveBufferRenderContext {
+        let options = LiveBufferRenderOptions {
             columns: 512,
             color: false,
         };
         assert_eq!(
-            LiveBufferItem::render(&live, context).unwrap().lines[0].text(),
+            LiveBufferItem::render(&live, options).unwrap().lines[0].text(),
             started
         );
         millis.store(10000, Ordering::SeqCst);
         assert_eq!(
-            LiveBufferItem::render(&animate(&live, 1), context)
+            LiveBufferItem::render(&animate(&live, 1), options)
                 .unwrap()
                 .lines[0]
                 .text(),
@@ -47,7 +47,7 @@ fn wait_counts_down_same_live_item_across_animated_frames() {
         );
         millis.store(400000, Ordering::SeqCst);
         assert_eq!(
-            LiveBufferItem::render(&animate(&live, 2), context)
+            LiveBufferItem::render(&animate(&live, 2), options)
                 .unwrap()
                 .lines[0]
                 .text(),
@@ -58,7 +58,7 @@ fn wait_counts_down_same_live_item_across_animated_frames() {
 #[test]
 fn wait_renders_integer_extremes_without_timespan_limits() {
     let presenter = WaitToolPresenter::with_clock(Arc::new(|| Duration::ZERO));
-    let context = LiveBufferRenderContext {
+    let options = LiveBufferRenderOptions {
         columns: 512,
         color: false,
     };
@@ -76,7 +76,7 @@ fn wait_renders_integer_extremes_without_timespan_limits() {
             )
             .unwrap();
         assert_eq!(
-            LiveBufferItem::render(&item, context).unwrap().lines[0].text(),
+            LiveBufferItem::render(&item, options).unwrap().lines[0].text(),
             format!("⠋ Wait for incoming activity ({expected} left)"),
             "{milliseconds}"
         );
@@ -122,17 +122,17 @@ fn wait_countdown_uses_ceiling_and_source_default_parsing() {
             0,
         )
         .unwrap();
-    let context = LiveBufferRenderContext {
+    let options = LiveBufferRenderOptions {
         columns: 512,
         color: false,
     };
     assert_eq!(
-        LiveBufferItem::render(&item, context).unwrap().lines[0].text(),
+        LiveBufferItem::render(&item, options).unwrap().lines[0].text(),
         "⠋ Wait for incoming activity (2s left)"
     );
     millis.store(1, Ordering::SeqCst);
     assert_eq!(
-        LiveBufferItem::render(&item, context).unwrap().lines[0].text(),
+        LiveBufferItem::render(&item, options).unwrap().lines[0].text(),
         "⠋ Wait for incoming activity (1s left)"
     );
     for args in ["{", r#"{"duration_ms":null}"#, r#"{"duration_ms":"2"}"#] {

@@ -1,5 +1,5 @@
 use parrot_cli::slash_sessions::{
-    CommandContext, SlashCommand, SlashCommandCompletion, SlashCommandRegistry, SlashFailure,
+    CommandEnvironment, SlashCommand, SlashCommandCompletion, SlashCommandRegistry, SlashFailure,
 };
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 
@@ -18,7 +18,7 @@ impl SlashCommand for CompletionCommand {
     fn run<'a>(
         &'a self,
         _: &'a str,
-        _: &'a mut CommandContext<'_>,
+        _: &'a mut CommandEnvironment<'_>,
         _: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async { panic!("completion must not dispatch a command") })

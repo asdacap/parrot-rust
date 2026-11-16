@@ -165,8 +165,8 @@ async fn prepared_history_retains_first_and_ends_replay_at_first_usage_without_r
         PreparedSessionStream::open(fixture.client(), "selected", lifetime, &preparation)
             .await
             .unwrap();
-    let replay = stream.replay_context();
-    assert!(Arc::ptr_eq(&replay, &stream.replay_context()));
+    let replay = stream.replay_state();
+    assert!(Arc::ptr_eq(&replay, &stream.replay_state()));
     let completions = Arc::new(Mutex::new(Vec::new()));
     let completed = completions.clone();
     replay
@@ -216,9 +216,9 @@ async fn live_stream_requests_no_replay_and_never_enters_it() {
     )
     .await
     .unwrap();
-    assert!(!stream.replay_context().lock().unwrap().is_replaying());
+    assert!(!stream.replay_state().lock().unwrap().is_replaying());
     assert_eq!(stream.next().await.unwrap().unwrap().id, "live");
-    assert!(!stream.replay_context().lock().unwrap().is_replaying());
+    assert!(!stream.replay_state().lock().unwrap().is_replaying());
     assert!(!fixture.requests.lock().unwrap()[0].replay);
     stream.close();
     fixture.close().await;
@@ -338,7 +338,7 @@ async fn basic_replay_keeps_old_plan_and_failure_history_and_live_terminals() {
         )
         .await
         .unwrap();
-        let replay = stream.replay_context();
+        let replay = stream.replay_state();
         let callback_replay = replay.clone();
         let plans = Arc::new(AtomicUsize::new(0));
         let starts = Arc::new(AtomicUsize::new(0));

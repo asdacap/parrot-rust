@@ -3,7 +3,7 @@ use parrot_core::{CompactionRequest, NeverCancelled};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
-        security::InvocationContext,
+        security::InvocationScope,
         tools::{ParallelSafety, Tool},
     },
     values::{progress::ProgressUpdate, tools::ConfiguredToolDefinition},
@@ -266,10 +266,10 @@ impl<S: SessionServices> Tool for SessionTool<S> {
     fn invoke<'a>(
         &'a self,
         invocation: Self::Invocation,
-        context: InvocationContext<'a, Self::Security, Self::Selection>,
+        scope: InvocationScope<'a, Self::Security, Self::Selection>,
     ) -> BoxFuture<'a, OperationResult<Output, Failure>> {
         Box::pin(async move {
-            self.execute(&invocation, context.selection(), context.cancellation())
+            self.execute(&invocation, scope.selection(), scope.cancellation())
                 .await
         })
     }

@@ -423,14 +423,24 @@ async fn actual_remote_basic_once_listens_then_sends_structured_text_and_finishe
 }
 
 #[tokio::test]
-async fn actual_remote_attachment_boundary_never_admits_a_partial_prompt() {
+async fn actual_remote_attachment_failure_becomes_plain_text_and_admits_the_prompt() {
     let (result, calls) =
         native_once(ChatSessionStart::ResumeLatest, "before @missing.png after").await;
-    assert_eq!(result.unwrap(), dispatch::EXIT_FAILURE);
+    assert_eq!(result.unwrap(), dispatch::EXIT_SUCCESS);
     let calls = calls.lock().unwrap();
     assert_eq!(calls.created.len(), 1);
     assert_eq!(calls.listened.len(), 1);
-    assert!(calls.messages.is_empty());
+    assert_eq!(calls.messages.len(), 1);
+    assert_eq!(calls.messages[0].parts.len(), 3);
+    assert!(
+        matches!(&calls.messages[0].parts[0].content, Some(wire::message_content_part::Content::Text(text)) if text == "before ")
+    );
+    assert!(
+        matches!(&calls.messages[0].parts[1].content, Some(wire::message_content_part::Content::Text(text)) if text == "@missing.png")
+    );
+    assert!(
+        matches!(&calls.messages[0].parts[2].content, Some(wire::message_content_part::Content::Text(text)) if text == " after")
+    );
 }
 
 #[tokio::test]

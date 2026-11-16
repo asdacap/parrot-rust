@@ -115,6 +115,7 @@ async fn original_openai_image_cost_retention_and_summary_chunk_assertions() {
             trigger_percent: 90,
             target_percent: 5,
             maximum_input_tokens: 600,
+            maximum_output_tokens: 0,
             summary_output_tokens: 100,
             summary_instructions: String::new(),
             summary_prefix: String::new(),

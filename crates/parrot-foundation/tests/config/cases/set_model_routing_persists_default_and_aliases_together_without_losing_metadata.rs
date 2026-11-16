@@ -1,8 +1,8 @@
-use crate::support::{Context, transact};
+use crate::support::{ConfigFixture, transact};
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let mut config=context.configured("theme: dark\nmodel_aliases:\n  high_llm:\n    model_string: provider/old\n    usage: Customized usage\n    augment_system_prompt: Keep metadata.\n").unwrap();
+    let fixture = ConfigFixture::new();
+    let mut config=fixture.configured("theme: dark\nmodel_aliases:\n  high_llm:\n    model_string: provider/old\n    usage: Customized usage\n    augment_system_prompt: Keep metadata.\n").unwrap();
     transact(&mut config, |transaction| {
         transaction.set_model_routing_with_limits(
             "high_llm",
@@ -11,7 +11,7 @@ fn source_assertions() {
         )
     })
     .unwrap();
-    let reloaded = context.load().unwrap();
+    let reloaded = fixture.load().unwrap();
     assert_eq!(reloaded.model, "high_llm");
     assert_eq!(
         reloaded.models.model_aliases["high_llm"].model_string,
@@ -27,5 +27,5 @@ fn source_assertions() {
             .as_deref(),
         Some("Keep metadata.")
     );
-    assert!(context.saved().contains("theme: dark"));
+    assert!(fixture.saved().contains("theme: dark"));
 }

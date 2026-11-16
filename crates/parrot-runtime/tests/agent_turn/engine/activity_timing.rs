@@ -58,18 +58,16 @@ async fn real_activity_finishes_each_started_turn_once_for_normal_publication_ca
             }
         );
         let diagnostic = runtime.activity.diagnostic.lock().unwrap().clone();
-        let starts: Vec<_> = diagnostic
+        let starts = diagnostic
             .iter()
-            .filter(|entry| entry.starts_with("started:"))
-            .collect();
+            .filter(|entry| entry.as_str() == "started")
+            .count();
         let ends: Vec<_> = diagnostic
             .iter()
             .filter(|entry| entry.starts_with("finished:"))
             .collect();
-        assert_eq!(starts.len(), 1, "{case}: {diagnostic:?}");
+        assert_eq!(starts, 1, "{case}: {diagnostic:?}");
         assert_eq!(ends.len(), 1, "{case}: {diagnostic:?}");
-        let turn = starts[0].strip_prefix("started:").unwrap();
-        assert!(ends[0].starts_with(&format!("finished:{turn}:")));
         drop(diagnostic);
         runtime.close().await;
     }

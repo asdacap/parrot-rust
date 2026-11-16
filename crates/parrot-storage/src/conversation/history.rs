@@ -24,15 +24,10 @@ pub fn include_request_history(
     after_request_event_sequence: i64,
     mut entries: Vec<AgentHistoryEntry>,
 ) -> Result<Vec<AgentHistoryEntry>, EventError> {
-    let mut read = tx.prepare("SELECT event.sequence, event.payload, COALESCE(event.history_anchor, 0) AS history_sequence FROM event WHERE event.agent_session = ?1 AND event.request_id IS NOT NULL AND event.sequence > ?2 ORDER BY event.sequence;")?;
+    let mut read = tx.prepare("SELECT event.sequence, event.payload, COALESCE(event.history_anchor, 0) AS history_sequence FROM event WHERE event.agent_session = ?1 AND event.kind = 'request_usage_recorded' AND event.sequence > ?2 ORDER BY event.sequence;")?;
     let mut rows = read.query(params![agent, after_request_event_sequence])?;
     while let Some(row) = rows.next()? {
         let event = Event::parse_from_bytes(&row.get::<_, Vec<u8>>(1)?)?;
-        if !event.has_request_usage_recorded() {
-            return Err(EventError::Invalid(
-                "request history event does not contain RequestUsageRecorded".into(),
-            ));
-        }
         let request = event.request_usage_recorded();
         entries.push(AgentHistoryEntry::Request {
             sequence: row.get(2)?,

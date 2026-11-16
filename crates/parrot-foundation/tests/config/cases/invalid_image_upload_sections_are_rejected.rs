@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 
 #[test]
 fn source_assertions() {
@@ -57,8 +57,8 @@ fn source_assertions() {
             "image_upload contains an unsupported key",
         ),
     ] {
-        let context = Context::new();
-        let error = context.configured(&format!("{yaml}\n")).unwrap_err();
+        let fixture = ConfigFixture::new();
+        let error = fixture.configured(&format!("{yaml}\n")).unwrap_err();
         assert_eq!(error.0, expected);
     }
 }

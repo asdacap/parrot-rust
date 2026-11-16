@@ -2,7 +2,7 @@ use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
         paths::ResolvedRead,
-        security::{AccessSnapshot, InvocationContext},
+        security::{AccessSnapshot, InvocationScope},
         tools::Tool,
     },
     values::tools::ConfiguredToolDefinition,
@@ -131,7 +131,7 @@ async fn run(
     };
     let token = Token(token);
     let result = tool
-        .invoke(invocation, InvocationContext::new(snapshot, (), &token))
+        .invoke(invocation, InvocationScope::new(snapshot, (), &token))
         .await
         .map(|output| output.text);
     (result, services)

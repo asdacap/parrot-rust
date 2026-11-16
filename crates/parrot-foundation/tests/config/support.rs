@@ -13,18 +13,18 @@ pub fn transact(
     configuration.model_configuration_transaction(update)?
 }
 
-pub struct Context {
+pub struct ConfigFixture {
     pub directory: PathBuf,
     pub path: PathBuf,
     pub predefined: PathBuf,
     pub environment: BTreeMap<String, String>,
 }
-impl Default for Context {
+impl Default for ConfigFixture {
     fn default() -> Self {
         Self::new()
     }
 }
-impl Context {
+impl ConfigFixture {
     pub fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.tmp");

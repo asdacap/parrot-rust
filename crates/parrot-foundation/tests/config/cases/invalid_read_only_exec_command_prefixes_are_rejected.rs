@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     let element_error = "read_only_exec_command_prefixes[19] must be a unique nonblank string without leading or trailing whitespace";
@@ -18,9 +18,9 @@ fn source_assertions() {
         ),
         ("read_only_exec_command_prefixes:\n  - [rg]", element_error),
     ] {
-        let context = Context::new();
+        let fixture = ConfigFixture::new();
         assert_eq!(
-            context.configured(&format!("{yaml}\n")).unwrap_err().0,
+            fixture.configured(&format!("{yaml}\n")).unwrap_err().0,
             message
         );
     }

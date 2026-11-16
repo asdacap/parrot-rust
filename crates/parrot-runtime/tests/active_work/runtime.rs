@@ -42,7 +42,7 @@ use parrot_runtime::{
     compaction::ContextStatus,
     event_broker::{BrokerError, EventBroker},
     interactions::*,
-    prompt_context::{PromptResult, SystemPrompt},
+    prompt_assembly::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
     conversation::{AgentHistoryView, MessageRole},
@@ -121,8 +121,8 @@ impl SessionActivity for Activity {
         Duration::ZERO
     }
     fn finish_execution(&self, _: i64, _: &Execution) {}
-    fn turn_started(&self, _: &str) {}
-    fn turn_finished(&self, _: &str, _: &str, _: Option<&str>) {}
+    fn turn_started(&self) {}
+    fn turn_finished(&self, _: &str, _: Option<&str>) {}
     fn assistant_message(&self, _: &str) {}
 }
 struct NoParent;

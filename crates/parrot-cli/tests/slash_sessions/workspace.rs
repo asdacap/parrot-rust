@@ -8,7 +8,7 @@ use std::{
 
 use chrono::{Local, TimeZone, Utc};
 use parrot_cli::slash_sessions::{
-    CommandContext, NavigationFailure, PollingSlashActivity, SlashCommand, SlashFailure,
+    CommandEnvironment, NavigationFailure, PollingSlashActivity, SlashCommand, SlashFailure,
     WorkspaceNavigation, WorkspaceSessionsCommand, parse_creation_instant, workspace_options,
 };
 use parrot_domain::{
@@ -101,7 +101,7 @@ async fn run(
     let mut session = Session::new(record.clone());
     let activity = Activity::new(record);
     let refresh = refresh(Record::default());
-    let mut context = CommandContext {
+    let mut environment = CommandEnvironment {
         session: &mut session,
         activity: &activity,
         dialog: &mut dialog,
@@ -109,7 +109,7 @@ async fn run(
         commands: &[],
     };
     let result = command
-        .run("arguments are ignored", &mut context, &Stop::new())
+        .run("arguments are ignored", &mut environment, &Stop::new())
         .await;
     (result, dialog, session)
 }
@@ -179,7 +179,7 @@ async fn workspace_options_sort_instants_then_stable_ids_and_display_local_time(
     command
         .run(
             "",
-            &mut CommandContext {
+            &mut CommandEnvironment {
                 session: &mut session,
                 activity: &activity,
                 dialog: &mut dialog,
@@ -267,14 +267,14 @@ async fn workspace_selected_id_loads_only_after_actual_activity_becomes_idle() {
     let refresh = refresh(Record::default());
     let stop = Stop::new();
     {
-        let mut context = CommandContext {
+        let mut environment = CommandEnvironment {
             session: &mut session,
             activity: &activity,
             dialog: &mut dialog,
             refresh_skills: &refresh,
             commands: &[],
         };
-        let running = command.run("", &mut context, &stop);
+        let running = command.run("", &mut environment, &stop);
         tokio::pin!(running);
         assert!(
             tokio::time::timeout(Duration::from_millis(10), &mut running)
@@ -305,14 +305,14 @@ async fn workspace_cancellation_while_busy_preserves_session_and_has_no_error_fr
     let refresh = refresh(Record::default());
     let stop = Stop::new();
     let result = {
-        let mut context = CommandContext {
+        let mut environment = CommandEnvironment {
             session: &mut session,
             activity: &activity,
             dialog: &mut dialog,
             refresh_skills: &refresh,
             commands: &[],
         };
-        let running = command.run("", &mut context, &stop);
+        let running = command.run("", &mut environment, &stop);
         tokio::pin!(running);
         assert!(
             tokio::time::timeout(Duration::from_millis(10), &mut running)

@@ -27,7 +27,7 @@ use crate::{
         interrupt_loop, reconcile_loop, stop_binding, terminal_commands,
     },
     slash_sessions::{
-        CallbackSessionBinding, CommandContext, NavigationFailure, PollingSlashActivity,
+        CallbackSessionBinding, CommandEnvironment, NavigationFailure, PollingSlashActivity,
         RpcSlashSession, SkillRefresh, SlashFailure, SlashSession, native_call,
     },
     slash_settings::{AuthServices, model_alias},
@@ -374,7 +374,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             )
             .await?
         };
-        let replay_context = stream.replay_context();
+        let replay_state = stream.replay_state();
         let shared = Arc::new(BasicSession {
             binding: tokio::sync::Mutex::new(Binding {
                 stream,
@@ -399,7 +399,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             error: self.error.clone(),
         });
         if replay {
-            replay_context
+            replay_state
                 .lock()
                 .expect("Basic replay poisoned")
                 .set_completion(shared.busy_observer());
@@ -598,14 +598,14 @@ impl<R: DialogInput + 'static> BasicCli<R> {
                 continue;
             }
             if entered.starts_with('/') {
-                let mut context = CommandContext {
+                let mut environment = CommandEnvironment {
                     session: &mut session,
                     activity: &activity,
                     dialog: &mut dialog,
                     refresh_skills: &refresh,
                     commands: &[],
                 };
-                commands.dispatch(entered, &mut context, c).await?;
+                commands.dispatch(entered, &mut environment, c).await?;
                 let current = shared.snapshot();
                 if current.generation == snapshot.generation {
                     shared.update_settings(session.current_session().clone());
@@ -775,7 +775,7 @@ impl BasicSession {
             let current = self.snapshot();
             let replaying = binding
                 .stream
-                .replay_context()
+                .replay_state()
                 .lock()
                 .expect("Basic replay poisoned")
                 .is_replaying();
@@ -891,11 +891,11 @@ impl BasicSession {
         self.busy.store(false, Ordering::Release);
         self.interrupt_requested.store(false, Ordering::Release);
         if replay {
-            // The shared context observes the buffered first event before its
+            // The shared replay state observes the buffered first event before its
             // yield. Its single source callback restores latest-root busy.
             let busy = self.busy_observer();
             prepared
-                .replay_context()
+                .replay_state()
                 .lock()
                 .expect("Basic replay poisoned")
                 .set_completion(busy);
@@ -1110,7 +1110,6 @@ mod tests {
                     description: "description".into(),
                     ..Default::default()
                 }],
-                custom: false,
                 multiple: false,
                 ..Default::default()
             }],

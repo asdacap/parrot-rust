@@ -41,14 +41,14 @@ impl Clock for ManualClock {
 }
 struct Diagnostics(Arc<Mutex<Vec<String>>>);
 impl TurnDiagnostics for Diagnostics {
-    fn started(&self, id: &str) {
-        self.0.lock().unwrap().push(format!("started:{id}"));
+    fn started(&self) {
+        self.0.lock().unwrap().push("started".to_owned());
     }
-    fn finished(&self, id: &str, outcome: &str, code: Option<&str>) {
+    fn finished(&self, outcome: &str, code: Option<&str>) {
         self.0
             .lock()
             .unwrap()
-            .push(format!("finished:{id}:{outcome}:{code:?}"));
+            .push(format!("finished:{outcome}:{code:?}"));
     }
 }
 pub(super) struct Activity {
@@ -97,11 +97,11 @@ impl SessionActivity for Activity {
         self.trace
             .push(format!("execution-finished:{:?}", execution.status));
     }
-    fn turn_started(&self, id: &str) {
-        self.live.turn_started(id);
+    fn turn_started(&self) {
+        self.live.turn_started();
     }
-    fn turn_finished(&self, id: &str, outcome: &str, error: Option<&str>) {
-        self.live.turn_finished(id, outcome, error);
+    fn turn_finished(&self, outcome: &str, error: Option<&str>) {
+        self.live.turn_finished(outcome, error);
     }
     fn assistant_message(&self, text: &str) {
         self.live.assistant_message(text);

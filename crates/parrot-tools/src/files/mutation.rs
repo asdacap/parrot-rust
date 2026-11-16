@@ -2,7 +2,7 @@ use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
         filesystem::{AuthorizedMutationService, FileReadErrorKind, MutationRequest},
-        security::InvocationContext,
+        security::InvocationScope,
         tools::{ParallelSafety, Tool},
     },
     values::tools::ConfiguredToolDefinition,
@@ -247,10 +247,10 @@ macro_rules! mutation_tool {
             fn invoke<'a>(
                 &'a self,
                 invocation: Self::Invocation,
-                context: InvocationContext<'a, Self::Security, Self::Selection>,
+                scope: InvocationScope<'a, Self::Security, Self::Selection>,
             ) -> BoxFuture<'a, OperationResult<Self::Output, Self::Error>> {
                 Box::pin(async move {
-                    self.execute(&invocation, context.security(), context.cancellation())
+                    self.execute(&invocation, scope.security(), scope.cancellation())
                         .await
                 })
             }

@@ -8,7 +8,7 @@ use std::{
 };
 
 use parrot_cli::slash_sessions::{
-    CallbackSessionBinding, CommandContext, ModeCommand, ModeSelection, ModesCommand,
+    CallbackSessionBinding, CommandEnvironment, ModeCommand, ModeSelection, ModesCommand,
     RpcSlashSession, SessionsCommand, SkillRefresh, SlashActivity, SlashCommand, SlashFailure,
     SlashSession, StatusCommand,
 };
@@ -98,7 +98,7 @@ async fn run(
     command
         .run(
             "ignored arguments",
-            &mut CommandContext {
+            &mut CommandEnvironment {
                 session,
                 activity,
                 dialog,

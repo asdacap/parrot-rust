@@ -11,19 +11,21 @@ use fixture::*;
 #[path = "../../../parrot-runtime/tests/tool_settlement/common.rs"]
 mod common;
 use common::*;
-#[path = "context_resources.rs"]
+#[path = "invocation_resources.rs"]
 mod resources;
-use resources::BorrowedContextResources;
+use resources::BorrowedInvocationResources;
 #[path = "../../../parrot-runtime/tests/tool_settlement/runtime.rs"]
 mod runtime;
-use parrot_host::composition::context::{ContextSelection, ContextServices, RetainedCompactTool};
-use parrot_runtime::{agent_turn::lifecycle::ExecutionStatus, prompt_context::SessionPrompt};
+use parrot_host::composition::invocation::{
+    InvocationSelection, InvocationServices, RetainedCompactTool,
+};
+use parrot_runtime::{agent_turn::lifecycle::ExecutionStatus, prompt_assembly::SessionPrompt};
 use parrot_tools::session::{self, Failure, SessionServices};
 
 struct Ancillary;
 impl SessionServices for Ancillary {
     type Security = SharedSecurity<Security>;
-    type Selection = ContextSelection<Security>;
+    type Selection = InvocationSelection<Security>;
     fn set_reminder<'a>(
         &'a self,
         _: &'a str,
@@ -66,10 +68,10 @@ impl SessionServices for Ancillary {
 }
 type Bridge = (
     Arc<RetainedCompactTool<Security>>,
-    Arc<session::SessionTool<ContextServices<Security, Ancillary>>>,
+    Arc<session::SessionTool<InvocationServices<Security, Ancillary>>>,
 );
 fn bridge() -> Bridge {
-    let services = Arc::new(ContextServices::new(Arc::new(Ancillary)));
+    let services = Arc::new(InvocationServices::new(Arc::new(Ancillary)));
     let tool = Arc::new(session::SessionTool::new(
         session::Kind::CompactContext,
         ConfiguredToolDefinition::new("Compact current context", r#"{"type":"object"}"#),
@@ -219,14 +221,15 @@ async fn retained_compact_invocation_only_acknowledges_without_mutating_context(
     let sequence = fixture.batch(vec![call("inert", "compact_context")]).await;
     let (adapter, _) = bridge();
     let mut harness =
-        BorrowedContextResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
+        BorrowedInvocationResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())])
+            .await;
     let provider = Scripted::default();
     harness.selection = selection(&provider);
     let before = fixture.history.conversation().await.unwrap();
     let definitions = harness.snapshot.definitions().to_vec();
     let output = bounded(adapter.invoke(
         ToolInvocation::new("inert", "{}", sequence, templates()),
-        BorrowedToolContext {
+        BorrowedToolState {
             selection: &harness.selection,
             definitions: &definitions,
             resources: TurnResources {
@@ -311,7 +314,7 @@ struct StatusAncillary {
     observed: Mutex<Vec<ContextSnapshot>>,
     prompt_probe: Option<Arc<SessionPrompt>>,
 }
-fn status_query(selected: &ContextSelection<Security>) -> StatusQuery {
+fn status_query(selected: &InvocationSelection<Security>) -> StatusQuery {
     StatusQuery {
         session_id: "agent".into(),
         parent_session_id: String::new(),
@@ -331,7 +334,7 @@ fn status_error(error: OperationError<StatusError>) -> OperationError<Failure> {
 }
 impl SessionServices for StatusAncillary {
     type Security = SharedSecurity<Security>;
-    type Selection = ContextSelection<Security>;
+    type Selection = InvocationSelection<Security>;
     fn set_reminder<'a>(
         &'a self,
         title: &'a str,
@@ -400,7 +403,7 @@ impl SessionServices for StatusAncillary {
 type StatusBridge = (
     Arc<RetainedCompactTool<Security>>,
     Arc<StatusAncillary>,
-    Arc<session::SessionTool<ContextServices<Security, StatusAncillary>>>,
+    Arc<session::SessionTool<InvocationServices<Security, StatusAncillary>>>,
 );
 fn status_bridge() -> StatusBridge {
     status_bridge_with_prompt(None)
@@ -421,7 +424,7 @@ fn status_bridge_with_prompt(prompt_probe: Option<Arc<SessionPrompt>>) -> Status
         observed: Mutex::new(vec![]),
         prompt_probe,
     });
-    let services = Arc::new(ContextServices::new(ancillary.clone()));
+    let services = Arc::new(InvocationServices::new(ancillary.clone()));
     let tool = Arc::new(session::SessionTool::new(
         session::Kind::Status,
         ConfiguredToolDefinition::new("Observe runtime status", r#"{"type":"object"}"#),
@@ -463,7 +466,7 @@ async fn retained_status_tool_uses_actual_activity_context_statistics_and_same_i
     let observations = ancillary.observed.lock().unwrap().clone();
     assert_eq!(observations.len(), 2);
     assert!(observations[1].estimated_tokens > observations[0].estimated_tokens);
-    let selection = ContextSelection::external(selection(&provider));
+    let selection = InvocationSelection::external(selection(&provider));
     let query = status_query(&selection);
     let statistics = ancillary
         .runtime
@@ -555,12 +558,13 @@ async fn retained_status_observes_current_borrowed_history_tools_and_epoch_witho
     ))));
     let (adapter, ancillary, _) = status_bridge_with_prompt(Some(prompt.clone()));
     let mut harness =
-        BorrowedContextResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
+        BorrowedInvocationResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())])
+            .await;
     let definitions = harness.snapshot.definitions().to_vec();
     for index in 0..2 {
         let output = bounded(adapter.invoke(
             ToolInvocation::new("direct-status", "{}", index, templates()),
-            BorrowedToolContext {
+            BorrowedToolState {
                 selection: &harness.selection,
                 definitions: &definitions,
                 resources: TurnResources {
@@ -624,14 +628,15 @@ async fn retained_status_precancel_does_not_estimate_and_external_selection_has_
     let fixture = Fixture::new();
     let (adapter, ancillary, _) = status_bridge();
     let mut harness =
-        BorrowedContextResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())]).await;
+        BorrowedInvocationResources::new(&fixture, vec![ToolHandle::Borrowed(adapter.clone())])
+            .await;
     let definitions = harness.snapshot.definitions().to_vec();
     let cancelled = Signal::new();
     cancelled.cancel();
     let result = adapter
         .invoke(
             ToolInvocation::new("cancel-status", "{}", 0, templates()),
-            BorrowedToolContext {
+            BorrowedToolState {
                 selection: &harness.selection,
                 definitions: &definitions,
                 resources: TurnResources {
@@ -651,7 +656,7 @@ async fn retained_status_precancel_does_not_estimate_and_external_selection_has_
         .await;
     assert!(matches!(result, Err(OperationError::Cancelled)));
     assert!(ancillary.observed.lock().unwrap().is_empty());
-    let external = ContextSelection::external(harness.selection.clone());
+    let external = InvocationSelection::external(harness.selection.clone());
     let error = external
         .estimate_context(&NeverCancelled)
         .await

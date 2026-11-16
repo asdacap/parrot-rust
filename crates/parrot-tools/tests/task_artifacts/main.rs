@@ -163,7 +163,7 @@ fn source_envelope_schema_union_unknown_and_empty_rules_are_enforced() {
 }
 
 #[test]
-fn dependency_and_instruction_errors_keep_source_field_context() {
+fn dependency_and_instruction_errors_name_the_source_field() {
     let invalid_dependencies = r#"{"schema_version":1,"tasks":[{"name":"x","dependencies":null,"description":"d","payload":"p","acceptance_criteria":"a"}]}"#;
     assert_eq!(
         parse_artifact(invalid_dependencies)

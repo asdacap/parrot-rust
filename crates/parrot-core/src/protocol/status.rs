@@ -21,3 +21,28 @@ pub type StatusOffering = BTreeMap<StatusKey, StatusOffer>;
 /// Cumulative identities of the status slots delivered to the conversation,
 /// read from the latest persisted status message.
 pub type StatusStanding = BTreeMap<StatusKey, String>;
+
+/// Returns whether the core should steer a new status assembly at a safe point.
+/// Non-auto slots never trigger steering on their own. A new conversation has
+/// empty standing state, so the first safe point steers the initial assembly
+/// even when every slot is static. An auto-update slot with no standing hash
+/// counts as changed, because its content was never injected.
+pub fn status_steering_needed(offering: &StatusOffering, standing: &StatusStanding) -> bool {
+    if offering.is_empty() {
+        return false;
+    }
+    standing.is_empty()
+        || offering
+            .iter()
+            .filter(|(_, offer)| offer.is_auto_update)
+            .any(|(key, offer)| standing.get(key) != Some(&offer.hash))
+}
+
+/// Joins every offered slot's rendered text in slot order.
+pub fn join_status_offering(offering: &StatusOffering) -> String {
+    offering
+        .values()
+        .map(|offer| offer.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}

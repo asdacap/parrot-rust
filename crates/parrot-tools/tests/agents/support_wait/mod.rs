@@ -18,7 +18,7 @@ use parrot_domain::{
         filenames::FilenameGenerator,
         paths::{RootOrigin, SelectedSessionRoot},
         runtime::AgentRuntime,
-        security::InvocationContext,
+        security::InvocationScope,
         tools::{ParallelSafety, Tool},
     },
     protocol::messages::parrot::{self as protocol, Event},
@@ -49,7 +49,7 @@ use parrot_runtime::{
     },
     compaction::{ContextController, ContextStatus},
     event_broker::EventBroker,
-    prompt_context::{PromptResult, SystemPrompt},
+    prompt_assembly::{PromptResult, SystemPrompt},
     tool_settlement::{
         self, SharedSecurity, ToolDiagnostics, ToolExecutionConfig, ToolFactory, ToolFailure,
         ToolHandle, ToolInventory, ToolMetadata, ToolOutput,
@@ -328,8 +328,8 @@ impl SessionActivity for Activity {
     fn finish_execution(&self, execution: i64, outcome: &Execution) {
         self.0.finish_execution(execution, outcome.clone());
     }
-    fn turn_started(&self, _: &str) {}
-    fn turn_finished(&self, _: &str, _: &str, _: Option<&str>) {}
+    fn turn_started(&self) {}
+    fn turn_finished(&self, _: &str, _: Option<&str>) {}
     fn assistant_message(&self, _: &str) {}
 }
 struct NoParent;
@@ -522,7 +522,7 @@ impl Tool for RetainedTool {
     fn invoke<'a>(
         &'a self,
         invocation: Self::Invocation,
-        context: InvocationContext<'a, Self::Security, Self::Selection>,
+        scope: InvocationScope<'a, Self::Security, Self::Selection>,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         Box::pin(async move {
             self.tool
@@ -532,17 +532,17 @@ impl Tool for RetainedTool {
                         assistant_sequence: invocation.assistant_sequence,
                         call_id: invocation.call_id,
                     },
-                    InvocationContext::new(
-                        context.security().snapshot().clone(),
+                    InvocationScope::new(
+                        scope.security().snapshot().clone(),
                         AgentSelection {
-                            requested_model: context
+                            requested_model: scope
                                 .selection()
                                 .model
                                 .requested_selector
                                 .value
                                 .clone(),
                         },
-                        context.cancellation(),
+                        scope.cancellation(),
                     ),
                 )
                 .await
@@ -626,6 +626,7 @@ impl Harness {
                 trigger_percent: 95,
                 target_percent: 30,
                 maximum_input_tokens: 60000,
+                maximum_output_tokens: 0,
                 summary_output_tokens: 1024,
                 summary_instructions: String::new(),
                 summary_prefix: String::new(),
@@ -735,7 +736,10 @@ impl Harness {
         cancellation: &dyn Cancellation,
     ) -> Result<String, OperationError<AgentToolError>> {
         wait_tool(self.bridge.clone())
-            .invoke(crate::invocation(arguments), crate::context(cancellation))
+            .invoke(
+                crate::invocation(arguments),
+                crate::invocation_scope(cancellation),
+            )
             .await
     }
     pub(super) async fn send(

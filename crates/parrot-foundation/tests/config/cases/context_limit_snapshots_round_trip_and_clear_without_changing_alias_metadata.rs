@@ -1,4 +1,4 @@
-use crate::support::{Context, transact};
+use crate::support::{ConfigFixture, transact};
 use parrot_domain::values::context::ContextSize;
 use parrot_foundation::config::models::{ModelPresetConfig, ModelPresetContextLimits};
 use std::collections::BTreeMap;
@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 #[test]
 fn source_assertions() {
     for empty in [false, true] {
-        let context = Context::new();
-        let mut configuration = context.configured("theme: dark\ncontext_limit: 100k\nmodel_aliases:\n  high_llm:\n    model_string: provider/old\n    usage: Keep usage\n    context_limit: 20%\nmodel_presets:\n  legacy:\n    model: provider/old\n    model_aliases: {}\n  empty:\n    model: provider/old\n    model_aliases: {}\n    context_limits: {}\n").unwrap();
+        let fixture = ConfigFixture::new();
+        let mut configuration = fixture.configured("theme: dark\ncontext_limit: 100k\nmodel_aliases:\n  high_llm:\n    model_string: provider/old\n    usage: Keep usage\n    context_limit: 20%\nmodel_presets:\n  legacy:\n    model: provider/old\n    model_aliases: {}\n  empty:\n    model: provider/old\n    model_aliases: {}\n    context_limits: {}\n").unwrap();
         assert!(
             configuration.models.model_presets["legacy"]
                 .context_limits
@@ -51,14 +51,14 @@ fn source_assertions() {
         })
         .unwrap();
         assert_eq!(
-            context.load().unwrap().models.context_limit,
+            fixture.load().unwrap().models.context_limit,
             Some(ContextSize::parse("50k").unwrap())
         );
         assert_eq!(
-            context.load().unwrap().models.model_aliases["high_llm"].context_limit,
+            fixture.load().unwrap().models.model_aliases["high_llm"].context_limit,
             Some(ContextSize::parse("20%").unwrap())
         );
-        let saved = context.load().unwrap().models.model_presets["saved"].clone();
+        let saved = fixture.load().unwrap().models.model_presets["saved"].clone();
         transact(&mut configuration, |transaction| {
             transaction.set_model_routing_with_limits(
                 &saved.model,
@@ -67,7 +67,7 @@ fn source_assertions() {
             )
         })
         .unwrap();
-        let restored = context.load().unwrap();
+        let restored = fixture.load().unwrap();
         assert_eq!(
             restored.models.context_limit,
             if empty {
@@ -88,6 +88,6 @@ fn source_assertions() {
             restored.models.model_aliases["high_llm"].usage,
             "Keep usage"
         );
-        assert!(context.saved().contains("theme: dark"));
+        assert!(fixture.saved().contains("theme: dark"));
     }
 }

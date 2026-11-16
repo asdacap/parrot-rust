@@ -53,11 +53,11 @@ impl SkillSnapshot {
 
 /// An explicit path base and platform, not host discovery or filesystem authority.
 #[derive(Clone, Debug)]
-pub struct SkillDiscoveryContext {
+pub struct SkillPathBases {
     pub working_directory: PathBuf,
     pub platform: PathPlatform,
 }
-impl SkillDiscoveryContext {
+impl SkillPathBases {
     fn lexical(&self, path: &Path) -> Result<String, FileReadError> {
         let value = unicode(path)?;
         let base = unicode(&self.working_directory)?;
@@ -166,7 +166,7 @@ struct DirectoryVisit {
 struct Discovery<'a, R: AuthorizedReadService + ?Sized> {
     service: &'a R,
     configuration: &'a SkillConfiguration,
-    context: &'a SkillDiscoveryContext,
+    path_bases: &'a SkillPathBases,
     snapshot: &'a R::Security,
     cancellation: &'a dyn Cancellation,
     result: SkillSnapshot,
@@ -177,14 +177,14 @@ pub async fn discover_skills<R: AuthorizedReadService + ?Sized>(
     service: &R,
     roots: &[SkillRoot],
     configuration: &SkillConfiguration,
-    context: &SkillDiscoveryContext,
+    path_bases: &SkillPathBases,
     snapshot: &R::Security,
     cancellation: &dyn Cancellation,
 ) -> OperationResult<SkillSnapshot, FileReadError> {
     let mut discovery = Discovery {
         service,
         configuration,
-        context,
+        path_bases,
         snapshot,
         cancellation,
         result: SkillSnapshot::default(),
@@ -200,7 +200,7 @@ pub async fn discover_skills<R: AuthorizedReadService + ?Sized>(
 impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
     async fn root(&mut self, root: &SkillRoot) -> OperationResult<(), FileReadError> {
         let logical = self
-            .context
+            .path_bases
             .lexical(Path::new(&root.path))
             .map_err(boundary_error)?;
         self.result
@@ -244,7 +244,7 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
             Err(error) => return Err(error),
         };
         let physical = self
-            .context
+            .path_bases
             .physical(&resolved.physical_path)
             .map_err(boundary_error)?;
         self.result
@@ -260,7 +260,7 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
         while let Some(current) = pending.pop_front() {
             check_cancel(self.cancellation)?;
             if !visited.insert(
-                self.context
+                self.path_bases
                     .physical(&current.physical)
                     .map_err(boundary_error)?,
             ) {
@@ -289,7 +289,7 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
                 Err(OperationError::Failed(error)) if caught_io(&error) => {
                     add_error(
                         &mut self.result.errors,
-                        self.context
+                        self.path_bases
                             .lexical(&current.logical)
                             .map_err(boundary_error)?,
                         &error.message,
@@ -338,7 +338,7 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
             Err(OperationError::Failed(error)) if caught_io(&error) => {
                 add_error(
                     &mut self.result.errors,
-                    self.context.lexical(path).map_err(boundary_error)?,
+                    self.path_bases.lexical(path).map_err(boundary_error)?,
                     &error.message,
                 );
                 return Ok(());
@@ -358,7 +358,7 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
                     Err(OperationError::Failed(error)) if caught_io(&error) => {
                         add_error(
                             &mut self.result.errors,
-                            self.context.lexical(path).map_err(boundary_error)?,
+                            self.path_bases.lexical(path).map_err(boundary_error)?,
                             &error.message,
                         );
                         return Ok(());
@@ -369,7 +369,7 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
                     pending.push_back(DirectoryVisit {
                         logical: path.into(),
                         physical: self
-                            .context
+                            .path_bases
                             .physical(&target.physical_path)
                             .map_err(boundary_error)?
                             .into(),
@@ -411,7 +411,7 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
             .await;
         let physical = match result {
             Ok(metadata) if metadata.kind == EntryKind::Regular => self
-                .context
+                .path_bases
                 .physical(&metadata.physical_path)
                 .map_err(boundary_error)?,
             Ok(_) => return Ok(SkillDisplayMetadata::default()),
@@ -421,7 +421,7 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
             Err(OperationError::Failed(error)) if caught_skill(&error) => {
                 add_error(
                     &mut self.result.errors,
-                    self.context.lexical(&logical).map_err(boundary_error)?,
+                    self.path_bases.lexical(&logical).map_err(boundary_error)?,
                     &error.message,
                 );
                 return Ok(SkillDisplayMetadata::default());
@@ -441,7 +441,7 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
             Err(OperationError::Failed(error)) if caught_skill(&error) => {
                 add_error(
                     &mut self.result.errors,
-                    self.context.lexical(&logical).map_err(boundary_error)?,
+                    self.path_bases.lexical(&logical).map_err(boundary_error)?,
                     &error.message,
                 );
                 Ok(SkillDisplayMetadata::default())
@@ -457,7 +457,7 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
         lexical: &Path,
     ) -> OperationResult<(), FileReadError> {
         let canonical = self
-            .context
+            .path_bases
             .physical(&directory.physical.join("SKILL.md"))
             .map_err(boundary_error)?;
         if self.canonical_paths.contains(&canonical) {
@@ -476,7 +476,7 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
             Err(OperationError::Failed(error)) if caught_skill(&error) => {
                 add_error(
                     &mut self.result.errors,
-                    self.context.lexical(lexical).map_err(boundary_error)?,
+                    self.path_bases.lexical(lexical).map_err(boundary_error)?,
                     &error.message,
                 );
                 return Ok(());
@@ -494,7 +494,7 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
             Err(error) => {
                 add_error(
                     &mut self.result.errors,
-                    self.context.lexical(lexical).map_err(boundary_error)?,
+                    self.path_bases.lexical(lexical).map_err(boundary_error)?,
                     &error.message,
                 );
                 return Ok(());
@@ -506,11 +506,11 @@ impl<R: AuthorizedReadService + ?Sized> Discovery<'_, R> {
             .configuration
             .is_enabled(
                 &canonical,
-                unicode(&self.context.working_directory).map_err(boundary_error)?,
-                self.context.platform,
+                unicode(&self.path_bases.working_directory).map_err(boundary_error)?,
+                self.path_bases.platform,
             )
             .map_err(|error| boundary_error(invalid_path(error.to_string())))?;
-        parsed.discovery_path = self.context.lexical(lexical).map_err(boundary_error)?;
+        parsed.discovery_path = self.path_bases.lexical(lexical).map_err(boundary_error)?;
         self.canonical_paths.insert(canonical);
         self.result.skills.push(parsed);
         Ok(())
@@ -533,14 +533,14 @@ pub fn resolve_skill_roots(
     packaged_root: &Path,
     platform: PathPlatform,
 ) -> Result<Vec<SkillRoot>, FileReadError> {
-    let context = SkillDiscoveryContext {
+    let path_bases = SkillPathBases {
         working_directory: workspace.launch_directory().into(),
         platform,
     };
     let mut roots = Vec::new();
     let mut paths = HashSet::new();
     let mut add = |path: PathBuf, scope, follow_directory_links| -> Result<(), FileReadError> {
-        let path = context.lexical(&path)?;
+        let path = path_bases.lexical(&path)?;
         if paths.insert(path.clone()) {
             roots.push(SkillRoot {
                 path,
@@ -551,16 +551,16 @@ pub fn resolve_skill_roots(
         Ok(())
     };
     if let Some(repository) = workspace.repository_root() {
-        let repository_normalized = context.physical(repository)?;
-        let launch = context.physical(workspace.launch_directory())?;
+        let repository_normalized = path_bases.physical(repository)?;
+        let launch = path_bases.physical(workspace.launch_directory())?;
         let start = if Path::new(&launch).starts_with(&repository_normalized) {
             workspace.launch_directory()
         } else {
             workspace.physical_identity()
         };
-        let mut current = PathBuf::from(context.lexical(start)?);
+        let mut current = PathBuf::from(path_bases.lexical(start)?);
         loop {
-            let normalized = context.physical(&current)?;
+            let normalized = path_bases.physical(&current)?;
             if !Path::new(&normalized).starts_with(&repository_normalized) {
                 break;
             }
@@ -596,7 +596,7 @@ struct CatalogState {
 pub struct SkillCatalog<R: AuthorizedReadService + ?Sized> {
     service: Arc<R>,
     roots: Vec<SkillRoot>,
-    context: SkillDiscoveryContext,
+    path_bases: SkillPathBases,
     configuration: SkillConfigurationSource,
     configure: Option<SkillConfigurationWriter>,
     state: Mutex<CatalogState>,
@@ -605,13 +605,13 @@ impl<R: AuthorizedReadService + ?Sized> SkillCatalog<R> {
     pub fn new(
         service: Arc<R>,
         roots: Vec<SkillRoot>,
-        context: SkillDiscoveryContext,
+        path_bases: SkillPathBases,
         configuration: SkillConfigurationSource,
     ) -> Self {
         Self {
             service,
             roots,
-            context,
+            path_bases,
             configuration,
             configure: None,
             state: Mutex::new(CatalogState::default()),
@@ -627,8 +627,8 @@ impl<R: AuthorizedReadService + ?Sized> SkillCatalog<R> {
     pub fn service(&self) -> &R {
         &self.service
     }
-    pub fn context(&self) -> &SkillDiscoveryContext {
-        &self.context
+    pub fn path_bases(&self) -> &SkillPathBases {
+        &self.path_bases
     }
     pub async fn capture(
         &self,
@@ -650,7 +650,7 @@ impl<R: AuthorizedReadService + ?Sized> SkillCatalog<R> {
                 self.service.as_ref(),
                 &self.roots,
                 &configuration,
-                &self.context,
+                &self.path_bases,
                 security,
                 cancellation,
             )
@@ -684,8 +684,8 @@ impl<R: AuthorizedReadService + ?Sized> SkillCatalog<R> {
             return Err(boundary_error(invalid_path("skill path cannot be blank")));
         }
         let equal = |left: &str, right: &str| match (
-            self.context.lexical(Path::new(left)),
-            self.context.lexical(Path::new(right)),
+            self.path_bases.lexical(Path::new(left)),
+            self.path_bases.lexical(Path::new(right)),
         ) {
             (Ok(left), Ok(right)) => left == right,
             _ => false,

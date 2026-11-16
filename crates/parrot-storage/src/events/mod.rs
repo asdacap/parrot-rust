@@ -11,10 +11,12 @@ pub mod tools;
 pub mod types;
 pub use error::EventError;
 pub use repository::AppendOutcome;
-pub use terminal::{CloseTurnError, TurnClosure, TurnCommit, TurnKey};
+pub use terminal::{CloseTurnError, TurnClosure, TurnCommit};
 pub use types::*;
 
-use crate::database::{DatabaseError, SessionDatabase, Transaction, extract_usage_keys};
+use crate::database::{
+    DatabaseError, SessionDatabase, Transaction, extract_event_kind, extract_usage_keys,
+};
 use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_domain::contracts::storage::{AdmissionError, CommitTicket, Committed};
 use parrot_domain::protocol::messages::parrot::Event;
@@ -91,7 +93,7 @@ impl EventRepository {
     }
     /// Every stored event, in SQLite sequence order, including historical duplicates.
     pub async fn replay_raw(&self) -> Result<Vec<StoredEvent>, EventError> {
-        self.transaction(|tx| read_events(tx, None)).await
+        self.transaction(read_events).await
     }
     pub async fn replay(&self) -> Result<Vec<Event>, EventError> {
         Ok(self
@@ -121,16 +123,21 @@ impl EventRepository {
             return Err(EventError::Invalid("kind must not be empty".into()));
         }
         self.transaction(move |tx| {
-            Ok(read_events(tx, Some(&agent))?
-                .into_iter()
-                .filter_map(|row| {
-                    if row.event.has_agent_notice() && row.event.agent_notice().kind == kind {
-                        Some(row.event.agent_notice().clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect())
+            let mut read = tx.prepare(
+                "SELECT payload FROM event
+                 WHERE agent_session = ?1 AND kind = 'agent_notice'
+                 ORDER BY sequence",
+            )?;
+            let mut rows = read.query([agent])?;
+            let mut notices = Vec::new();
+            while let Some(row) = rows.next()? {
+                let event = Event::parse_from_bytes(&row.get::<_, Vec<u8>>(0)?)?;
+                let notice = event.agent_notice();
+                if notice.kind == kind {
+                    notices.push(notice.clone());
+                }
+            }
+            Ok(notices)
         })
         .await
     }
@@ -142,7 +149,7 @@ pub use parrot_core::NeverCancelled;
 pub fn record(tx: &Transaction<'_>, event: &Event, at: &str) -> Result<StoredEvent, EventError> {
     let bytes = event.write_to_bytes()?;
     let (request, call) = extract_usage_keys(event);
-    tx.execute("INSERT INTO event (id, agent_session, payload, created_at, request_id, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",rusqlite::params![event.id,event.agent_session_id,bytes,at,request,call])?;
+    tx.execute("INSERT INTO event (id, agent_session, payload, kind, created_at, request_id, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",rusqlite::params![event.id,event.agent_session_id,bytes,extract_event_kind(event),at,request,call])?;
     let sequence = tx.last_insert_rowid();
     Ok(StoredEvent {
         sequence,
@@ -150,12 +157,9 @@ pub fn record(tx: &Transaction<'_>, event: &Event, at: &str) -> Result<StoredEve
         raw: bytes,
     })
 }
-pub fn read_events(
-    tx: &Transaction<'_>,
-    agent: Option<&str>,
-) -> Result<Vec<StoredEvent>, EventError> {
-    let mut read=tx.prepare("SELECT sequence, payload FROM event WHERE ?1 IS NULL OR agent_session = ?1 ORDER BY sequence")?;
-    let rows = read.query_map([agent], |row| {
+pub fn read_events(tx: &Transaction<'_>) -> Result<Vec<StoredEvent>, EventError> {
+    let mut read = tx.prepare("SELECT sequence, payload FROM event ORDER BY sequence")?;
+    let rows = read.query_map([], |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
     })?;
     rows.map(|row| {
@@ -179,7 +183,7 @@ pub fn read_events_after(
         |row| row.get(0),
     )?;
     let Some(start) = start else {
-        return read_events(tx, None);
+        return read_events(tx);
     };
     let mut read =
         tx.prepare("SELECT sequence, payload FROM event WHERE sequence > ?1 ORDER BY sequence")?;

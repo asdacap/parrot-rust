@@ -1,8 +1,6 @@
 use crate::{
-    AgentState, CancellationToken, ConfigKey, ContextSnapshot, ConversationAddition,
-    ConversationEvent, ConversationOrigin, ConversationPersistence, Error, Message, Provider,
-    ProviderRequest, Role, States, StatusKey, StatusOffering, StatusStanding, ToolDefinition,
-    context::fit_status,
+    AgentState, CancellationToken, ConversationAddition, ConversationEvent, ConversationOrigin,
+    ConversationPersistence, Error, Message, Role, States, StatusKey, status_steering_needed,
 };
 use std::fmt;
 
@@ -28,56 +26,21 @@ impl fmt::Display for StatusKey {
     }
 }
 
-/// Returns whether the core should steer a new status assembly at a safe point.
-/// Non-auto slots never trigger steering on their own. A new conversation has
-/// empty standing state, so the first safe point steers the initial assembly
-/// even when every slot is static. An auto-update slot with no standing hash
-/// counts as changed, because its content was never injected.
-pub fn status_steering_needed(offering: &StatusOffering, standing: &StatusStanding) -> bool {
-    if offering.is_empty() {
-        return false;
-    }
-    standing.is_empty()
-        || offering
-            .iter()
-            .filter(|(_, offer)| offer.is_auto_update)
-            .any(|(key, offer)| standing.get(key) != Some(&offer.hash))
-}
-
-/// Joins every offered slot's rendered text in slot order.
-pub fn join_status_offering(offering: &StatusOffering) -> String {
-    offering
-        .values()
-        .map(|offer| offer.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-/// Injects full fitted status without a standing baseline. Later auto-update
+/// Injects the full offered status without a standing baseline. Later auto-update
 /// changes inject only auto-update slots with changed identities.
 /// After each message, the agent state records cumulative standing identities so
 /// unchanged slots stay known across updates and restarts.
 /// Safe points occur between provider requests.
-pub async fn steer_status(
+pub(crate) async fn steer_status(
     states: &mut dyn States,
-    state: &mut AgentState,
-    provider: &dyn Provider,
-    definitions: &[ToolDefinition],
+    agent_state: &mut AgentState,
     cancellation: CancellationToken<'_>,
 ) -> Result<(), Error> {
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
-    let instructions = states.capture_system_prompt().await?;
-    let messages = states.read_conversation_state().await?.assemble_messages();
-    let configuration = states
-        .get_config(ConfigKey::Context)
-        .await?
-        .into_context()?;
-    let tokens = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
-    let context = ContextSnapshot::estimate(tokens, &configuration);
-    let offering = states.read_status_offering(context).await?;
-    let mut standing = state.standing_statuses.clone();
+    let offering = states.read_status_offering().await?;
+    let mut standing = agent_state.standing_statuses.clone();
     if !status_steering_needed(&offering, &standing) {
         return Ok(());
     }
@@ -87,26 +50,11 @@ pub async fn steer_status(
             standing.is_empty() || (offer.is_auto_update && standing.get(key) != Some(&offer.hash))
         })
         .collect::<Vec<_>>();
-    let content = if standing.is_empty() {
-        fit_status(
-            &ProviderRequest {
-                instructions,
-                messages,
-                tools: definitions.to_vec(),
-                ..ProviderRequest::default()
-            },
-            &configuration,
-            states,
-            provider,
-        )
-        .await?
-    } else {
-        updates
-            .iter()
-            .map(|(_, offer)| offer.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    };
+    let content = updates
+        .iter()
+        .map(|(_, offer)| offer.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
     for (key, offer) in updates {
         standing.insert(key.clone(), offer.hash.clone());
     }
@@ -123,14 +71,14 @@ pub async fn steer_status(
             },
         })
         .await?;
-    state.standing_statuses = standing;
+    agent_state.standing_statuses = standing;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{StatusKey, StatusOffering, StatusStanding, status_steering_needed};
-    use crate::StatusOffer;
+    use super::{StatusKey, status_steering_needed};
+    use crate::{StatusOffer, StatusOffering, StatusStanding};
 
     fn offering(entries: &[(&str, &str, bool)]) -> StatusOffering {
         entries
@@ -164,42 +112,42 @@ mod tests {
     #[test]
     fn matching_standing_steers_nothing() {
         let current = offering(&[("selection", "a", true), ("time", "b", false)]);
-        let recorded = standing(&[("selection", "a"), ("time", "b")]);
-        assert!(!status_steering_needed(&current, &recorded));
+        let known = standing(&[("selection", "a"), ("time", "b")]);
+        assert!(!status_steering_needed(&current, &known));
     }
 
     #[test]
     fn changed_auto_hash_steers() {
         let current = offering(&[("selection", "a2", true), ("time", "b", false)]);
-        let recorded = standing(&[("selection", "a"), ("time", "b")]);
-        assert!(status_steering_needed(&current, &recorded));
+        let known = standing(&[("selection", "a"), ("time", "b")]);
+        assert!(status_steering_needed(&current, &known));
     }
 
     #[test]
     fn non_auto_change_alone_steers_nothing() {
         let current = offering(&[("selection", "a", true), ("time", "b2", false)]);
-        let recorded = standing(&[("selection", "a"), ("time", "b")]);
-        assert!(!status_steering_needed(&current, &recorded));
+        let known = standing(&[("selection", "a"), ("time", "b")]);
+        assert!(!status_steering_needed(&current, &known));
     }
 
     #[test]
     fn unchanged_after_restart_steers_nothing() {
         let restored = offering(&[("selection", "a2", true), ("time", "b2", false)]);
-        let recorded = standing(&[("selection", "a2"), ("time", "b2")]);
-        assert!(!status_steering_needed(&restored, &recorded));
+        let known = standing(&[("selection", "a2"), ("time", "b2")]);
+        assert!(!status_steering_needed(&restored, &known));
     }
 
     #[test]
     fn auto_slot_without_standing_hash_counts_as_changed() {
         let current = offering(&[("selection", "a", true), ("work", "w", true)]);
-        let recorded = standing(&[("selection", "a")]);
-        assert!(status_steering_needed(&current, &recorded));
+        let known = standing(&[("selection", "a")]);
+        assert!(status_steering_needed(&current, &known));
     }
 
     #[test]
     fn empty_offering_steers_nothing() {
         let current = StatusOffering::default();
-        let recorded = standing(&[("selection", "a")]);
-        assert!(!status_steering_needed(&current, &recorded));
+        let known = standing(&[("selection", "a")]);
+        assert!(!status_steering_needed(&current, &known));
     }
 }

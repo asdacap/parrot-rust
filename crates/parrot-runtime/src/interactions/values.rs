@@ -85,11 +85,6 @@ pub fn validate_questions(questions: &[QuestionDefinition]) -> Result<(), Intera
                 )));
             }
         }
-        if question.options.is_empty() && !question.custom {
-            return Err(InteractionError::question(
-                "question requires options or custom answers",
-            ));
-        }
     }
     Ok(())
 }

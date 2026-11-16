@@ -1,18 +1,18 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_foundation::config::runtime::ImageUploadConfig;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let minimal = context
+    let fixture = ConfigFixture::new();
+    let minimal = fixture
         .configured(
             "image_upload:\n  endpoint: https://minio.example.com\n  bucket: parrot-images\n",
         )
         .unwrap()
         .runtime
         .image_upload;
-    let full=context.configured("image_upload:\n  endpoint: https://minio.example.com:9000/base\n  bucket: b.1-2\n  region: eu-west-1\n  key_prefix: images/\n  public_base_url: https://cdn.example.com\n  access_key_env: AK\n  secret_key_env: SK\n").unwrap().runtime.image_upload;
+    let full=fixture.configured("image_upload:\n  endpoint: https://minio.example.com:9000/base\n  bucket: b.1-2\n  region: eu-west-1\n  key_prefix: images/\n  public_base_url: https://cdn.example.com\n  access_key_env: AK\n  secret_key_env: SK\n").unwrap().runtime.image_upload;
     assert!(
-        context
+        fixture
             .configured("")
             .unwrap()
             .runtime

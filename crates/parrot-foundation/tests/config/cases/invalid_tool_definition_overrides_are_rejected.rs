@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for (override_yaml, message) in [
@@ -16,8 +16,8 @@ fn source_assertions() {
             "tools.read contains an unsupported key",
         ),
     ] {
-        let context = Context::new();
-        let error = context
+        let fixture = ConfigFixture::new();
+        let error = fixture
             .configured(&format!("tools:\n  read:\n    {override_yaml}\n"))
             .unwrap_err();
         assert_eq!(error.0, message);

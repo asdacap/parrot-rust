@@ -140,8 +140,8 @@ impl PlanArtifactStore {
             return Ok(None);
         };
         let load = || -> io::Result<(String, String)> {
-            let markdown = crate::prompt_context::decode_source_text(&fs::read(paths.plan())?);
-            let task_json = crate::prompt_context::decode_source_text(&fs::read(paths.tasks())?);
+            let markdown = crate::prompt_assembly::decode_source_text(&fs::read(paths.plan())?);
+            let task_json = crate::prompt_assembly::decode_source_text(&fs::read(paths.tasks())?);
             Ok((markdown.trim().to_owned(), task_json.trim().to_owned()))
         };
         let (markdown, task_json) = load().map_err(|error| ReadFailure {

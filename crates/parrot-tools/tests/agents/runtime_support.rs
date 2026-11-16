@@ -17,7 +17,7 @@ use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError},
         runtime::AgentRuntime,
-        security::{InvocationContext, RestrictableAccessSnapshot},
+        security::{InvocationScope, RestrictableAccessSnapshot},
     },
     protocol::messages::parrot::Event,
     values::{
@@ -49,7 +49,7 @@ use parrot_runtime::{
     children::*,
     compaction::ContextStatus,
     event_broker::EventBroker,
-    prompt_context::{PromptResult, SystemPrompt},
+    prompt_assembly::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
     conversation::{
@@ -242,8 +242,8 @@ impl TurnStatus<Security> for Status {
 }
 struct Diagnostics;
 impl TurnDiagnostics for Diagnostics {
-    fn started(&self, _: &str) {}
-    fn finished(&self, _: &str, _: &str, _: Option<&str>) {}
+    fn started(&self) {}
+    fn finished(&self, _: &str, _: Option<&str>) {}
 }
 struct NoParent;
 impl ParentCompletion for NoParent {
@@ -584,12 +584,12 @@ pub fn invocation(arguments: serde_json::Value) -> ToolInvocation {
         call_id: "spawn-call".into(),
     }
 }
-pub fn context<'a>(
+pub fn invocation_scope<'a>(
     scope: &Arc<Scope<Security>>,
     cancellation: &'a dyn Cancellation,
-) -> InvocationContext<'a, Security, AgentSelection> {
+) -> InvocationScope<'a, Security, AgentSelection> {
     let selection = scope.session().selection().capture().unwrap();
-    InvocationContext::new(
+    InvocationScope::new(
         (*selection.security).clone(),
         AgentSelection {
             requested_model: selection.model.requested_selector.value,

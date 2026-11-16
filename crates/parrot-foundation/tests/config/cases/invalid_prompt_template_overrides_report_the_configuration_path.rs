@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for (override_yaml, reason) in [
@@ -8,8 +8,8 @@ fn source_assertions() {
             "must be included in allowed_arguments",
         ),
     ] {
-        let context = Context::new();
-        let error = context
+        let fixture = ConfigFixture::new();
+        let error = fixture
             .configured(&format!(
                 "prompt_templates:\n  tool-result.output-blob-notice:\n    {override_yaml}\n"
             ))

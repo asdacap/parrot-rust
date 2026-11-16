@@ -299,7 +299,6 @@ pub struct WireQuestion {
     pub prompt: Option<String>,
     pub options: Option<Vec<WireQuestionOption>>,
     pub multiple: bool,
-    pub custom: Option<bool>,
 }
 impl<'de> Deserialize<'de> for WireQuestion {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -317,7 +316,6 @@ impl<'de> Deserialize<'de> for WireQuestion {
                         "prompt" => question.prompt = map.next_value()?,
                         "options" => question.options = map.next_value()?,
                         "multiple" => question.multiple = map.next_value()?,
-                        "custom" => question.custom = map.next_value()?,
                         _ => {
                             return Err(de::Error::custom(format!(
                                 "unknown question property: {key}"

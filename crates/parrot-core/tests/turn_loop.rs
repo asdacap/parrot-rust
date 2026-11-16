@@ -1,9 +1,9 @@
 use parrot_core::{
     AgentState, BoxFuture, Cancellation, CancellationToken, CompletionBlockerFeedback, ConfigKey,
-    ConfigValue, Content, ContextConfiguration, ContextSnapshot, ConversationAddition,
-    ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationReceipt,
-    ConversationTurn, DerivedContext, Error, ErrorCode, ErrorKind, EventPublisher, FinishReason,
-    InputAdmission, Message, Outcome, PromotedInput, PromptTemplate, Provider, ProviderRequest,
+    ConfigValue, Content, ContextConfiguration, ConversationAddition, ConversationEvent,
+    ConversationOrigin, ConversationPersistence, ConversationReceipt, ConversationTurn, Error,
+    ErrorCode, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome,
+    PreparedSkillPrompt, PromotedInput, PromptTemplate, Provider, ProviderRequest,
     ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention, SkillProvider,
     SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding, ToolCall,
     ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult, ToolStatus,
@@ -72,12 +72,10 @@ impl EventPublisher for MemoryEventPublisher {
         &'a self,
         model: &'a TurnModel,
         _: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<String, Error>> {
+    ) -> BoxFuture<'a, Result<(), Error>> {
         Box::pin(async move {
-            let mut started = self.started_turns.lock().unwrap();
-            let turn_id = format!("turn-start-{}", started.len());
-            started.push(model.clone());
-            Ok(turn_id)
+            self.started_turns.lock().unwrap().push(model.clone());
+            Ok(())
         })
     }
 }
@@ -86,7 +84,7 @@ const RUNAWAY_NOTICE: &str = "configured runaway notice";
 
 struct MemoryTurnHooks {
     model: String,
-    turn_ids: Arc<Mutex<Vec<String>>>,
+    activations: Arc<Mutex<usize>>,
     activation_error: Option<Error>,
     fail_at: Option<&'static str>,
 }
@@ -103,8 +101,8 @@ impl parrot_core::TurnHooks for MemoryTurnHooks {
             })
         })
     }
-    fn activate_conversation_turn(&self, turn_id: &str) -> BoxFuture<'_, Result<(), Error>> {
-        self.turn_ids.lock().unwrap().push(turn_id.to_owned());
+    fn activate_conversation_turn(&self) -> BoxFuture<'_, Result<(), Error>> {
+        *self.activations.lock().unwrap() += 1;
         let result = self.activation_error.clone().map_or(Ok(()), Err);
         Box::pin(async move { result })
     }
@@ -117,7 +115,7 @@ struct MemoryTurnLifecycle<'a> {
     states: &'a mut MemoryState,
     tools: &'a dyn Tools,
     provider: &'a dyn Provider,
-    publisher: &'a MemoryEventPublisher,
+    event_publisher: &'a MemoryEventPublisher,
     single_turn: bool,
     opened: bool,
 }
@@ -143,13 +141,12 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
         Box::pin(async move {
             let hooks = MemoryTurnHooks {
                 model: self.states.model.clone(),
-                turn_ids: self.states.turn_ids.clone(),
+                activations: self.states.turn_activations.clone(),
                 activation_error: self.states.activation_error.clone(),
                 fail_at: self.states.fail_at,
             };
             let model = parrot_core::TurnHooks::begin_conversation_turn(&hooks).await?;
-            let start_event_id = self
-                .publisher
+            self.event_publisher
                 .report_turn_started(&model, cancellation)
                 .await?;
             let skills = MemorySkills::new(self.states);
@@ -158,10 +155,9 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
                 states: self.states,
                 tools: self.tools,
                 provider: self.provider,
-                publisher: self.publisher,
+                event_publisher: self.event_publisher,
                 hooks,
                 skills,
-                start_event_id,
             }) as Box<dyn parrot_core::Turn>)
         })
     }
@@ -171,21 +167,19 @@ struct MemoryTurn<'a> {
     states: &'a mut MemoryState,
     tools: &'a dyn Tools,
     provider: &'a dyn Provider,
-    publisher: &'a MemoryEventPublisher,
+    event_publisher: &'a MemoryEventPublisher,
     hooks: MemoryTurnHooks,
     skills: MemorySkills,
-    start_event_id: String,
 }
 
 impl parrot_core::Turn for MemoryTurn<'_> {
     fn borrow_services(&mut self) -> parrot_core::TurnServices<'_> {
         parrot_core::TurnServices {
-            start_event_id: &self.start_event_id,
             states: self.states,
             skills: &self.skills,
             tools: self.tools,
             provider: self.provider,
-            publisher: self.publisher,
+            event_publisher: self.event_publisher,
             hooks: &self.hooks,
         }
     }
@@ -211,9 +205,7 @@ impl parrot_core::Turn for MemoryTurn<'_> {
                 }
                 Err(error) => Err(error.clone()),
             };
-            self.states
-                .disposed_turns
-                .push((self.start_event_id.clone(), result));
+            self.states.disposed_turns.push(result);
             self.states.disposal_error.clone().map_or(Ok(()), Err)
         })
     }
@@ -225,7 +217,7 @@ async fn run(
     provider: &dyn Provider,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
-    let publisher = MemoryEventPublisher {
+    let event_publisher = MemoryEventPublisher {
         events: states.events.clone(),
         started_turns: states.started_turns.clone(),
     };
@@ -233,7 +225,7 @@ async fn run(
         states,
         tools,
         provider,
-        publisher: &publisher,
+        event_publisher: &event_publisher,
         single_turn: false,
         opened: false,
     };
@@ -246,7 +238,7 @@ async fn run_turn(
     provider: &dyn Provider,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
-    let publisher = MemoryEventPublisher {
+    let event_publisher = MemoryEventPublisher {
         events: states.events.clone(),
         started_turns: states.started_turns.clone(),
     };
@@ -254,7 +246,7 @@ async fn run_turn(
         states,
         tools,
         provider,
-        publisher: &publisher,
+        event_publisher: &event_publisher,
         single_turn: true,
         opened: false,
     };
@@ -279,10 +271,10 @@ fn request_too_large(message: &str) -> Error {
 
 fn finish<F: Future>(future: F) -> F::Output {
     let waker = Waker::from(Arc::new(ThreadWake(thread::current())));
-    let mut context = Context::from_waker(&waker);
+    let mut cx = Context::from_waker(&waker);
     let mut future = std::pin::pin!(future);
     loop {
-        match future.as_mut().poll(&mut context) {
+        match future.as_mut().poll(&mut cx) {
             Poll::Ready(output) => return output,
             Poll::Pending => thread::park(),
         }
@@ -474,11 +466,9 @@ impl Provider for MemoryProvider {
             if let Some(context) = compaction.contexts.pop_front() {
                 let mut request = self.request.lock().unwrap();
                 request.messages = context.messages;
-                request.context = context.state;
+                request.model = context.state;
             }
-            if let Some(state) = compaction.effect_state_on_call.take() {
-                compaction.effect_state = Some(state);
-            } else if result.as_ref().is_ok_and(Option::is_some) {
+            if result.as_ref().is_ok_and(Option::is_some) {
                 let mut state = compaction.saved_state.clone();
                 state.last_request_statistic.reset();
                 compaction.effect_state = Some(state);
@@ -522,7 +512,7 @@ impl Provider for MemoryProvider {
     }
 }
 
-struct RenderedContext {
+struct RenderedRequest {
     instructions: String,
     maximum_output_tokens: i32,
     messages: Vec<Message>,
@@ -538,13 +528,13 @@ struct InputEstimate {
 }
 
 #[derive(Clone)]
-struct MemoryContext {
+struct MemoryModel {
     configuration: ContextConfiguration,
 }
 
 struct CompactedContext {
     messages: Vec<Message>,
-    state: MemoryContext,
+    state: MemoryModel,
 }
 
 struct MemoryRequestData {
@@ -552,10 +542,10 @@ struct MemoryRequestData {
     estimates: Vec<InputEstimate>,
     estimate_script: VecDeque<i64>,
     estimated_input_tokens: i64,
-    context: MemoryContext,
+    model: MemoryModel,
     instructions: String,
     messages: Vec<Message>,
-    renderings: VecDeque<RenderedContext>,
+    renderings: VecDeque<RenderedRequest>,
 }
 
 #[derive(Default)]
@@ -566,9 +556,9 @@ struct MemoryPromptData {
 struct MemoryState {
     events: Arc<Mutex<Vec<ConversationEvent>>>,
     started_turns: Arc<Mutex<Vec<TurnModel>>>,
-    turn_ids: Arc<Mutex<Vec<String>>>,
+    turn_activations: Arc<Mutex<usize>>,
     closed_turns: Vec<ConversationAddition>,
-    disposed_turns: Vec<(String, Result<Outcome, Error>)>,
+    disposed_turns: Vec<Result<Outcome, Error>>,
     activation_error: Option<Error>,
     disposal_error: Option<Error>,
     usage_totals: parrot_core::UsageTotals,
@@ -580,7 +570,7 @@ struct MemoryState {
     request: Arc<Mutex<MemoryRequestData>>,
     prompts: Arc<Mutex<MemoryPromptData>>,
     skill_templates: Arc<Mutex<BTreeMap<ConfigKey, String>>>,
-    recorded_input_contexts: Vec<DerivedContext>,
+    recorded_skill_prompts: Vec<PreparedSkillPrompt>,
     tools: MemoryTools,
     provider: MemoryProvider,
     completion_blocker_feedback: Vec<CompletionBlockerFeedback>,
@@ -639,7 +629,7 @@ impl MemoryState {
             estimates: Vec::new(),
             estimate_script: VecDeque::new(),
             estimated_input_tokens: 0,
-            context: MemoryContext {
+            model: MemoryModel {
                 configuration: ContextConfiguration {
                     canonical_model: "memory/model".into(),
                     context_window: 0,
@@ -658,7 +648,7 @@ impl MemoryState {
         let mut state = Self {
             events: Arc::default(),
             started_turns: Arc::default(),
-            turn_ids: Arc::new(Mutex::new(Vec::new())),
+            turn_activations: Arc::new(Mutex::new(0)),
             closed_turns: Vec::new(),
             disposed_turns: Vec::new(),
             activation_error: None,
@@ -701,7 +691,7 @@ impl MemoryState {
                     "<skill-too-large>\n<name>{name}</name>\n<path>{path}</path>\n<message>The skill instructions exceed the {limit_bytes}-byte injection limit and were not loaded.</message>\n</skill-too-large>".into(),
                 ),
             ].into())),
-            recorded_input_contexts: Vec::new(),
+            recorded_skill_prompts: Vec::new(),
             trace: trace.clone(),
             tools: MemoryTools {
                 trace: trace.clone(),
@@ -815,8 +805,8 @@ impl MemoryState {
     }
     fn prime_context(&mut self, estimate: i64) {
         let mut request = self.request();
-        request.context.configuration.context_window = 1000;
-        request.context.configuration.maximum_output_tokens = 1;
+        request.model.configuration.context_window = 1000;
+        request.model.configuration.maximum_output_tokens = 1;
         request.messages = vec![Message {
             role: Role::User,
             contents: vec![Content::Text("question".into())],
@@ -878,14 +868,11 @@ impl MemoryState {
     }
 }
 impl States for MemoryState {
-    fn read_status_offering(
-        &self,
-        context: ContextSnapshot,
-    ) -> BoxFuture<'_, Result<StatusOffering, Error>> {
+    fn read_status_offering(&self) -> BoxFuture<'_, Result<StatusOffering, Error>> {
         if self.status_reads.fetch_add(1, Ordering::SeqCst) == 0 {
             return Box::pin(async { Ok(self.status_offering.clone()) });
         }
-        Box::pin(async move { finish(self.compaction.lock().unwrap().status.offering(context)) })
+        Box::pin(async move { finish(self.compaction.lock().unwrap().status.offering()) })
     }
     fn add_conversation_messages(
         &mut self,
@@ -920,8 +907,8 @@ impl States for MemoryState {
                             .collect::<String>();
                         self.status_steered.push(content);
                     }
-                    ConversationEvent::Notice { kind, .. } if kind == "skill_context" => {
-                        self.step("record_input_context")?;
+                    ConversationEvent::Notice { kind, .. } if kind == "skill_prompt" => {
+                        self.step("record_skill_prompt")?;
                         let content = addition.messages[0]
                             .contents
                             .iter()
@@ -930,7 +917,7 @@ impl States for MemoryState {
                                 _ => None,
                             })
                             .collect();
-                        self.recorded_input_contexts.push(DerivedContext {
+                        self.recorded_skill_prompts.push(PreparedSkillPrompt {
                             content,
                             loaded_paths: Vec::new(),
                         });
@@ -1017,7 +1004,7 @@ impl States for MemoryState {
                 ConfigKey::Context => {
                     self.trace.step("context_configuration", self.fail_at)?;
                     Ok(ConfigValue::Context(
-                        self.request().context.configuration.clone(),
+                        self.request().model.configuration.clone(),
                     ))
                 }
                 key => {
@@ -1107,7 +1094,7 @@ impl States for MemoryState {
                     let mut request = self.request();
                     if let Some(rendered) = request.renderings.pop_front() {
                         request.instructions = rendered.instructions;
-                        request.context.configuration.maximum_output_tokens =
+                        request.model.configuration.maximum_output_tokens =
                             rendered.maximum_output_tokens;
                         request.messages = rendered.messages;
                     }
@@ -1210,11 +1197,6 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "conversation",
             "context_configuration",
             "estimate",
-            "instruction_state",
-            "render",
-            "conversation",
-            "context_configuration",
-            "estimate",
             "conversation",
             "context_configuration",
             "estimate",
@@ -1224,11 +1206,6 @@ fn tools_are_recorded_and_executed_before_the_next_request_and_final_completion(
             "record_results",
             "catalog",
             "promote",
-            "instruction_state",
-            "render",
-            "conversation",
-            "context_configuration",
-            "estimate",
             "instruction_state",
             "render",
             "conversation",
@@ -1292,8 +1269,8 @@ fn maximum_requests_restricts_final_tools_and_bounds_settlement_extensions() {
             .iter()
             .all(|tools| tools == &["read"])
     );
-    assert!(state.final_requests.contains(&1));
-    assert_eq!(state.final_requests, [1]);
+    assert!(state.final_requests.contains(&0));
+    assert_eq!(state.final_requests, [0]);
     assert_eq!(
         state
             .trace
@@ -1367,7 +1344,7 @@ fn caller_budget_configuration_controls_request_limits_and_final_phase() {
             if maximum == 1_000_000 {
                 vec![]
             } else {
-                vec![1]
+                vec![0]
             }
         );
         assert!(state.recorded_tools.is_empty());
@@ -1483,7 +1460,7 @@ fn completion_retry_resets_budget_and_keeps_pending_work_alive() {
     );
     assert_eq!(state.capture_catalogs()[1], ["read", "write"]);
     assert_eq!(state.capture_catalogs()[2], ["read"]);
-    assert_eq!(state.final_requests, [3]);
+    assert_eq!(state.final_requests, [2]);
 }
 
 #[test]
@@ -1627,7 +1604,7 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
             options.include_router_metadata
         );
     }
-    assert!(state.final_requests.contains(&6));
+    assert!(state.final_requests.contains(&5));
     assert_eq!(state.turn_reads.load(Ordering::SeqCst), 6);
     let trace = state.trace.values();
     assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 6);
@@ -1740,8 +1717,8 @@ fn new_turns_reset_request_count_but_retain_final_phase_and_settlement_extension
         Ok(Outcome::BudgetExhausted(RUNAWAY_NOTICE.into()))
     );
     assert_eq!(state.request().rendered_instructions.len(), 6);
-    assert!(state.final_requests.contains(&1));
-    assert_eq!(state.final_requests, [1, 3]);
+    assert!(state.final_requests.contains(&0));
+    assert_eq!(state.final_requests, [0, 2]);
     assert_eq!(
         state
             .trace
@@ -1790,7 +1767,7 @@ fn completion_retry_resets_quota_final_phase_and_settlement_extensions() {
     assert_eq!(catalogs[1], ["read"]);
     assert_eq!(catalogs[2], ["read"]);
     assert_eq!(catalogs[3], ["read", "write"]);
-    assert_eq!(state.final_requests, [2]);
+    assert_eq!(state.final_requests, [1]);
     assert!(catalogs[4..].iter().all(|tools| tools == &["read"]));
     assert!(state.tools.flags.lock().unwrap()[3].final_phase);
     assert!(
@@ -1958,7 +1935,7 @@ fn core_selects_phase_and_estimates_the_exact_advertised_tools() {
     assert_eq!(states.run(), Ok(Outcome::Completed("answer".into())));
     assert_eq!(states.request().rendered_instructions.len(), 2);
     assert!(!states.tools.flags.lock().unwrap()[0].final_phase);
-    assert_eq!(states.final_requests, [2]);
+    assert_eq!(states.final_requests, [1]);
     let requests = states.provider.requests.lock().unwrap();
     let estimates = states.capture_request_estimates();
     assert_eq!(requests.len(), estimates.len());
@@ -2168,7 +2145,7 @@ fn steering_commits_the_initial_assembly_once_before_the_first_request() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     state.status_offering = status_offer(&[("selection", true, "h1"), ("time", false, "t1")]);
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.status_steered, ["fitted status"]);
+    assert_eq!(state.status_steered, ["selection\n\ntime"]);
     assert_eq!(
         state.budget.standing_statuses,
         status_standing(&[("selection", "h1"), ("time", "t1")])
@@ -2182,7 +2159,7 @@ fn steering_commits_the_initial_assembly_once_before_the_first_request() {
             _ => String::new(),
         })
         .collect::<Vec<_>>();
-    assert_eq!(steered, ["fitted status".to_string()]);
+    assert_eq!(steered, ["selection\n\ntime".to_string()]);
     assert!(
         state
             .trace
@@ -2204,7 +2181,7 @@ fn unchanged_hashes_never_steer_again_across_turns() {
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     state.enqueue_message(Delivery::Queue, "follow up");
     assert_eq!(state.run(), Ok(Outcome::Completed("second answer".into())));
-    assert_eq!(state.status_steered, ["fitted status"]);
+    assert_eq!(state.status_steered, ["selection\n\ntime"]);
     assert_eq!(
         state.budget.standing_statuses,
         status_standing(&[("selection", "h1"), ("time", "t1")])
@@ -2224,7 +2201,7 @@ fn changed_auto_hash_steers_again_at_the_next_safe_point() {
     state.status_offering = status_offer(&[("selection", true, "h1")]);
     state.next_status_offering = Some(status_offer(&[("selection", true, "h2")]));
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.status_steered, ["fitted status", "selection"]);
+    assert_eq!(state.status_steered, ["selection", "selection"]);
     assert_eq!(
         state.budget.standing_statuses,
         status_standing(&[("selection", "h2")])
@@ -2246,7 +2223,7 @@ fn changed_auto_hash_steers_at_a_retry_continuation() {
     state.status_offering = status_offer(&[("selection", true, "h1")]);
     state.next_status_offering = Some(status_offer(&[("selection", true, "h2")]));
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.status_steered, ["fitted status", "selection"]);
+    assert_eq!(state.status_steered, ["selection", "selection"]);
     assert_eq!(
         state.budget.standing_statuses,
         status_standing(&[("selection", "h2")])

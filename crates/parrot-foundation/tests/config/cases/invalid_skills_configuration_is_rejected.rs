@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for (yaml, message) in [
@@ -24,8 +24,8 @@ fn source_assertions() {
             "skills.entries[0] contains an unsupported key",
         ),
     ] {
-        let context = Context::new();
-        let error = context.configured(&format!("{yaml}\n")).unwrap_err();
+        let fixture = ConfigFixture::new();
+        let error = fixture.configured(&format!("{yaml}\n")).unwrap_err();
         assert_eq!(error.0, message);
     }
 }

@@ -122,7 +122,7 @@ pub type RuntimeTool<S> = dyn Tool<
 /// This in-drain boundary lends the actual already-owned state. It is not the
 /// production retained Tool / SessionControl owned+'static bridge (P07/P08).
 /// Implementations must not relock or schedule-and-wait on the current engine.
-pub struct BorrowedToolContext<'a, S: AccessSnapshot> {
+pub struct BorrowedToolState<'a, S: AccessSnapshot> {
     pub selection: &'a TurnSelection<S>,
     pub resources: TurnResources<'a>,
     pub definitions: &'a [parrot_provider::sessions::Tool],
@@ -133,7 +133,7 @@ pub trait BorrowedTool<S: AccessSnapshot>: Send + Sync {
     fn invoke<'a>(
         &'a self,
         invocation: ToolInvocation,
-        context: BorrowedToolContext<'a, S>,
+        state: BorrowedToolState<'a, S>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>>;
 }

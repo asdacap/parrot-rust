@@ -566,20 +566,18 @@ async fn multiple_choice_replies_in_source_option_order_with_or_without_timing()
 }
 
 #[tokio::test]
-async fn custom_question_context_and_optionless_answers_continue_in_order_source_rows() {
+async fn custom_question_header_and_optionless_answers_continue_in_order_source_rows() {
     for multiple in [false, true] {
         for optionless in [false, true] {
             let mut question = pending("question-request");
             question.questions[0].header = "Answer context".into();
             question.questions[0].prompt = "Explain your choice".into();
-            question.questions[0].custom = true;
             question.questions[0].multiple = multiple;
             if optionless {
                 question.questions[0].options.clear();
             }
             question.questions.push(wire::QuestionDefinition {
                 prompt: "Next answer".into(),
-                custom: true,
                 ..Default::default()
             });
             let (mut fixture, _) = question_fixture(vec![question.clone()]).await;
@@ -628,12 +626,11 @@ async fn custom_question_context_and_optionless_answers_continue_in_order_source
 
 #[tokio::test]
 async fn picker_cancel_and_empty_or_cancelled_custom_answers_reject_without_reply() {
-    for custom in [false, true] {
+    for optionless in [false, true] {
         for answer in [None, Some(" \n ")] {
             let mut question = pending("question-request");
             let mut dialog = RecordingDialog::default();
-            if custom {
-                question.questions[0].custom = true;
+            if optionless {
                 question.questions[0].options.clear();
                 dialog.texts.push_back(answer.map(str::to_owned));
             }
@@ -854,7 +851,6 @@ async fn remotely_settled_optionless_custom_answers_do_not_submit_source_rows() 
     for multiple in [false, true] {
         let mut question = pending("question-request");
         question.questions[0].options.clear();
-        question.questions[0].custom = true;
         question.questions[0].multiple = multiple;
         let (mut fixture, state) = question_fixture(vec![question.clone()]).await;
         let (mut dialog, mut arrived, _release, dropped) = gate_dialog(usize::MAX, true);

@@ -1,9 +1,9 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
+    let fixture = ConfigFixture::new();
     assert!(
-        context
+        fixture
             .configured("profiles:\n  query:\n    status: retired\n")
             .unwrap()
             .runtime

@@ -1,6 +1,6 @@
 use parrot_cli::presenters::tools::get_agent_tasks::GetAgentTasksToolPresenter;
 use parrot_cli::presenters::*;
-use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderContext};
+use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderOptions};
 const LEAF: &str = r#"{"name":"task","description":"Do work","dependencies":[],"acceptance_criteria":"Work done","payload":"Run work","state":"succeeded"}"#;
 fn item(args: &str, result: &str) -> PresenterResult<Option<Presentation>> {
     GetAgentTasksToolPresenter::default().present_terminal(
@@ -15,7 +15,7 @@ fn item(args: &str, result: &str) -> PresenterResult<Option<Presentation>> {
 fn render(args: &str, result: &str, width: usize) -> Vec<String> {
     ScrollbackItem::render(
         &item(args, result).unwrap().unwrap(),
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns: width,
             color: false,
             inline_diff: false,

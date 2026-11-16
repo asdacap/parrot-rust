@@ -49,7 +49,7 @@ fn actual_selected_resources_render_compressed_environment_and_literal_overrides
             .build(&selection)
             .unwrap();
         let lines: Vec<_> = rendered.lines().collect();
-        assert_eq!(lines.len(), 11);
+        assert_eq!(lines.len(), 14);
         assert!(rendered.contains("TMPDIR is the sandbox-mapped /tmp inside commands; PARROT_HOST_TMPDIR is the full host temp directory outside the sandbox."));
         assert_eq!(lines[1], format!("WORKDIR = {}", work.display()));
         assert_eq!(lines[2], "TMPDIR = /tmp");

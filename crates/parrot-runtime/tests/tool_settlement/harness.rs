@@ -72,7 +72,7 @@ pub struct Harness {
     pub diagnostics: Arc<Diagnostics>,
     pub factory: Arc<Factory>,
     pub usage: Arc<SessionUsageRecorder>,
-    pub prompt: parrot_runtime::prompt_context::SessionPrompt,
+    pub prompt: parrot_runtime::prompt_assembly::SessionPrompt,
     pub sessions: sessions::ProviderSessions,
     pub events: ContextPublisher,
 }
@@ -167,7 +167,7 @@ impl Harness {
             diagnostics,
             factory,
             usage,
-            prompt: parrot_runtime::prompt_context::SessionPrompt::new(Box::new(Prompt)),
+            prompt: parrot_runtime::prompt_assembly::SessionPrompt::new(Box::new(Prompt)),
             sessions: sessions::ProviderSessions::new(),
             events: ContextPublisher(fixture.history.clone()),
         }

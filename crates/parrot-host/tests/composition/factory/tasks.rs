@@ -24,7 +24,7 @@ use parrot_domain::{
             LinkPolicy, ReadRequest,
         },
         runtime::TaskController,
-        security::InvocationContext,
+        security::InvocationScope,
         tools::Tool,
     },
     values::{
@@ -317,7 +317,7 @@ async fn invoke(
     let security = (*selection.security).clone();
     tool.invoke(
         invocation(arguments),
-        InvocationContext::new(security, selection, cancel),
+        InvocationScope::new(security, selection, cancel),
     )
     .await
 }
@@ -336,7 +336,7 @@ async fn occupy_self(
             assistant_sequence: 0,
             arguments_json: serde_json::json!({"tasks":[declaration("owner-slot")]}).to_string(),
         },
-        InvocationContext::new((*selected.security).clone(), selected, &NeverCancelled),
+        InvocationScope::new((*selected.security).clone(), selected, &NeverCancelled),
     ))
     .await
     .unwrap();
@@ -462,7 +462,7 @@ async fn actual_child_history_fork_stops_before_the_invoking_tool_batch() {
             assistant_sequence: sequence,
             arguments_json: serde_json::json!({"tasks":[declaration("forked")]}).to_string(),
         },
-        InvocationContext::new(security, selection, &NeverCancelled),
+        InvocationScope::new(security, selection, &NeverCancelled),
     )
     .await
     .unwrap();
@@ -691,7 +691,7 @@ async fn update_observer_cancellation_remains_live_during_accepted_response_seal
                 assistant_sequence: 17,
                 arguments_json,
             },
-            InvocationContext::new((*selected.security).clone(), selected.clone(), cancellation),
+            InvocationScope::new((*selected.security).clone(), selected.clone(), cancellation),
         )
     };
     let mut update = Box::pin(invoke_set(arguments.clone(), &cancellation));
@@ -990,7 +990,7 @@ async fn actual_bridge_replays_exact_response_without_reading_changed_or_removed
                 assistant_sequence: 17,
                 arguments_json,
             },
-            InvocationContext::new(
+            InvocationScope::new(
                 (*selected.security).clone(),
                 selected.clone(),
                 &NeverCancelled,

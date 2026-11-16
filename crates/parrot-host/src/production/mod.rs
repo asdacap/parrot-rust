@@ -68,10 +68,10 @@ use parrot_runtime::{
         MaterializedModeProfile, ModeRegistry, ModeWorkflowFactory, PlanModeWorkflowFactory,
         RetainedModePolicyMaterializer,
     },
-    prompt_context::{
+    prompt_assembly::{
         AgentsPromptProvider, ModelPromptProvider, RuleActionDescription,
         SecurityProfilePromptProvider, SecurityRuleDescription, SessionIdentityPromptProvider,
-        SkillCatalog, SkillDiscoveryContext, StaticSystemPromptProvider, SystemPromptProvider,
+        SkillCatalog, SkillPathBases, StaticSystemPromptProvider, SystemPromptProvider,
         TemplateSystemPromptProvider, native_platform_identifier, resolve_skill_roots,
     },
     tool_settlement::SharedSecurity,
@@ -111,11 +111,11 @@ fn internal(error: impl std::fmt::Display) -> RpcError {
 
 /// The same configured policies and real authorized reader used for native
 /// prompt attachments, including clients connected to a remote session.
-pub struct ProductionReadContext {
+pub struct ProductionReadAccess {
     pub reader: Arc<ProductionReader>,
     pub modes: Arc<ModeRegistry<ProductionPolicy>>,
 }
-impl ProductionReadContext {
+impl ProductionReadAccess {
     pub fn new(
         configuration: &Configuration,
         workspace: parrot_domain::values::project_workspace::ProjectWorkspace,
@@ -258,7 +258,7 @@ impl ProductionHost {
                 let catalog = SkillCatalog::new(
                     reader.clone(),
                     roots,
-                    SkillDiscoveryContext {
+                    SkillPathBases {
                         working_directory: workspace.launch_directory().to_owned(),
                         platform,
                     },
@@ -463,7 +463,7 @@ impl AgentFactorySource<ProductionPolicy> for ProductionSource {
                 )) as Arc<dyn SystemPromptProvider>
             })
             .collect();
-        // Instructions are host context, not a file-tool invocation under the
+        // The host supplies these instructions, not a file-tool invocation under the
         // selected profile. Keep this read-only capture separate from tool grants.
         prompts.push(Arc::new(
             AgentsPromptProvider::new(
@@ -500,7 +500,7 @@ impl AgentFactorySource<ProductionPolicy> for ProductionSource {
             .into_iter()
             .map(|(id, profile)| serde_json::json!({"id": id, "usage": profile.usage}))
             .collect::<Vec<_>>();
-        let context = [
+        let sections = [
             (
                 "05b-optional-cli-utilities",
                 "context.optional-cli-utilities",
@@ -555,7 +555,7 @@ impl AgentFactorySource<ProductionPolicy> for ProductionSource {
                 vec![("subagents".into(), subagents.into())],
             ),
         ];
-        prompts.extend(context.into_iter().map(|(key, template, arguments)| {
+        prompts.extend(sections.into_iter().map(|(key, template, arguments)| {
             Arc::new(TemplateSystemPromptProvider::new(
                 format!("runtime:system-context:{key}"),
                 template,

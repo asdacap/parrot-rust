@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_foundation::config::runtime::AgentTaskForkHistoryMode;
 #[test]
 fn source_assertions() {
@@ -22,8 +22,8 @@ fn source_assertions() {
             AgentTaskForkHistoryMode::Dependency,
         ),
     ] {
-        let context = Context::new();
-        let tasks = context.configured(yaml).unwrap().runtime.agent_tasks;
+        let fixture = ConfigFixture::new();
+        let tasks = fixture.configured(yaml).unwrap().runtime.agent_tasks;
         assert_eq!(tasks.extra_concurrent_tasks, 2);
         assert_eq!(tasks.maximum_attempts, attempts);
         assert_eq!(tasks.maximum_response_repairs, repairs);

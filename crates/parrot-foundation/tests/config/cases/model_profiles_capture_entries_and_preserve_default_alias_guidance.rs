@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_domain::values::config::{ModelProfileConfig, ModelProfiles};
 use std::collections::BTreeMap;
 #[test]
@@ -21,9 +21,9 @@ fn source_assertions() {
         ),
     );
     assert_eq!(profiles.resolve("provider/model"), original);
-    let context = Context::new();
-    let defaults = context.configured("").unwrap().models.model_aliases;
-    let configuration = context.configured("model_aliases:\n  low_llm:\n    model_string: provider/model\nmodel_profiles:\n  provider/model:\n    usage: Model usage\n").unwrap();
+    let fixture = ConfigFixture::new();
+    let defaults = fixture.configured("").unwrap().models.model_aliases;
+    let configuration = fixture.configured("model_aliases:\n  low_llm:\n    model_string: provider/model\nmodel_profiles:\n  provider/model:\n    usage: Model usage\n").unwrap();
     assert_eq!(
         configuration.models.model_aliases["low_llm"].usage,
         defaults["low_llm"].usage

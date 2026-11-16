@@ -11,7 +11,7 @@ use parrot_provider::{
             BuildServices, HttpClients, ImageBucketFactory, ProviderRegistryBuilder,
             SelectedHttpClient,
         },
-        factory::{ProviderBuildContext, ProviderImplementation, build_provider},
+        factory::{ProviderBuildInputs, ProviderImplementation, build_provider},
         models_dev::ModelsDevInformationProvider,
         registry::ProviderRegistry,
         usage::{KimiUsageReporter, OpenCodeGoUsageReporter},
@@ -345,7 +345,7 @@ fn configured_provider(
 ) -> Arc<dyn Provider> {
     let fixture = Fixture::new(yaml);
     let configuration = fixture.load();
-    build_provider(ProviderBuildContext {
+    build_provider(ProviderBuildInputs {
         id,
         config: &configuration.models.providers[id],
         credentials,
@@ -690,7 +690,7 @@ async fn custom_openrouter_preserves_catalog_metadata_and_routing_preferences() 
     let configuration = fixture.load();
     let credentials = Credentials::one("openrouter-near", "key");
     let transport = Transport::new(Mode::OpenRouter);
-    let built = build_provider(ProviderBuildContext {
+    let built = build_provider(ProviderBuildInputs {
         id: "openrouter-near",
         config: &configuration.models.providers["openrouter-near"],
         credentials: credentials.as_ref(),
@@ -959,7 +959,7 @@ fn actual_factory_selects_all_configured_implementations_and_never_uses_catalogu
         ("generic", ProviderImplementation::Compatible),
     ] {
         let transport = Transport::new(Mode::Unavailable);
-        let built = build_provider(ProviderBuildContext {
+        let built = build_provider(ProviderBuildInputs {
             id,
             config: &configuration.models.providers[id],
             credentials: &credentials,
@@ -992,7 +992,7 @@ fn actual_factory_selects_all_configured_implementations_and_never_uses_catalogu
     assert!(ProviderImplementation::ChatGpt.can_build(&anthropic));
     let mut invalid = generic.clone();
     invalid.provider_type = "unsupported".into();
-    let error = match build_provider(ProviderBuildContext {
+    let error = match build_provider(ProviderBuildInputs {
         id: "generic",
         config: &invalid,
         credentials: &credentials,
@@ -1011,7 +1011,7 @@ fn actual_factory_selects_all_configured_implementations_and_never_uses_catalogu
     );
     invalid.provider_type = "compatible".into();
     invalid.protocol = "unsupported".into();
-    let error = match build_provider(ProviderBuildContext {
+    let error = match build_provider(ProviderBuildInputs {
         id: "generic",
         config: &invalid,
         credentials: &credentials,
@@ -1038,7 +1038,7 @@ fn actual_factory_selects_all_configured_implementations_and_never_uses_catalogu
     );
 }
 fn built_image_cost(configuration: &Configuration, credentials: &Credentials, id: &str) -> i64 {
-    build_provider(ProviderBuildContext {
+    build_provider(ProviderBuildInputs {
         id,
         config: &configuration.models.providers[id],
         credentials,

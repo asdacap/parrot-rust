@@ -1,15 +1,9 @@
 use super::*;
 
-pub(super) struct MemoryStatus {
-    pub(super) contexts: Mutex<Vec<ContextSnapshot>>,
-}
+pub(super) struct MemoryStatus;
 
 impl MemoryStatus {
-    pub(super) fn offering(
-        &self,
-        context: ContextSnapshot,
-    ) -> BoxFuture<'_, Result<StatusOffering, Error>> {
-        self.contexts.lock().unwrap().push(context);
+    pub(super) fn offering(&self) -> BoxFuture<'_, Result<StatusOffering, Error>> {
         Box::pin(async move {
             let mut offering = StatusOffering::default();
             offering.insert(
@@ -32,7 +26,6 @@ pub(super) struct MemoryCompaction {
     pub(super) contexts: VecDeque<CompactedContext>,
     pub(super) saved_state: AgentState,
     pub(super) effect_state: Option<AgentState>,
-    pub(super) effect_state_on_call: Option<AgentState>,
     pub(super) status: MemoryStatus,
 }
 
@@ -45,10 +38,7 @@ impl Default for MemoryCompaction {
             contexts: VecDeque::new(),
             saved_state: AgentState::default(),
             effect_state: None,
-            effect_state_on_call: None,
-            status: MemoryStatus {
-                contexts: Mutex::default(),
-            },
+            status: MemoryStatus,
         }
     }
 }
@@ -121,7 +111,7 @@ fn opaque_replacement_reaches_the_next_request_without_interpretation() {
         contents: vec![Content::Text("retained tail".into())],
         ..Message::default()
     };
-    let context = state.request().context.clone();
+    let model = state.request().model.clone();
     state
         .compaction
         .lock()
@@ -130,79 +120,11 @@ fn opaque_replacement_reaches_the_next_request_without_interpretation() {
         .push_back(Ok(Some(replacement.clone())));
     state.compactions.push_back(CompactedContext {
         messages: vec![replacement.clone(), retained.clone()],
-        state: context,
+        state: model,
     });
 
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
     let requests = state.provider.requests.lock().unwrap();
     assert_eq!(&requests[1].messages[..2], [replacement, retained]);
     assert_eq!(state.compaction.lock().unwrap().requests.len(), 1);
-}
-
-#[test]
-fn compaction_reloads_provider_state_on_success_and_postcommit_error() {
-    for fail in [false, true] {
-        let mut states = MemoryState::new([]);
-        let mut state = AgentState::default();
-        state
-            .last_request_statistic
-            .observe_usage("before/model", 10, 20);
-        let mut finalized = AgentState::default();
-        finalized.final_phase = true;
-        finalized
-            .last_request_statistic
-            .observe_usage("after/model", 30, 45);
-        let error = Error::failed("terminal publication failed after commit");
-        {
-            let mut compaction = states.compaction.lock().unwrap();
-            compaction.effect_state_on_call = Some(finalized.clone());
-            compaction.replies.push_back(if fail {
-                Err(error.clone())
-            } else {
-                Ok(Some(Message::default()))
-            });
-        }
-        let provider = states.provider.clone();
-        let outcome = finish(parrot_core::compact_context(
-            &mut states,
-            &mut state,
-            &provider,
-            &[],
-            parrot_core::CompactionRequest::default(),
-            CancellationToken::uncancelled(),
-        ));
-        if fail {
-            assert_eq!(outcome, Err(error));
-        } else {
-            assert!(outcome.unwrap().reduced);
-        }
-        assert_eq!(state, finalized);
-        assert!(states.events.lock().unwrap().is_empty());
-        assert_eq!(states.compaction.lock().unwrap().requests.len(), 1);
-    }
-}
-
-#[test]
-fn successful_noop_keeps_calibration_and_refreshes_instructions() {
-    let mut states = MemoryState::new([]);
-    states.request().instructions = "fresh instructions".into();
-    let mut state = AgentState::default();
-    state
-        .last_request_statistic
-        .observe_usage("provider/model", 10, 20);
-    let before = state.clone();
-    let provider = states.provider.clone();
-    let outcome = finish(parrot_core::compact_context(
-        &mut states,
-        &mut state,
-        &provider,
-        &[],
-        parrot_core::CompactionRequest::default(),
-        CancellationToken::uncancelled(),
-    ))
-    .unwrap();
-    assert!(!outcome.reduced);
-    assert_eq!(outcome.instructions, "fresh instructions");
-    assert_eq!(state, before);
-    assert!(states.events.lock().unwrap().is_empty());
 }

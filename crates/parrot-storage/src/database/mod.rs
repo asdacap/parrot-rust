@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use tokio::sync::{oneshot, watch};
 
 pub use rusqlite::{Connection, Transaction};
-pub use schema::extract_usage_keys;
+pub use schema::{extract_event_kind, extract_usage_keys};
 
 /// Database failures stay observable through admission or completion.
 #[derive(Debug)]

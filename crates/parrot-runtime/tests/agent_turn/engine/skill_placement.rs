@@ -1,6 +1,6 @@
 //! Skill preparation through the real core loop with raw native records.
 use super::*;
-use parrot_runtime::prompt_context::StaticSystemPrompt;
+use parrot_runtime::prompt_assembly::StaticSystemPrompt;
 use protobuf::Message;
 
 struct StoredSkills {
@@ -190,7 +190,7 @@ async fn send_skill_input(
 }
 
 #[tokio::test]
-async fn selected_skill_context_follows_original_steer_and_new_turn_history_and_event_order() {
+async fn selected_skill_prompt_follows_original_steer_and_new_turn_history_and_event_order() {
     let fixture = Fixture::new();
     let first_path = fixture
         .path
@@ -376,7 +376,13 @@ async fn selected_skill_context_follows_original_steer_and_new_turn_history_and_
             .join("|"),
         format!("{second_path}|{first_path}|{first_path}|{third_path}")
     );
-    assert_eq!(events.iter().filter(|event| event.has_agent_notice() && event.agent_notice().kind == "skill_context").count(), 3);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.has_agent_notice() && event.agent_notice().kind == "skill_prompt")
+            .count(),
+        3
+    );
     assert!(
         events
             .iter()
@@ -406,7 +412,7 @@ async fn selected_skill_context_follows_original_steer_and_new_turn_history_and_
 }
 
 #[tokio::test]
-async fn core_skill_context_uses_configured_minijinja_without_interpreting_skill_body() {
+async fn core_skill_prompt_uses_configured_minijinja_without_interpreting_skill_body() {
     let fixture = Fixture::new();
     let environment = [
         ("HOME", "/skill-test/home"),

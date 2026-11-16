@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for yaml in [
@@ -6,7 +6,7 @@ fn source_assertions() {
         "profiles:\n  build:\n    hard_rules: []\n",
         "sandbox_rules:\n  - path: /workspace\n    rules: allow_write\n",
     ] {
-        let context = Context::new();
-        assert!(context.configured(yaml).is_err());
+        let fixture = ConfigFixture::new();
+        assert!(fixture.configured(yaml).is_err());
     }
 }

@@ -424,12 +424,12 @@ message PendingQuestion {
 }
 
 message QuestionDefinition {
-  reserved 1;
+  reserved 1, 6;
+  reserved "custom";
   string header = 2;
   string prompt = 3;
   repeated QuestionOption options = 4;
   bool multiple = 5;
-  bool custom = 6;
 }
 
 message QuestionOption {
@@ -737,7 +737,17 @@ message CompactionProgressEvent {
   uint64 total_groups = 3;
 }
 
-message CompactionStarted {}
+// Why a compaction run started. The origin changes only how the run is reported.
+enum CompactionTrigger {
+  COMPACTION_TRIGGER_UNSPECIFIED = 0;
+  COMPACTION_TRIGGER_AUTOMATIC = 1;
+  COMPACTION_TRIGGER_MODEL_REQUESTED = 2;
+  COMPACTION_TRIGGER_USER_REQUESTED = 3;
+}
+
+message CompactionStarted {
+  CompactionTrigger trigger = 1;
+}
 
 message CompactionFinished {}
 

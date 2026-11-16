@@ -131,7 +131,7 @@ fn optional_strings_reject_nonstring_types() {
 }
 
 #[test]
-fn unknown_properties_follow_the_source_generation_context() {
+fn unknown_properties_follow_the_source_generated_types() {
     for property in ["unexpected", "Command", "TTY"] {
         assert!(ExecInput::parse(&format!(r#"{{"command":"true","{property}":true}}"#)).is_err());
         assert!(

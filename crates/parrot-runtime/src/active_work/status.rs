@@ -524,6 +524,14 @@ fn render_reminder(
 /// per band and the standing comparison gates repeats across tool followups
 /// and restarts. Without an active band the hash records "none" and stays
 /// stable across usage changes.
+/// The snapshot's tokens are the last provider response's actual input tokens
+/// recorded by the usage recorder, not a live estimate. Core deliberately
+/// supplies no snapshot: an earlier design fed core-estimated tokens into this
+/// slot and looped estimate and render until they agreed, which reported a
+/// number that included the status text about to be injected and coupled core
+/// to status content. Do not reintroduce a core-supplied snapshot or an
+/// estimate-render loop here. Before the first provider response no statistic
+/// exists and the slot reports zero usage.
 pub struct ContextStatusProvider {
     pub snapshot: ContextSnapshot,
     pub templates: Arc<PromptTemplateCatalog>,

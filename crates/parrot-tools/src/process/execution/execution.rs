@@ -99,8 +99,8 @@ impl Failure {
         )
     }
     fn error(&self) -> io::Error {
-        if let Some(context) = &self.3 {
-            return io::Error::new(self.0, context.clone());
+        if let Some(blob_fault) = &self.3 {
+            return io::Error::new(self.0, blob_fault.clone());
         }
         self.2.map_or_else(
             || io::Error::new(self.0, self.1.clone()),

@@ -13,7 +13,7 @@ use std::{
 use parrot_cli::{
     dispatch::dialog::{DialogOption, SlashDialog},
     slash_sessions::{
-        CommandContext, SkillRefresh, SlashActivity, SlashCommand, SlashFailure, SlashSession,
+        CommandEnvironment, SkillRefresh, SlashActivity, SlashCommand, SlashFailure, SlashSession,
     },
 };
 use parrot_domain::{
@@ -497,14 +497,14 @@ pub async fn run_with_session(
             Ok(())
         })
     });
-    let mut context = CommandContext {
+    let mut environment = CommandEnvironment {
         session,
         activity,
         dialog,
         refresh_skills: &refresh,
         commands: &[],
     };
-    command.run(arguments, &mut context, cancellation).await
+    command.run(arguments, &mut environment, cancellation).await
 }
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);

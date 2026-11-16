@@ -1,12 +1,12 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_foundation::config::runtime::{SandboxRule, SandboxRuleAction};
 
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let root = context.directory.join("replacement");
+    let fixture = ConfigFixture::new();
+    let root = fixture.directory.join("replacement");
     std::fs::create_dir(&root).unwrap();
-    let configuration = context
+    let configuration = fixture
         .configured(&format!(
             "sandbox_rules: !replace\n  - path: {}\n    rule: deny_write\n",
             root.display()
@@ -20,6 +20,6 @@ fn source_assertions() {
             action: SandboxRuleAction::DenyWrite
         }
     );
-    let empty = context.configured("sandbox_rules: !replace []\n").unwrap();
+    let empty = fixture.configured("sandbox_rules: !replace []\n").unwrap();
     assert!(empty.runtime.sandbox_rules.is_empty());
 }

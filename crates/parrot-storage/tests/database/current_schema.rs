@@ -58,7 +58,7 @@ fn unversioned_tables_and_views_are_rejected_without_writes() {
 
 #[test]
 fn unknown_versions_are_rejected_without_writes() {
-    for version in [1, 2, 3, 4, 5, 6, 7, 8, 9, 11] {
+    for version in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
         let fixture = Fixture::new();
         let path = fixture.0.join("session.db");
         let connection = Connection::open(&path).unwrap();
@@ -99,7 +99,7 @@ async fn empty_unversioned_file_initializes_the_current_format() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (10, 5));
+    assert_eq!(state, (11, 5));
     database.close().await.unwrap();
 }
 
@@ -128,7 +128,7 @@ async fn current_format_reopens_without_schema_repair() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (10, 5, false));
+    assert_eq!(state, (11, 5, false));
     reopened.close().await.unwrap();
 }
 
@@ -201,7 +201,7 @@ async fn status_slots_and_history_anchor_constraints_match_the_current_contract(
         assert!(tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,status_slots) VALUES('agent','system','system','','at','not json')", []).is_err());
         tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at,status_slots) VALUES('agent','system','system','','at','{\"runtime:selection\":\"h1\"}')", [])?;
         tx.execute("INSERT INTO conversation_item(agent_session,origin,role,tool_call_id,created_at) VALUES('agent','system','system','','at'),('agent','system','system','','at')", [])?;
-        tx.execute("INSERT INTO event(id,agent_session,payload,created_at,history_anchor) VALUES('anchored','agent',X'','at',42)", [])?;
+        tx.execute("INSERT INTO event(id,agent_session,payload,kind,created_at,history_anchor) VALUES('anchored','agent',X'','','at',42)", [])?;
         let anchor: i64 = tx.query_row("SELECT history_anchor FROM event WHERE id='anchored'", [], |row| row.get(0))?;
         assert_eq!(anchor,42);
         assert!(tx.execute("UPDATE event SET history_anchor=-1", []).is_err());

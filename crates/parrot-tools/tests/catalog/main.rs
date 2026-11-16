@@ -438,7 +438,7 @@ async fn retained_identity_budget_templates_and_cancellation_survive_binding() {
     let output = read
         .invoke(
             invocation,
-            parrot_domain::contracts::security::InvocationContext::new(
+            parrot_domain::contracts::security::InvocationScope::new(
                 support::Snapshot { id: 1 },
                 catalog::Selection {
                     requested_model: "alias".into(),
@@ -469,7 +469,7 @@ async fn retained_identity_budget_templates_and_cancellation_survive_binding() {
                 r#"{"path":"old.txt","content":"new"}"#,
                 fixture.templates.clone(),
             ),
-            parrot_domain::contracts::security::InvocationContext::new(
+            parrot_domain::contracts::security::InvocationScope::new(
                 support::Snapshot { id: 3 },
                 catalog::Selection {
                     requested_model: "alias".into(),

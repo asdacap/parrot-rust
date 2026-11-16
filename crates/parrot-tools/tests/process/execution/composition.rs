@@ -623,10 +623,10 @@ async fn actual_stream_failure_preserves_first_error_and_settles_other_work() {
 }
 
 // Original ShellProcessOwnersTests.Faulted_process_completion: moving the
-// output directory must fault the result with logical blob context, while
+// output directory must fault the result with the logical blob fault, while
 // disposing the owner still joins successfully rather than replaying the fault.
 #[tokio::test]
-async fn faulted_blob_capture_retains_context_but_settlement_does_not_rethrow_work() {
+async fn faulted_blob_capture_retains_blob_fault_but_settlement_does_not_rethrow_work() {
     let directory = Directory::new();
     let blob = directory.0.join("blob");
     let marker = directory.0.join("produce");
@@ -651,7 +651,7 @@ async fn faulted_blob_capture_retains_context_but_settlement_does_not_rethrow_wo
     let cached = execution.try_result().unwrap_err();
     assert_eq!(cached.kind(), first.kind());
     assert_eq!(cached.to_string(), first.to_string());
-    // Context is a custom io::Error, not a fabricated raw OS error at the outer
+    // The wrapper is a custom io::Error, not a fabricated raw OS error at the outer
     // layer. Its actual original errno remains available through Error::source.
     for error in [&first, &cached] {
         assert_eq!(error.raw_os_error(), None);

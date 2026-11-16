@@ -7,7 +7,7 @@ use parrot_domain::{
 use parrot_provider::routing::aliases::ResolvedModelSelection;
 use parrot_runtime::{
     interactions::{InteractionError, PendingQuestion, QuestionReply},
-    prompt_context::{SkillMetadata, SkillSnapshot},
+    prompt_assembly::{SkillMetadata, SkillSnapshot},
 };
 use parrot_storage::{
     artifacts::ImageArtifactMetadata,

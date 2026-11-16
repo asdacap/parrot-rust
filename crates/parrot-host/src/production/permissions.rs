@@ -2,8 +2,8 @@
 
 use super::policy::{ProductionPolicy, ProductionPolicyMaterializer, ProductionWriteTarget};
 use crate::composition::{
-    context::ContextSelection,
     factory::user::UserServices,
+    invocation::InvocationSelection,
     protocol::{self, RpcCode, RpcError},
 };
 use parrot_domain::contracts::async_ops::{
@@ -61,7 +61,7 @@ impl ProductionPermissionAuthority {
 
 impl PermissionServices for ProductionPermissionAuthority {
     type Security = SharedSecurity<ProductionPolicy>;
-    type Selection = ContextSelection<ProductionPolicy>;
+    type Selection = InvocationSelection<ProductionPolicy>;
 
     fn resolve_target(&self, requested: &str) -> Result<WriteTarget, Failure> {
         let target = self.resolve(requested)?;

@@ -11,7 +11,7 @@ use parrot_domain::{
             MutationTarget, ReadRequest,
         },
         paths::ResolvedRead,
-        security::{AccessSnapshot, InvocationContext},
+        security::{AccessSnapshot, InvocationScope},
         tools::{ParallelSafety, Tool},
     },
     values::tools::ConfiguredToolDefinition,
@@ -490,7 +490,7 @@ impl Fixture {
         self.tool
             .invoke(
                 invocation(arguments),
-                InvocationContext::new(snapshot, selected, token),
+                InvocationScope::new(snapshot, selected, token),
             )
             .await
     }

@@ -11,7 +11,7 @@ use std::{
 use parrot_cli::{
     dispatch::dialog::{DialogOption, SlashDialog},
     slash_sessions::{
-        CommandContext, SkillRefresh, SlashActivity, SlashCommand, SlashFailure, SlashSession,
+        CommandEnvironment, SkillRefresh, SlashActivity, SlashCommand, SlashFailure, SlashSession,
     },
 };
 use parrot_domain::{
@@ -532,14 +532,14 @@ pub fn run(
     refresh: &SkillRefresh,
     cancellation: &dyn Cancellation,
 ) -> Result<(), SlashFailure> {
-    let mut context = CommandContext {
+    let mut environment = CommandEnvironment {
         session,
         activity,
         dialog,
         refresh_skills: refresh,
         commands: &[],
     };
-    let future = command.run(arguments, &mut context, cancellation);
+    let future = command.run(arguments, &mut environment, cancellation);
     match std::pin::pin!(future)
         .as_mut()
         .poll(&mut Context::from_waker(Waker::noop()))

@@ -21,7 +21,7 @@ use parrot_domain::{
             MutationTarget, ReadRequest,
         },
         paths::ResolvedRead,
-        security::{AccessSnapshot, InvocationContext, RestrictableAccessSnapshot},
+        security::{AccessSnapshot, InvocationScope, RestrictableAccessSnapshot},
         tools::Tool,
     },
     values::{
@@ -35,7 +35,6 @@ use parrot_foundation::{
 };
 use parrot_host::composition::{
     agents::AgentSessionServices,
-    context::ContextSelection,
     factory::{
         scope::{AgentOutput, AgentSourceConfig, AuthoritativeAgentSource},
         tasks::ScopedTaskController,
@@ -45,6 +44,7 @@ use parrot_host::composition::{
             durable_permission_factory,
         },
     },
+    invocation::InvocationSelection,
     protocol::{self, HostedSession, HostedSessionFactory, RpcCode, RpcError},
 };
 use parrot_provider::{
@@ -74,8 +74,8 @@ use parrot_runtime::{
     plan_mode::{
         MaterializedModeProfile, ModeRegistry, ModeResult, RetainedModePolicyMaterializer,
     },
-    prompt_context::{
-        AgentIdentityDescription, PromptResult, SkillCatalog, SkillDiscoveryContext,
+    prompt_assembly::{
+        AgentIdentityDescription, PromptResult, SkillCatalog, SkillPathBases,
         StaticSystemPromptProvider, SystemPrompt, SystemPromptProvider,
     },
     task_scheduler::{TaskScheduler, TaskSession},
@@ -404,7 +404,7 @@ impl SystemPrompt for BlockingStatusPrompt {
                 .store(true, std::sync::atomic::Ordering::SeqCst);
             cancellation
                 .check()
-                .map_err(|_| parrot_runtime::prompt_context::PromptError::Cancelled)?;
+                .map_err(|_| parrot_runtime::prompt_assembly::PromptError::Cancelled)?;
             self.read_system_prompts(selection)
         })
     }
@@ -440,7 +440,7 @@ impl Transport for NoExternal {
 }
 impl PermissionServices for NoExternal {
     type Security = SharedSecurity<Security>;
-    type Selection = ContextSelection<Security>;
+    type Selection = InvocationSelection<Security>;
     fn resolve_target(&self, requested: &str) -> Result<WriteTarget, Failure> {
         Ok(WriteTarget {
             path: requested.into(),
@@ -650,7 +650,7 @@ impl UserSkills<Security> for ObservedSkills {
         &'a self,
         security: &'a Security,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, protocol::Result<parrot_runtime::prompt_context::SkillSnapshot>> {
+    ) -> BoxFuture<'a, protocol::Result<parrot_runtime::prompt_assembly::SkillSnapshot>> {
         Box::pin(async move {
             let snapshot = self.actual.refresh(security, cancellation).await?;
             if let Some(barrier) = &self.barrier {
@@ -683,13 +683,13 @@ impl UserSkills<Security> for ObservedSkills {
         path: &'a str,
         enabled: bool,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, protocol::Result<parrot_runtime::prompt_context::SkillMetadata>> {
+    ) -> BoxFuture<'a, protocol::Result<parrot_runtime::prompt_assembly::SkillMetadata>> {
         self.actual.configure(security, path, enabled, cancellation)
     }
     fn new_agent(
         &self,
         selection: Arc<dyn SelectionSource<Security>>,
-    ) -> BoxFuture<'_, parrot_runtime::prompt_context::PromptResult<AgentSkillBindings>> {
+    ) -> BoxFuture<'_, parrot_runtime::prompt_assembly::PromptResult<AgentSkillBindings>> {
         self.actual.new_agent(selection)
     }
 }
@@ -919,7 +919,7 @@ impl Fixture {
                         catalog: Arc::new(SkillCatalog::new(
                             reader.clone(),
                             Vec::new(),
-                            SkillDiscoveryContext {
+                            SkillPathBases {
                                 working_directory: workspace.launch_directory().into(),
                                 platform: PathPlatform::Unix,
                             },
@@ -1028,7 +1028,7 @@ async fn actual_factory_binds_same_identity_selection_scheduler_and_task_owner_b
         .unwrap();
     assert!(Arc::ptr_eq(&session, &services.session));
     let tasks = root
-        .get_service::<ScopedTaskController<Security, ContextSelection<Security>>>()
+        .get_service::<ScopedTaskController<Security, InvocationSelection<Security>>>()
         .unwrap();
     let scheduler = root
         .get_service::<TaskScheduler<Security, TaskArtifactParserAdapter>>()
@@ -2406,7 +2406,6 @@ async fn shared_provider_routes_actual_turn_diagnostics(interrupt: bool) {
     assert_eq!(fixture.requests.lock().unwrap().len(), 3);
     let first_events = first_user.lease.events.replay().await.unwrap();
     let second_events = second_user.lease.events.replay().await.unwrap();
-    let mut turn_ids = Vec::new();
     for (scope, events) in [
         (&first_root, &first_events),
         (&second_root, &second_events),
@@ -2426,7 +2425,6 @@ async fn shared_provider_routes_actual_turn_diagnostics(interrupt: bool) {
             1,
             "actual durable TurnEnded for {agent}"
         );
-        turn_ids.push(starts[0].id.clone());
     }
     #[cfg(target_os = "linux")]
     for path in [&first_path, &second_path] {
@@ -2498,12 +2496,7 @@ async fn shared_provider_routes_actual_turn_diagnostics(interrupt: bool) {
         assert!(!log.contains("private-"));
         assert!(!log.contains("https://example.invalid"));
     }
-    for ((scope, turn_id), log) in
-        scopes
-            .iter()
-            .zip(turn_ids)
-            .zip([&first_log, &second_log, &first_log])
-    {
+    for (scope, log) in scopes.iter().zip([&first_log, &second_log, &first_log]) {
         let agent = &scope.identity().session.session_id;
         let lines: Vec<_> = log
             .lines()
@@ -2535,11 +2528,13 @@ async fn shared_provider_routes_actual_turn_diagnostics(interrupt: bool) {
         );
         assert_eq!(
             turn_diagnostic_field(starts[0], "correlation"),
-            Some(turn_id.as_str())
+            None,
+            "turn diagnostics no longer correlate by start event id"
         );
         assert_eq!(
             turn_diagnostic_field(finishes[0], "correlation"),
-            Some(turn_id.as_str())
+            None,
+            "turn diagnostics no longer correlate by start event id"
         );
     }
     assert!(first_log.contains("category=\"session\" event=\"closed\""));

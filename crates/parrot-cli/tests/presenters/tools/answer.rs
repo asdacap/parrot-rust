@@ -1,6 +1,6 @@
 use parrot_cli::presenters::tools::answer::AnswerToolPresenter;
 use parrot_cli::presenters::*;
-use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderContext};
+use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderOptions};
 use std::sync::Arc;
 #[test]
 fn answer_formats_resolved_recipient_single_and_numbered_multiline_answers() {
@@ -38,7 +38,7 @@ fn answer_formats_resolved_recipient_single_and_numbered_multiline_answers() {
         assert_eq!(report.block.text, expected);
         let lines = ScrollbackItem::render(
             &item,
-            ScrollbackRenderContext {
+            ScrollbackRenderOptions {
                 columns: 512,
                 color: false,
                 inline_diff: false,

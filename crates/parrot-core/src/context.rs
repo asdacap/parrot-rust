@@ -2,11 +2,6 @@ use crate::{
     ContextConfiguration, ContextLimit, ContextSnapshot, OutputTokenError, RequestStatistic,
 };
 mod compaction_request;
-mod preparation;
-mod status;
-pub use preparation::compact_context;
-pub(crate) use preparation::prepare_request;
-pub(crate) use status::fit_status;
 
 use crate::{Error, ErrorCode, ErrorKind};
 use std::fmt;

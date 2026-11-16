@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for provider in ["chatgpt", "openai", "custom"] {
@@ -15,8 +15,8 @@ fn source_assertions() {
                 0,
             ),
         ] {
-            let context = Context::new();
-            let configuration = context
+            let fixture = ConfigFixture::new();
+            let configuration = fixture
                 .configured(&format!("providers:\n  {provider}: {settings}\n"))
                 .unwrap();
             let actual = &configuration.models.providers[provider];

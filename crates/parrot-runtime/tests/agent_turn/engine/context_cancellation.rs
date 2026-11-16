@@ -46,14 +46,10 @@ async fn awaited_actual_epoch_prompt_cancellation_closes_interrupted_without_pro
     assert_eq!(provider.turn_begins.load(Ordering::SeqCst), 0);
     let events = fixture.events().await;
     assert_interrupted(&events);
-    let started = events
-        .iter()
-        .find(|event| event.has_turn_started())
-        .unwrap();
     let diagnostic = runtime.activity.diagnostic.lock().unwrap().clone();
     assert_eq!(diagnostic.len(), 2);
-    assert_eq!(diagnostic[0], format!("started:{}", started.id));
-    assert!(diagnostic[1].starts_with(&format!("finished:{}:cancelled:", started.id)));
+    assert_eq!(diagnostic[0], "started");
+    assert!(diagnostic[1].starts_with("finished:cancelled:"));
     assert!(trace.values().iter().any(|entry| entry == "epoch-start"));
     assert!(!trace.values().iter().any(|entry| entry == "epoch-done"));
     assert!(!trace.values().iter().any(|entry| entry == "skills-begin"));
@@ -77,7 +73,7 @@ impl SystemPrompt for FailingEpochPrompt {
 
     fn sample_epoch<'a>(&'a mut self, _: &'a dyn Cancellation) -> BoxFuture<'a, PromptResult<()>> {
         Box::pin(async {
-            Err(parrot_runtime::prompt_context::PromptError::Context(
+            Err(parrot_runtime::prompt_assembly::PromptError::Context(
                 "epoch initialization failed".into(),
             ))
         })
@@ -146,8 +142,8 @@ async fn native_initialization_failure_finishes_its_started_activity_without_ent
     assert!(!events.iter().any(|event| event.has_turn_ended()));
     let diagnostic = runtime.activity.diagnostic.lock().unwrap().clone();
     assert_eq!(diagnostic.len(), 2);
-    assert_eq!(diagnostic[0], format!("started:{}", starts[0].id));
-    assert!(diagnostic[1].starts_with(&format!("finished:{}:failed:", starts[0].id)));
+    assert_eq!(diagnostic[0], "started");
+    assert!(diagnostic[1].starts_with("finished:failed:"));
     runtime.close().await;
 }
 
@@ -317,6 +313,15 @@ async fn oversized_recovery_uses_the_shared_core_summary_without_publishing_priv
     assert_eq!(
         events
             .iter()
+            .find(|event| event.has_compaction_started())
+            .unwrap()
+            .compaction_started()
+            .trigger,
+        protocol::CompactionTrigger::COMPACTION_TRIGGER_AUTOMATIC.into()
+    );
+    assert_eq!(
+        events
+            .iter()
             .filter(|event| event.has_compaction_finished())
             .count(),
         1
@@ -378,6 +383,15 @@ async fn oversized_recovery_summary_cancellation_records_failure_after_joining_t
             .filter(|event| event.has_compaction_started())
             .count(),
         1
+    );
+    assert_eq!(
+        events
+            .iter()
+            .find(|event| event.has_compaction_started())
+            .unwrap()
+            .compaction_started()
+            .trigger,
+        protocol::CompactionTrigger::COMPACTION_TRIGGER_AUTOMATIC.into()
     );
     let failed: Vec<_> = events
         .iter()

@@ -24,7 +24,7 @@ pub use activity::{ActivityUpdate, RawActivityView};
 pub use model::*;
 pub use registry::ToolPresenterRegistry;
 pub use rendering::{ActivityDecoration, ToolDisplayText};
-pub use replay::SessionReplayContext;
+pub use replay::SessionReplayState;
 pub use session::{EnhancedSessionPresenter, PresentationUpdate};
 pub use state::AgentSessionState;
 pub use status::{MarqueeValue, ModelineValue};

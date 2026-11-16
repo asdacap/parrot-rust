@@ -236,7 +236,7 @@ async fn seeded_concurrent_passive_wakes_share_one_drain_without_execution_callb
     }
 }
 
-async fn exercise_wakes(participants: usize, context: &str) {
+async fn exercise_wakes(participants: usize, label: &str) {
     let backend = Backend::new();
     let session = AgentSession::with_state(
         backend.clone(),
@@ -260,19 +260,15 @@ async fn exercise_wakes(participants: usize, context: &str) {
     backend.release.add_permits(1);
     let result = bounded(first.join()).await.unwrap();
     bounded(session.close()).await.unwrap();
-    assert!(started && unfinished, "{context}");
-    assert_eq!(result.status, ExecutionStatus::Succeeded, "{context}");
-    assert_eq!(
-        backend.maximum_active.load(Ordering::SeqCst),
-        1,
-        "{context}"
-    );
-    assert_eq!(backend.passes.load(Ordering::SeqCst), 2, "{context}");
+    assert!(started && unfinished, "{label}");
+    assert_eq!(result.status, ExecutionStatus::Succeeded, "{label}");
+    assert_eq!(backend.maximum_active.load(Ordering::SeqCst), 1, "{label}");
+    assert_eq!(backend.passes.load(Ordering::SeqCst), 2, "{label}");
     // Passive wake(None) reserves no input execution; callbacks must not be fabricated.
-    assert_eq!(backend.starts.load(Ordering::SeqCst), 0, "{context}");
-    assert_eq!(backend.finishes.load(Ordering::SeqCst), 0, "{context}");
-    assert_eq!(backend.closes.load(Ordering::SeqCst), 1, "{context}");
-    assert!(session.is_idle(), "{context}");
+    assert_eq!(backend.starts.load(Ordering::SeqCst), 0, "{label}");
+    assert_eq!(backend.finishes.load(Ordering::SeqCst), 0, "{label}");
+    assert_eq!(backend.closes.load(Ordering::SeqCst), 1, "{label}");
+    assert!(session.is_idle(), "{label}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -297,7 +293,7 @@ async fn seeded_cancelled_or_dropped_observer_cannot_abandon_admitted_mutation_o
     }
 }
 
-async fn exercise_mutation(cancelled_observer: bool, value: u64, context: &str) {
+async fn exercise_mutation(cancelled_observer: bool, value: u64, label: &str) {
     let backend = Backend::new();
     let session = AgentSession::with_state(
         backend.clone(),
@@ -330,7 +326,7 @@ async fn exercise_mutation(cancelled_observer: bool, value: u64, context: &str) 
         assert_eq!(
             mutation.wait(caller.as_ref()).await,
             Err(LifecycleError::Cancelled),
-            "{context}"
+            "{label}"
         );
     } else {
         pending(mutation.wait(&NeverCancelled)).await;
@@ -343,16 +339,16 @@ async fn exercise_mutation(cancelled_observer: bool, value: u64, context: &str) 
     release.add_permits(1);
     let completed = bounded(mutation.join()).await.unwrap();
     bounded(close.join()).await.unwrap();
-    assert!(blocked, "{context}");
-    assert_eq!(completed, value, "{context}");
-    assert_eq!(backend.closes.load(Ordering::SeqCst), 1, "{context}");
-    assert_eq!(backend.passes.load(Ordering::SeqCst), 0, "{context}");
+    assert!(blocked, "{label}");
+    assert_eq!(completed, value, "{label}");
+    assert_eq!(backend.closes.load(Ordering::SeqCst), 1, "{label}");
+    assert_eq!(backend.passes.load(Ordering::SeqCst), 0, "{label}");
     assert!(
         matches!(
             session.owned_mutation(|_, _| Box::pin(async { Ok(()) }), Arc::new(NeverCancelled)),
             Err(LifecycleError::ShuttingDown)
         ),
-        "{context}"
+        "{label}"
     );
 }
 
@@ -383,7 +379,7 @@ async fn seeded_subscribe_before_replay_preserves_duplicates_and_defers_snapshot
     }
 }
 
-async fn exercise_replay(count: usize, duplicate: usize, context: &str) {
+async fn exercise_replay(count: usize, duplicate: usize, label: &str) {
     let broker = EventBroker::new();
     let release = Arc::new(Semaphore::new(0));
     let captures = Arc::new(AtomicUsize::new(0));
@@ -437,9 +433,9 @@ async fn exercise_replay(count: usize, duplicate: usize, context: &str) {
     while let Some(next) = bounded(stream.next(&NeverCancelled)).await.unwrap() {
         tail.push(next.id);
     }
-    assert_eq!(replayed, persisted, "{context}");
-    assert_eq!(captured_before_tail, 0, "{context}");
-    assert_eq!(captures.load(Ordering::SeqCst), 1, "{context}");
+    assert_eq!(replayed, persisted, "{label}");
+    assert_eq!(captured_before_tail, 0, "{label}");
+    assert_eq!(captures.load(Ordering::SeqCst), 1, "{label}");
     assert_eq!(
         tail,
         vec![
@@ -447,6 +443,6 @@ async fn exercise_replay(count: usize, duplicate: usize, context: &str) {
             format!("e{duplicate}"),
             "live-only".to_owned()
         ],
-        "{context}"
+        "{label}"
     );
 }

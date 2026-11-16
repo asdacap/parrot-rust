@@ -1,13 +1,13 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 use parrot_foundation::config::runtime::{SandboxRule, SandboxRuleAction};
 
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let workspace = context.directory.join("workspace");
+    let fixture = ConfigFixture::new();
+    let workspace = fixture.directory.join("workspace");
     let private_workspace = workspace.join("private");
     std::fs::create_dir_all(&private_workspace).unwrap();
-    let configuration = context.configured(&format!(
+    let configuration = fixture.configured(&format!(
         "sandbox_rules:\n  - path: {}\n    rule: allow_write\n  - path: {}\n    rule: deny_read\nprofiles:\n  build:\n    read_only: false\n    sandbox_rules:\n      - path: /workspace/generated\n        rule: deny_write\n  plan:\n    sandbox_rules: []\n  query:\n    read_only: true\n",
         workspace.display(), private_workspace.display()
     )).unwrap();

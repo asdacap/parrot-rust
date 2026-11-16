@@ -1,6 +1,6 @@
 use crate::{
     fixtures,
-    support::{Context, transact},
+    support::{ConfigFixture, transact},
 };
 use parrot_domain::values::context::ContextSize;
 use parrot_foundation::config::{
@@ -75,16 +75,16 @@ fn competing_update(configuration: &mut Configuration, kind: usize) -> Result<()
 #[test]
 fn transaction_reenters_separate_normalized_handles_and_excludes_every_direct_writer() {
     bounded(|| {
-        let context = Context::new();
-        let mut outer = context.configured("unknown: retained\n").unwrap();
+        let fixture = ConfigFixture::new();
+        let mut outer = fixture.configured("unknown: retained\n").unwrap();
         let mut nested = fixtures::fixture_load(
-            &context.directory.join(".").join("config.yaml"),
-            &context.predefined,
+            &fixture.directory.join(".").join("config.yaml"),
+            &fixture.predefined,
         )
         .unwrap();
-        let competitors: Vec<_> = (0..7).map(|_| context.load().unwrap()).collect();
-        let independent_context = Context::new();
-        let mut independent = independent_context.configured("unknown: other\n").unwrap();
+        let competitors: Vec<_> = (0..7).map(|_| fixture.load().unwrap()).collect();
+        let independent_fixture = ConfigFixture::new();
+        let mut independent = independent_fixture.configured("unknown: other\n").unwrap();
         let (ready, started) = mpsc::channel();
         let (done, completed) = mpsc::channel();
         let mut workers = Vec::new();
@@ -135,20 +135,20 @@ fn transaction_reenters_separate_normalized_handles_and_excludes_every_direct_wr
         for worker in workers {
             worker.join().unwrap();
         }
-        assert!(context.saved().contains("unknown: retained"));
+        assert!(fixture.saved().contains("unknown: retained"));
     });
 }
 
 #[test]
 fn transaction_reload_synchronize_and_explicit_rollback_keep_caller_error_inside_gate() {
     bounded(|| {
-        let context = Context::new();
-        let mut configuration = context
+        let fixture = ConfigFixture::new();
+        let mut configuration = fixture
             .configured("model: p/old\nsandbox:\n  enabled: false\nunknown: retained\n")
             .unwrap();
-        context.write("model: p/external\nsandbox:\n  enabled: true\nunknown: retained\n");
+        fixture.write("model: p/external\nsandbox:\n  enabled: true\nunknown: retained\n");
         let previous = configuration.reload_model_configuration().unwrap();
-        let mut competitor = context.load().unwrap();
+        let mut competitor = fixture.load().unwrap();
         let (ready, started) = mpsc::channel();
         let (done, completed) = mpsc::channel();
         let mut worker = None;
@@ -215,16 +215,16 @@ fn transaction_reload_synchronize_and_explicit_rollback_keep_caller_error_inside
             final_snapshot.model_aliases["low_llm"].model_string,
             "p/after"
         );
-        assert!(context.saved().contains("unknown: retained"));
+        assert!(fixture.saved().contains("unknown: retained"));
     });
 }
 
 #[test]
 fn transaction_errors_do_not_implicitly_rollback_and_panics_release_reentrant_admission() {
     bounded(|| {
-        let context = Context::new();
-        let mut configuration = context.configured("model: p/old\n").unwrap();
-        let mut nested = context.load().unwrap();
+        let fixture = ConfigFixture::new();
+        let mut configuration = fixture.configured("model: p/old\n").unwrap();
+        let mut nested = fixture.load().unwrap();
         let result: std::result::Result<(), &str> = configuration
             .model_configuration_transaction(|transaction| {
                 transaction
@@ -252,7 +252,7 @@ fn transaction_errors_do_not_implicitly_rollback_and_panics_release_reentrant_ad
                 .unwrap();
         }));
         assert!(panic.is_err());
-        let mut subsequent = context.load().unwrap();
+        let mut subsequent = fixture.load().unwrap();
         let (done, completed) = mpsc::channel();
         let worker = std::thread::spawn(move || {
             subsequent.set_model("p/after-panic").unwrap();

@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS event (
     id            TEXT NOT NULL UNIQUE,
     agent_session TEXT NOT NULL,
     payload       BLOB NOT NULL,
+    kind          TEXT NOT NULL,
     created_at    TEXT NOT NULL,
     request_id    TEXT,
     tool_call_id  TEXT,

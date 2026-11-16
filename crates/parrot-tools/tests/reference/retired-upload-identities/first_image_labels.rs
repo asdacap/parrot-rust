@@ -9,7 +9,7 @@ async fn image_result_uses_bound_actual_filename_and_real_repository_preserves_o
     let original = tool
         .invoke(
             FileToolInvocation::new("original-call", r#"{"path":"alias.dat"}"#),
-            InvocationContext::new(Snapshot(71), (), &NoCancel),
+            InvocationScope::new(Snapshot(71), (), &NoCancel),
         )
         .await
         .unwrap();
@@ -33,7 +33,7 @@ async fn image_result_uses_bound_actual_filename_and_real_repository_preserves_o
     let renamed = tool
         .invoke(
             FileToolInvocation::new("renamed-call", r#"{"path":"renamed.png"}"#),
-            InvocationContext::new(Snapshot(72), (), &NoCancel),
+            InvocationScope::new(Snapshot(72), (), &NoCancel),
         )
         .await
         .unwrap();

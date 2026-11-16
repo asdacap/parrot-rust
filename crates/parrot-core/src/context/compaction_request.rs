@@ -65,6 +65,7 @@ impl CompactionRequest {
         Ok(Self {
             target,
             tools: Vec::new(),
+            trigger: crate::CompactionTrigger::ModelRequested,
         })
     }
 }

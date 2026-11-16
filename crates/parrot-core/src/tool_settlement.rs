@@ -48,7 +48,7 @@ impl ToolSettlement {
             } else {
                 let error_message =
                     render_template(states, ConfigKey::CrashedToolTemplate, &[]).await?;
-                let text = render_template(
+                let result_text = render_template(
                     states,
                     ConfigKey::ToolErrorTemplate,
                     &[("message".into(), error_message.clone().into())],
@@ -59,7 +59,7 @@ impl ToolSettlement {
                         call_id: call.id.clone(),
                         tool_name: call.name.clone(),
                         status: ToolStatus::Error,
-                        text,
+                        text: result_text,
                         error_message,
                     },
                     false,
@@ -143,7 +143,7 @@ impl ToolSettlement {
 }
 
 /// Settles the full tool batch and returns its first successful compaction request.
-pub async fn execute_tools(
+pub(crate) async fn execute_tools(
     states: &mut dyn States,
     tools: &dyn Tools,
     calls: Vec<ToolCall>,
@@ -185,3 +185,6 @@ pub async fn execute_tools(
         }
     }))
 }
+
+#[cfg(test)]
+mod tests;

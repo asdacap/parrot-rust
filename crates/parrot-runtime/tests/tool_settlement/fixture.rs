@@ -25,7 +25,7 @@ pub use parrot_runtime::{
     agent_turn::services::*,
     compaction::*,
     event_broker::{BrokerError, EventBroker},
-    prompt_context::{PromptResult, SystemPrompt},
+    prompt_assembly::{PromptResult, SystemPrompt},
 };
 pub use parrot_storage::{
     conversation::{AgentHistoryView, ConversationMessage, ConversationRepository, MessageRole},
@@ -179,6 +179,7 @@ impl Fixture {
                 trigger_percent: 95,
                 target_percent: 30,
                 maximum_input_tokens: 60000,
+                maximum_output_tokens: 0,
                 summary_output_tokens: 1024,
                 summary_instructions: String::new(),
                 summary_prefix: String::new(),

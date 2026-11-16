@@ -1,5 +1,5 @@
 use parrot_cli::presenters::{tools::set_agent_tasks::SetAgentTasksToolPresenter, *};
-use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderContext};
+use parrot_cli::terminal_frames::{ScrollbackItem, ScrollbackRenderOptions};
 use parrot_cli::terminal_layout::TerminalText;
 use std::sync::{Arc, Mutex};
 
@@ -26,7 +26,7 @@ fn successful_assignment_output_preserves_full_instructions_and_acceptance_crite
     for columns in [32, 512] {
         let actual = ScrollbackItem::render(
             &item,
-            ScrollbackRenderContext {
+            ScrollbackRenderOptions {
                 columns,
                 color: false,
                 inline_diff: false,
@@ -92,15 +92,15 @@ fn legacy_count_output_and_unsuccessful_outcomes_preserve_existing_rendering() {
             .present_terminal(&ToolCallPresentation::new("set_agent_tasks", ""), &terminal)
             .unwrap()
             .unwrap();
-        let context = ScrollbackRenderContext {
+        let options = ScrollbackRenderOptions {
             columns: 120,
             color: false,
             inline_diff: false,
             previous_packing: None,
         };
         assert_eq!(
-            ScrollbackItem::render(&actual, context.clone()).unwrap(),
-            ScrollbackItem::render(&expected, context).unwrap()
+            ScrollbackItem::render(&actual, options.clone()).unwrap(),
+            ScrollbackItem::render(&expected, options).unwrap()
         );
     }
 }

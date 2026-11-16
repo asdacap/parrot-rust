@@ -1,7 +1,7 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
+    let fixture = ConfigFixture::new();
     let _: parrot_foundation::config::ConfigError =
-        context.configured("inline_diff: yes\n").unwrap_err();
+        fixture.configured("inline_diff: yes\n").unwrap_err();
 }

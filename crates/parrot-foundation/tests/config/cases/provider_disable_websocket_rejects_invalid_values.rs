@@ -1,9 +1,9 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for value in ["not-a-boolean", "null", "[true]"] {
-        let context = Context::new();
-        let error = context
+        let fixture = ConfigFixture::new();
+        let error = fixture
             .configured(&format!(
                 "providers:\n  custom:\n    disable_websocket: {value}\n"
             ))

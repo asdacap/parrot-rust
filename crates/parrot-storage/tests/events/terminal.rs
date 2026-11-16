@@ -6,7 +6,7 @@ use parrot_domain::contracts::storage::{AdmissionError, Committed};
 use parrot_domain::protocol::messages::parrot::{
     Event, RequestUsageRecorded, TurnEnded, TurnStarted,
 };
-use parrot_storage::events::terminal::{CloseTurnError, TurnClosure, TurnCommit, TurnKey};
+use parrot_storage::events::terminal::{CloseTurnError, TurnClosure, TurnCommit};
 use parrot_storage::events::{
     ConversationMessage, EventError, EventRepository, MessageRole, NeverCancelled,
 };
@@ -17,12 +17,6 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex, mpsc};
 
-fn key(agent: &str, start: &str) -> TurnKey {
-    TurnKey {
-        agent_session_id: agent.into(),
-        start_event_id: start.into(),
-    }
-}
 fn start(agent: &str, id: &str) -> Event {
     let mut event = Event::new();
     event.id = id.into();
@@ -52,12 +46,12 @@ fn message(text: &str) -> Option<ConversationMessage> {
 }
 async fn finish(
     repository: &EventRepository,
-    turn: TurnKey,
+    agent: &str,
     proposed: Event,
     text: &str,
 ) -> TurnCommit {
     repository
-        .admit_close_turn(turn, proposed, message(text), &NeverCancelled)
+        .admit_close_turn(agent.to_owned(), proposed, message(text), &NeverCancelled)
         .unwrap()
         .into_completion()
         .await
@@ -102,7 +96,7 @@ async fn cancellation_before_admission_keeps_turn_open_without_projection() {
         .unwrap();
     let cancelled = Cancel(AtomicBool::new(true));
     let ticket = repository.admit_close_turn(
-        key("agent", "start"),
+        "agent".to_owned(),
         end("agent", "canceled", "interrupted", 17, 9),
         message("losing"),
         &cancelled,
@@ -111,7 +105,7 @@ async fn cancellation_before_admission_keeps_turn_open_without_projection() {
     assert_eq!(counts(&repository).await, (1, 0, 0));
     let outcome = finish(
         &repository,
-        key("agent", "start"),
+        "agent",
         end("agent", "winner", "stop", 17, 9),
         "answer",
     )
@@ -131,7 +125,7 @@ async fn projection_failure_after_terminal_insert_rolls_back_whole_close() {
     repository.transaction(|tx| { tx.execute_batch("CREATE TRIGGER fail_message BEFORE INSERT ON conversation_part BEGIN SELECT RAISE(ABORT, 'controlled projection failure'); END;")?; Ok(()) }).await.unwrap();
     let failure = repository
         .admit_close_turn(
-            key("agent", "start"),
+            "agent".to_owned(),
             end("agent", "failed", "stop", 17, 9),
             message("must rollback"),
             &NeverCancelled,
@@ -150,7 +144,7 @@ async fn projection_failure_after_terminal_insert_rolls_back_whole_close() {
         .unwrap();
     let winner = finish(
         &repository,
-        key("agent", "start"),
+        "agent",
         end("agent", "winner", "stop", 17, 9),
         "answer",
     )
@@ -182,7 +176,7 @@ async fn admitted_close_survives_dropped_ticket_late_cancel_and_reopen() {
     let (event, raw) = unknown(end("agent", "winner", "stop", 17, 9));
     let ticket = repository
         .admit_close_turn(
-            key("agent", "start"),
+            "agent".to_owned(),
             event.clone(),
             message("winning answer"),
             &cancellation,
@@ -194,7 +188,7 @@ async fn admitted_close_survives_dropped_ticket_late_cancel_and_reopen() {
     blocker.into_completion().await.unwrap();
     let retry = finish(
         &repository,
-        key("agent", "start"),
+        "agent",
         end("agent", "new-interrupted-id", "interrupted", 0, 0),
         "losing interruption",
     )
@@ -208,7 +202,7 @@ async fn admitted_close_survives_dropped_ticket_late_cancel_and_reopen() {
     let reopened = fixture.repository();
     let retried = finish(
         &reopened,
-        key("agent", "start"),
+        "agent",
         end("agent", "restart-id", "interrupted", 999, 999),
         "not committed",
     )
@@ -221,8 +215,8 @@ async fn admitted_close_survives_dropped_ticket_late_cancel_and_reopen() {
 
 struct CancellingPublisher {
     path: PathBuf,
-    key: TurnKey,
-    closed: Mutex<Option<TurnKey>>,
+    agent_session_id: String,
+    closed: Mutex<Option<String>>,
     cancellation: Arc<Cancel>,
     calls: AtomicUsize,
 }
@@ -236,7 +230,10 @@ impl EventPublisher for CancellingPublisher {
     ) -> BoxFuture<'a, Result<(), OperationError<Self::Error>>> {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            assert_eq!(self.closed.lock().unwrap().as_ref(), Some(&self.key));
+            assert_eq!(
+                self.closed.lock().unwrap().as_ref(),
+                Some(&self.agent_session_id)
+            );
             assert!(self.cancellation.is_cancelled());
             let connection = rusqlite::Connection::open(&self.path).unwrap();
             let bytes: Vec<u8> = connection
@@ -278,7 +275,7 @@ async fn publication_cancellation_reconciles_key_after_commit_and_never_republis
     let cancellation = Arc::new(Cancel(AtomicBool::new(false)));
     let publisher = CancellingPublisher {
         path: fixture.0.join("session.db"),
-        key: key("agent", "start"),
+        agent_session_id: "agent".into(),
         closed: Mutex::new(None),
         cancellation: cancellation.clone(),
         calls: AtomicUsize::new(0),
@@ -286,15 +283,15 @@ async fn publication_cancellation_reconciles_key_after_commit_and_never_republis
     let proposed = end("agent", "winner", "stop", 17, 9);
     let result = repository
         .close_turn_and_publish(
-            key("agent", "start"),
+            "agent".to_owned(),
             proposed.clone(),
             message("winning answer"),
             &publisher,
             cancellation.as_ref(),
             |receipt| {
-                assert_eq!(receipt.key, publisher.key);
+                assert_eq!(receipt.agent_session_id, publisher.agent_session_id);
                 assert_eq!(receipt.closure, TurnClosure::NewlyClosed);
-                *publisher.closed.lock().unwrap() = Some(receipt.key.clone());
+                *publisher.closed.lock().unwrap() = Some(receipt.agent_session_id.clone());
                 cancellation.0.store(true, Ordering::SeqCst);
             },
         )
@@ -309,13 +306,13 @@ async fn publication_cancellation_reconciles_key_after_commit_and_never_republis
     assert_eq!(committed.terminal.event, proposed);
     let retried = repository
         .close_turn_and_publish(
-            key("agent", "start"),
+            "agent".to_owned(),
             end("agent", "interrupt", "interrupted", 0, 0),
             message("losing interruption"),
             &publisher,
             &NeverCancelled,
             |receipt| {
-                assert_eq!(receipt.key, publisher.key);
+                assert_eq!(receipt.agent_session_id, publisher.agent_session_id);
                 assert_eq!(receipt.closure, TurnClosure::AlreadyClosed);
             },
         )
@@ -351,7 +348,7 @@ async fn competing_closes_have_one_exact_winner_and_other_agent_events_do_not_bo
             barrier.wait();
             repository
                 .admit_close_turn(
-                    key("agent", "start"),
+                    "agent".to_owned(),
                     end("agent", id, "stop", 17, 9),
                     message(id),
                     &NeverCancelled,
@@ -386,7 +383,7 @@ async fn competing_closes_have_one_exact_winner_and_other_agent_events_do_not_bo
 }
 
 #[tokio::test]
-async fn exact_invalid_turn_keys_and_stale_start_are_rejected_without_writes() {
+async fn invalid_proposals_fail_without_writes_and_close_targets_the_latest_open_turn() {
     let fixture = Fixture::new();
     let repository = fixture.repository();
     repository
@@ -401,40 +398,38 @@ async fn exact_invalid_turn_keys_and_stale_start_are_rejected_without_writes() {
         .append(end("agent", "not-start", "stop", 0, 0), None)
         .await
         .unwrap();
-    for (turn, proposed, expected) in [
+    for (agent, proposed, expected) in [
         (
-            key("agent", "missing"),
-            end("agent", "m", "stop", 0, 0),
-            "turn start does not exist",
+            "lonely",
+            end("lonely", "m", "stop", 0, 0),
+            "no open turn for the agent",
         ),
         (
-            key("agent", "other-start"),
-            end("agent", "w", "stop", 0, 0),
-            "turn key does not name that agent's TurnStarted",
-        ),
-        (
-            key("agent", "not-start"),
-            end("agent", "k", "stop", 0, 0),
-            "turn key does not name that agent's TurnStarted",
-        ),
-        (
-            key("agent", "start"),
+            "agent",
             end("other", "p", "stop", 0, 0),
-            "terminal proposal must be TurnEnded for the keyed agent",
+            "terminal proposal must be TurnEnded for the closing agent",
         ),
         (
-            key("agent", "start"),
+            "agent",
             start("agent", "wrong-payload"),
-            "terminal proposal must be TurnEnded for the keyed agent",
+            "terminal proposal must be TurnEnded for the closing agent",
         ),
     ] {
         let result = repository
-            .admit_close_turn(turn, proposed, message("never"), &NeverCancelled)
+            .admit_close_turn(
+                agent.to_owned(),
+                proposed,
+                message("never"),
+                &NeverCancelled,
+            )
             .unwrap()
             .into_completion()
             .await;
         assert!(matches!(result, Err(EventError::Invalid(actual)) if actual==expected));
     }
+    // A turn that crashed without a terminal leaves an open turn behind, and a
+    // later turn starts anyway. The close targets the session's latest open
+    // turn, so the retry closes the newer turn instead of failing stale.
     repository
         .append(start("stale-agent", "old"), None)
         .await
@@ -443,20 +438,22 @@ async fn exact_invalid_turn_keys_and_stale_start_are_rejected_without_writes() {
         .append(start("stale-agent", "new"), None)
         .await
         .unwrap();
-    let result = repository
+    let closed = repository
         .admit_close_turn(
-            key("stale-agent", "old"),
+            "stale-agent".to_owned(),
             end("stale-agent", "stale", "stop", 0, 0),
             message("never"),
             &NeverCancelled,
         )
         .unwrap()
         .into_completion()
-        .await;
-    assert!(
-        matches!(result, Err(EventError::Invalid(message)) if message=="turn key is stale: a later turn has started")
-    );
-    assert_eq!(counts(&repository).await, (5, 0, 0));
+        .await
+        .unwrap()
+        .into_value()
+        .into_output();
+    assert_eq!(closed.closure, TurnClosure::NewlyClosed);
+    assert_eq!(closed.terminal.event.id, "stale");
+    assert_eq!(counts(&repository).await, (6, 1, 1));
     repository.database().close().await.unwrap();
 }
 
@@ -482,7 +479,7 @@ async fn historical_duplicate_terminals_remain_in_replay_without_repair_or_norma
     let before = repository.replay_raw().await.unwrap();
     let outcome = finish(
         &repository,
-        key("agent", "start"),
+        "agent",
         end("agent", "new", "interrupted", 99, 99),
         "must not insert",
     )
@@ -511,14 +508,14 @@ async fn a003_storage_schedule_retains_one_completion_and_two_separate_turn_endi
         .unwrap();
     finish(
         &repository,
-        key("agent", "first"),
+        "agent",
         end("agent", "first-end", "stop", 0, 0),
         "first answer",
     )
     .await;
     finish(
         &repository,
-        key("agent", "first"),
+        "agent",
         end("agent", "first-interrupt", "interrupted", 0, 0),
         "losing",
     )
@@ -539,14 +536,14 @@ async fn a003_storage_schedule_retains_one_completion_and_two_separate_turn_endi
         .unwrap();
     finish(
         &repository,
-        key("agent", "second"),
+        "agent",
         end("agent", "second-end", "stop", 0, 0),
         "second answer",
     )
     .await;
     finish(
         &repository,
-        key("agent", "second"),
+        "agent",
         end("agent", "second-interrupt", "interrupted", 0, 0),
         "losing",
     )
@@ -599,14 +596,14 @@ async fn a003_storage_schedule_retains_17_9_then_23_11_and_all_three_raw_usage_f
         .unwrap();
     finish(
         &repository,
-        key("agent", "first"),
+        "agent",
         end("agent", "first-end", "stop", 17, 9),
         "first",
     )
     .await;
     finish(
         &repository,
-        key("agent", "first"),
+        "agent",
         end("agent", "first-loser", "interrupted", 17, 9),
         "losing",
     )
@@ -628,14 +625,14 @@ async fn a003_storage_schedule_retains_17_9_then_23_11_and_all_three_raw_usage_f
         .collect();
     finish(
         &repository,
-        key("agent", "second"),
+        "agent",
         end("agent", "second-end", "stop", 23, 11),
         "second",
     )
     .await;
     finish(
         &repository,
-        key("agent", "second"),
+        "agent",
         end("agent", "second-loser", "interrupted", 23, 11),
         "losing",
     )
@@ -740,7 +737,7 @@ async fn actual_process_kills_recover_before_admission_during_transaction_and_af
         let before = repository.replay_raw().await.unwrap();
         let retry = finish(
             &repository,
-            key("agent", "crash-start"),
+            "agent",
             end("agent", "recovery-interrupted", "interrupted", 0, 0),
             "losing recovery",
         )

@@ -16,6 +16,10 @@ An LLM's conversation history. The term is reserved for this meaning, not genera
 **Conversation turn**:
 A user's input and the response messages and tool activity that follow it. A compacted conversation view may retain only part of the turn.
 
+**Open turn**:
+A conversation turn that has begun but has no recorded terminal outcome in the agent session's event stream. A session may hold several open turns after a crash; close-turn arbitration targets the latest one.
+_Avoid_: Active turn, current turn
+
 **Turn result**:
 A no-tool assistant response at the end of the visible conversation turn, which may be a completion candidate. It does not by itself mean the turn has been accepted as complete.
 

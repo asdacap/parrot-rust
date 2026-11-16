@@ -11,8 +11,8 @@ use tonic::Status;
 use crate::{
     dispatch::dialog::{DialogOption, SlashDialog},
     terminal_frames::{
-        LiveBufferCaret, LiveBufferItem, LiveBufferRender, LiveBufferRenderContext,
-        LiveBufferRetention, SPINNER_INTERVAL, ScrollbackItem, ScrollbackRenderContext,
+        LiveBufferCaret, LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions,
+        LiveBufferRetention, SPINNER_INTERVAL, ScrollbackItem, ScrollbackRenderOptions,
         spinner_text,
     },
     terminal_input::{IncrementalEditor, PromptState, TerminalKey, TerminalKeyKind},
@@ -432,12 +432,12 @@ fn style(color: bool, sequence: &str) -> TerminalStyle {
 #[derive(Clone, Debug)]
 pub struct PromptValue(pub PromptState);
 impl LiveBufferItem for PromptValue {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         let clean = self.0.sanitize();
         let indent = " ".repeat(TerminalText::width(&clean.prefix));
         let lines = TerminalText::layout_hanging(
             &(clean.prefix.clone() + &clean.text),
-            context.columns,
+            options.columns,
             &indent,
         );
         let before = clean.prefix
@@ -446,7 +446,7 @@ impl LiveBufferItem for PromptValue {
                 .chars()
                 .take(clean.cursor as usize)
                 .collect::<String>();
-        let caret_lines = TerminalText::layout_hanging(&before, context.columns, &indent);
+        let caret_lines = TerminalText::layout_hanging(&before, options.columns, &indent);
         let caret = LiveBufferCaret {
             row: caret_lines.len().saturating_sub(1) as isize,
             cells: TerminalText::width(caret_lines.last().map(String::as_str).unwrap_or_default())
@@ -456,7 +456,7 @@ impl LiveBufferItem for PromptValue {
             lines: lines
                 .into_iter()
                 .map(|line| {
-                    TerminalLine::new(line, style(context.color, "\x1b[48;5;236m\x1b[32m\x1b[1m"))
+                    TerminalLine::new(line, style(options.color, "\x1b[48;5;236m\x1b[32m\x1b[1m"))
                 })
                 .collect(),
             caret: Some(caret),
@@ -468,12 +468,12 @@ impl LiveBufferItem for PromptValue {
 #[derive(Clone, Debug)]
 pub struct LiveTextValue(pub String);
 impl LiveBufferItem for LiveTextValue {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         Ok(LiveBufferRender {
-            lines: TerminalText::layout_words(&TerminalText::sanitize(&self.0), context.columns)
+            lines: TerminalText::layout_words(&TerminalText::sanitize(&self.0), options.columns)
                 .into_iter()
                 .map(|line| {
-                    TerminalLine::new(line, style(context.color, "\x1b[48;5;236m\x1b[38;5;252m"))
+                    TerminalLine::new(line, style(options.color, "\x1b[48;5;236m\x1b[38;5;252m"))
                 })
                 .collect(),
             caret: None,
@@ -489,7 +489,7 @@ pub struct PickerOptionValue {
     pub selected: bool,
 }
 impl LiveBufferItem for PickerOptionValue {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         let marker = if self.selected { "> " } else { "  " };
         let label = TerminalText::sanitize_line(&self.label);
         let description = TerminalText::sanitize_line(&self.description);
@@ -498,17 +498,17 @@ impl LiveBufferItem for PickerOptionValue {
         } else {
             format!("{marker}{label} — {description}")
         };
-        let clipped: String = text.chars().take(context.columns.max(1)).collect();
+        let clipped: String = text.chars().take(options.columns.max(1)).collect();
         let sequence = if self.selected {
             "\x1b[48;5;240m\x1b[38;5;231m"
         } else {
             "\x1b[48;5;236m\x1b[38;5;252m"
         };
         Ok(LiveBufferRender {
-            lines: TerminalText::layout_words(&clipped, context.columns)
+            lines: TerminalText::layout_words(&clipped, options.columns)
                 .into_iter()
                 .take(1)
-                .map(|line| TerminalLine::new(line, style(context.color, sequence)))
+                .map(|line| TerminalLine::new(line, style(options.color, sequence)))
                 .collect(),
             caret: None,
             retention: LiveBufferRetention::Fixed,
@@ -522,9 +522,9 @@ pub struct DialogMessageValue {
     pub error: bool,
 }
 impl LiveBufferItem for DialogMessageValue {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         let lines =
-            TerminalText::layout_words(&TerminalText::sanitize(&self.text), context.columns);
+            TerminalText::layout_words(&TerminalText::sanitize(&self.text), options.columns);
         let caret = LiveBufferCaret {
             row: lines.len().saturating_sub(1) as isize,
             cells: TerminalText::width(lines.last().map(String::as_str).unwrap_or_default())
@@ -538,7 +538,7 @@ impl LiveBufferItem for DialogMessageValue {
         Ok(LiveBufferRender {
             lines: lines
                 .into_iter()
-                .map(|line| TerminalLine::new(line, style(context.color, sequence)))
+                .map(|line| TerminalLine::new(line, style(options.color, sequence)))
                 .collect(),
             caret: Some(caret),
             retention: LiveBufferRetention::Caret,
@@ -552,18 +552,18 @@ pub struct SpinnerValue {
     pub frame: usize,
 }
 impl LiveBufferItem for SpinnerValue {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         let text = spinner_text(
             &TerminalText::clip(
                 &TerminalText::sanitize(&self.activity),
-                context.columns.saturating_sub(2),
+                options.columns.saturating_sub(2),
             ),
             self.frame,
         );
         Ok(LiveBufferRender {
             lines: vec![TerminalLine::new(
                 text,
-                style(context.color, "\x1b[48;5;236m\x1b[36m"),
+                style(options.color, "\x1b[48;5;236m\x1b[36m"),
             )],
             caret: None,
             retention: LiveBufferRetention::Tail,
@@ -580,11 +580,11 @@ impl ScrollbackItem for MutedScrollbackValue {
     fn continues(&self, _previous: &dyn ScrollbackItem) -> bool {
         false
     }
-    fn render(&self, context: ScrollbackRenderContext) -> io::Result<Vec<String>> {
+    fn render(&self, options: ScrollbackRenderOptions) -> io::Result<Vec<String>> {
         Ok(self
             .0
             .iter()
-            .map(|line| style(context.color, "\x1b[38;5;245m").apply(&TerminalText::sanitize(line)))
+            .map(|line| style(options.color, "\x1b[38;5;245m").apply(&TerminalText::sanitize(line)))
             .collect())
     }
 }

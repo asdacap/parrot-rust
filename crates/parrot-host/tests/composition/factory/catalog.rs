@@ -5,7 +5,7 @@ use super::*;
 
 #[allow(dead_code)]
 mod fixture_support {
-    use super::{ContextSelection, SharedSecurity};
+    use super::{InvocationSelection, SharedSecurity};
     // Deterministic catalog-binding fixtures, not filesystem policy or host adapters.
 
     use std::{
@@ -104,7 +104,7 @@ mod fixture_support {
         }
     }
     pub type Snapshot = SharedSecurity<Security>;
-    pub type Selection = ContextSelection<Security>;
+    pub type Selection = InvocationSelection<Security>;
 
     struct NoProcessDiagnostics;
     impl ProcessDiagnostics for NoProcessDiagnostics {
@@ -1321,7 +1321,7 @@ async fn real_retained_read_receives_captured_security_and_budget_identity() {
     let result = read
         .invoke(
             call,
-            InvocationContext::new(
+            InvocationScope::new(
                 SharedSecurity(selection.security.clone()),
                 selection.clone(),
                 &NoCancel,
@@ -1348,7 +1348,7 @@ async fn real_retained_read_receives_captured_security_and_budget_identity() {
     let output = image
         .invoke(
             call,
-            InvocationContext::new(
+            InvocationScope::new(
                 SharedSecurity(selection.security.clone()),
                 selection,
                 &NoCancel,
@@ -1388,7 +1388,7 @@ async fn retained_session_uses_immutable_turn_selection_and_boundary_sequence() 
                 9_007_199_254_740_993,
                 templates.clone(),
             ),
-            InvocationContext::new(
+            InvocationScope::new(
                 SharedSecurity(selection.security.clone()),
                 selection.clone(),
                 &NoCancel,
@@ -1568,7 +1568,7 @@ async fn retained_operation_cancellation_is_not_rendered_as_success() {
     let result = read
         .invoke(
             ToolInvocation::new("cancel", r#"{"path":"file.txt"}"#, 9, templates.clone()),
-            InvocationContext::new(
+            InvocationScope::new(
                 SharedSecurity(selection.security.clone()),
                 selection,
                 &Cancelled,

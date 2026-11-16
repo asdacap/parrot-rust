@@ -155,7 +155,7 @@ struct Rule {
 }
 
 #[derive(Clone)]
-struct AgentContext {
+struct AgentDirectories {
     scratch: AgentScratchDirectory,
     launch_directory: PathBuf,
 }
@@ -177,7 +177,7 @@ enum Policy {
 pub struct ProductionPolicy {
     policy: Arc<Policy>,
     read_only: bool,
-    context: Option<AgentContext>,
+    directories: Option<AgentDirectories>,
 }
 
 impl ProductionPolicy {
@@ -208,7 +208,7 @@ impl ProductionPolicy {
         Ok(Self {
             policy: Arc::new(Policy::Configured(rules)),
             read_only,
-            context: None,
+            directories: None,
         })
     }
 
@@ -225,13 +225,17 @@ impl ProductionPolicy {
     }
 
     pub fn agent_scratch(&self) -> Option<&AgentScratchDirectory> {
-        self.context.as_ref().map(|context| &context.scratch)
+        self.directories
+            .as_ref()
+            .map(|directories| &directories.scratch)
     }
 
     pub fn launch_directory(&self) -> &Path {
-        self.context
+        self.directories
             .as_ref()
-            .map_or(Path::new("/"), |context| context.launch_directory.as_path())
+            .map_or(Path::new("/"), |directories| {
+                directories.launch_directory.as_path()
+            })
     }
 
     pub fn materialized_rules(&self) -> Vec<ProductionAccessRule> {
@@ -285,7 +289,7 @@ impl ProductionPolicy {
                 },
             }),
             read_only: self.read_only,
-            context: Some(AgentContext {
+            directories: Some(AgentDirectories {
                 scratch: scratch.clone(),
                 launch_directory: normalize(workspace.launch_directory())?,
             }),
@@ -419,19 +423,19 @@ impl RestrictableAccessSnapshot for ProductionPolicy {
         Self {
             policy: Arc::new(Policy::Intersection(self.clone(), child.clone())),
             read_only: self.read_only || child.read_only,
-            context: child.context.clone(),
+            directories: child.directories.clone(),
         }
     }
 }
 
-struct SessionContext {
+struct SessionDirectories {
     root: PathBuf,
     workspace: ProjectWorkspace,
 }
 
 #[derive(Default)]
 struct MaterializerState {
-    sessions: Vec<SessionContext>,
+    sessions: Vec<SessionDirectories>,
     agents: HashMap<PathBuf, Vec<ProductionWriteTarget>>,
 }
 
@@ -474,7 +478,7 @@ impl ProductionPolicyMaterializer {
             }
             return Err(invalid("The session security workspace is already bound."));
         }
-        state.sessions.push(SessionContext { root, workspace });
+        state.sessions.push(SessionDirectories { root, workspace });
         Ok(())
     }
 
@@ -890,7 +894,7 @@ mod tests {
     }
 
     #[test]
-    fn intersection_never_widens_and_keeps_child_resource_context() {
+    fn intersection_never_widens_and_keeps_child_agent_directories() {
         let fixture = Fixture::new();
         let materializer = fixture.materializer();
         let child = fixture.capture(&materializer, &raw(false));

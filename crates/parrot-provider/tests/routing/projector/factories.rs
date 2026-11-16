@@ -19,7 +19,7 @@ use parrot_provider::{
             BuildServices, HttpClients, ImageBucketFactory, ProviderRegistryBuilder,
             SelectedHttpClient,
         },
-        factory::{ProviderBuildContext, ProviderImplementation, build_provider},
+        factory::{ProviderBuildInputs, ProviderImplementation, build_provider},
         models_dev::ModelsDevInformationProvider,
     },
     sessions::{Error, Event, Message, Request},
@@ -468,7 +468,7 @@ pub async fn run_factory(case: &Value) -> Result<Value, String> {
         .map(|v| common::seed_model(id, v))
         .collect::<Vec<_>>();
     let can_build = ProviderImplementation::resolve(id, &config).can_build(&config);
-    let built = match build_provider(ProviderBuildContext {
+    let built = match build_provider(ProviderBuildInputs {
         id,
         config: &config,
         credentials: credentials.as_ref(),

@@ -32,7 +32,7 @@ use parrot_runtime::{
     },
     compaction::*,
     event_broker::{BrokerError, EventBroker},
-    prompt_context::{PromptResult, SystemPrompt},
+    prompt_assembly::{PromptResult, SystemPrompt},
 };
 use parrot_storage::{
     conversation::{
@@ -173,6 +173,7 @@ impl Fixture {
                 trigger_percent: 95,
                 target_percent: 30,
                 maximum_input_tokens: 60000,
+                maximum_output_tokens: 0,
                 summary_output_tokens: 1024,
                 summary_instructions: String::new(),
                 summary_prefix: String::new(),
@@ -551,15 +552,15 @@ impl BorrowedTool<Security> for FixtureTool {
     fn invoke<'a>(
         &'a self,
         _: ToolInvocation,
-        context: BorrowedToolContext<'a, Security>,
+        state: BorrowedToolState<'a, Security>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<ToolOutput, OperationError<ToolFailure>>> {
         Box::pin(async move {
             self.tools.executions.fetch_add(1, Ordering::SeqCst);
             if let Some(observations) = &self.observations {
                 observations.lock().unwrap().push((
-                    context.selection.profile.id.clone(),
-                    context
+                    state.selection.profile.id.clone(),
+                    state
                         .definitions
                         .iter()
                         .map(|tool| tool.name.clone())
@@ -596,11 +597,11 @@ impl SystemPrompt for Prompt {
             self.trace.push("epoch-start");
             tokio::task::yield_now().await;
             if self.cancel_sample {
-                return Err(parrot_runtime::prompt_context::PromptError::Cancelled);
+                return Err(parrot_runtime::prompt_assembly::PromptError::Cancelled);
             }
             cancellation
                 .check()
-                .map_err(|_| parrot_runtime::prompt_context::PromptError::Cancelled)?;
+                .map_err(|_| parrot_runtime::prompt_assembly::PromptError::Cancelled)?;
             self.sampled = true;
             self.trace.push("epoch-done");
             Ok(())
@@ -978,17 +979,16 @@ async fn terminal_commit_precedes_cancellable_publication_without_second_interru
                 .all(|entry| entry.content != interrupted_note)
         );
         let diagnostic = runtime.activity.diagnostic.lock().unwrap().clone();
-        let started: Vec<_> = diagnostic
+        let started = diagnostic
             .iter()
-            .filter_map(|entry| entry.strip_prefix("started:"))
-            .collect();
+            .filter(|entry| entry.as_str() == "started")
+            .count();
         let finished: Vec<_> = diagnostic
             .iter()
             .filter(|entry| entry.starts_with("finished:"))
             .collect();
-        assert_eq!(started.len(), 1);
+        assert_eq!(started, 1);
         assert_eq!(finished.len(), 1);
-        assert!(finished[0].starts_with(&format!("finished:{}:", started[0])));
         runtime.close().await;
     }
 }

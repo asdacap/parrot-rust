@@ -16,7 +16,7 @@ use parrot_host::{
         dialog::WebSlashDialog,
         router::{WebClient, WebOpenedSession, WebSessionRouter, WebStartup},
         slash::{
-            WebSlashContext, WebSlashFactory, WebSlashFailure, WebSlashRegistry, WebSlashService,
+            WebSlashBindings, WebSlashFactory, WebSlashFailure, WebSlashRegistry, WebSlashService,
         },
     },
 };
@@ -430,21 +430,21 @@ struct Factory {
     dialog: Arc<Mutex<Option<Arc<WebSlashDialog>>>>,
 }
 impl WebSlashFactory for Factory {
-    fn create(&self, context: WebSlashContext) -> Box<dyn WebSlashRegistry> {
-        if context.initial_session.id.is_empty() {
-            assert!(!context.activity.is_busy());
+    fn create(&self, bindings: WebSlashBindings) -> Box<dyn WebSlashRegistry> {
+        if bindings.initial_session.id.is_empty() {
+            assert!(!bindings.activity.is_busy());
         }
-        *self.dialog.lock().unwrap() = Some(context.dialog.clone());
+        *self.dialog.lock().unwrap() = Some(bindings.dialog.clone());
         Box::new(Registry {
-            session: context.initial_session.clone(),
-            context,
+            session: bindings.initial_session.clone(),
+            bindings,
             dropped: self.dropped.clone(),
         })
     }
 }
 struct Registry {
     session: wire::UserSession,
-    context: WebSlashContext,
+    bindings: WebSlashBindings,
     dropped: Arc<AtomicUsize>,
 }
 impl Drop for Registry {
@@ -472,7 +472,7 @@ impl WebSlashRegistry for Registry {
             match text {
                 "ask" => {
                     self.session.model = self
-                        .context
+                        .bindings
                         .dialog
                         .read_text("Model", cancellation)
                         .await?
@@ -481,7 +481,7 @@ impl WebSlashRegistry for Registry {
                 "replace" => {
                     self.session.id = "replacement-fixture".into();
                     self.session.model = "replacement-model".into();
-                    self.context
+                    self.bindings
                         .dialog
                         .session_replaced(self.session.clone(), cancellation)
                         .await?;

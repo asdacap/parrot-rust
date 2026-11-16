@@ -7,7 +7,7 @@ use super::{
 };
 use crate::composition::{
     agents::{AgentSessionServices, ScopedAgentRuntime},
-    context::{ContextSelection, ContextServices},
+    invocation::{InvocationSelection, InvocationServices},
     processes::{ScopedProcessStatus, production_filename_generator},
     protocol,
 };
@@ -74,7 +74,7 @@ use parrot_runtime::{
     compaction::{ContextController, ContextError, ContextResult, ContextStatus, StatusOffering},
     interactions::{AgentAskIdentity, AgentAsks},
     plan_mode::{ModeResult, UserSessionModes},
-    prompt_context::{
+    prompt_assembly::{
         AgentIdentityDescription, AgentPathEnvironment, CompositeSystemPromptProvider,
         SystemPromptProvider, TemplateSystemPromptProvider,
     },
@@ -156,7 +156,8 @@ pub struct AgentSourceConfig<S, F, L, P>
 where
     S: RestrictableAccessSnapshot + 'static,
     L: CapturedProcessLauncher<Request = CommandRequest, Security = SharedSecurity<S>>,
-    P: PermissionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>> + 'static,
+    P: PermissionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>
+        + 'static,
 {
     pub configuration: Arc<Configuration>,
     pub router: Arc<ModelRouter>,
@@ -173,7 +174,8 @@ pub struct AuthoritativeAgentSource<S, F, L, P>
 where
     S: RestrictableAccessSnapshot + 'static,
     L: CapturedProcessLauncher<Request = CommandRequest, Security = SharedSecurity<S>>,
-    P: PermissionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>> + 'static,
+    P: PermissionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>
+        + 'static,
 {
     config: Arc<AgentSourceConfig<S, F, L, P>>,
 }
@@ -181,7 +183,8 @@ impl<S, F, L, P> AuthoritativeAgentSource<S, F, L, P>
 where
     S: RestrictableAccessSnapshot + 'static,
     L: CapturedProcessLauncher<Request = CommandRequest, Security = SharedSecurity<S>>,
-    P: PermissionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>> + 'static,
+    P: PermissionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>
+        + 'static,
 {
     pub fn new(config: AgentSourceConfig<S, F, L, P>) -> Self {
         Self {
@@ -295,7 +298,7 @@ struct ScopeLog<S: RestrictableAccessSnapshot + 'static> {
     user: Arc<UserServices<S>>,
     session_id: String,
     clock: Arc<dyn Clock>,
-    turn: Mutex<Option<(String, Instant)>>,
+    turn: Mutex<Option<Instant>>,
 }
 impl<S: RestrictableAccessSnapshot + 'static> ScopeLog<S> {
     fn event(
@@ -345,25 +348,16 @@ impl<S: RestrictableAccessSnapshot + 'static> DiagnosticSink for ScopeLog<S> {
     }
 }
 impl<S: RestrictableAccessSnapshot + 'static> TurnDiagnostics for ScopeLog<S> {
-    fn started(&self, turn_id: &str) {
-        *self.turn.lock().expect("turn diagnostics poisoned") =
-            Some((turn_id.to_owned(), self.clock.now()));
+    fn started(&self) {
+        *self.turn.lock().expect("turn diagnostics poisoned") = Some(self.clock.now());
         let mut event = DiagnosticEvent::new("turn", "started", DiagnosticSeverity::Information);
         event.agent_session_id = Some(self.session_id.clone());
-        event.correlation_id = Some(turn_id.to_owned());
         self.user.diagnostic(&event);
     }
-    fn finished(&self, turn_id: &str, outcome: &str, code: Option<&str>) {
-        let started = {
-            let mut turn = self.turn.lock().expect("turn diagnostics poisoned");
-            match turn.as_ref() {
-                Some((active_id, started)) if active_id == turn_id => {
-                    let started = *started;
-                    *turn = None;
-                    started
-                }
-                _ => return,
-            }
+    fn finished(&self, outcome: &str, code: Option<&str>) {
+        let started = self.turn.lock().expect("turn diagnostics poisoned").take();
+        let Some(started) = started else {
+            return;
         };
         let severity = if outcome == "failed" {
             DiagnosticSeverity::Error
@@ -372,7 +366,6 @@ impl<S: RestrictableAccessSnapshot + 'static> TurnDiagnostics for ScopeLog<S> {
         };
         let mut event = DiagnosticEvent::new("turn", "finished", severity);
         event.agent_session_id = Some(self.session_id.clone());
-        event.correlation_id = Some(turn_id.to_owned());
         event.outcome = Some(outcome.to_owned());
         event.error_code = code.map(str::to_owned);
         event.duration_milliseconds = Some(
@@ -825,7 +818,7 @@ impl ContextStatus for ScopedModeStatus {
 
 struct ScopedImages<S: RestrictableAccessSnapshot + 'static>(std::marker::PhantomData<fn() -> S>);
 impl<S: RestrictableAccessSnapshot + 'static> ImageProvider for ScopedImages<S> {
-    type Selection = ContextSelection<S>;
+    type Selection = InvocationSelection<S>;
     type Security = SharedSecurity<S>;
     fn generate<'a>(
         &'a self,
@@ -864,7 +857,7 @@ struct ScopedSessionServices<S: RestrictableAccessSnapshot + 'static> {
 }
 impl<S: RestrictableAccessSnapshot + 'static> SessionServices for ScopedSessionServices<S> {
     type Security = SharedSecurity<S>;
-    type Selection = ContextSelection<S>;
+    type Selection = InvocationSelection<S>;
     fn set_reminder<'a>(
         &'a self,
         title: &'a str,
@@ -912,7 +905,7 @@ impl<S: RestrictableAccessSnapshot + 'static> SessionServices for ScopedSessionS
     }
     fn runtime_status<'a>(
         &'a self,
-        selection: &'a ContextSelection<S>,
+        selection: &'a InvocationSelection<S>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, OperationResult<String, Failure>> {
         Box::pin(async move {
@@ -929,7 +922,7 @@ impl<S: RestrictableAccessSnapshot + 'static> SessionServices for ScopedSessionS
     }
     fn statistics_status<'a>(
         &'a self,
-        selection: &'a ContextSelection<S>,
+        selection: &'a InvocationSelection<S>,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, OperationResult<String, Failure>> {
         Box::pin(async move {
@@ -1169,7 +1162,8 @@ struct ScopedFactory<S, F, L, P>
 where
     S: RestrictableAccessSnapshot + 'static,
     L: CapturedProcessLauncher<Request = CommandRequest, Security = SharedSecurity<S>>,
-    P: PermissionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>> + 'static,
+    P: PermissionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>
+        + 'static,
 {
     config: Arc<AgentSourceConfig<S, F, L, P>>,
     user: Arc<UserServices<S>>,
@@ -1182,7 +1176,8 @@ where
         + Clone
         + 'static,
     L: CapturedProcessLauncher<Request = CommandRequest, Security = SharedSecurity<S>> + 'static,
-    P: PermissionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>> + 'static,
+    P: PermissionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>
+        + 'static,
 {
     fn create(&self, user: Arc<UserServices<S>>) -> protocol::Result<AgentFactoryParts<S>> {
         Ok(AgentFactoryParts {
@@ -1203,7 +1198,8 @@ where
         + Clone
         + 'static,
     L: CapturedProcessLauncher<Request = CommandRequest, Security = SharedSecurity<S>> + 'static,
-    P: PermissionServices<Security = SharedSecurity<S>, Selection = ContextSelection<S>> + 'static,
+    P: PermissionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>
+        + 'static,
 {
     fn create(&self, prepared: PreparedScope<S>) -> BoxFuture<'_, ChildResult<ScopeParts<S>>> {
         Box::pin(async move {
@@ -1275,7 +1271,7 @@ where
             );
             let mut progress_owner: Option<Arc<AgentProgress>> = None;
             let mut session: Option<Arc<RuntimeSession<S>>> = None;
-            let mut controller: Option<Arc<ScopedTaskController<S, ContextSelection<S>>>> = None;
+            let mut controller: Option<Arc<ScopedTaskController<S, InvocationSelection<S>>>> = None;
             let constructed = async {
                 let store = Arc::new(
                     FileProgressStore::open(scratch.root(), identity.session.session_id.clone())
@@ -1327,7 +1323,7 @@ where
                         diagnostics: log.clone(),
                         lifetime: prepared.lifetime.clone(),
                     },
-                    |selection: &ContextSelection<S>| selection.turn.clone(),
+                    |selection: &InvocationSelection<S>| selection.turn.clone(),
                 )
                 .await?;
                 controller = Some(tasks.clone());
@@ -1393,7 +1389,7 @@ where
                     progress: progress.clone(),
                     status: status.clone(),
                 });
-                let context_services = Arc::new(ContextServices::<S, _>::new(ancillary));
+                let invocation_services = Arc::new(InvocationServices::<S, _>::new(ancillary));
                 let activity = Arc::new(AgentSessionActivity::new(self.config.clock.clone()));
                 let bound_catalog = Arc::new(BoundCatalog::new());
                 let tool_execution = ToolExecutionConfig {
@@ -1417,6 +1413,7 @@ where
                     trigger_percent: compact.trigger_percent,
                     target_percent: compact.target_percent,
                     maximum_input_tokens: compact.maximum_input_tokens,
+                    maximum_output_tokens: compact.maximum_output_tokens,
                     summary_output_tokens: compact.summary_output_tokens,
                     summary_instructions: String::new(),
                     summary_prefix: String::new(),
@@ -1593,7 +1590,7 @@ where
                 let catalog_cells = bound_catalog.clone();
                 let catalog_agents = agents.clone();
                 let catalog_tasks = tasks.clone();
-                let catalog_context = context_services.clone();
+                let catalog_services = invocation_services.clone();
                 let catalog_environment = environment.clone();
                 let binding = Arc::new(ScopeBindings {
                     link: link.clone(),
@@ -1638,7 +1635,7 @@ where
                         .map_err(child)?;
                         let services = SessionFactories::new(
                             SessionBindings {
-                                control: catalog_context.clone(),
+                                control: catalog_services.clone(),
                                 images: Arc::new(ScopedImages::<S>(std::marker::PhantomData)),
                                 permission: permission.clone(),
                                 filesystem: Arc::new(config.filesystem.clone()),
@@ -1691,7 +1688,7 @@ where
                         ServiceRegistration::new(asks.clone()),
                         ServiceRegistration::new(runtime_status),
                         ServiceRegistration::new(status),
-                        ServiceRegistration::new(context_services),
+                        ServiceRegistration::new(invocation_services),
                         ServiceRegistration::new(binding),
                     ],
                     publishers: vec![

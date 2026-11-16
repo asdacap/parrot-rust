@@ -9,7 +9,7 @@ use parrot_domain::{
 };
 use parrot_runtime::{
     interactions::{InteractionError, InteractionErrorKind, QuestionReply, QuestionReplyKind},
-    prompt_context::{SkillMetadata, SkillScope},
+    prompt_assembly::{SkillMetadata, SkillScope},
 };
 use parrot_storage::{
     artifacts::{self, ImageArtifactMetadata},
@@ -817,7 +817,6 @@ pub fn map_question(
                 header: question.header,
                 prompt: question.prompt,
                 multiple: question.multiple,
-                custom: question.custom,
                 options: question
                     .options
                     .into_iter()

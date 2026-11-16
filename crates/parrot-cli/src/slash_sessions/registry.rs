@@ -1,6 +1,6 @@
 use parrot_domain::contracts::async_ops::Cancellation;
 
-use super::{CommandContext, CommandDescription, SlashCommand, SlashFailure};
+use super::{CommandDescription, CommandEnvironment, SlashCommand, SlashFailure};
 
 /// The source registry preserves construction order for command discovery and
 /// uses ordinal matching for dispatch and completion.
@@ -69,12 +69,12 @@ impl SlashCommandRegistry {
     pub async fn dispatch(
         &self,
         entered: &str,
-        context: &mut CommandContext<'_>,
+        environment: &mut CommandEnvironment<'_>,
         cancellation: &dyn Cancellation,
     ) -> Result<(), SlashFailure> {
         let command_name = name(entered);
         let Some(command) = self.find(command_name) else {
-            context
+            environment
                 .dialog
                 .show_error(
                     &format!("unknown command {command_name}, try /help"),
@@ -85,11 +85,11 @@ impl SlashCommandRegistry {
         };
         let arguments = entered[command_name.len()..].trim_start_matches([' ', '\t', '\r', '\n']);
         let descriptions = self.descriptions();
-        let mut actual = CommandContext {
-            session: context.session,
-            activity: context.activity,
-            dialog: context.dialog,
-            refresh_skills: context.refresh_skills,
+        let mut actual = CommandEnvironment {
+            session: environment.session,
+            activity: environment.activity,
+            dialog: environment.dialog,
+            refresh_skills: environment.refresh_skills,
             commands: &descriptions,
         };
         command.run(arguments, &mut actual, cancellation).await

@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 
 #[test]
 fn source_assertions() {
@@ -7,9 +7,9 @@ fn source_assertions() {
         "allow_insecure_remote",
         "allow_invalid_tls_certificate",
     ] {
-        let context = Context::new();
+        let fixture = ConfigFixture::new();
         for expected in [true, false] {
-            let configuration = context
+            let configuration = fixture
                 .configured(&format!(
                     "providers:\n  custom:\n    {option}: {expected}\n"
                 ))
@@ -23,7 +23,7 @@ fn source_assertions() {
             };
             assert_eq!(value, expected);
         }
-        let error = context
+        let error = fixture
             .configured(&format!("providers:\n  custom:\n    {option}: null\n"))
             .unwrap_err();
         assert_eq!(

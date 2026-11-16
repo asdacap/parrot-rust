@@ -17,7 +17,7 @@ use crate::{
         EpochInput, provider_message,
     },
     event_broker::{BrokerError, EventBroker},
-    prompt_context::{SessionPrompt, SystemPrompt},
+    prompt_assembly::{SessionPrompt, SystemPrompt},
 };
 use parrot_domain::values::tools::ToolCycleImageBudget;
 use parrot_domain::{
@@ -42,7 +42,7 @@ use parrot_storage::{
     conversation::{AgentConversation, AgentHistoryView, ConversationReadView, ModelMessage},
     events::{
         Admission, CloseTurnError, ConversationMessage, ConversationOrigin, ConversationPart,
-        EventError, MessageRole, NeverCancelled, ProviderContent, TurnClosure, TurnKey,
+        EventError, MessageRole, NeverCancelled, ProviderContent, TurnClosure,
     },
 };
 use std::sync::{
@@ -314,6 +314,7 @@ where
             .compact(
                 &selection.model,
                 parrot_core::CompactionRequest {
+                    trigger: parrot_core::CompactionTrigger::UserRequested,
                     target: target.map(Into::into),
                     tools: definitions.clone(),
                 },
@@ -875,13 +876,6 @@ where
         _cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Self::Selection, LifecycleError>> {
         Box::pin(async move {
-            let mut guard = self.state.lock().await;
-            let state = &mut *guard;
-            state
-                .tool_conversation
-                .restore_results(&mut state.conversation)
-                .await
-                .map_err(|error| error.lifecycle_error())?;
             self.selection
                 .capture()
                 .map_err(|error| error.lifecycle_error())
@@ -893,37 +887,27 @@ where
         work: &'a dyn DrainWork,
     ) -> BoxFuture<'a, Result<DrainPass, LifecycleError>> {
         Box::pin(async move {
-            let (result, failed_key) = core_loop::run(self, cancellation, work).await;
+            let (result, failed_turn) = core_loop::run(self, cancellation, work).await;
             let outcome = async {
                 match result {
                     Ok(execution) => {
-                        if execution.status == ExecutionStatus::Failed
-                            && let Some(key) = &failed_key
-                        {
-                            self.activity.turn_finished(
-                                &key.start_event_id,
-                                "failed",
-                                Some("runaway"),
-                            );
+                        if execution.status == ExecutionStatus::Failed && failed_turn {
+                            self.activity.turn_finished("failed", Some("runaway"));
                         }
                         Ok(execution)
                     }
                     Err(error) if error.is_cancelled() => {
                         work.join_mutations().await?;
-                        if let Some(key) = &failed_key {
-                            self.activity
-                                .turn_finished(&key.start_event_id, "cancelled", None);
+                        if failed_turn {
+                            self.activity.turn_finished("cancelled", None);
                         }
                         Ok(Execution::canceled())
                     }
                     Err(error) => {
                         work.join_mutations().await?;
-                        if let Some(key) = &failed_key {
-                            self.activity.turn_finished(
-                                &key.start_event_id,
-                                "failed",
-                                Some(error.diagnostic_code().code()),
-                            );
+                        if failed_turn {
+                            self.activity
+                                .turn_finished("failed", Some(error.diagnostic_code().code()));
                         }
                         self.fail(error.to_string(), error.response_body().to_owned())
                             .await
@@ -997,13 +981,6 @@ where
     ) -> BoxFuture<'_, Result<i64, LifecycleError>> {
         let message_id = message_id.to_owned();
         Box::pin(async move {
-            let mut guard = self.state.lock().await;
-            let state = &mut *guard;
-            state
-                .tool_conversation
-                .restore_results(&mut state.conversation)
-                .await
-                .map_err(|error| error.lifecycle_error())?;
             if let Some(input) = self
                 .history
                 .repository()

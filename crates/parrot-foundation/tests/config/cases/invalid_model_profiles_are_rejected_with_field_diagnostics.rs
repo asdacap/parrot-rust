@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for (content, field) in [
@@ -31,9 +31,9 @@ fn source_assertions() {
             "model_profiles.provider.system_prompt",
         ),
     ] {
-        let context = Context::new();
+        let fixture = ConfigFixture::new();
         assert!(
-            context
+            fixture
                 .configured(content)
                 .unwrap_err()
                 .to_string()

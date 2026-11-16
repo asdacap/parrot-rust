@@ -1443,8 +1443,15 @@ async fn separate_pending_input_recovery_preserves_retained_wait_result_or_unsta
 struct CompletionPauseState {
     inner: Arc<dyn AgentStateStore>,
     gate: Arc<Gate>,
-    first: AtomicBool,
+    active_loads: AtomicUsize,
     fail_terminal: AtomicBool,
+}
+impl CompletionPauseState {
+    /// The pause lands on the second Active-observing load: the drain's state
+    /// restore loads first, and terminal finalization loads after the turn.
+    fn pauses_this_load(&self) -> bool {
+        self.active_loads.fetch_add(1, Ordering::SeqCst) == 1
+    }
 }
 impl AgentStateStore for CompletionPauseState {
     fn load(
@@ -1459,7 +1466,7 @@ impl AgentStateStore for CompletionPauseState {
                 .as_ref()
                 .and_then(|snapshot| snapshot.execution.as_ref())
                 .is_some_and(|execution| execution.phase == ExecutionPhase::Active)
-                && self.first.swap(false, Ordering::SeqCst)
+                && self.pauses_this_load()
             {
                 self.gate.wait(&NeverCancelled).await.map_err(|error| {
                     parrot_domain::contracts::agent_state::AgentStateError::new(
@@ -1512,7 +1519,7 @@ async fn owned_result_reference_is_not_replaced_by_later_input_or_raw_response()
         let paused = Arc::new(CompletionPauseState {
             inner: store.clone(),
             gate: gate.clone(),
-            first: AtomicBool::new(true),
+            active_loads: AtomicUsize::new(0),
             fail_terminal: AtomicBool::new(false),
         });
         let mut steps = vec![Step::complete("original owned answer")];
@@ -1683,7 +1690,7 @@ async fn failed_terminal_persistence_blocks_deferred_raw_work_and_successor_inte
     let paused = Arc::new(CompletionPauseState {
         inner: store.clone(),
         gate: gate.clone(),
-        first: AtomicBool::new(true),
+        active_loads: AtomicUsize::new(0),
         fail_terminal: AtomicBool::new(true),
     });
     let provider = Scripted::new(vec![Step::complete("original answer")]);
@@ -1769,7 +1776,7 @@ async fn suspension_stops_deferred_raw_work_while_preserving_late_committed_resu
     let paused = Arc::new(CompletionPauseState {
         inner: store.clone(),
         gate: gate.clone(),
-        first: AtomicBool::new(true),
+        active_loads: AtomicUsize::new(0),
         fail_terminal: AtomicBool::new(false),
     });
     let provider = Scripted::new(vec![Step::complete("committed before suspension")]);

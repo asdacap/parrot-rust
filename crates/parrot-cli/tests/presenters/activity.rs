@@ -7,7 +7,7 @@ use parrot_cli::presenters::tools::{
     exec_command::ExecCommandToolPresenter, generic::GenericToolPresenter,
 };
 use parrot_cli::presenters::{ActivityUpdate, RawActivityView, ToolPresenterRegistry};
-use parrot_cli::terminal_frames::{LiveBufferRenderContext, ScrollbackRenderContext};
+use parrot_cli::terminal_frames::{LiveBufferRenderOptions, ScrollbackRenderOptions};
 use parrot_domain::protocol::messages::{parrot as wire, process, queue};
 use protobuf::Message;
 
@@ -74,7 +74,7 @@ fn live_at(view: &RawActivityView, columns: usize) -> String {
         .unwrap()
         .iter()
         .flat_map(|item| {
-            item.render(LiveBufferRenderContext {
+            item.render(LiveBufferRenderOptions {
                 columns,
                 color: false,
             })
@@ -93,7 +93,7 @@ fn commits_at(update: &ActivityUpdate, columns: usize) -> Vec<String> {
         .commits
         .iter()
         .map(|item| {
-            item.render(ScrollbackRenderContext {
+            item.render(ScrollbackRenderOptions {
                 columns,
                 color: false,
                 inline_diff: false,
@@ -257,6 +257,71 @@ fn compaction_completions_identify_root_and_child_agents_once() {
         );
         assert!(!live(&view).contains("Compacting"));
         assert!(commits(&view.observe(&completion).unwrap()).is_empty());
+    }
+}
+
+#[test]
+fn compaction_labels_distinguish_automatic_model_requested_and_user_requested() {
+    for (trigger, phrase) in [
+        (wire::CompactionTrigger::COMPACTION_TRIGGER_UNSPECIFIED, ""),
+        (
+            wire::CompactionTrigger::COMPACTION_TRIGGER_AUTOMATIC,
+            " (automatic)",
+        ),
+        (
+            wire::CompactionTrigger::COMPACTION_TRIGGER_MODEL_REQUESTED,
+            " (model requested)",
+        ),
+        (
+            wire::CompactionTrigger::COMPACTION_TRIGGER_USER_REQUESTED,
+            " (user requested)",
+        ),
+    ] {
+        let mut view = view();
+        view.observe(&turn("root")).unwrap();
+        let started = || {
+            event(
+                "root",
+                wire::event::Payload::CompactionStarted(wire::CompactionStarted {
+                    trigger: trigger.into(),
+                    ..Default::default()
+                }),
+            )
+        };
+        view.observe(&started()).unwrap();
+        assert!(live(&view).contains(&format!("Compacting{phrase}…")));
+        let update = view
+            .observe(&event(
+                "root",
+                wire::event::Payload::CompactionFinished(wire::CompactionFinished::default()),
+            ))
+            .unwrap();
+        assert_eq!(
+            commits(&update),
+            [format!("✓ [main] compaction finished{phrase}")]
+        );
+        view.observe(&started()).unwrap();
+        let failed = view
+            .observe(&event(
+                "root",
+                wire::event::Payload::CompactionFailed(wire::CompactionFailed {
+                    message: "provider failed".into(),
+                    ..Default::default()
+                }),
+            ))
+            .unwrap();
+        assert_eq!(
+            commits(&failed),
+            [format!(
+                "✗ [main] compaction failed{phrase}: provider failed"
+            )]
+        );
+        view.observe(&event(
+            "root",
+            wire::event::Payload::CompactionStarted(wire::CompactionStarted::default()),
+        ))
+        .unwrap();
+        assert!(live(&view).ends_with("Compacting…"));
     }
 }
 
@@ -694,7 +759,7 @@ fn child_reasoning_rows_label_each_row_once_at_exact_terminal_width() {
             assert!(live_at(&view, columns).starts_with("  ✦ [worker] A ✦ B|"));
             let snapshot = view.snapshot().unwrap();
             let narrower = snapshot[0]
-                .render(LiveBufferRenderContext {
+                .render(LiveBufferRenderOptions {
                     columns: 17,
                     color: false,
                 })
@@ -817,7 +882,7 @@ fn reasoning_rows_keep_immutable_live_and_scrollback_snapshots_at_sink_width() {
     assert_eq!(commits_at(&committed, 3), ["✦ A|✦ B"]);
     assert_eq!(live_at(&view, 7), "✦ C ✦ D");
     let original = snapshot[0]
-        .render(LiveBufferRenderContext {
+        .render(LiveBufferRenderOptions {
             columns: 7,
             color: false,
         })
@@ -845,7 +910,7 @@ fn reasoning_rows_pack_counted_summary_and_encrypted_entries_with_color() {
     let snapshot = view.snapshot().unwrap();
     for color in [false, true] {
         let rendered = snapshot[0]
-            .render(LiveBufferRenderContext {
+            .render(LiveBufferRenderOptions {
                 columns: 160,
                 color,
             })
@@ -856,7 +921,7 @@ fn reasoning_rows_pack_counted_summary_and_encrypted_entries_with_color() {
     let committed = view.flush_reasoning_row().unwrap();
     assert_eq!(commits(&committed), [expected]);
     let colored = committed.commits[0]
-        .render(ScrollbackRenderContext {
+        .render(ScrollbackRenderOptions {
             columns: 160,
             color: true,
             inline_diff: false,
@@ -1038,7 +1103,7 @@ fn task_rows_reserve_marker_indent_when_wrapping() {
     ))
     .unwrap();
     let rendered = view.snapshot().unwrap()[0]
-        .render(LiveBufferRenderContext {
+        .render(LiveBufferRenderOptions {
             columns: 14,
             color: false,
         })
@@ -1055,7 +1120,7 @@ fn task_rows_reserve_marker_indent_when_wrapping() {
     let finished = view.finish().unwrap();
     assert_eq!(
         finished.commits[0]
-            .render(ScrollbackRenderContext {
+            .render(ScrollbackRenderOptions {
                 columns: 14,
                 color: false,
                 inline_diff: false,
@@ -1868,7 +1933,7 @@ fn monitor_marker_blinks_without_moving_or_restyling_content() {
             .iter()
             .find_map(|item| {
                 let rendered = item
-                    .render(LiveBufferRenderContext {
+                    .render(LiveBufferRenderOptions {
                         columns: 160,
                         color: true,
                     })

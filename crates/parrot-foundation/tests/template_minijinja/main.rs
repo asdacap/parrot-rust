@@ -1,4 +1,4 @@
-use parrot_core::template::MiniJinjaPromptTemplateEngine;
+use parrot_core::MiniJinjaPromptTemplateEngine;
 use parrot_core::{CancellationToken, Error, ErrorKind};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use serde_json::{Map, Value, json};
@@ -108,7 +108,7 @@ fn m4_missing_variable_is_strict_and_discards_prior_output() {
     assert!(error.contains("undefined"), "{error}");
     assert!(
         !error.contains("PRIVATE-PARTIAL"),
-        "debug source context must be disabled"
+        "debug source excerpt must be disabled"
     );
 }
 

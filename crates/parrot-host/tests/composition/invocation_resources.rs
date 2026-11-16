@@ -2,7 +2,7 @@ use super::*;
 use parrot_runtime::agent_turn::usage::SessionUsageRecorder;
 use parrot_storage::conversation::{AgentConversation, ConversationOrigin};
 
-pub(super) struct BorrowedContextResources {
+pub(super) struct BorrowedInvocationResources {
     pub snapshot: ToolSnapshot<Security>,
     pub selection: TurnSelection<Security>,
     pub conversation: AgentConversation,
@@ -14,7 +14,7 @@ pub(super) struct BorrowedContextResources {
     pub events: ContextPublisher,
 }
 
-impl BorrowedContextResources {
+impl BorrowedInvocationResources {
     pub async fn new(fixture: &Fixture, handles: Vec<ToolHandle<Security>>) -> Self {
         Self {
             snapshot: ToolSnapshot::document(inventory(handles)).unwrap(),

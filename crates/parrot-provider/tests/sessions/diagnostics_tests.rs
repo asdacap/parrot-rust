@@ -38,8 +38,8 @@ impl ManualClock {
     }
 }
 
-fn context() -> CallContext {
-    CallContext {
+fn identity() -> CallIdentity {
+    CallIdentity {
         agent_session_id: "agent".into(),
         correlation_id: "call-1".into(),
         provider_id: "provider".into(),
@@ -47,7 +47,7 @@ fn context() -> CallContext {
     }
 }
 fn call(sink: &Arc<RecordingSink>, clock: &Arc<ManualClock>) -> CallTrace {
-    CallTrace::start(sink.clone(), clock.clone(), context(), None)
+    CallTrace::start(sink.clone(), clock.clone(), identity(), None)
 }
 
 struct TestRoot(PathBuf);
@@ -204,7 +204,7 @@ fn prepared_body_hook_dumps_actual_bytes_without_adding_payload_to_diagnostics()
     let sink = Arc::new(RecordingSink::default());
     let clock = Arc::new(ManualClock::default());
     let dumper = Arc::new(LastRequestDumper::new(root.file(), sink.clone()));
-    let trace = CallTrace::start(sink.clone(), clock, context(), Some(dumper));
+    let trace = CallTrace::start(sink.clone(), clock, identity(), Some(dumper));
     let body = b"{\"messages\":[{\"content\":\"SECRET-PROMPT-CANARY\"}],\"schema\":1e999}";
     trace.dump_prepared_body(body);
     assert_eq!(fs::read(root.file()).unwrap(), body);
@@ -473,7 +473,7 @@ fn archive_call(root: &TestRoot, sink: &Arc<RecordingSink>) -> CallTrace {
     CallTrace::start(
         sink.clone(),
         Arc::new(ManualClock::default()),
-        context(),
+        identity(),
         Some(Arc::new(LastRequestDumper::new(
             root.0.join("requests/last_requests.json"),
             sink.clone(),

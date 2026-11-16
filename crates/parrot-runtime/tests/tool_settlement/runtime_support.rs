@@ -106,8 +106,8 @@ impl ParentCompletion for Parent {
 }
 struct TurnLog;
 impl TurnDiagnostics for TurnLog {
-    fn started(&self, _: &str) {}
-    fn finished(&self, _: &str, _: &str, _: Option<&str>) {}
+    fn started(&self) {}
+    fn finished(&self, _: &str, _: Option<&str>) {}
 }
 pub(super) async fn runtime(
     fixture: &Fixture,

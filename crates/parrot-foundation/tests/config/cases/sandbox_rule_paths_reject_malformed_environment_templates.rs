@@ -1,11 +1,11 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for template in ["${}", "${1ROOT}", "${ROOT-default}", "${ROOT", "/root}"] {
-        let mut context = Context::new();
-        context.environment.clear();
+        let mut fixture = ConfigFixture::new();
+        fixture.environment.clear();
         assert!(
-            context
+            fixture
                 .configured(&format!(
                     "sandbox_rules:\n  - path: '{template}'\n    rule: allow_write\n"
                 ))

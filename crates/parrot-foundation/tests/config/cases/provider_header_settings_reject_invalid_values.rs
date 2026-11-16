@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for (setting, value) in [
@@ -7,8 +7,8 @@ fn source_assertions() {
         ("header_timeout_ms", "null"),
         ("header_timeout_max_retries", "bad"),
     ] {
-        let context = Context::new();
-        let failure = context
+        let fixture = ConfigFixture::new();
+        let failure = fixture
             .configured(&format!("providers:\n  custom:\n    {setting}: {value}\n"))
             .unwrap_err();
         assert_eq!(

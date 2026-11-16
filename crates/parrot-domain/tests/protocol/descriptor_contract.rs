@@ -280,7 +280,7 @@ fn additive_optional_fields_preserve_existing_oneofs_and_field_contracts() {
 }
 
 #[test]
-#[ignore = "The approved upload-identity removal retires AttachmentUploadHeader.upload_id; the upload-free contract checks every other retained field and method"]
+#[ignore = "The approved upload-identity removal retires AttachmentUploadHeader.upload_id; the retirement-aware contract checks every other retained field and method"]
 fn skill_root_extension_preserves_existing_wire_fields_and_rpc_methods() {
     let legacy = descriptor_contract(include_bytes!("fixtures/source-descriptors.pb"));
     let current = descriptor_contract(include_bytes!(concat!(
@@ -303,7 +303,7 @@ fn skill_root_extension_preserves_existing_wire_fields_and_rpc_methods() {
 }
 
 #[test]
-fn upload_free_protocol_preserves_other_fields_and_reserves_retired_identity() {
+fn retirement_aware_protocol_preserves_every_other_wire_field_and_reserved_number() {
     let mut legacy = descriptor_contract(include_bytes!("fixtures/source-descriptors.pb"));
     let header = legacy
         .iter_mut()
@@ -319,6 +319,20 @@ fn upload_free_protocol_preserves_other_fields_and_reserves_retired_identity() {
         .position(|field| field.name == "upload_id")
         .unwrap();
     assert_eq!(header.fields.remove(retired).number, 2);
+    let definition = legacy
+        .iter_mut()
+        .find(|file| file.name == "parrot.proto")
+        .unwrap()
+        .messages
+        .iter_mut()
+        .find(|message| message.name == "QuestionDefinition")
+        .unwrap();
+    let retired = definition
+        .fields
+        .iter()
+        .position(|field| field.name == "custom")
+        .unwrap();
+    assert_eq!(definition.fields.remove(retired).number, 6);
 
     let current = descriptor_contract(include_bytes!(concat!(
         env!("OUT_DIR"),
@@ -354,6 +368,19 @@ fn upload_free_protocol_preserves_other_fields_and_reserves_retired_identity() {
             .any(|range| range.start() <= 2 && range.end() > 2)
     );
     assert!(header.reserved_name.iter().any(|name| name == "upload_id"));
+    let definition = descriptor
+        .message_type
+        .iter()
+        .find(|message| message.name() == "QuestionDefinition")
+        .unwrap();
+    assert_eq!(definition.field.len(), 4);
+    assert!(
+        definition
+            .reserved_range
+            .iter()
+            .any(|range| range.start() <= 6 && range.end() > 6)
+    );
+    assert!(definition.reserved_name.iter().any(|name| name == "custom"));
     let part = descriptor
         .message_type
         .iter()

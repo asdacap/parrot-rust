@@ -1,6 +1,6 @@
 use super::*;
 #[test]
-fn scope_context_renders_only_effective_changes_from_ancestors_to_self() {
+fn scope_renders_only_effective_changes_from_ancestors_to_self() {
     let templates = templates("");
     let empty = PromptScope::empty(templates.clone());
     assert_eq!(empty.format(1).unwrap(), "");

@@ -2,7 +2,7 @@ use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
         paths::ResolvedRead,
-        security::{AccessSnapshot, InvocationContext},
+        security::{AccessSnapshot, InvocationScope},
         tools::Tool,
     },
     values::{
@@ -271,8 +271,8 @@ impl Fixture {
             arguments_json: json.into(),
             prompt_templates: formatter,
         };
-        let context = InvocationContext::new(Security, SELECTION.to_owned(), cancellation);
-        Tool::invoke(&self.tool(kind), invocation, context).await
+        let scope = InvocationScope::new(Security, SELECTION.to_owned(), cancellation);
+        Tool::invoke(&self.tool(kind), invocation, scope).await
     }
     pub fn calls(&self) -> Vec<Call> {
         self.services.0.lock().unwrap().calls.clone()

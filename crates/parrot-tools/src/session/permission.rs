@@ -5,7 +5,7 @@ use super::{
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
-        security::{AccessSnapshot, InvocationContext},
+        security::{AccessSnapshot, InvocationScope},
         tools::{ParallelSafety, Tool},
     },
     values::tools::ConfiguredToolDefinition,
@@ -172,11 +172,11 @@ impl<P: PermissionServices> Tool for RequestWritePermissionTool<P> {
     fn invoke<'a>(
         &'a self,
         invocation: Invocation,
-        context: InvocationContext<'a, Self::Security, Self::Selection>,
+        scope: InvocationScope<'a, Self::Security, Self::Selection>,
     ) -> BoxFuture<'a, OperationResult<Output, Failure>> {
         Box::pin(async move {
             match self
-                .execute(&invocation, context.security(), context.cancellation())
+                .execute(&invocation, scope.security(), scope.cancellation())
                 .await
             {
                 Err(OperationError::Failed(error))

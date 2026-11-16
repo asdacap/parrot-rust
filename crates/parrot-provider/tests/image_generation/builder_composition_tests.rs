@@ -813,7 +813,7 @@ async fn actual_builder_cancelled_observer_leaves_shared_signed_upload_alive_and
 fn source_image_token_rows_use_actual_factory_build_and_retry_composition() {
     use parrot_provider::{
         catalogs::Model,
-        routing::factory::{ProviderBuildContext, build_provider},
+        routing::factory::{ProviderBuildInputs, build_provider},
         sessions::decorators::RetryingProvider,
     };
     let directory = std::env::current_dir()
@@ -845,7 +845,7 @@ fn source_image_token_rows_use_actual_factory_build_and_retry_composition() {
         ("generic", 4096),
         ("openrouter", 4096),
     ] {
-        let built = build_provider(ProviderBuildContext {
+        let built = build_provider(ProviderBuildInputs {
             id: provider_id,
             config,
             credentials: &credentials,

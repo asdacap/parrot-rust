@@ -13,7 +13,7 @@ use parrot_domain::{
         async_ops::OperationError,
         filesystem::{EntryKind, FileReadError, FileReadErrorKind, LinkPolicy, ReadRequest},
         paths::{RootOrigin, SelectedSessionRoot},
-        security::InvocationContext,
+        security::InvocationScope,
         tools::{ParallelSafety, Tool},
     },
     values::{image_artifact::ImageArtifactMetadata, tools::ToolCycleImageBudget},
@@ -119,7 +119,7 @@ async fn image_references_preserve_each_bound_actual_filename_and_share_original
     let original = tool
         .invoke(
             FileToolInvocation::new("original-call", r#"{"path":"alias.dat"}"#, templates()),
-            InvocationContext::new(Snapshot(71), (), &NoCancel),
+            InvocationScope::new(Snapshot(71), (), &NoCancel),
         )
         .await
         .unwrap();
@@ -143,7 +143,7 @@ async fn image_references_preserve_each_bound_actual_filename_and_share_original
     let renamed = tool
         .invoke(
             FileToolInvocation::new("renamed-call", r#"{"path":"renamed.png"}"#, templates()),
-            InvocationContext::new(Snapshot(72), (), &NoCancel),
+            InvocationScope::new(Snapshot(72), (), &NoCancel),
         )
         .await
         .unwrap();
@@ -362,7 +362,7 @@ async fn image_second_service_authorization_failure_does_not_persist_or_charge_b
     let result = tool
         .invoke(
             budget_invocation("denied", r#"{"path":"alias.png"}"#, &budget, &templates),
-            InvocationContext::new(Snapshot(74), (), &NoCancel),
+            InvocationScope::new(Snapshot(74), (), &NoCancel),
         )
         .await
         .unwrap();

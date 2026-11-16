@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use parrot_cli::presenters::{
-    EnhancedSessionPresenter, SessionReplayContext, ToolPresenterRegistry,
+    EnhancedSessionPresenter, SessionReplayState, ToolPresenterRegistry,
     tools::read::SkillReadPathFormatter,
 };
 use parrot_domain::protocol::messages::parrot::{self as wire, event::Payload};
@@ -12,9 +12,9 @@ use super::support::SessionHarness;
 use super::turn::{child, commits, completed, ended, event, start, text};
 
 #[test]
-fn replay_context_ends_at_first_usage_snapshot_and_never_reenters() {
-    let mut context = SessionReplayContext::new(true);
-    assert!(context.is_replaying());
+fn replay_state_ends_at_first_usage_snapshot_and_never_reenters() {
+    let mut replay = SessionReplayState::new(true);
+    assert!(replay.is_replaying());
     let events = [
         start(""),
         queue_event("", Vec::new()),
@@ -29,28 +29,28 @@ fn replay_context_ends_at_first_usage_snapshot_and_never_reenters() {
         ),
     ];
     for (published, expected) in events.iter().zip([true, true, false, false, false]) {
-        context.observe(published);
-        assert_eq!(context.is_replaying(), expected);
+        replay.observe(published);
+        assert_eq!(replay.is_replaying(), expected);
     }
 }
 
 #[test]
 fn live_context_never_enters_replay() {
-    let mut context = SessionReplayContext::new(false);
-    context.observe(&start(""));
-    assert!(!context.is_replaying());
-    context.observe(&event(
+    let mut replay = SessionReplayState::new(false);
+    replay.observe(&start(""));
+    assert!(!replay.is_replaying());
+    replay.observe(&event(
         "",
         Payload::SessionUsageSnapshot(wire::SessionUsageSnapshot::default()),
     ));
-    assert!(!context.is_replaying());
+    assert!(!replay.is_replaying());
 }
 
 fn replay_completion_case(tail: Payload, expected_busy: bool) {
-    let mut context = SessionReplayContext::new(true);
+    let mut replay = SessionReplayState::new(true);
     let states = Arc::new(Mutex::new(Vec::new()));
     let captured = states.clone();
-    context.set_completion(Arc::new(move |busy| captured.lock().unwrap().push(busy)));
+    replay.set_completion(Arc::new(move |busy| captured.lock().unwrap().push(busy)));
     let events = [
         child("root"),
         start("child"),
@@ -62,15 +62,15 @@ fn replay_completion_case(tail: Payload, expected_busy: bool) {
         event("child", Payload::TurnFailed(wire::TurnFailed::default())),
     ];
     for published in events {
-        context.observe(&published);
-        assert!(context.is_replaying());
+        replay.observe(&published);
+        assert!(replay.is_replaying());
         assert!(states.lock().unwrap().is_empty());
     }
-    context.observe(&event(
+    replay.observe(&event(
         "",
         Payload::SessionUsageSnapshot(wire::SessionUsageSnapshot::default()),
     ));
-    assert!(!context.is_replaying());
+    assert!(!replay.is_replaying());
     assert_eq!(*states.lock().unwrap(), [expected_busy]);
     for published in [
         start("root"),
@@ -80,7 +80,7 @@ fn replay_completion_case(tail: Payload, expected_busy: bool) {
             Payload::SessionUsageSnapshot(wire::SessionUsageSnapshot::default()),
         ),
     ] {
-        context.observe(&published);
+        replay.observe(&published);
     }
     assert_eq!(*states.lock().unwrap(), [expected_busy]);
 }
@@ -217,32 +217,32 @@ fn enhanced_replay_preserves_history_and_only_live_action_flags_on_failure() {
 }
 
 #[test]
-fn presenter_consumes_the_same_external_replay_context_without_duplicate_completion() {
-    let context = Arc::new(Mutex::new(SessionReplayContext::new(true)));
+fn presenter_consumes_the_same_external_replay_state_without_duplicate_completion() {
+    let replay = Arc::new(Mutex::new(SessionReplayState::new(true)));
     let states = Arc::new(Mutex::new(Vec::new()));
     let captured = states.clone();
-    context
+    replay
         .lock()
         .unwrap()
         .set_completion(Arc::new(move |busy| captured.lock().unwrap().push(busy)));
     let mut presenter = SessionHarness::external(EnhancedSessionPresenter::with_registry(
         80,
         false,
-        context.clone(),
+        replay.clone(),
         Arc::new(ToolPresenterRegistry::standard_with_skill_read_paths(
             Vec::new(),
             Arc::new(SkillReadPathFormatter::default()),
         )),
     ));
     let root = start("root");
-    context.lock().unwrap().observe(&root);
+    replay.lock().unwrap().observe(&root);
     let historical = presenter.observe(&root).unwrap();
     assert!(!historical.started_main_turn);
     let sentinel = event(
         "",
         Payload::SessionUsageSnapshot(wire::SessionUsageSnapshot::default()),
     );
-    context.lock().unwrap().observe(&sentinel);
+    replay.lock().unwrap().observe(&sentinel);
     let transition = presenter.observe(&sentinel).unwrap();
     assert_eq!(transition.replay_completed, Some(true));
     assert_eq!(*states.lock().unwrap(), [true]);

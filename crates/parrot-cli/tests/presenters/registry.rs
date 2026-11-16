@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use parrot_cli::presenters::{tools::generic::GenericToolPresenter, *};
 use parrot_cli::terminal_frames::{
-    LiveBufferItem, LiveBufferRenderContext, ScrollbackItem, ScrollbackLayout,
-    ScrollbackRenderContext,
+    LiveBufferItem, LiveBufferRenderOptions, ScrollbackItem, ScrollbackLayout,
+    ScrollbackRenderOptions,
 };
 
 struct Fixed {
@@ -51,7 +51,7 @@ impl ToolPresenter for Fixed {
 fn live(item: Presentation) -> String {
     LiveBufferItem::render(
         &item,
-        LiveBufferRenderContext {
+        LiveBufferRenderOptions {
             columns: 32768,
             color: false,
         },
@@ -66,7 +66,7 @@ fn live(item: Presentation) -> String {
 fn terminal(item: Presentation) -> String {
     ScrollbackItem::render(
         &item,
-        ScrollbackRenderContext {
+        ScrollbackRenderOptions {
             columns: 32768,
             color: false,
             inline_diff: true,

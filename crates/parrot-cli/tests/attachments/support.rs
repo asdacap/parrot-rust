@@ -42,7 +42,7 @@ use parrot_provider::{
 use parrot_runtime::{
     interactions::{InteractionError, PendingQuestion, QuestionReply},
     plan_mode::{MaterializedModeProfile, ModeRegistry},
-    prompt_context::{SkillMetadata, SkillSnapshot},
+    prompt_assembly::{SkillMetadata, SkillSnapshot},
 };
 use parrot_storage::{
     artifacts::ImageArtifactMetadata,

@@ -36,13 +36,13 @@ use crate::{
         tools::read::SkillReadPathFormatter,
     },
     slash_sessions::{
-        CallbackSessionBinding, CommandContext, NavigationFailure, PollingSlashActivity,
+        CallbackSessionBinding, CommandEnvironment, NavigationFailure, PollingSlashActivity,
         RpcSlashSession, SkillCompletion, SkillRefresh, SlashCommandCompletion, SlashFailure,
         SlashSession,
     },
     slash_settings::AuthServices,
     terminal_frames::{
-        LiveBufferItem, LiveBufferRender, LiveBufferRenderContext, SPINNER_INTERVAL,
+        LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions, SPINNER_INTERVAL,
         ScrollbackItem, TerminalFrameRenderer,
     },
     terminal_input::{IncrementalEditor, PromptState, TerminalKey, TerminalKeyKind},
@@ -211,7 +211,7 @@ impl EnhancedCli {
         let mut presenter = EnhancedSessionPresenter::with_registry(
             columns.max(1) as usize,
             self.terminal.color,
-            stream.replay_context(),
+            stream.replay_state(),
             registry,
         );
         let initial_update = presenter
@@ -727,14 +727,14 @@ impl EnhancedInput {
                         })
                     })
                 };
-                let mut context = CommandContext {
+                let mut environment = CommandEnvironment {
                     session: &mut session,
                     activity: &activity,
                     dialog: &mut dialog,
                     refresh_skills: &refresh_skills,
                     commands: &[],
                 };
-                let dispatched = commands.dispatch(&entered, &mut context, c).await;
+                let dispatched = commands.dispatch(&entered, &mut environment, c).await;
                 let snapshot = shared.snapshot();
                 if snapshot.generation != generation {
                     generation = snapshot.generation;
@@ -930,7 +930,7 @@ impl Drop for KeyboardLease {
 // A publication owns this cache; the next spinner tick must reevaluate timed items.
 struct CachedLiveValue {
     item: Arc<dyn LiveBufferItem>,
-    rendered: Mutex<Option<(LiveBufferRenderContext, LiveBufferRender)>>,
+    rendered: Mutex<Option<(LiveBufferRenderOptions, LiveBufferRender)>>,
 }
 impl CachedLiveValue {
     fn new(item: Arc<dyn LiveBufferItem>) -> Self {
@@ -941,18 +941,18 @@ impl CachedLiveValue {
     }
 }
 impl LiveBufferItem for CachedLiveValue {
-    fn render(&self, context: LiveBufferRenderContext) -> io::Result<LiveBufferRender> {
+    fn render(&self, options: LiveBufferRenderOptions) -> io::Result<LiveBufferRender> {
         let mut cached = self
             .rendered
             .lock()
             .map_err(|_| io::Error::other("terminal live render cache lock poisoned"))?;
         if let Some((previous, rendered)) = &*cached
-            && *previous == context
+            && *previous == options
         {
             return Ok(rendered.clone());
         }
-        let rendered = self.item.render(context)?;
-        *cached = Some((context, rendered.clone()));
+        let rendered = self.item.render(options)?;
+        *cached = Some((options, rendered.clone()));
         Ok(rendered)
     }
 }
@@ -1045,7 +1045,7 @@ impl SessionState {
         if self.generation != generation {
             return false;
         }
-        self.skill_paths.replace_context(
+        self.skill_paths.replace_index(
             skills.root_locations().to_vec(),
             skills.list_catalog_skills(),
         );
@@ -1225,7 +1225,7 @@ impl EnhancedSession {
             let snapshot = self.snapshot();
             let replaying = binding
                 .stream
-                .replay_context()
+                .replay_state()
                 .lock()
                 .map_err(|_| Status::internal("session replay lock poisoned"))?
                 .is_replaying();
@@ -1320,7 +1320,7 @@ impl SessionReplacement for EnhancedSession {
             let mut presenter = EnhancedSessionPresenter::with_registry(
                 columns.max(1) as usize,
                 self.color,
-                prepared.replay_context(),
+                prepared.replay_state(),
                 registry,
             );
             let update = presenter

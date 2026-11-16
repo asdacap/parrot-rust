@@ -1,4 +1,4 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
     for value in [
@@ -11,8 +11,8 @@ fn source_assertions() {
         "2147483648",
         "[]",
     ] {
-        let context = Context::new();
-        let error = context
+        let fixture = ConfigFixture::new();
+        let error = fixture
             .configured(&format!("live_buffer_rows: {value}\n"))
             .unwrap_err();
         assert_eq!(error.0, "live_buffer_rows must be a positive integer");

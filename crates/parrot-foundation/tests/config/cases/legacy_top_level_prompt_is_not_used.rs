@@ -1,8 +1,8 @@
-use crate::support::Context;
+use crate::support::ConfigFixture;
 #[test]
 fn source_assertions() {
-    let context = Context::new();
-    let configuration = context.configured("prompt: Legacy prompt.\n").unwrap();
+    let fixture = ConfigFixture::new();
+    let configuration = fixture.configured("prompt: Legacy prompt.\n").unwrap();
     assert!(
         !configuration.system_prompts["runtime:system-context:01-base"].contains("Legacy prompt.")
     );

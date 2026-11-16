@@ -1,4 +1,4 @@
-//! On-demand completion context observations, with completion policy owned by core.
+//! On-demand completion state observations, with completion policy owned by core.
 use super::{blockers::ActiveWorkReminder, exit_reminders::ExitReminders};
 use crate::{
     agent_turn::services::{CompletionStateSource, TurnError},

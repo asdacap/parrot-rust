@@ -1,6 +1,7 @@
 use crate::{
-    CancellationToken, ConfigKey, Content, DerivedContext, Error, PromotedInput, PromptTemplate,
-    Skill, SkillContent, SkillMention, SkillProvider, SkillReference, States,
+    CancellationToken, ConfigKey, Content, Error, PreparedSkillPrompt, PromotedInput,
+    PromptTemplate, Skill, SkillContent, SkillProvider, SkillReference, States,
+    parse_skill_mentions,
 };
 use std::{collections::HashSet, sync::Arc};
 
@@ -19,7 +20,60 @@ impl SkillPreparation {
         skill_provider: &dyn SkillProvider,
         inputs: &[PromotedInput],
         cancellation: CancellationToken<'_>,
-    ) -> Result<DerivedContext, Error> {
+    ) -> Result<PreparedSkillPrompt, Error> {
+        let selected = self
+            .detect_selected_skills(skill_provider, inputs, cancellation)
+            .await?;
+
+        if cancellation.is_cancelled() {
+            return Err(Error::cancelled());
+        }
+
+        if selected.is_empty() {
+            return Ok(PreparedSkillPrompt::default());
+        }
+
+        let templates = SkillTemplates {
+            unavailable: states
+                .get_config(ConfigKey::SkillUnavailableTemplate)
+                .await?
+                .into_prompt_template()?,
+            selected: states
+                .get_config(ConfigKey::SkillSelectedTemplate)
+                .await?
+                .into_prompt_template()?,
+            too_large: states
+                .get_config(ConfigKey::SkillTooLargeTemplate)
+                .await?
+                .into_prompt_template()?,
+        };
+        let mut rendering = SkillRendering::new(&templates)?;
+        for (skill, _) in selected {
+            if cancellation.is_cancelled() {
+                return Err(Error::cancelled());
+            }
+            match skill_provider.read_skill_content(&skill).await? {
+                SkillContent::Text(content) => rendering.selected(&templates, &skill, &content)?,
+                SkillContent::Unavailable(message) => {
+                    rendering.diagnostic(&templates, &skill.name, &message)?;
+                }
+            }
+        }
+        if cancellation.is_cancelled() {
+            return Err(Error::cancelled());
+        }
+        rendering.finish(&templates)
+    }
+
+    /// Detects skills newly selected by the promoted inputs and returns them in
+    /// input, mention and identity-tiebreak order, skipping skills already
+    /// selected on earlier turns.
+    async fn detect_selected_skills(
+        &mut self,
+        skill_provider: &dyn SkillProvider,
+        inputs: &[PromotedInput],
+        cancellation: CancellationToken<'_>,
+    ) -> Result<Vec<(Skill, usize)>, Error> {
         let mut selected = Vec::new();
         for input in inputs {
             let mut mentions = Vec::new();
@@ -46,8 +100,8 @@ impl SkillPreparation {
                     .iter()
                     .map(|(reference, _)| reference.clone())
                     .collect::<Vec<_>>();
-                let records = skill_provider.resolve_skill_references(&references).await?;
-                for (record, (_, position)) in records.into_iter().zip(mentions) {
+                let resolved = skill_provider.resolve_skill_references(&references).await?;
+                for (record, (_, position)) in resolved.into_iter().zip(mentions) {
                     if let Some(skill) = record
                         && self.selected_ids.insert(skill.id.clone())
                     {
@@ -56,47 +110,11 @@ impl SkillPreparation {
                 }
             }
         }
-        if cancellation.is_cancelled() {
-            return Err(Error::cancelled());
-        }
-        if selected.is_empty() {
-            return Ok(DerivedContext::default());
-        }
         selected.sort_by(|(left, lp), (right, rp)| {
             lp.cmp(rp)
                 .then_with(|| left.id.encode_utf16().cmp(right.id.encode_utf16()))
         });
-        let preparation = SkillTemplates {
-            unavailable: states
-                .get_config(ConfigKey::SkillUnavailableTemplate)
-                .await?
-                .into_prompt_template()?,
-            selected: states
-                .get_config(ConfigKey::SkillSelectedTemplate)
-                .await?
-                .into_prompt_template()?,
-            too_large: states
-                .get_config(ConfigKey::SkillTooLargeTemplate)
-                .await?
-                .into_prompt_template()?,
-        };
-        let preparation = &preparation;
-        let mut rendering = SkillRendering::new(preparation)?;
-        for (skill, _) in selected {
-            if cancellation.is_cancelled() {
-                return Err(Error::cancelled());
-            }
-            match skill_provider.read_skill_content(&skill).await? {
-                SkillContent::Text(content) => rendering.selected(preparation, &skill, &content)?,
-                SkillContent::Unavailable(message) => {
-                    rendering.diagnostic(preparation, &skill.name, &message)?;
-                }
-            }
-        }
-        if cancellation.is_cancelled() {
-            return Err(Error::cancelled());
-        }
-        rendering.finish(preparation)
+        Ok(selected)
     }
 }
 
@@ -124,7 +142,7 @@ fn escape(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn unavailable(preparation: &SkillTemplates, name: &str, message: &str) -> Result<String, Error> {
+fn unavailable(templates: &SkillTemplates, name: &str, message: &str) -> Result<String, Error> {
     let normalized = message.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut message = String::new();
     let mut units = 0;
@@ -136,7 +154,7 @@ fn unavailable(preparation: &SkillTemplates, name: &str, message: &str) -> Resul
         units += character.len_utf16();
     }
     render_template(
-        &preparation.unavailable,
+        &templates.unavailable,
         &[
             ("name".into(), escape(name)),
             ("message".into(), escape(&message)),
@@ -145,15 +163,15 @@ fn unavailable(preparation: &SkillTemplates, name: &str, message: &str) -> Resul
 }
 
 struct SkillRendering {
-    context: DerivedContext,
+    prompt: PreparedSkillPrompt,
     content_budget: usize,
     omitted: i32,
 }
 
 impl SkillRendering {
-    fn new(preparation: &SkillTemplates) -> Result<Self, Error> {
+    fn new(templates: &SkillTemplates) -> Result<Self, Error> {
         let summary = unavailable(
-            preparation,
+            templates,
             "selected skills",
             &format!(
                 "{} diagnostics omitted by the active-turn prompt budget",
@@ -169,28 +187,22 @@ impl SkillRendering {
                 )
             })?;
         Ok(Self {
-            context: DerivedContext::default(),
+            prompt: PreparedSkillPrompt::default(),
             content_budget,
             omitted: 0,
         })
     }
 
     fn fits(&self, value: &str) -> bool {
-        self.context.content.len()
-            + if self.context.content.is_empty() {
-                0
-            } else {
-                2
-            }
-            + value.len()
+        self.prompt.content.len() + if self.prompt.content.is_empty() { 0 } else { 2 } + value.len()
             <= self.content_budget
     }
 
     fn append(&mut self, value: &str) {
-        if !self.context.content.is_empty() {
-            self.context.content.push_str("\n\n");
+        if !self.prompt.content.is_empty() {
+            self.prompt.content.push_str("\n\n");
         }
-        self.context.content.push_str(value);
+        self.prompt.content.push_str(value);
     }
 
     fn notice(&mut self, value: &str) {
@@ -203,47 +215,47 @@ impl SkillRendering {
 
     fn diagnostic(
         &mut self,
-        preparation: &SkillTemplates,
+        templates: &SkillTemplates,
         name: &str,
         message: &str,
     ) -> Result<(), Error> {
-        let value = unavailable(preparation, name, message)?;
-        self.notice(&value);
+        let rendered = unavailable(templates, name, message)?;
+        self.notice(&rendered);
         Ok(())
     }
 
     fn selected(
         &mut self,
-        preparation: &SkillTemplates,
+        templates: &SkillTemplates,
         skill: &Skill,
         content: &str,
     ) -> Result<(), Error> {
         if content.len() > MAXIMUM_SKILL_BYTES {
-            let value = render_template(
-                &preparation.too_large,
+            let rendered = render_template(
+                &templates.too_large,
                 &[
                     ("name".into(), escape(&skill.name)),
                     ("path".into(), escape(&skill.path)),
                     ("limit_bytes".into(), MAXIMUM_SKILL_BYTES.to_string()),
                 ],
             )?;
-            self.notice(&value);
+            self.notice(&rendered);
             return Ok(());
         }
-        let value = render_template(
-            &preparation.selected,
+        let rendered = render_template(
+            &templates.selected,
             &[
                 ("name".into(), escape(&skill.name)),
                 ("path".into(), escape(&skill.path)),
                 ("content".into(), content.into()),
             ],
         )?;
-        if self.fits(&value) {
-            self.append(&value);
-            self.context.loaded_paths.push(skill.path.clone());
+        if self.fits(&rendered) {
+            self.append(&rendered);
+            self.prompt.loaded_paths.push(skill.path.clone());
         } else {
             self.diagnostic(
-                preparation,
+                templates,
                 &skill.name,
                 "selected skill instructions exceed the active-turn prompt budget",
             )?;
@@ -251,10 +263,10 @@ impl SkillRendering {
         Ok(())
     }
 
-    fn finish(mut self, preparation: &SkillTemplates) -> Result<DerivedContext, Error> {
+    fn finish(mut self, templates: &SkillTemplates) -> Result<PreparedSkillPrompt, Error> {
         if self.omitted > 0 {
             let summary = unavailable(
-                preparation,
+                templates,
                 "selected skills",
                 &format!(
                     "{} diagnostics omitted by the active-turn prompt budget",
@@ -262,102 +274,12 @@ impl SkillRendering {
                 ),
             )?;
             self.append(&summary);
-            if self.context.content.len() > MAXIMUM_TURN_BYTES {
+            if self.prompt.content.len() > MAXIMUM_TURN_BYTES {
                 return Err(Error::failed(
                     "The selected-skill context exceeds the active-turn prompt budget.",
                 ));
             }
         }
-        Ok(self.context)
+        Ok(self.prompt)
     }
-}
-
-fn word(character: u8) -> bool {
-    character.is_ascii_alphanumeric() || character == b'_'
-}
-
-fn name_character(character: u8) -> bool {
-    word(character) || matches!(character, b':' | b'-')
-}
-
-fn linked_mention(text: &str, start: usize) -> Option<(usize, &str, &str)> {
-    let rest = text.get(start..)?.strip_prefix("[$")?;
-    let name_end = rest.find([']', '\r', '\n'])?;
-    if name_end == 0 || !rest[name_end..].starts_with("](") {
-        return None;
-    }
-    let path = &rest[name_end + 2..];
-    let path_end = path.find(')')?;
-    if path_end == 0 {
-        return None;
-    }
-    let end = start + 2 + name_end + 2 + path_end + 1;
-    if text
-        .as_bytes()
-        .get(end)
-        .copied()
-        .is_some_and(name_character)
-    {
-        return None;
-    }
-    Some((end, rest[..name_end].trim(), path[..path_end].trim()))
-}
-
-/// Finds bare and linked skill mentions, including inside Markdown and code.
-/// Bare environment-variable names retain their existing exclusions.
-pub fn parse_skill_mentions(text: &str) -> Vec<SkillMention> {
-    const ENVIRONMENT_NAMES: &[&str] = &[
-        "HOME",
-        "PATH",
-        "USER",
-        "SHELL",
-        "PWD",
-        "TMP",
-        "TMPDIR",
-        "PARROT_HOST_TMPDIR",
-        "TEMP",
-        "LANG",
-        "TERM",
-        "XDG_CONFIG_HOME",
-    ];
-    let mut mentions = Vec::new();
-    let mut start = 0;
-    let mut position = 0;
-    while start < text.len() {
-        let previous_is_word = start > 0 && word(text.as_bytes()[start - 1]);
-        let matched = if previous_is_word {
-            None
-        } else if let Some((end, name, path)) = linked_mention(text, start) {
-            Some((end, name, Some(path.to_owned())))
-        } else if text.as_bytes()[start] == b'$' {
-            let mut end = start + 1;
-            while text
-                .as_bytes()
-                .get(end)
-                .copied()
-                .is_some_and(name_character)
-            {
-                end += 1;
-            }
-            (end > start + 1).then(|| (end, &text[start + 1..end], None))
-        } else {
-            None
-        };
-        if let Some((end, name, path)) = matched {
-            if path.is_some() || !ENVIRONMENT_NAMES.contains(&name) {
-                mentions.push(SkillMention {
-                    name: name.into(),
-                    path,
-                    position,
-                });
-            }
-            position += text[start..end].encode_utf16().count();
-            start = end;
-        } else {
-            let character = text[start..].chars().next().expect("in-bounds character");
-            position += character.len_utf16();
-            start += character.len_utf8();
-        }
-    }
-    mentions
 }
