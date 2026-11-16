@@ -899,7 +899,7 @@ async fn runtime_tree_changes_do_not_trigger_status_steering() {
     );
     let mut query = query();
     query.session_id = "root".into();
-    let bound = runtime.bind_context(query, "profile prompt".into());
+    let bound = runtime.create(query, "profile prompt".into());
     let snapshot = ContextSnapshot::new(100, 1000, Some(10), 90);
     let initial = bound.slots(&snapshot, &NeverCancelled).await.unwrap();
     assert!(parrot_core::status_steering_needed(
@@ -1007,10 +1007,11 @@ async fn runtime_status_preserves_additional_provider_order_exclusions_and_per_c
     .unwrap();
     let query = query();
     let full = runtime
-        .observe_with_context(
+        .observe_live(
             &query,
             "profile prompt",
             ContextSnapshot::new(123, 1000, Some(12), 90),
+            AgentSessionStatisticsSnapshot::default(),
             &NeverCancelled,
         )
         .await
@@ -1028,7 +1029,9 @@ async fn runtime_status_preserves_additional_provider_order_exclusions_and_per_c
         )
     );
     assert!(full.contains("\n\nRuntime:\n- agent: main\n\nActive profile: build"));
-    assert!(full.ends_with("\n\nActive profile: build\nModel: provider/model"));
+    assert!(
+        full.contains("Active profile: build\nModel: provider/model\n\nStatistics (lifetime):")
+    );
     let (first, second) = tokio::join!(
         runtime.observe_runtime(
             &query,
@@ -1080,10 +1083,11 @@ async fn status_rejects_invalid_profile_keys() {
     bad.profile = "bad profile".into();
     assert!(
         runtime
-            .observe_with_context(
+            .observe_live(
                 &bad,
                 "text",
                 ContextSnapshot::new(1, 10, Some(10), 90),
+                AgentSessionStatisticsSnapshot::default(),
                 &NeverCancelled
             )
             .await
@@ -1105,7 +1109,7 @@ async fn bound_context_status_uses_actual_full_status_and_preserves_snapshot_and
         )
         .unwrap(),
     );
-    let bound = runtime.bind_context(query(), "profile prompt".into());
+    let bound = runtime.create(query(), "profile prompt".into());
     let first = bound
         .slots(
             &ContextSnapshot::new(100, 1000, Some(10), 90),
@@ -1443,7 +1447,7 @@ async fn context_slot_merges_usage_line_with_once_per_band_reminder() {
     let snapshot = ContextSnapshot::new(550, 1000, Some(55), 90);
     let context_key = parrot_core::StatusKey::new("runtime:context");
 
-    let bound = runtime.bind_context(query(), "profile prompt".into());
+    let bound = runtime.create(query(), "profile prompt".into());
     let offering = bound.slots(&snapshot, &NeverCancelled).await.unwrap();
     let context = offering.get(&context_key).unwrap();
     assert_eq!(context.hash, "context:provider/model:1000:false:50");
@@ -1511,7 +1515,7 @@ async fn context_slot_merges_usage_line_with_once_per_band_reminder() {
 
     let mut other = query();
     other.requested_model = "other/model".into();
-    let other_bound = runtime.bind_context(other, "profile prompt".into());
+    let other_bound = runtime.create(other, "profile prompt".into());
     let offering = other_bound.slots(&snapshot, &NeverCancelled).await.unwrap();
     let context = offering.get(&context_key).unwrap();
     assert_eq!(context.hash, "context:other/model:1000:false:50");

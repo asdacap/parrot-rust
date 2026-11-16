@@ -56,8 +56,8 @@ use parrot_runtime::{
         progress::{AgentProgress, ProgressBlocker, ProgressSnapshotPublisher},
         runtime_tree::{RegistryRuntimeTreeSource, RuntimeTreeStatusProvider},
         status::{
-            RuntimeStatus, StatusError, StatusObservation, StatusProvider, StatusQuery,
-            StatusResult, StatusTarget,
+            RuntimeStatus, RuntimeStatusProvider, StatusError, StatusObservation, StatusProvider,
+            StatusQuery, StatusResult, StatusTarget,
         },
     },
     agent_turn::{
@@ -804,9 +804,7 @@ impl ScopedModeStatus {
             .prompt
             .as_ref()
             .map_err(|error| ContextError::Operation(error.to_string()))?;
-        Ok(self
-            .runtime
-            .bind_context(self.query.clone(), prompt.clone()))
+        Ok(self.runtime.create(self.query.clone(), prompt.clone()))
     }
 }
 impl ContextStatus for ScopedModeStatus {

@@ -4,6 +4,7 @@ use super::*;
 use parrot_domain::contracts::async_ops::{Cancelled, Clock};
 use parrot_provider::compaction::{CompactionSettings, Compactor};
 use parrot_runtime::active_work::status::RuntimeStatus;
+use parrot_runtime::active_work::status::RuntimeStatusProvider;
 use parrot_runtime::active_work::status::StatusQuery;
 use std::time::{Instant, SystemTime};
 
@@ -79,7 +80,7 @@ impl RealReminderStatus {
 }
 impl TurnStatus<Security> for RealReminderStatus {
     fn bind(&self, selection: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
-        self.0.bind_context(
+        self.0.create(
             StatusQuery {
                 session_id: "agent".into(),
                 parent_session_id: String::new(),

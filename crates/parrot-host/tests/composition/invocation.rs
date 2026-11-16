@@ -499,10 +499,11 @@ async fn retained_status_tool_uses_actual_activity_context_statistics_and_same_i
         assert_eq!(result.content(), expected);
         let full = ancillary
             .runtime
-            .observe_with_context(
+            .observe_live(
                 &query,
                 "PROFILE MUST NOT APPEAR IN STATUS TOOL",
                 snapshot.clone(),
+                Default::default(),
                 &NeverCancelled,
             )
             .await

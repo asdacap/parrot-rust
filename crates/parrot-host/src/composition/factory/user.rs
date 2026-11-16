@@ -2096,15 +2096,16 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
                 let profile = status
                     .profile_prompt(&observed.selection)
                     .map_err(internal)?;
+                let statistics = session.backend().usage().capture();
                 let full = status
                     .runtime
-                    .observe_with_context(&query, &profile, observed.context, cancellation.as_ref())
-                    .await
-                    .map_err(status_error)?;
-                let statistics = session.backend().usage().capture();
-                let statistics = status
-                    .runtime
-                    .observe_statistics(&query, statistics, cancellation.as_ref())
+                    .observe_live(
+                        &query,
+                        &profile,
+                        observed.context,
+                        statistics,
+                        cancellation.as_ref(),
+                    )
                     .await
                     .map_err(status_error)?;
                 let fast_mode = if core.services.fast_mode.is_enabled() {
@@ -2112,7 +2113,7 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
                 } else {
                     "Fast mode: off"
                 };
-                Ok([full, fast_mode.into(), statistics]
+                Ok([full, fast_mode.into()]
                     .into_iter()
                     .filter(|text| !text.trim().is_empty())
                     .collect::<Vec<_>>()

@@ -2032,7 +2032,7 @@ async fn interactive_sessions_offer_tools_that_wait_for_the_user() {
 }
 
 #[tokio::test]
-async fn actual_hosted_status_uses_live_context_then_full_status_then_later_statistics() {
+async fn actual_hosted_status_renders_live_context_and_one_statistics_capture() {
     use parrot_domain::values::accounting::{AgentUsageIncrement, AgentUsageKey, AgentUsageTotals};
     use parrot_host::composition::factory::scope::ScopedTurnStatus;
     use parrot_runtime::active_work::status::RuntimeStatus;
@@ -2122,8 +2122,9 @@ async fn actual_hosted_status_uses_live_context_then_full_status_then_later_stat
     .await
     .unwrap();
     assert_ne!(before_text, after_text);
-    assert!(rendered.ends_with(&format!("\n\n{after_text}")));
-    assert!(!rendered.ends_with(&format!("\n\n{before_text}")));
+    assert!(rendered.contains(&before_text));
+    assert!(!rendered.contains(&after_text));
+    assert!(rendered.ends_with("\n\nFast mode: off"));
     assert!(fixture.requests.lock().unwrap().is_empty());
     assert_same_policy(&prepared.capture().unwrap(), &original);
     assert_eq!(

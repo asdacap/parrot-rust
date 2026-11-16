@@ -110,6 +110,8 @@ pub enum StatusTarget {
     Steer,
     /// Only the status tool rendering on demand.
     Tool,
+    /// Only the protocol live view rendered on demand for a human.
+    Live,
 }
 
 pub trait StatusProvider: Send + Sync {
@@ -317,7 +319,7 @@ impl StatusProvider for ProfileStatusProvider {
         &self.key
     }
     fn should_show(&self, surface: StatusTarget) -> bool {
-        matches!(surface, StatusTarget::Steer)
+        matches!(surface, StatusTarget::Steer | StatusTarget::Live)
     }
     fn observe<'a>(
         &'a self,
@@ -344,7 +346,7 @@ impl StatusProvider for SelectionStatusProvider {
         "runtime:selection"
     }
     fn should_show(&self, surface: StatusTarget) -> bool {
-        matches!(surface, StatusTarget::Steer)
+        matches!(surface, StatusTarget::Steer | StatusTarget::Live)
     }
     fn observe<'a>(
         &'a self,
@@ -391,7 +393,7 @@ impl StatusProvider for GeneratedTimeStatusProvider {
         "runtime:generated-time"
     }
     fn should_show(&self, surface: StatusTarget) -> bool {
-        matches!(surface, StatusTarget::Steer)
+        matches!(surface, StatusTarget::Steer | StatusTarget::Live)
     }
     fn observe<'a>(
         &'a self,
@@ -610,7 +612,7 @@ impl StatusProvider for StatisticsStatusProvider {
         "runtime:statistics"
     }
     fn should_show(&self, surface: StatusTarget) -> bool {
-        matches!(surface, StatusTarget::Tool)
+        matches!(surface, StatusTarget::Tool | StatusTarget::Live)
     }
     fn observe<'a>(
         &'a self,
@@ -686,22 +688,34 @@ pub fn format_tokens(count: i64) -> String {
 /// state is retained here. Each call receives its own immutable context/usage.
 pub struct RuntimeStatus {
     templates: Arc<PromptTemplateCatalog>,
-    registry: StatusRegistry,
+    registry: Arc<StatusRegistry>,
 }
-impl RuntimeStatus {
-    /// Binds only immutable query/profile identity, not a cached context snapshot.
-    pub fn bind_context(
-        self: &Arc<Self>,
+/// Creates the status seam bound to one turn's identity. The query and the
+/// profile prompt are captured at creation; the usage snapshot is supplied
+/// per slots call afterwards.
+pub trait RuntimeStatusProvider: Send + Sync {
+    fn create(
+        &self,
+        query: StatusQuery,
+        profile_prompt: String,
+    ) -> Arc<dyn crate::compaction::ContextStatus>;
+}
+impl RuntimeStatusProvider for RuntimeStatus {
+    fn create(
+        &self,
         query: StatusQuery,
         profile_prompt: String,
     ) -> Arc<dyn crate::compaction::ContextStatus> {
         Arc::new(BoundContextStatus {
-            runtime: self.clone(),
+            registry: self.registry.clone(),
+            templates: self.templates.clone(),
             query,
             profile_prompt,
         })
     }
+}
 
+impl RuntimeStatus {
     pub fn new(
         templates: Arc<PromptTemplateCatalog>,
         clock: Arc<dyn Clock>,
@@ -721,7 +735,7 @@ impl RuntimeStatus {
         all.extend(providers);
         Ok(Self {
             templates,
-            registry: StatusRegistry::new(all)?,
+            registry: Arc::new(StatusRegistry::new(all)?),
         })
     }
     pub async fn observe_runtime(
@@ -758,35 +772,12 @@ impl RuntimeStatus {
         .observe(query, None, &[], StatusTarget::Tool, cancellation)
         .await
     }
-    pub async fn observe_slots(
-        &self,
-        query: &StatusQuery,
-        profile_prompt: &str,
-        context: &ContextSnapshot,
-        cancellation: &dyn Cancellation,
-    ) -> StatusResult<Vec<StatusSlot>> {
-        let context_provider = ContextStatusProvider {
-            snapshot: context.clone(),
-            templates: self.templates.clone(),
-        };
-        self.registry
-            .observe_slots(
-                query,
-                Some(&ProfileStatusProvider {
-                    key: format!("profile:{}", query.profile),
-                    prompt: profile_prompt.to_owned(),
-                }),
-                &[&context_provider],
-                StatusTarget::Steer,
-                cancellation,
-            )
-            .await
-    }
-    pub async fn observe_with_context(
+    pub async fn observe_live(
         &self,
         query: &StatusQuery,
         profile_prompt: &str,
         context: ContextSnapshot,
+        statistics: AgentSessionStatisticsSnapshot,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
         let profile = ProfileStatusProvider {
@@ -797,12 +788,16 @@ impl RuntimeStatus {
             snapshot: context,
             templates: self.templates.clone(),
         };
+        let statistics_provider = StatisticsStatusProvider {
+            snapshot: statistics,
+            templates: self.templates.clone(),
+        };
         self.registry
             .observe(
                 query,
                 Some(&profile),
-                &[&context_provider],
-                StatusTarget::Steer,
+                &[&context_provider, &statistics_provider],
+                StatusTarget::Live,
                 cancellation,
             )
             .await
@@ -810,19 +805,37 @@ impl RuntimeStatus {
 }
 
 struct BoundContextStatus {
-    runtime: Arc<RuntimeStatus>,
+    registry: Arc<StatusRegistry>,
+    templates: Arc<PromptTemplateCatalog>,
     query: StatusQuery,
     profile_prompt: String,
 }
 impl crate::compaction::ContextStatus for BoundContextStatus {
+    /// Offers the steering slots for the bound identity at one safe point:
+    /// the profile prompt and the context usage rendered from the supplied
+    /// snapshot, joined with the Steer registry providers.
     fn slots<'a>(
         &'a self,
         context: &'a ContextSnapshot,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, crate::compaction::ContextResult<parrot_core::StatusOffering>> {
         Box::pin(async move {
-            self.runtime
-                .observe_slots(&self.query, &self.profile_prompt, context, cancellation)
+            let profile = ProfileStatusProvider {
+                key: format!("profile:{}", self.query.profile),
+                prompt: self.profile_prompt.clone(),
+            };
+            let context_provider = ContextStatusProvider {
+                snapshot: context.clone(),
+                templates: self.templates.clone(),
+            };
+            self.registry
+                .observe_slots(
+                    &self.query,
+                    Some(&profile),
+                    &[&context_provider],
+                    StatusTarget::Steer,
+                    cancellation,
+                )
                 .await
                 .map_err(context_error)
                 .map(|slots| {
