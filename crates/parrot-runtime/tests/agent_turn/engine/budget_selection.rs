@@ -3,7 +3,6 @@
 use super::*;
 use parrot_domain::contracts::async_ops::{Cancelled, Clock};
 use parrot_provider::compaction::{CompactionSettings, Compactor};
-use parrot_runtime::active_work::status::RuntimeStatus;
 use parrot_runtime::active_work::status::RuntimeStatusProvider;
 use parrot_runtime::active_work::status::StatusQuery;
 use std::time::{Instant, SystemTime};
@@ -64,11 +63,11 @@ impl Clock for FixedStatusClock {
 }
 /// Offers the real runtime status slots, including the context reminder, so the
 /// end-to-end test exercises the actual band hash through the engine estimator.
-struct RealReminderStatus(Arc<RuntimeStatus>);
+struct RealReminderStatus(Arc<RuntimeStatusProvider>);
 impl RealReminderStatus {
     fn new() -> Arc<Self> {
         Arc::new(Self(Arc::new(
-            RuntimeStatus::new(
+            RuntimeStatusProvider::new(
                 templates(),
                 Arc::new(FixedStatusClock),
                 SystemTime::UNIX_EPOCH,

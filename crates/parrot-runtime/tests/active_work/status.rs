@@ -886,7 +886,7 @@ async fn runtime_tree_changes_do_not_trigger_status_steering() {
         ..RuntimeTreeSnapshot::default()
     })));
     let runtime = Arc::new(
-        RuntimeStatus::new(
+        RuntimeStatusProvider::new(
             catalog(""),
             clock(),
             SystemTime::UNIX_EPOCH,
@@ -998,7 +998,7 @@ async fn runtime_tree_reports_idle_root_custom_model_cycles_and_unknown_owners_w
 }
 #[tokio::test]
 async fn runtime_status_preserves_additional_provider_order_exclusions_and_per_call_isolation() {
-    let runtime = RuntimeStatus::new(
+    let runtime = RuntimeStatusProvider::new(
         catalog(""),
         clock(),
         SystemTime::UNIX_EPOCH,
@@ -1078,7 +1078,8 @@ async fn runtime_status_preserves_additional_provider_order_exclusions_and_per_c
 }
 #[tokio::test]
 async fn status_rejects_invalid_profile_keys() {
-    let runtime = RuntimeStatus::new(catalog(""), clock(), SystemTime::UNIX_EPOCH, vec![]).unwrap();
+    let runtime =
+        RuntimeStatusProvider::new(catalog(""), clock(), SystemTime::UNIX_EPOCH, vec![]).unwrap();
     let mut bad = query();
     bad.profile = "bad profile".into();
     assert!(
@@ -1101,7 +1102,7 @@ async fn status_rejects_invalid_profile_keys() {
 async fn bound_context_status_uses_actual_full_status_and_preserves_snapshot_and_cancellation() {
     use parrot_runtime::compaction::ContextError;
     let runtime = Arc::new(
-        RuntimeStatus::new(
+        RuntimeStatusProvider::new(
             catalog(""),
             clock(),
             SystemTime::UNIX_EPOCH,
@@ -1442,8 +1443,9 @@ async fn registry_runtime_tree_source_missing_process_service_is_error_not_silen
 }
 #[tokio::test]
 async fn context_slot_merges_usage_line_with_once_per_band_reminder() {
-    let runtime =
-        Arc::new(RuntimeStatus::new(catalog(""), clock(), SystemTime::UNIX_EPOCH, vec![]).unwrap());
+    let runtime = Arc::new(
+        RuntimeStatusProvider::new(catalog(""), clock(), SystemTime::UNIX_EPOCH, vec![]).unwrap(),
+    );
     let snapshot = ContextSnapshot::new(550, 1000, Some(55), 90);
     let context_key = parrot_core::StatusKey::new("runtime:context");
 

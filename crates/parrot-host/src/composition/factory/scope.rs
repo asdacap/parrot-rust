@@ -56,8 +56,8 @@ use parrot_runtime::{
         progress::{AgentProgress, ProgressBlocker, ProgressSnapshotPublisher},
         runtime_tree::{RegistryRuntimeTreeSource, RuntimeTreeStatusProvider},
         status::{
-            RuntimeStatus, RuntimeStatusProvider, StatusError, StatusObservation, StatusProvider,
-            StatusQuery, StatusResult, StatusTarget,
+            RuntimeStatusProvider, StatusError, StatusObservation, StatusProvider, StatusQuery,
+            StatusResult, StatusTarget,
         },
     },
     agent_turn::{
@@ -741,7 +741,7 @@ impl<S: RestrictableAccessSnapshot + 'static> SelectionSource<S> for RoutedSelec
 }
 
 pub struct ScopedTurnStatus<S: RestrictableAccessSnapshot + 'static> {
-    pub runtime: Arc<RuntimeStatus>,
+    pub runtime: Arc<RuntimeStatusProvider>,
     identity: Arc<AgentIdentity>,
     modes: Arc<UserSessionModes<S>>,
     configuration: Arc<Configuration>,
@@ -794,7 +794,7 @@ impl<S: RestrictableAccessSnapshot + 'static> TurnStatus<S> for ScopedTurnStatus
 }
 
 struct ScopedModeStatus {
-    runtime: Arc<RuntimeStatus>,
+    runtime: Arc<RuntimeStatusProvider>,
     query: StatusQuery,
     prompt: ModeResult<String>,
 }
@@ -1347,7 +1347,7 @@ where
                     templates: self.user.templates.clone(),
                 });
                 let runtime_status = Arc::new(
-                    RuntimeStatus::new(
+                    RuntimeStatusProvider::new(
                         self.user.templates.clone(),
                         self.config.clock.clone(),
                         self.user.started_at,

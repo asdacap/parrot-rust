@@ -686,37 +686,81 @@ pub fn format_tokens(count: i64) -> String {
 
 /// Captures belong to the calling real session/selection; no last-observation
 /// state is retained here. Each call receives its own immutable context/usage.
-pub struct RuntimeStatus {
+pub(crate) struct RuntimeStatus {
     templates: Arc<PromptTemplateCatalog>,
     registry: Arc<StatusRegistry>,
 }
-/// Creates the status seam bound to one turn's identity. The query and the
-/// profile prompt are captured at creation; the usage snapshot is supplied
-/// per slots call afterwards.
-pub trait RuntimeStatusProvider: Send + Sync {
-    fn create(
-        &self,
-        query: StatusQuery,
-        profile_prompt: String,
-    ) -> Arc<dyn crate::compaction::ContextStatus>;
+/// The status provider one agent session holds. Composes the engine at
+/// creation, binds the steering seam per turn, and renders the tool and
+/// live surfaces. The steering seam captures the query and the profile prompt
+/// at creation; the usage snapshot is supplied per slots call afterwards.
+pub struct RuntimeStatusProvider {
+    engine: RuntimeStatus,
 }
-impl RuntimeStatusProvider for RuntimeStatus {
-    fn create(
+impl RuntimeStatusProvider {
+    /// Composes the status engine for one agent session. This is the
+    /// composition factory entry; every other caller receives a composed
+    /// provider.
+    pub fn new(
+        templates: Arc<PromptTemplateCatalog>,
+        clock: Arc<dyn Clock>,
+        started_at: SystemTime,
+        providers: Vec<Arc<dyn StatusProvider>>,
+    ) -> Result<Self, StatusError> {
+        Ok(Self {
+            engine: RuntimeStatus::new(templates, clock, started_at, providers)?,
+        })
+    }
+    /// Binds the steering seam for one turn's identity. The usage snapshot is
+    /// supplied per slots call.
+    pub fn create(
         &self,
         query: StatusQuery,
         profile_prompt: String,
     ) -> Arc<dyn crate::compaction::ContextStatus> {
         Arc::new(BoundContextStatus {
-            registry: self.registry.clone(),
-            templates: self.templates.clone(),
+            registry: self.engine.registry.clone(),
+            templates: self.engine.templates.clone(),
             query,
             profile_prompt,
         })
     }
+    pub async fn observe_runtime(
+        &self,
+        query: &StatusQuery,
+        context: ContextSnapshot,
+        cancellation: &dyn Cancellation,
+    ) -> StatusResult<String> {
+        self.engine
+            .observe_runtime(query, context, cancellation)
+            .await
+    }
+    pub async fn observe_statistics(
+        &self,
+        query: &StatusQuery,
+        statistics: AgentSessionStatisticsSnapshot,
+        cancellation: &dyn Cancellation,
+    ) -> StatusResult<String> {
+        self.engine
+            .observe_statistics(query, statistics, cancellation)
+            .await
+    }
+    pub async fn observe_live(
+        &self,
+        query: &StatusQuery,
+        profile_prompt: &str,
+        context: ContextSnapshot,
+        statistics: AgentSessionStatisticsSnapshot,
+        cancellation: &dyn Cancellation,
+    ) -> StatusResult<String> {
+        self.engine
+            .observe_live(query, profile_prompt, context, statistics, cancellation)
+            .await
+    }
 }
 
 impl RuntimeStatus {
-    pub fn new(
+    pub(crate) fn new(
         templates: Arc<PromptTemplateCatalog>,
         clock: Arc<dyn Clock>,
         started_at: SystemTime,
@@ -738,7 +782,7 @@ impl RuntimeStatus {
             registry: Arc::new(StatusRegistry::new(all)?),
         })
     }
-    pub async fn observe_runtime(
+    pub(crate) async fn observe_runtime(
         &self,
         query: &StatusQuery,
         context: ContextSnapshot,
@@ -758,7 +802,7 @@ impl RuntimeStatus {
             )
             .await
     }
-    pub async fn observe_statistics(
+    pub(crate) async fn observe_statistics(
         &self,
         query: &StatusQuery,
         statistics: AgentSessionStatisticsSnapshot,
@@ -772,7 +816,7 @@ impl RuntimeStatus {
         .observe(query, None, &[], StatusTarget::Tool, cancellation)
         .await
     }
-    pub async fn observe_live(
+    pub(crate) async fn observe_live(
         &self,
         query: &StatusQuery,
         profile_prompt: &str,

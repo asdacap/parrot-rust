@@ -306,10 +306,10 @@ async fn invalid_compact_target_returns_tool_error_without_compaction() {
 // The retained status tool must use the activity+context registry, not the full
 // observation (generated time, selection and profile) used for prompt injection.
 use parrot_domain::values::accounting::AgentSessionStatistics;
-use parrot_runtime::active_work::status::{RuntimeStatus, StatusError, StatusQuery};
+use parrot_runtime::active_work::status::{RuntimeStatusProvider, StatusError, StatusQuery};
 struct StatusAncillary {
     other: Ancillary,
-    runtime: Arc<RuntimeStatus>,
+    runtime: Arc<RuntimeStatusProvider>,
     statistics: AgentSessionStatistics,
     observed: Mutex<Vec<ContextSnapshot>>,
     prompt_probe: Option<Arc<SessionPrompt>>,
@@ -412,7 +412,7 @@ fn status_bridge_with_prompt(prompt_probe: Option<Arc<SessionPrompt>>) -> Status
     let ancillary = Arc::new(StatusAncillary {
         other: Ancillary,
         runtime: Arc::new(
-            RuntimeStatus::new(
+            RuntimeStatusProvider::new(
                 templates(),
                 Arc::new(TestClock),
                 SystemTime::UNIX_EPOCH,
