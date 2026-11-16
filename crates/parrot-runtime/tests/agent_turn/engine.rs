@@ -781,11 +781,14 @@ struct Step {
 }
 impl Step {
     fn complete(text: &str) -> Self {
+        Self::complete_with_input(text, 17)
+    }
+    fn complete_with_input(text: &str, input_tokens: i32) -> Self {
         Self {
             completion: Ok(Completion {
                 assistant_text: text.into(),
                 finish_reason: "stop".into(),
-                input_tokens: 17,
+                input_tokens,
                 output_tokens: 9,
                 ..Completion::default()
             }),

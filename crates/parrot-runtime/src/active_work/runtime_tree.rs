@@ -1,6 +1,7 @@
 //! Runtime tree observations from retained scopes and their actual scoped services.
 use super::status::{
-    StatusError, StatusObservation, StatusProvider, StatusQuery, StatusResult, ordinal, render,
+    StatusError, StatusObservation, StatusProvider, StatusQuery, StatusResult, StatusTarget,
+    ordinal, render,
 };
 use crate::{
     agent_turn::services::SessionIdentity,
@@ -83,6 +84,9 @@ pub struct RuntimeTreeStatusProvider {
 impl StatusProvider for RuntimeTreeStatusProvider {
     fn key(&self) -> &str {
         "runtime:queues"
+    }
+    fn should_show(&self, _surface: StatusTarget) -> bool {
+        true
     }
     fn observe<'a>(
         &'a self,

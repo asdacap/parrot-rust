@@ -977,7 +977,7 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
     let fixture = Fixture::new();
     let provider = Scripted::new(vec![
         Step::complete("first answer"),
-        Step::complete("second answer"),
+        Step::complete_with_input("second answer", 5_200),
         Step::complete("third answer"),
     ]);
     let runtime = BudgetRuntime::compose(
@@ -1028,23 +1028,18 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
     let standing = runtime.read_standing_statuses().await;
     assert!(standing.contains_key(&parrot_core::StatusKey::new("runtime:context")));
     assert!(standing.contains_key(&parrot_core::StatusKey::new("profile:original")));
-    let reminder = {
+    {
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
         assert!(requests[0].messages.iter().any(|message| {
             message.role == sessions::Role::System
                 && message.content().contains("Standing profile instructions")
         }));
-        let message = requests[1].messages.last().unwrap();
-        assert!(!message.content().contains("Standing profile instructions"));
-        assert_eq!(message.role, sessions::Role::System);
-        assert!(
-            message
-                .content()
-                .contains("Context usage entered the 50% notification band")
-        );
-        message.content().to_owned()
-    };
+        assert!(!requests[1].messages.iter().any(|message| {
+            message.role == sessions::Role::System
+                && message.content().contains("notification band")
+        }));
+    }
 
     let third = runtime
         .send("third prompt", protocol::Delivery::DELIVERY_STEER)
@@ -1053,9 +1048,22 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
         bounded(third.execution.join()).await.unwrap().status,
         ExecutionStatus::Succeeded
     );
-    {
+    let reminder = {
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 3);
+        let message = requests[2]
+            .messages
+            .iter()
+            .find(|message| {
+                message.role == sessions::Role::System
+                    && message.content().contains("50% notification band")
+            })
+            .unwrap();
+        assert!(!message.content().contains("Standing profile instructions"));
+        message.content().to_owned()
+    };
+    {
+        let requests = provider.requests.lock().unwrap();
         assert_eq!(
             requests[2]
                 .messages

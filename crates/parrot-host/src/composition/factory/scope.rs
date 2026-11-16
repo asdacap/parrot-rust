@@ -57,7 +57,7 @@ use parrot_runtime::{
         runtime_tree::{RegistryRuntimeTreeSource, RuntimeTreeStatusProvider},
         status::{
             RuntimeStatus, StatusError, StatusObservation, StatusProvider, StatusQuery,
-            StatusResult,
+            StatusResult, StatusTarget,
         },
     },
     agent_turn::{
@@ -686,6 +686,9 @@ struct TaskStatus {
 impl StatusProvider for TaskStatus {
     fn key(&self) -> &str {
         "runtime:agent-tasks"
+    }
+    fn should_show(&self, _surface: StatusTarget) -> bool {
+        true
     }
     fn observe<'a>(
         &'a self,

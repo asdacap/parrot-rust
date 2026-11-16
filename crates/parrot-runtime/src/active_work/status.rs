@@ -103,8 +103,22 @@ pub struct StatusSlot {
     pub is_auto_update: bool,
 }
 
+/// One of the status consumers that may offer a slot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StatusTarget {
+    /// Only the steering machinery at injection safe points.
+    Steer,
+    /// Only the status tool rendering on demand.
+    Tool,
+}
+
 pub trait StatusProvider: Send + Sync {
+    /// Names the slot for the registry. Keys must be unique within a registry.
     fn key(&self) -> &str;
+    /// Declares whether this slot is offered for the requested surface. This
+    /// decides membership only; the rendering is identical wherever shown.
+    fn should_show(&self, surface: StatusTarget) -> bool;
+    /// Renders one slot observation on demand from the provider's own state.
     fn observe<'a>(
         &'a self,
         query: &'a StatusQuery,
@@ -128,15 +142,18 @@ impl StatusRegistry {
         Ok(Self { providers })
     }
 
+    /// Observes every provider whose target offers the requested surface once
+    /// and joins the slot texts in registry key order.
     pub async fn observe(
         &self,
         query: &StatusQuery,
         profile: Option<&dyn StatusProvider>,
         additional: &[&dyn StatusProvider],
+        target: StatusTarget,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
         let slots = self
-            .observe_slots(query, profile, additional, cancellation)
+            .observe_slots(query, profile, additional, target, cancellation)
             .await?;
         Ok(slots
             .iter()
@@ -145,17 +162,23 @@ impl StatusRegistry {
             .join("\n\n"))
     }
 
-    /// Observes every provider once and returns the resulting slots in registry
-    /// key order. The join poll semantics match `observe` above.
+    /// Observes every provider whose target offers the requested surface once
+    /// and returns the resulting slots in registry key order. The join poll
+    /// semantics match `observe` above.
     pub async fn observe_slots(
         &self,
         query: &StatusQuery,
         profile: Option<&dyn StatusProvider>,
         additional: &[&dyn StatusProvider],
+        target: StatusTarget,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<Vec<StatusSlot>> {
-        let mut providers: Vec<&dyn StatusProvider> =
-            self.providers.iter().map(Arc::as_ref).collect();
+        let mut providers: Vec<&dyn StatusProvider> = self
+            .providers
+            .iter()
+            .map(Arc::as_ref)
+            .filter(|provider| provider.should_show(target))
+            .collect();
         if let Some(extra) = profile {
             validate_key(extra.key(), "profile provider").map_err(OperationError::Failed)?;
             if providers
@@ -293,6 +316,9 @@ impl StatusProvider for ProfileStatusProvider {
     fn key(&self) -> &str {
         &self.key
     }
+    fn should_show(&self, surface: StatusTarget) -> bool {
+        matches!(surface, StatusTarget::Steer)
+    }
     fn observe<'a>(
         &'a self,
         _query: &'a StatusQuery,
@@ -316,6 +342,9 @@ pub struct SelectionStatusProvider {
 impl StatusProvider for SelectionStatusProvider {
     fn key(&self) -> &str {
         "runtime:selection"
+    }
+    fn should_show(&self, surface: StatusTarget) -> bool {
+        matches!(surface, StatusTarget::Steer)
     }
     fn observe<'a>(
         &'a self,
@@ -360,6 +389,9 @@ pub struct GeneratedTimeStatusProvider {
 impl StatusProvider for GeneratedTimeStatusProvider {
     fn key(&self) -> &str {
         "runtime:generated-time"
+    }
+    fn should_show(&self, surface: StatusTarget) -> bool {
+        matches!(surface, StatusTarget::Steer)
     }
     fn observe<'a>(
         &'a self,
@@ -540,6 +572,9 @@ impl StatusProvider for ContextStatusProvider {
     fn key(&self) -> &str {
         "runtime:context"
     }
+    fn should_show(&self, _surface: StatusTarget) -> bool {
+        true
+    }
     fn observe<'a>(
         &'a self,
         query: &'a StatusQuery,
@@ -566,30 +601,6 @@ impl StatusProvider for ContextStatusProvider {
     }
 }
 
-/// Usage-line-only observation for the runtime-tree view, which never renders
-/// the band reminder. The stable identity never changes and this slot never
-/// triggers steering.
-struct ContextUsageStatusProvider {
-    snapshot: ContextSnapshot,
-    templates: Arc<PromptTemplateCatalog>,
-}
-impl StatusProvider for ContextUsageStatusProvider {
-    fn key(&self) -> &str {
-        "runtime:context"
-    }
-    fn observe<'a>(
-        &'a self,
-        _query: &'a StatusQuery,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, StatusResult<StatusObservation>> {
-        Box::pin(async move {
-            check(cancellation)?;
-            render_usage_line(&self.snapshot, &self.templates, cancellation)
-                .map(|observation| observation.with_identity("context-usage:activity", false))
-        })
-    }
-}
-
 pub struct StatisticsStatusProvider {
     pub snapshot: AgentSessionStatisticsSnapshot,
     pub templates: Arc<PromptTemplateCatalog>,
@@ -597,6 +608,9 @@ pub struct StatisticsStatusProvider {
 impl StatusProvider for StatisticsStatusProvider {
     fn key(&self) -> &str {
         "runtime:statistics"
+    }
+    fn should_show(&self, surface: StatusTarget) -> bool {
+        matches!(surface, StatusTarget::Tool)
     }
     fn observe<'a>(
         &'a self,
@@ -672,8 +686,7 @@ pub fn format_tokens(count: i64) -> String {
 /// state is retained here. Each call receives its own immutable context/usage.
 pub struct RuntimeStatus {
     templates: Arc<PromptTemplateCatalog>,
-    activity: StatusRegistry,
-    full: StatusRegistry,
+    registry: StatusRegistry,
 }
 impl RuntimeStatus {
     /// Binds only immutable query/profile identity, not a cached context snapshot.
@@ -695,8 +708,7 @@ impl RuntimeStatus {
         started_at: SystemTime,
         providers: Vec<Arc<dyn StatusProvider>>,
     ) -> Result<Self, StatusError> {
-        let activity = StatusRegistry::new(providers.clone())?;
-        let mut full: Vec<Arc<dyn StatusProvider>> = vec![
+        let mut all: Vec<Arc<dyn StatusProvider>> = vec![
             Arc::new(GeneratedTimeStatusProvider {
                 clock,
                 started_at,
@@ -706,11 +718,10 @@ impl RuntimeStatus {
                 templates: templates.clone(),
             }),
         ];
-        full.extend(providers);
+        all.extend(providers);
         Ok(Self {
             templates,
-            activity,
-            full: StatusRegistry::new(full)?,
+            registry: StatusRegistry::new(all)?,
         })
     }
     pub async fn observe_runtime(
@@ -719,12 +730,18 @@ impl RuntimeStatus {
         context: ContextSnapshot,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
-        let context_provider = ContextUsageStatusProvider {
+        let context_provider = ContextStatusProvider {
             snapshot: context,
             templates: self.templates.clone(),
         };
-        self.activity
-            .observe(query, None, &[&context_provider], cancellation)
+        self.registry
+            .observe(
+                query,
+                None,
+                &[&context_provider],
+                StatusTarget::Tool,
+                cancellation,
+            )
             .await
     }
     pub async fn observe_statistics(
@@ -738,7 +755,7 @@ impl RuntimeStatus {
             templates: self.templates.clone(),
         })])
         .map_err(OperationError::Failed)?
-        .observe(query, None, &[], cancellation)
+        .observe(query, None, &[], StatusTarget::Tool, cancellation)
         .await
     }
     pub async fn observe_slots(
@@ -752,7 +769,7 @@ impl RuntimeStatus {
             snapshot: context.clone(),
             templates: self.templates.clone(),
         };
-        self.full
+        self.registry
             .observe_slots(
                 query,
                 Some(&ProfileStatusProvider {
@@ -760,6 +777,7 @@ impl RuntimeStatus {
                     prompt: profile_prompt.to_owned(),
                 }),
                 &[&context_provider],
+                StatusTarget::Steer,
                 cancellation,
             )
             .await
@@ -779,8 +797,14 @@ impl RuntimeStatus {
             snapshot: context,
             templates: self.templates.clone(),
         };
-        self.full
-            .observe(query, Some(&profile), &[&context_provider], cancellation)
+        self.registry
+            .observe(
+                query,
+                Some(&profile),
+                &[&context_provider],
+                StatusTarget::Steer,
+                cancellation,
+            )
             .await
     }
 }

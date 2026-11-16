@@ -95,6 +95,9 @@ impl StatusProvider for Scripted {
     fn key(&self) -> &str {
         &self.key
     }
+    fn should_show(&self, _surface: StatusTarget) -> bool {
+        true
+    }
     fn observe<'a>(
         &'a self,
         query: &'a StatusQuery,
@@ -136,14 +139,26 @@ async fn observe_composes_available_status_by_key_and_resamples_providers() {
     };
     assert_eq!(
         registry
-            .observe(&query, Some(&profile), &[], &NeverCancelled)
+            .observe(
+                &query,
+                Some(&profile),
+                &[],
+                StatusTarget::Tool,
+                &NeverCancelled
+            )
             .await
             .unwrap(),
         "profile prompt\n\nselection 1"
     );
     assert_eq!(
         registry
-            .observe(&query, Some(&profile), &[], &NeverCancelled)
+            .observe(
+                &query,
+                Some(&profile),
+                &[],
+                StatusTarget::Tool,
+                &NeverCancelled
+            )
             .await
             .unwrap(),
         "profile prompt\n\nselection 2"
@@ -175,6 +190,7 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
                     &query(),
                     Some(Scripted::new(key, "x").as_ref()),
                     &[],
+                    StatusTarget::Tool,
                     &NeverCancelled
                 )
                 .await
@@ -186,6 +202,7 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
                     &query(),
                     None,
                     &[Scripted::new(key, "x").as_ref()],
+                    StatusTarget::Tool,
                     &NeverCancelled
                 )
                 .await
@@ -197,13 +214,25 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
     let registry = StatusRegistry::new(vec![first.clone()]).unwrap();
     assert!(
         registry
-            .observe(&query(), Some(first.as_ref()), &[], &NeverCancelled)
+            .observe(
+                &query(),
+                Some(first.as_ref()),
+                &[],
+                StatusTarget::Tool,
+                &NeverCancelled
+            )
             .await
             .is_err()
     );
     assert!(
         registry
-            .observe(&query(), None, &[first.as_ref()], &NeverCancelled)
+            .observe(
+                &query(),
+                None,
+                &[first.as_ref()],
+                StatusTarget::Tool,
+                &NeverCancelled
+            )
             .await
             .is_err()
     );
@@ -214,6 +243,7 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
                 &query(),
                 Some(extra.as_ref()),
                 &[extra.as_ref()],
+                StatusTarget::Tool,
                 &NeverCancelled
             )
             .await
@@ -222,7 +252,7 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
     assert_eq!(first.calls.load(Ordering::SeqCst), 0);
     assert_eq!(
         registry
-            .observe(&query(), None, &[], &NeverCancelled)
+            .observe(&query(), None, &[], StatusTarget::Tool, &NeverCancelled)
             .await
             .unwrap(),
         "x"
@@ -238,7 +268,7 @@ async fn registry_preserves_utf16_ordinal_order_and_case_sensitive_namespaces() 
     .unwrap();
     assert_eq!(
         registry
-            .observe(&query(), None, &[], &NeverCancelled)
+            .observe(&query(), None, &[], StatusTarget::Tool, &NeverCancelled)
             .await
             .unwrap(),
         "upper\n\nastral\n\nbmp"
@@ -253,6 +283,9 @@ struct Rendezvous {
 impl StatusProvider for Rendezvous {
     fn key(&self) -> &str {
         self.key
+    }
+    fn should_show(&self, _surface: StatusTarget) -> bool {
+        true
     }
     fn observe<'a>(
         &'a self,
@@ -294,7 +327,7 @@ async fn registry_starts_all_observations_and_joins_errors_with_provider_source(
     .unwrap();
     let error = tokio::time::timeout(
         Duration::from_secs(2),
-        registry.observe(&query(), None, &[], &NeverCancelled),
+        registry.observe(&query(), None, &[], StatusTarget::Tool, &NeverCancelled),
     )
     .await
     .expect("serial observation deadlocked")
@@ -320,6 +353,9 @@ impl StatusProvider for CancelProvider {
     fn key(&self) -> &str {
         "runtime:cancel"
     }
+    fn should_show(&self, _surface: StatusTarget) -> bool {
+        true
+    }
     fn observe<'a>(
         &'a self,
         _: &'a StatusQuery,
@@ -337,7 +373,9 @@ async fn registry_propagates_actual_caller_cancellation_without_fabricating_a_se
     let cancel = Signal::new();
     cancel.cancel();
     assert!(matches!(
-        registry.observe(&query(), None, &[], &cancel).await,
+        registry
+            .observe(&query(), None, &[], StatusTarget::Tool, &cancel)
+            .await,
         Err(OperationError::Cancelled)
     ));
     let templates = catalog("");
@@ -1003,9 +1041,11 @@ async fn runtime_status_preserves_additional_provider_order_exclusions_and_per_c
             &NeverCancelled
         )
     );
+    let first = first.unwrap();
+    let second = second.unwrap();
     for (text, present, absent) in [
-        (first.unwrap(), "10% used", "80% used"),
-        (second.unwrap(), "80% used", "10% used"),
+        (&first, "10% used", "80% used"),
+        (&second, "80% used", "10% used"),
     ] {
         assert!(text.contains(present));
         assert!(!text.contains(absent));
@@ -1014,11 +1054,12 @@ async fn runtime_status_preserves_additional_provider_order_exclusions_and_per_c
             "Active profile:",
             "Model:",
             "The time is:",
-            "notification band",
         ] {
             assert!(!text.contains(excluded));
         }
     }
+    assert!(!first.contains("notification band"));
+    assert!(second.contains("Context usage entered the 80% notification band"));
     let statistics = runtime
         .observe_statistics(
             &query,
@@ -1134,6 +1175,9 @@ impl StatusProvider for ImmediateFailure {
             "runtime:z-failure"
         }
     }
+    fn should_show(&self, _surface: StatusTarget) -> bool {
+        true
+    }
     fn observe<'a>(
         &'a self,
         _: &'a StatusQuery,
@@ -1154,7 +1198,7 @@ async fn registry_wraps_foreign_cancellation_and_faults_take_precedence_after_jo
         StatusRegistry::new(vec![Arc::new(ImmediateFailure { cancelled: true })]).unwrap();
     assert_eq!(
         registry
-            .observe(&query(), None, &[], &NeverCancelled)
+            .observe(&query(), None, &[], StatusTarget::Tool, &NeverCancelled)
             .await
             .unwrap_err()
             .to_string(),
@@ -1169,7 +1213,7 @@ async fn registry_wraps_foreign_cancellation_and_faults_take_precedence_after_jo
     cancelled.cancel();
     assert_eq!(
         registry
-            .observe(&query(), None, &[], &cancelled)
+            .observe(&query(), None, &[], StatusTarget::Tool, &cancelled)
             .await
             .unwrap_err()
             .to_string(),
