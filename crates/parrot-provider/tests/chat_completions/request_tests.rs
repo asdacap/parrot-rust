@@ -871,3 +871,36 @@ fn both_reasoning_fields_round_trip_from_stream_completion() {
     assert_eq!(encoded["messages"][0]["reasoning_content"], "think more");
     assert_eq!(encoded["messages"][0]["reasoning"], "alternate field");
 }
+
+#[test]
+fn batch_body_matches_sync_body_except_streaming_keys() {
+    let request = Request {
+        model: "vendor/model".into(),
+        instructions: "follow instructions".into(),
+        messages: vec![message(Role::User, "hello")],
+        tools: vec![Tool {
+            name: "weather".into(),
+            description: "forecast".into(),
+            schema: r#"{"type":"object"}"#.into(),
+        }],
+        effort: Some("xhigh".into()),
+        preferences: r#"{"allow_fallbacks":false}"#.into(),
+        metadata: true,
+        max: 4096,
+    };
+    let streaming: Value =
+        serde_json::from_slice(&prepare(&request, "test").unwrap().body).unwrap();
+    let batch: Value =
+        serde_json::from_slice(&prepare_batch_body(&request, "test").unwrap().body).unwrap();
+    assert_eq!(streaming["stream"], true);
+    assert_eq!(streaming["stream_options"]["include_usage"], true);
+    assert!(batch.get("stream").is_none());
+    assert!(batch.get("stream_options").is_none());
+    let mut without_stream = streaming.clone();
+    without_stream.as_object_mut().unwrap().remove("stream");
+    without_stream
+        .as_object_mut()
+        .unwrap()
+        .remove("stream_options");
+    assert_eq!(batch, without_stream);
+}

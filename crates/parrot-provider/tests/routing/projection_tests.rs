@@ -8,13 +8,49 @@ async fn frozen_input_catalogue_runs_all_families_without_oracle_access() {
     let output: Value = serde_json::from_str(&projector::project(input).await.unwrap()).unwrap();
     let inputs = source["cases"].as_array().unwrap();
     let observations = output["cases"].as_array().unwrap();
-    assert_eq!(inputs.len(), 165);
+    assert_eq!(inputs.len(), 166);
     assert_eq!(observations.len(), inputs.len());
     for (input, output) in inputs.iter().zip(observations) {
         assert_eq!(output["case_id"], input["case_id"]);
         assert_eq!(output["family"], input["family"]);
         assert!(output["observation"].is_object(), "{}", input["case_id"]);
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn builder_registry_builds_the_openrouter_batch_provider() {
+    let input = include_str!("fixtures/source/inputs.json");
+    let output: Value = serde_json::from_str(&projector::project(input).await.unwrap()).unwrap();
+    let case = output["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["case_id"] == "t32-builder-openrouter-batch")
+        .unwrap();
+    let observation = &case["observation"];
+    assert!(
+        observation["buildable"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == "openrouter-batch")
+    );
+    assert!(
+        observation["provider_ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == "openrouter-batch")
+    );
+    assert!(observation["error"].is_null());
+    let batched = observation["catalogues"]["openrouter-batch"]
+        .as_array()
+        .unwrap();
+    assert!(
+        batched
+            .iter()
+            .any(|seed| seed["id"] == "vendor/batched" && seed["provider_id"] == "openrouter")
+    );
 }
 
 #[tokio::test(start_paused = true)]

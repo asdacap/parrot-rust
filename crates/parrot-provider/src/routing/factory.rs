@@ -8,6 +8,7 @@ use crate::{
     anthropic::AnthropicProvider,
     catalogs::{self, Model, ModelCapabilities, ModelMetadataFields, ModelVariant},
     http_stream::HttpTransport,
+    openrouter_batch::OpenRouterBatchProvider,
     responses_websocket::Connector,
     sessions::{
         Error, Provider,
@@ -28,6 +29,7 @@ pub enum ProviderImplementation {
     OpenAi,
     ChatGpt,
     OpenRouter,
+    OpenRouterBatch,
     OpenCodeGo,
     KimiCode,
     KimiApi,
@@ -38,12 +40,14 @@ impl ProviderImplementation {
         match config.provider_type.as_str() {
             "anthropic" => return Self::Anthropic,
             "openrouter" => return Self::OpenRouter,
+            "openrouter-batch" => return Self::OpenRouterBatch,
             _ => {}
         }
         match id {
             "openai" => Self::OpenAi,
             "chatgpt" => Self::ChatGpt,
             "openrouter" => Self::OpenRouter,
+            "openrouter-batch" => Self::OpenRouterBatch,
             "opencode-go" => Self::OpenCodeGo,
             "kimi-code" => Self::KimiCode,
             "kimi-api" => Self::KimiApi,
@@ -120,7 +124,7 @@ pub fn build_provider(inputs: ProviderBuildInputs<'_>) -> Result<BuiltProvider, 
         _ => {
             if !matches!(
                 config.provider_type.as_str(),
-                "" | "compatible" | "openai-compatible" | "openrouter"
+                "" | "compatible" | "openai-compatible" | "openrouter" | "openrouter-batch"
             ) {
                 return Err(Error::Provider(format!(
                     "provider: unsupported provider type \"{}\" for \"{}\"",
@@ -137,6 +141,14 @@ pub fn build_provider(inputs: ProviderBuildInputs<'_>) -> Result<BuiltProvider, 
                     )));
                 }
             };
+            if implementation == ProviderImplementation::OpenRouterBatch
+                && protocol != Protocol::ChatCompletions
+            {
+                return Err(Error::Provider(format!(
+                    "provider: unsupported protocol \"{}\" for \"{}\"",
+                    config.protocol, inputs.id
+                )));
+            }
             let mut options = CompatibleOptions::new(
                 inputs.id,
                 &config.base_url,
@@ -169,6 +181,10 @@ pub fn build_provider(inputs: ProviderBuildInputs<'_>) -> Result<BuiltProvider, 
                         .provider_preferences
                         .clone_from(&config.provider_preferences);
                 }
+                ProviderImplementation::OpenRouterBatch => {
+                    options.decoder =
+                        CatalogDecoderSelection::Legacy(catalogs::OpenRouterModelDecoder::decode);
+                }
                 ProviderImplementation::KimiCode => {
                     options.decoder =
                         CatalogDecoderSelection::Legacy(catalogs::KimiModelDecoder::decode)
@@ -183,13 +199,15 @@ pub fn build_provider(inputs: ProviderBuildInputs<'_>) -> Result<BuiltProvider, 
             usage_options.allow_insecure_localhost = options.allow_insecure_localhost;
             usage_options.allow_insecure_remote = options.allow_insecure_remote;
             let usage_transport = inputs.transport.clone();
-            let compatible: Arc<dyn Provider> =
-                Arc::new(OpenAICompatibleProvider::new_with_images(
-                    options,
-                    inputs.transport,
-                    inputs.images,
-                    inputs.connector,
-                )?);
+            let api_key = options.api_key_source.clone();
+            let batch_transport = inputs.transport.clone();
+            let inner = Arc::new(OpenAICompatibleProvider::new_with_images(
+                options,
+                inputs.transport,
+                inputs.images,
+                inputs.connector,
+            )?);
+            let compatible: Arc<dyn Provider> = inner.clone();
             match implementation {
                 ProviderImplementation::OpenCodeGo => Arc::new(UsageReportingProvider::new(
                     compatible,
@@ -202,6 +220,15 @@ pub fn build_provider(inputs: ProviderBuildInputs<'_>) -> Result<BuiltProvider, 
                     compatible,
                     Arc::new(KimiUsageReporter::new(&usage_options, usage_transport)?),
                 )),
+                ProviderImplementation::OpenRouterBatch => Arc::new(OpenRouterBatchProvider::new(
+                    inputs.id,
+                    &config.base_url,
+                    config.allow_insecure_localhost,
+                    config.allow_insecure_remote,
+                    api_key,
+                    batch_transport,
+                    inner,
+                )?),
                 _ => compatible,
             }
         }

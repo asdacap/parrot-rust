@@ -490,3 +490,104 @@ async fn missing_finish_is_not_promoted_to_successful_completion() {
     ));
     assert_eq!(stream.next(&never).await.unwrap(), None);
 }
+
+fn completion_body(body: &str, provider_id: &str) -> ChatCompletion {
+    decode_completion_body(body, provider_id).unwrap()
+}
+
+#[test]
+fn full_body_decodes_text_finish_and_usage() {
+    let completion = completion_body(
+        r#"{"id":"gen-1","object":"chat.completion","model":"vendor/model","choices":[{"index":0,"message":{"role":"assistant","content":"hello world"},"finish_reason":"stop"}],"usage":{"prompt_tokens":11,"prompt_tokens_details":{"cached_tokens":5},"completion_tokens":3}}"#,
+        "p",
+    );
+    assert_eq!(completion.assistant_text, "hello world");
+    assert_eq!(completion.finish_reason, "stop");
+    assert_eq!(
+        (
+            completion.input_tokens,
+            completion.cached_input_tokens,
+            completion.output_tokens
+        ),
+        (11, 5, 3)
+    );
+    assert_eq!(completion.tool_calls, vec![]);
+    assert!(completion.provider_content.is_none());
+}
+
+#[test]
+fn full_body_decodes_complete_tool_calls_in_order() {
+    let completion = completion_body(
+        r#"{"choices":[
+            {"index":0,"message":{"role":"assistant","content":null,"tool_calls":[
+                {"id":"call_a","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Paris\"}"}},
+                {"id":"call_b","type":"function","function":{"name":"clock","arguments":"{\"zone\":\"utc\"}"}}
+            ]},"finish_reason":"tool_calls"}
+        ]}"#,
+        "p",
+    );
+    assert_eq!(completion.finish_reason, "tool_calls");
+    assert_eq!(
+        completion.tool_calls,
+        vec![
+            ToolCall {
+                id: "call_a".into(),
+                name: "weather".into(),
+                arguments_json: r#"{"city":"Paris"}"#.into(),
+            },
+            ToolCall {
+                id: "call_b".into(),
+                name: "clock".into(),
+                arguments_json: r#"{"zone":"utc"}"#.into(),
+            }
+        ]
+    );
+}
+
+#[test]
+fn full_body_decodes_reasoning_replay_and_signed_tool_calls() {
+    let completion = completion_body(
+        r#"{"choices":[{"index":0,"message":{"role":"assistant","reasoning":"thought out","tool_calls":[
+            {"id":"call_a","type":"function","function":{"name":"run","arguments":"{}"},"extra_content":{"google":{"thought_signature":"sig-1"}}}
+        ]},"finish_reason":"tool_calls"}]}"#,
+        "p",
+    );
+    let replay = completion.provider_content.unwrap();
+    assert_eq!(replay.provider_id, "p");
+    assert_eq!(replay.protocol, "chat-completions");
+    assert_eq!(replay.reasoning.as_deref(), Some("thought out"));
+    assert!(replay.reasoning_content.is_none());
+    assert_eq!(
+        replay.tool_calls,
+        vec![ToolCallReplay {
+            id: "call_a".into(),
+            thought_signature: "sig-1".into(),
+        }]
+    );
+}
+
+#[test]
+fn full_body_error_object_maps_to_provider_failure() {
+    let body = r#"{"error":{"type":"invalid_request_error","message":"max_tokens is greater than the model limit","code":400}}"#;
+    let error = decode_completion_body(body, "p").unwrap_err();
+    let ChatStreamError::Provider(failure) = error else {
+        unreachable!("body-level error becomes a provider failure");
+    };
+    assert_eq!(failure.error_type, "invalid_request_error");
+    assert_eq!(failure.error_code, "400");
+    assert_eq!(
+        failure.message,
+        "max_tokens is greater than the model limit"
+    );
+    assert_eq!(failure.response_body, body);
+}
+
+#[test]
+fn full_body_without_finish_reason_fails() {
+    let error = decode_completion_body(
+        r#"{"choices":[{"index":0,"message":{"role":"assistant","content":"partial"}}]}"#,
+        "p",
+    )
+    .unwrap_err();
+    assert!(matches!(error, ChatStreamError::UnexpectedEof));
+}
