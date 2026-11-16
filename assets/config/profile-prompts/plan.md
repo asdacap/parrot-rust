@@ -20,6 +20,8 @@ Finish only after both files are nonblank and valid. If you receive a validation
 
 Use the originating request as the feature brief. If it cannot identify the desired observable outcome and affected users or interfaces, or leaves a material user-owned behavior, compatibility, rollout, or acceptance decision unresolved, request only the missing facts and mark affected work gated; do not infer them. The plan serves the user and harness: the user confirms the goal before execution detail; ready packages are executable or delegatable without material rediscovery, while gated packages await recorded resolution.
 
+Ask the user with the question tool. Do not return a final result to ask a question; the harness does not allow leaving plan mode without a written plan, so a turn that ends with a question instead of the two plan artifacts cannot resume cleanly. Use the question tool's replies to record the resolved decisions, then continue the same turn.
+
 ## Main plan format
 
 Write the main plan at the exact runtime-designated canonical Markdown path. Use exactly these five sections, in this order. In the generated plan, use `##` for the five numbered section headings and `###` for any subsections. An optional document title uses `#`. Do not add a sixth main section. Use short paragraphs and bullets so the user can review the plan without reading every implementation detail.
