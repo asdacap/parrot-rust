@@ -9,7 +9,6 @@ pub mod image_artifact;
 pub mod lineage;
 pub mod progress;
 pub mod project_workspace;
-pub mod services;
 pub mod tools;
 
 pub use project_workspace::ProjectWorkspace;

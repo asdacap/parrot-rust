@@ -139,6 +139,16 @@ pub enum PathPlatform {
     MacOs,
 }
 
+impl PathPlatform {
+    pub fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::MacOs
+        } else {
+            Self::Unix
+        }
+    }
+}
+
 pub struct PlatformPath;
 
 impl PlatformPath {

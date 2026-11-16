@@ -1,5 +1,6 @@
-use super::{StatePaths, invalid, native_platform, normalize};
+use super::{StatePaths, invalid, normalize};
 use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
+use parrot_domain::values::config::PathPlatform;
 use parrot_domain::values::identifiers::UserSessionId;
 use std::collections::HashMap;
 use std::fs;
@@ -77,7 +78,7 @@ impl ApplicationRoots {
         normalize(
             &paths.state().join("sessions").join(id.value()),
             current_directory,
-            native_platform(),
+            PathPlatform::current(),
         )
     }
 }

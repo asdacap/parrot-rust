@@ -33,7 +33,6 @@ pub struct AgentDirectoryLineage {
     directories: Vec<AgentDirectoryOccupants>,
     paths: HashMap<String, Vec<String>>,
     directory_indexes: HashMap<String, usize>,
-    unresolved: Vec<String>,
 }
 
 impl AgentDirectoryLineage {
@@ -50,8 +49,6 @@ impl AgentDirectoryLineage {
             };
             if let Some(path) = path {
                 lineage.add(&record.session_id, path);
-            } else {
-                lineage.unresolved.push(record.session_id.clone());
             }
         }
         lineage
@@ -59,10 +56,6 @@ impl AgentDirectoryLineage {
 
     pub fn directories(&self) -> &[AgentDirectoryOccupants] {
         &self.directories
-    }
-
-    pub fn unresolved(&self) -> &[String] {
-        &self.unresolved
     }
 
     pub fn contains(&self, session_id: &str) -> bool {

@@ -184,22 +184,6 @@ impl ModelSettings {
         }))).collect();
         json!({"modelAliases":aliases,"modelPresets":presets,"providerModelAliasDefaults":defaults,"modelProfiles":profiles,"providers":providers,"contextLimit":self.context_limit.as_ref().map(ToString::to_string)})
     }
-
-    pub fn capture_context_limits(&self) -> ModelPresetContextLimits {
-        ModelPresetContextLimits {
-            default: self.context_limit.clone(),
-            model_aliases: self
-                .model_aliases
-                .iter()
-                .filter_map(|(name, alias)| {
-                    alias
-                        .context_limit
-                        .clone()
-                        .map(|limit| (name.clone(), limit))
-                })
-                .collect(),
-        }
-    }
 }
 
 pub fn validate_alias_name(name: &str) -> Result<()> {

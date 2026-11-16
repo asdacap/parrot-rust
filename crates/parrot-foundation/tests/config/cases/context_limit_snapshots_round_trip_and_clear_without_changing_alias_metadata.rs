@@ -24,7 +24,20 @@ fn source_assertions() {
                 model_aliases: BTreeMap::new(),
             }
         } else {
-            configuration.models.capture_context_limits()
+            ModelPresetContextLimits {
+                default: configuration.models.context_limit.clone(),
+                model_aliases: configuration
+                    .models
+                    .model_aliases
+                    .iter()
+                    .filter_map(|(name, alias)| {
+                        alias
+                            .context_limit
+                            .clone()
+                            .map(|limit| (name.clone(), limit))
+                    })
+                    .collect(),
+            }
         };
         transact(&mut configuration, |transaction| {
             transaction.set_model_preset(

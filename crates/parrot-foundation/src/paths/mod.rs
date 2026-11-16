@@ -26,14 +26,6 @@ fn normalize(path: &Path, current_directory: &Path, platform: PathPlatform) -> i
         .map_err(|error| invalid(&error.to_string()))
 }
 
-fn native_platform() -> PathPlatform {
-    if cfg!(target_os = "macos") {
-        PathPlatform::MacOs
-    } else {
-        PathPlatform::Unix
-    }
-}
-
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }

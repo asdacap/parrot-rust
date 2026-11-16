@@ -297,7 +297,16 @@ fn presets_and_context_limits_preserve_absence_null_and_explicit_clear() {
     let mut settings = ModelSettings::read(&configured).unwrap();
     assert!(settings.model_presets["legacy"].context_limits.is_none());
     assert!(settings.model_presets["empty"].context_limits.is_some());
-    let limits = settings.capture_context_limits();
+    let limits = ModelPresetContextLimits {
+        default: settings.context_limit.clone(),
+        model_aliases: BTreeMap::from([(
+            "custom".to_owned(),
+            settings.model_aliases["custom"]
+                .context_limit
+                .clone()
+                .unwrap(),
+        )]),
+    };
     assert_eq!(limits.default.as_ref().unwrap().to_string(), "100000");
     assert_eq!(limits.model_aliases["custom"].to_string(), "20%");
     let empty = ModelPresetContextLimits {
