@@ -109,18 +109,14 @@ impl<S: AuthorizedReadService> ReadImageTool<S> {
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
-        let artifact = match self
-            .artifacts
-            .persist(
-                Cursor::new(read.bytes),
-                &display_name,
-                "read_image",
-                None,
-                None,
-                cancellation,
-            )
-            .await
-        {
+        let artifact = match self.artifacts.persist(
+            Cursor::new(read.bytes),
+            &display_name,
+            "read_image",
+            None,
+            None,
+            cancellation,
+        ) {
             Ok(artifact) => artifact,
             Err(error) if error.kind == ErrorKind::Cancelled => {
                 return Err(OperationError::Cancelled);

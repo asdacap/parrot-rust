@@ -53,10 +53,6 @@ impl SessionCatalog {
         }
     }
 
-    pub fn sessions_directory(&self) -> &Path {
-        &self.sessions_directory
-    }
-
     pub fn find(&self, id: &UserSessionId) -> Option<SessionCatalogEntry> {
         let directory = self.sessions_directory.join(id.value());
         if !directory.is_dir() {

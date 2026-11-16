@@ -29,11 +29,7 @@ fn failed(kind: FileReadErrorKind, message: impl Into<String>) -> OperationError
 }
 
 fn normalize(root: &Path, requested: &Path) -> Result<PathBuf> {
-    let platform = if cfg!(target_os = "macos") {
-        PathPlatform::MacOs
-    } else {
-        PathPlatform::Unix
-    };
+    let platform = PathPlatform::current();
     normalize_for_platform(root, requested, platform)
 }
 

@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use parrot_cli::terminal_frames::{
-    ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions,
+    LiveBufferCaret, LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions,
     LiveBufferRetention, ScrollbackItem, ScrollbackLayout, ScrollbackRenderOptions,
     TerminalCellStyleSpan, TerminalFrameRenderer, TerminalLine, TerminalStyle,
 };
@@ -72,19 +72,11 @@ impl LiveBufferItem for FixtureLive {
 
 struct FixtureScroll {
     value: Value,
-    sequence: Option<ItemIdentity>,
 }
 impl FixtureScroll {
-    fn new(value: &Value, identities: &mut BTreeMap<String, ItemIdentity>) -> Self {
-        let sequence = value.get("sequence").map(|key| {
-            identities
-                .entry(key.as_str().unwrap().to_owned())
-                .or_insert_with(|| Arc::new(()))
-                .clone()
-        });
+    fn new(value: &Value) -> Self {
         Self {
             value: value.clone(),
-            sequence,
         }
     }
 }
@@ -112,36 +104,29 @@ impl ScrollbackItem for FixtureScroll {
     fn ends_layout(&self) -> bool {
         flag(&self.value, "ends", true)
     }
-    fn sequence_identity(&self) -> Option<ItemIdentity> {
-        self.sequence.clone()
-    }
-    fn packing_identity(&self) -> Option<ItemIdentity> {
-        self.value
-            .get("packing")
-            .map(|value| Arc::new(value.as_str().unwrap().to_owned()) as ItemIdentity)
-    }
-    fn packs(&self, previous: Option<&ItemIdentity>) -> bool {
-        previous
-            .and_then(|value| value.downcast_ref::<String>())
-            .is_some_and(|previous| {
-                self.value.get("pack_if").and_then(Value::as_str) == previous.split('|').next()
-            })
+    fn stream(&self) -> Option<(&str, &str)> {
+        let key = if let Some(packing) = self.value.get("packing").and_then(Value::as_str) {
+            packing
+        } else {
+            self.value.get("sequence").and_then(Value::as_str)?
+        };
+        let mut parts = key.splitn(2, '|');
+        Some((parts.next().unwrap(), parts.next().unwrap_or("")))
     }
     fn continues(&self, previous: &dyn ScrollbackItem) -> bool {
-        self.sequence
-            .as_ref()
-            .zip(previous.sequence_identity().as_ref())
-            .is_some_and(|(own, previous)| Arc::ptr_eq(own, previous))
+        self.value
+            .get("sequence")
+            .and_then(Value::as_str)
+            .zip(previous.stream())
+            .is_some_and(|(own, previous)| own == previous.0)
     }
     fn render(&self, options: ScrollbackRenderOptions) -> io::Result<Vec<String>> {
         let skip_heading = flag(&self.value, "suppress_heading_if_same_packing", false)
             && options
-                .previous_packing
-                .as_ref()
-                .and_then(|value| value.downcast_ref::<String>())
-                .is_some_and(|previous| {
-                    self.value.get("packing").and_then(Value::as_str) == Some(previous.as_str())
-                });
+                .previous_item
+                .as_deref()
+                .and_then(|previous| previous.stream())
+                .is_some_and(|previous| self.stream() == Some(previous));
         Ok(self.value["lines"]
             .as_array()
             .unwrap()
@@ -226,7 +211,6 @@ fn run_fixtures() -> Vec<ScenarioRun> {
             number(scenario, "max_input_rows", 12),
             flag(scenario, "inline_diff", true),
         );
-        let mut identities = BTreeMap::new();
         let mut run = ScenarioRun {
             name: name.to_owned(),
             columns: columns.max(1) as usize,
@@ -249,7 +233,7 @@ fn run_fixtures() -> Vec<ScenarioRun> {
                 match text(operation, "op") {
                     "draw" => renderer.draw(&items, columns, rows),
                     "commit" => renderer.commit(
-                        Arc::new(FixtureScroll::new(&operation["scroll"], &mut identities)),
+                        Arc::new(FixtureScroll::new(&operation["scroll"])),
                         &items,
                         columns,
                         rows,

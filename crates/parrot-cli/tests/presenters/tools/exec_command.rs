@@ -21,7 +21,7 @@ fn rows(item: &Presentation, color: bool) -> Vec<String> {
             columns: 32768,
             color,
             inline_diff: true,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap()

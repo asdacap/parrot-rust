@@ -242,7 +242,6 @@ async fn image_execution_metadata_survives_suspend_reopen_and_recovery() {
             None,
             &NeverCancelled,
         )
-        .await
         .unwrap();
     assert_eq!((metadata.width, metadata.height), (24, 12));
     let parts = vec![

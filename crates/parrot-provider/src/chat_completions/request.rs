@@ -1,60 +1,8 @@
 use crate::image_inspection::image_reference;
+use crate::view::{ContentView, MessageView, RequestView, ToolCallView, ToolView};
+use parrot_core::Role;
 use serde::Deserialize;
 use serde_json::value::RawValue;
-
-/// Borrowed, adapter-local view into the caller-owned provider request. T30's
-/// request history implements these views; no provider-neutral serialized DTO
-/// is introduced here.
-pub trait RequestView {
-    type Message: MessageView;
-    type Tool: ToolView;
-    fn model(&self) -> &str;
-    fn instructions(&self) -> &str;
-    fn messages(&self) -> &[Self::Message];
-    fn tools(&self) -> &[Self::Tool];
-    fn reasoning_effort(&self) -> Option<&str>;
-    fn provider_preferences(&self) -> &str;
-    fn include_router_metadata(&self) -> bool;
-    fn max_output_tokens(&self) -> i32;
-}
-
-pub trait MessageView {
-    type Content: ContentView;
-    type Call: ToolCallView;
-    fn role(&self) -> MessageRole;
-    fn text(&self) -> &str;
-    fn contents(&self) -> &[Self::Content];
-    fn tool_call_id(&self) -> &str;
-    fn tool_calls(&self) -> &[Self::Call];
-    fn provider_id(&self) -> &str;
-    fn provider_content(&self) -> &str;
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MessageRole {
-    System,
-    Assistant,
-    Tool,
-    User,
-}
-
-pub trait ContentView {
-    fn is_text(&self) -> bool;
-    fn text(&self) -> &str;
-    fn image_url(&self) -> &str;
-    fn media_type(&self) -> &str;
-    /// Reads only when encoding needs a data URL; ownership stays with the view.
-    fn read_image(&self) -> Result<Vec<u8>, RequestError>;
-}
-pub trait ToolCallView {
-    fn id(&self) -> &str;
-    fn name(&self) -> &str;
-    fn arguments_json(&self) -> &str;
-}
-pub trait ToolView {
-    fn name(&self) -> &str;
-    fn description(&self) -> &str;
-    fn parameters_json(&self) -> &str;
-}
 
 /// Fully owned protocol request bytes prepared for the HTTP transport.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -149,7 +97,7 @@ fn write_message(
     has_previous_message: bool,
 ) -> Result<(), RequestError> {
     let replay = read_replay(message, provider_id);
-    let nonleading_system = message.role() == MessageRole::System && has_previous_message;
+    let nonleading_system = message.role() == Role::System && has_previous_message;
     body.push('{');
     body.push_str("\"role\":");
     quoted(
@@ -185,7 +133,8 @@ fn write_message(
                     body,
                     &image_reference(Some(part.image_url()), part.media_type(), || {
                         part.read_image()
-                    })?,
+                    })
+                    .map_err(|error| RequestError::Image(error.to_string()))?,
                 )?;
                 body.push_str("}}");
             }
@@ -247,7 +196,7 @@ struct ReasoningReplay {
     tool_calls: Vec<super::stream::ToolCallReplay>,
 }
 fn read_replay(message: &impl MessageView, provider_id: &str) -> Option<ReasoningReplay> {
-    if message.role() != MessageRole::Assistant || message.provider_id() != provider_id {
+    if message.role() != Role::Assistant || message.provider_id() != provider_id {
         return None;
     }
     let fields: std::collections::BTreeMap<String, Box<RawValue>> =
@@ -281,12 +230,12 @@ fn read_replay(message: &impl MessageView, provider_id: &str) -> Option<Reasonin
     };
     (replay.version == 1 && replay.protocol == "chat-completions").then_some(replay)
 }
-fn role_name(role: MessageRole) -> &'static str {
+fn role_name(role: Role) -> &'static str {
     match role {
-        MessageRole::System => "system",
-        MessageRole::Assistant => "assistant",
-        MessageRole::Tool => "tool",
-        MessageRole::User => "user",
+        Role::System => "system",
+        Role::Assistant => "assistant",
+        Role::Tool => "tool",
+        Role::User => "user",
     }
 }
 fn wrap_system_update(text: &str) -> String {

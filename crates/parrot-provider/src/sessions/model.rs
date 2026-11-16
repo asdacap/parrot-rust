@@ -167,7 +167,7 @@ impl Message {
     }
 }
 
-impl chat_completions::RequestView for Request {
+impl crate::view::RequestView for Request {
     type Message = Message;
     type Tool = Tool;
     fn model(&self) -> &str {
@@ -188,77 +188,25 @@ impl chat_completions::RequestView for Request {
     fn reasoning_effort(&self) -> Option<&str> {
         self.reasoning.as_ref().map(|r| r.effort.as_str())
     }
+    fn reasoning_summary(&self) -> &str {
+        self.reasoning.as_ref().map_or("", |r| r.summary.as_str())
+    }
     fn provider_preferences(&self) -> &str {
         &self.provider_preferences
+    }
+    fn service_tier(&self) -> &str {
+        if self.fast_mode { "priority" } else { "" }
     }
     fn include_router_metadata(&self) -> bool {
         self.include_router_metadata
     }
 }
-impl responses::ResponsesRequestView for Request {
-    fn service_tier(&self) -> &str {
-        if self.fast_mode { "priority" } else { "" }
-    }
-    type Message = Message;
-    type Tool = Tool;
-    fn model(&self) -> &str {
-        &self.model
-    }
-    fn instructions(&self) -> &str {
-        &self.instructions
-    }
-    fn messages(&self) -> &[Message] {
-        &self.messages
-    }
-    fn tools(&self) -> &[Tool] {
-        &self.tools
-    }
-    fn max_output_tokens(&self) -> i32 {
-        self.max_output_tokens
-    }
-    fn reasoning_effort(&self) -> &str {
-        self.reasoning.as_ref().map_or("", |r| &r.effort)
-    }
-    fn reasoning_summary(&self) -> &str {
-        self.reasoning.as_ref().map_or("", |r| &r.summary)
-    }
-    fn provider_preferences(&self) -> &str {
-        &self.provider_preferences
-    }
-}
-impl anthropic::RequestView for Request {
-    type Message = Message;
-    type Tool = Tool;
-    fn model(&self) -> &str {
-        &self.model
-    }
-    fn instructions(&self) -> &str {
-        &self.instructions
-    }
-    fn messages(&self) -> &[Message] {
-        &self.messages
-    }
-    fn tools(&self) -> &[Tool] {
-        &self.tools
-    }
-    fn max_output_tokens(&self) -> i32 {
-        self.max_output_tokens
-    }
-    fn reasoning_effort(&self) -> Option<&str> {
-        self.reasoning.as_ref().map(|r| r.effort.as_str())
-    }
-}
 
-impl chat_completions::MessageView for Message {
+impl crate::view::MessageView for Message {
     type Content = Content;
-    type Call = ToolCall;
-    fn role(&self) -> chat_completions::MessageRole {
-        match self.role {
-            Role::System => chat_completions::MessageRole::System,
-            Role::User => chat_completions::MessageRole::User,
-            Role::Assistant => chat_completions::MessageRole::Assistant,
-            Role::Tool => chat_completions::MessageRole::Tool,
-        }
+    type ToolCall = ToolCall;
+    fn role(&self) -> Role {
+        self.role
     }
     fn text(&self) -> &str {
         self.content()
@@ -266,68 +214,11 @@ impl chat_completions::MessageView for Message {
     fn contents(&self) -> &[Content] {
         &self.contents
     }
-    fn tool_call_id(&self) -> &str {
-        &self.tool_call_id
-    }
     fn tool_calls(&self) -> &[ToolCall] {
         &self.tool_calls
     }
-    fn provider_id(&self) -> &str {
-        &self.provider_id
-    }
-    fn provider_content(&self) -> &str {
-        &self.provider_content
-    }
-}
-impl responses::ResponsesMessageView for Message {
-    type Content = Content;
-    type ToolCall = ToolCall;
-    fn role(&self) -> responses::ResponsesRole {
-        match self.role {
-            Role::System => responses::ResponsesRole::System,
-            Role::User => responses::ResponsesRole::User,
-            Role::Assistant => responses::ResponsesRole::Assistant,
-            Role::Tool => responses::ResponsesRole::Tool,
-        }
-    }
-    fn content(&self) -> &str {
-        self.content()
-    }
-    fn contents(&self) -> &[Content] {
-        &self.contents
-    }
     fn tool_call_id(&self) -> &str {
         &self.tool_call_id
-    }
-    fn tool_calls(&self) -> &[ToolCall] {
-        &self.tool_calls
-    }
-    fn provider_id(&self) -> &str {
-        &self.provider_id
-    }
-    fn provider_content(&self) -> &str {
-        &self.provider_content
-    }
-}
-impl anthropic::MessageView for Message {
-    type Content = Content;
-    type ToolCall = ToolCall;
-    fn role(&self) -> anthropic::Role {
-        match self.role {
-            Role::System => anthropic::Role::System,
-            Role::User => anthropic::Role::User,
-            Role::Assistant => anthropic::Role::Assistant,
-            Role::Tool => anthropic::Role::Tool,
-        }
-    }
-    fn contents(&self) -> &[Content] {
-        &self.contents
-    }
-    fn tool_call_id(&self) -> &str {
-        &self.tool_call_id
-    }
-    fn tool_calls(&self) -> &[ToolCall] {
-        &self.tool_calls
     }
     fn provider_id(&self) -> &str {
         &self.provider_id
@@ -337,7 +228,7 @@ impl anthropic::MessageView for Message {
     }
 }
 
-impl chat_completions::ContentView for Content {
+impl crate::view::ContentView for Content {
     fn is_text(&self) -> bool {
         matches!(self, Self::Text(_))
     }
@@ -345,95 +236,38 @@ impl chat_completions::ContentView for Content {
         self.text_value()
     }
     fn image_url(&self) -> &str {
-        self.image_url()
+        Content::image_url(self)
     }
     fn media_type(&self) -> &str {
-        self.media_type()
-    }
-    fn read_image(&self) -> Result<Vec<u8>, chat_completions::RequestError> {
-        Content::read_image(self)
-            .map_err(|error| chat_completions::RequestError::Image(error.to_string()))
-    }
-}
-impl responses::ResponsesContentView for Content {
-    fn kind(&self) -> responses::ResponsesContentKind {
-        if matches!(self, Self::Text(_)) {
-            responses::ResponsesContentKind::Text
-        } else {
-            responses::ResponsesContentKind::Image
-        }
-    }
-    fn text(&self) -> &str {
-        self.text_value()
-    }
-    fn image_url(&self) -> &str {
-        self.image_url()
-    }
-    fn image_media_type(&self) -> &str {
-        self.media_type()
-    }
-    fn read_image(&self) -> io::Result<Vec<u8>> {
-        Content::read_image(self)
-    }
-}
-impl anthropic::ContentView for Content {
-    fn kind(&self) -> anthropic::ContentKind {
-        if matches!(self, Self::Text(_)) {
-            anthropic::ContentKind::Text
-        } else {
-            anthropic::ContentKind::Image
-        }
-    }
-    fn text(&self) -> &str {
-        self.text_value()
-    }
-    fn image_url(&self) -> &str {
-        self.image_url()
-    }
-    fn media_type(&self) -> &str {
-        self.media_type()
+        Content::media_type(self)
     }
     fn read_image(&self) -> io::Result<Vec<u8>> {
         Content::read_image(self)
     }
 }
 
-macro_rules! tool_view {
-    ($trait:path) => {
-        impl $trait for Tool {
-            fn name(&self) -> &str {
-                &self.name
-            }
-            fn description(&self) -> &str {
-                &self.description
-            }
-            fn parameters_json(&self) -> &str {
-                &self.parameters_json
-            }
-        }
-    };
+impl crate::view::ToolView for Tool {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn parameters_json(&self) -> &str {
+        &self.parameters_json
+    }
 }
-tool_view!(chat_completions::ToolView);
-tool_view!(responses::ResponsesToolDefinitionView);
-tool_view!(anthropic::ToolDefinitionView);
-macro_rules! call_view {
-    ($trait:path) => {
-        impl $trait for ToolCall {
-            fn id(&self) -> &str {
-                &self.id
-            }
-            fn name(&self) -> &str {
-                &self.name
-            }
-            fn arguments_json(&self) -> &str {
-                &self.arguments_json
-            }
-        }
-    };
+impl crate::view::ToolCallView for ToolCall {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn arguments_json(&self) -> &str {
+        &self.arguments_json
+    }
 }
-call_view!(chat_completions::ToolCallView);
-call_view!(responses::ResponsesToolCallView);
-call_view!(anthropic::ToolCallView);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ReasoningKind {

@@ -24,19 +24,17 @@ use crate::{
     attachments::uploader::AttachmentError,
     chat_loops::{
         Binding, ChatLoopFailure, Interaction, Interactions, SessionSnapshot, application_exit,
-        interrupt_loop, reconcile_loop, stop_binding, terminal_commands,
+        check, interrupt_loop, reconcile_loop, stop_binding, terminal_commands,
     },
     dispatch::{
-        dialog::SlashDialog,
-        interrupts::{CliInterruptListener, Interrupts},
-        prepared_stream::PreparedSessionStream,
+        dialog::SlashDialog, interrupts::Interrupts, prepared_stream::PreparedSessionStream,
     },
     presenters::{
         EnhancedSessionPresenter, PresentationUpdate, ToolPresenterRegistry,
         tools::read::SkillReadPathFormatter,
     },
     slash_sessions::{
-        CallbackSessionBinding, CommandEnvironment, NavigationFailure, PollingSlashActivity,
+        CommandEnvironment, NavigationFailure, PollingSlashActivity, ReplaceSession,
         RpcSlashSession, SkillCompletion, SkillRefresh, SlashCommandCompletion, SlashFailure,
         SlashSession,
     },
@@ -287,9 +285,7 @@ impl EnhancedCli {
         ));
         let listener_shared = shared.clone();
         self.interrupts
-            .install(Arc::new(CliInterruptListener(move || {
-                listener_shared.interrupt()
-            })));
+            .install(Arc::new(move || listener_shared.interrupt()));
         let mut keyboard = KeyboardLease {
             output: self.terminal.output.clone(),
             interrupts: self.interrupts.clone(),
@@ -446,7 +442,7 @@ impl EnhancedInput {
             initial,
             self.configuration.clone(),
             true,
-            Box::new(binding),
+            binding,
         );
         let application = application_exit(shared.lifetime.clone());
         let create_registry = |client| {
@@ -747,7 +743,7 @@ impl EnhancedInput {
                         snapshot.session.clone(),
                         self.configuration.clone(),
                         !exit_on_completion,
-                        Box::new(session_binding(shared.clone())),
+                        session_binding(shared.clone()),
                     );
                     commands = create_registry(snapshot.client.clone());
                     skills = shared
@@ -825,8 +821,8 @@ impl EnhancedInput {
     }
 }
 
-fn session_binding(shared: Arc<EnhancedSession>) -> CallbackSessionBinding {
-    CallbackSessionBinding(Arc::new(move |session, c| {
+fn session_binding(shared: Arc<EnhancedSession>) -> ReplaceSession {
+    Arc::new(move |session, c| {
         let shared = shared.clone();
         Box::pin(async move {
             let client = shared.snapshot().client;
@@ -835,7 +831,7 @@ fn session_binding(shared: Arc<EnhancedSession>) -> CallbackSessionBinding {
                 .await
                 .map_err(Into::into)
         })
-    }))
+    })
 }
 
 fn accept_completion(
@@ -1390,10 +1386,6 @@ impl SessionReplacement for EnhancedSession {
     }
 }
 
-fn check(c: &dyn Cancellation) -> Result<(), Status> {
-    c.check()
-        .map_err(|_| Status::cancelled("operation cancelled"))
-}
 fn io_status(error: io::Error) -> Status {
     Status::unknown(error.to_string())
 }

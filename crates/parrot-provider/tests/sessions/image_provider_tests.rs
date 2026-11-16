@@ -1,9 +1,7 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::{
     http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
-    image_generation::{
-        ImageGenerationReference, ImageGenerationRequest, ImageHttpRequest, ImageTransport,
-    },
+    image_generation::{ImageGenerationReference, ImageGenerationRequest},
     responses_websocket::{ConnectedSocket, Connector, Headers, WebSocketError},
     sessions::{
         Error, Provider,
@@ -139,7 +137,7 @@ impl ByteStream for Bytes {
 }
 type Reply = Result<(u16, Vec<u8>), Error>;
 struct Images {
-    requests: Mutex<Vec<ImageHttpRequest>>,
+    requests: Mutex<Vec<HttpRequest>>,
     replies: Mutex<VecDeque<Reply>>,
 }
 impl Images {
@@ -153,15 +151,15 @@ impl Images {
         })
     }
 }
-impl ImageTransport for Images {
+impl HttpTransport for Images {
     fn send<'a>(
         &'a self,
-        request: ImageHttpRequest,
+        request: HttpRequest,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<HttpResponse, Error>> {
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async move {
             if cancellation.is_cancelled() {
-                return Err(Error::Cancelled);
+                return Err(HttpError::Cancelled);
             }
             self.requests.lock().unwrap().push(request);
             let (status, body) = self
@@ -169,7 +167,12 @@ impl ImageTransport for Images {
                 .lock()
                 .unwrap()
                 .pop_front()
-                .expect("scripted image response")?;
+                .expect("scripted image response")
+                .map_err(|error| match error {
+                    Error::Http(inner) => inner,
+                    Error::Cancelled => HttpError::Cancelled,
+                    other => HttpError::Provider(other.to_string()),
+                })?;
             Ok(HttpResponse {
                 status,
                 reason: String::new(),
@@ -192,14 +195,14 @@ fn request(edit: bool) -> ImageGenerationRequest {
         },
     }
 }
-fn header(request: &ImageHttpRequest, name: &str) -> Option<String> {
+fn header(request: &HttpRequest, name: &str) -> Option<String> {
     request
         .headers
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case(name))
         .map(|(_, value)| value.clone())
 }
-fn assert_no_session_headers(request: &ImageHttpRequest) {
+fn assert_no_session_headers(request: &HttpRequest) {
     for name in ["x-opencode-session", "session-id", "x-codex-turn-state"] {
         assert_eq!(header(request, name), None, "{name}");
     }

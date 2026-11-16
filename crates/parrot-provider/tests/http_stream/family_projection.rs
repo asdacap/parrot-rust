@@ -250,9 +250,11 @@ async fn observe_catalog(input: &Value) -> Value {
         let disposed = ReqwestTransport::new(insecure.clone())
             .send(
                 HttpRequest {
-                    method: HttpMethod::Get,
+                    method: "GET".into(),
                     endpoint: Url::parse("https://insecure.example/").unwrap().into(),
                     headers: vec![],
+                    content_type: None,
+                    filter_content_headers: true,
                     body: vec![],
                 },
                 &Token(false),

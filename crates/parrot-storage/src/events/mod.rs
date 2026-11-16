@@ -157,20 +157,21 @@ pub fn record(tx: &Transaction<'_>, event: &Event, at: &str) -> Result<StoredEve
         raw: bytes,
     })
 }
+fn stored_event_row(row: (i64, Vec<u8>)) -> Result<StoredEvent, EventError> {
+    let (sequence, raw) = row;
+    Ok(StoredEvent {
+        sequence,
+        event: Event::parse_from_bytes(&raw)?,
+        raw,
+    })
+}
+
 pub fn read_events(tx: &Transaction<'_>) -> Result<Vec<StoredEvent>, EventError> {
     let mut read = tx.prepare("SELECT sequence, payload FROM event ORDER BY sequence")?;
     let rows = read.query_map([], |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
     })?;
-    rows.map(|row| {
-        let (sequence, raw) = row?;
-        Ok(StoredEvent {
-            sequence,
-            event: Event::parse_from_bytes(&raw)?,
-            raw,
-        })
-    })
-    .collect()
+    rows.map(|row| stored_event_row(row?)).collect()
 }
 
 pub fn read_events_after(
@@ -190,15 +191,7 @@ pub fn read_events_after(
     let rows = read.query_map([start], |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
     })?;
-    rows.map(|row| {
-        let (sequence, raw) = row?;
-        Ok(StoredEvent {
-            sequence,
-            event: Event::parse_from_bytes(&raw)?,
-            raw,
-        })
-    })
-    .collect()
+    rows.map(|row| stored_event_row(row?)).collect()
 }
 
 pub(crate) fn timestamp() -> String {

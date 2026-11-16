@@ -595,14 +595,6 @@ fn read_sandbox_rules(
     Ok(result)
 }
 
-fn native_platform() -> PathPlatform {
-    if cfg!(target_os = "macos") {
-        PathPlatform::MacOs
-    } else {
-        PathPlatform::Unix
-    }
-}
-
 pub fn read_sandbox(root: &Node) -> Result<(bool, Vec<String>)> {
     let Some(sandbox) = root.get("sandbox") else {
         return Ok((true, Vec::new()));
@@ -880,7 +872,7 @@ pub fn canonical_skill_path(value: &str, field: &str) -> Result<String> {
     if !value.starts_with('/') {
         return Err(error(format!("{field} must be an absolute path")));
     }
-    let normalized = PlatformPath::normalize(value, "/", native_platform())
+    let normalized = PlatformPath::normalize(value, "/", PathPlatform::current())
         .map_err(|_| error(format!("{field} must be a valid absolute path")))?;
     Ok(if normalized == "/" {
         normalized

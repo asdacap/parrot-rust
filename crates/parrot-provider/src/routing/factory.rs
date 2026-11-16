@@ -1,14 +1,13 @@
 //! Source implementation selection and concrete provider composition.
 use super::{
-    anthropic::{AnthropicApiKeySource, AnthropicBridge, map_provider_error},
+    anthropic::{AnthropicBridge, map_provider_error},
     auth::CredentialSources,
     usage::{KimiUsageReporter, OpenCodeGoUsageReporter},
 };
 use crate::{
-    anthropic::{AnthropicOptions, AnthropicProvider},
+    anthropic::AnthropicProvider,
     catalogs::{self, Model, ModelCapabilities, ModelMetadataFields, ModelVariant},
     http_stream::HttpTransport,
-    image_generation::ImageTransport,
     responses_websocket::Connector,
     sessions::{
         Error, Provider,
@@ -61,7 +60,7 @@ pub struct ProviderBuildInputs<'a> {
     pub config: &'a ProviderConfig,
     pub credentials: &'a dyn CredentialSources,
     pub transport: Arc<dyn HttpTransport>,
-    pub images: Arc<dyn ImageTransport>,
+    pub images: Arc<dyn HttpTransport>,
     pub connector: Arc<dyn Connector>,
     pub external_models: &'a [Model],
     pub maximum_request_bytes: usize,
@@ -96,10 +95,11 @@ pub fn build_provider(inputs: ProviderBuildInputs<'_>) -> Result<BuiltProvider, 
             )?)
         }
         ProviderImplementation::Anthropic => {
-            let keys = Arc::new(AnthropicApiKeySource::new(
+            let mut options = CompatibleOptions::new(
+                inputs.id,
+                &config.base_url,
                 inputs.credentials.api_key(inputs.id, &config.api_key_env),
-            ));
-            let mut options = AnthropicOptions::new(inputs.id, &config.base_url, keys);
+            );
             options.headers = config
                 .headers
                 .iter()

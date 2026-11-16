@@ -16,7 +16,6 @@ pub(super) async fn image(fixture: &Fixture) -> ImageArtifactMetadata {
         None,
         &NeverCancelled,
     )
-    .await
     .unwrap()
 }
 fn image_tool(fixture: &Fixture, name: &str, image: &ImageArtifactMetadata) -> Arc<RecordingTool> {

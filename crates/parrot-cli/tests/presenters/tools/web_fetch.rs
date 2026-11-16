@@ -38,7 +38,7 @@ fn schema_label_and_tool_errors_are_specific_and_muted() {
                 columns: 32768,
                 color: false,
                 inline_diff: true,
-                previous_packing: None
+                previous_item: None
             }
         )
         .unwrap(),

@@ -1,8 +1,6 @@
 //! Runtime composition over the actual Anthropic adapter and owning stream.
 use crate::{
-    anthropic::{
-        self, AnthropicProvider, AnthropicStream, EncodeError, ParserError, ProviderError,
-    },
+    anthropic::{AnthropicProvider, AnthropicStream, EncodeError, ParserError, ProviderError},
     catalogs::{Model, StandardModelError},
     chat_completions::ProviderFailure,
     lazy_stream::LazyEventStream,
@@ -11,43 +9,6 @@ use crate::{
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::sync::Arc;
 
-pub struct AnthropicApiKeySource(Arc<dyn crate::sessions::provider::ApiKeySource>);
-impl AnthropicApiKeySource {
-    pub fn new(source: Arc<dyn crate::sessions::provider::ApiKeySource>) -> Self {
-        Self(source)
-    }
-}
-impl anthropic::ApiKeySource for AnthropicApiKeySource {
-    fn api_key<'a>(
-        &'a self,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<String, ProviderError>> {
-        Box::pin(async move { self.0.api_key(cancellation).await.map_err(credential_error) })
-    }
-    fn has_credential<'a>(
-        &'a self,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<bool, ProviderError>> {
-        Box::pin(async move {
-            self.0
-                .has_credential(cancellation)
-                .await
-                .map_err(credential_error)
-        })
-    }
-}
-fn credential_error(error: Error) -> ProviderError {
-    match error {
-        Error::Authentication(error) => ProviderError::Authentication(error),
-        Error::Cancelled => ProviderError::Http(crate::http_stream::HttpError::Cancelled),
-        Error::Http(error) => ProviderError::Http(error),
-        Error::Io(message) => {
-            ProviderError::Encode(EncodeError::Image(std::io::Error::other(message)))
-        }
-        Error::Wire(message) => ProviderError::Parse(ParserError::Wire(message)),
-        error => ProviderError::Credential(error.to_string()),
-    }
-}
 pub(super) fn map_provider_error(error: ProviderError) -> Error {
     match error {
         ProviderError::Authentication(error) => Error::Authentication(error),

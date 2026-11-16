@@ -1,17 +1,16 @@
-use super::{invalid, native_platform, normalize};
+use super::{invalid, normalize};
 use parrot_domain::contracts::paths::SelectedSessionRoot;
+use parrot_domain::values::config::PathPlatform;
 use parrot_domain::values::identifiers::UserSessionId;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 #[derive(Debug)]
 pub struct UserSessionResources<W> {
     selected_root: SelectedSessionRoot,
     id: UserSessionId,
     workspace: W,
-    metadata_gate: Mutex<()>,
 }
 
 impl<W> UserSessionResources<W> {
@@ -32,7 +31,6 @@ impl<W> UserSessionResources<W> {
             selected_root,
             id,
             workspace,
-            metadata_gate: Mutex::new(()),
         })
     }
 
@@ -47,14 +45,6 @@ impl<W> UserSessionResources<W> {
     }
     pub fn root(&self) -> &Path {
         self.selected_root.path()
-    }
-    pub fn sessions_directory(&self) -> &Path {
-        self.root()
-            .parent()
-            .expect("a selected session root has a session id component")
-    }
-    pub fn metadata_gate(&self) -> &Mutex<()> {
-        &self.metadata_gate
     }
     pub fn socket_path(&self) -> PathBuf {
         self.root().join("parrot.sock")
@@ -122,7 +112,7 @@ impl AgentScratchDirectory {
 
     pub fn new(root: &Path, current_directory: &Path) -> io::Result<Self> {
         let directory = Self {
-            root: normalize(root, current_directory, native_platform())?,
+            root: normalize(root, current_directory, PathPlatform::current())?,
         };
         directory.provision()?;
         Ok(directory)

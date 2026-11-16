@@ -2,7 +2,7 @@
 //! before applying last-wins semantics; JsonElement inputs remain opaque until
 //! the later serialization phase.
 use super::raw_object::RawObject;
-use super::wire_json::{normalize_raw_json, quote, selected_json_string};
+use crate::wire_json::{normalize_raw_json, quote, selected_json_string};
 use serde_json::value::RawValue;
 
 const BLOCK_FIELDS: &[&str] = &[

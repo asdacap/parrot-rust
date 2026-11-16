@@ -12,7 +12,7 @@ use parrot_host::web::router::WebClient;
 
 use crate::dispatch::arguments::ChatOptions;
 
-use super::{SlashActivity, SlashFailure, SlashSession, SlashSessionBinding, native_call};
+use super::{SlashActivity, SlashFailure, SlashSession, native_call};
 
 pub type ReplaceSession = Arc<
     dyn for<'a> Fn(
@@ -23,17 +23,6 @@ pub type ReplaceSession = Arc<
         + Sync,
 >;
 
-pub struct CallbackSessionBinding(pub ReplaceSession);
-impl SlashSessionBinding for CallbackSessionBinding {
-    fn replace<'a>(
-        &'a mut self,
-        session: wire::UserSession,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), SlashFailure>> {
-        (self.0)(session, cancellation)
-    }
-}
-
 /// The actual mutable source SlashSession. Every operation uses the selected
 /// native client; it never substitutes a new session or local storage algorithm.
 pub struct RpcSlashSession {
@@ -41,7 +30,7 @@ pub struct RpcSlashSession {
     current: wire::UserSession,
     configuration: Arc<Mutex<Configuration>>,
     interactive_permissions: bool,
-    binding: Box<dyn SlashSessionBinding>,
+    binding: ReplaceSession,
 }
 
 impl RpcSlashSession {
@@ -50,7 +39,7 @@ impl RpcSlashSession {
         initial: wire::UserSession,
         configuration: Arc<Mutex<Configuration>>,
         interactive_permissions: bool,
-        binding: Box<dyn SlashSessionBinding>,
+        binding: ReplaceSession,
     ) -> Self {
         Self {
             client,
@@ -305,7 +294,7 @@ impl SlashSession for RpcSlashSession {
             }
             let rollback = Rollback::new(&mut self.current);
             *rollback.current = replacement.clone();
-            self.binding.replace(replacement, c).await?;
+            (self.binding)(replacement, c).await?;
             rollback.keep();
             Ok(())
         })

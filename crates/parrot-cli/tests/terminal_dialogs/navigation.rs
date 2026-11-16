@@ -4,10 +4,7 @@
 
 use parrot_cli::{
     dispatch::startup::OpenLocalClient,
-    slash_sessions::{
-        CallbackSessionBinding, NavigationFailure, RpcSlashSession, SlashSession,
-        WorkspaceNavigation,
-    },
+    slash_sessions::{NavigationFailure, RpcSlashSession, SlashSession, WorkspaceNavigation},
     terminal_dialogs::navigation::{
         ExplicitRemoteTerminalSessionNavigation, LocalTerminalSessionNavigation,
         SessionReplacement, TerminalSessionController, TerminalSessionNavigation,
@@ -169,9 +166,7 @@ impl Fixture {
             snapshot.session,
             Arc::new(Mutex::new(config)),
             true,
-            Box::new(CallbackSessionBinding(Arc::new(|_, _| {
-                Box::pin(async { Ok(()) })
-            }))),
+            Arc::new(|_, _| Box::pin(async { Ok(()) })),
         )
     }
 }

@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use parrot_cli::terminal_frames::{
-    ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions,
+    LiveBufferCaret, LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions,
     LiveBufferRetention, ScrollbackItem, ScrollbackLayout, ScrollbackRenderOptions,
     TerminalCellStyleSpan, TerminalFrameRenderer, TerminalLine, TerminalStyle,
 };
@@ -289,12 +289,11 @@ fn invalid_carets_and_retention_return_source_messages_and_release_gate() {
 
 struct Scrollback {
     text: &'static str,
-    sequence: Option<u32>,
+    stream: Option<(String, String)>,
     completed: bool,
     layout: ScrollbackLayout,
     starts: bool,
     ends: bool,
-    packing: Option<u32>,
     expected_previous: Option<u32>,
 }
 impl ScrollbackItem for Scrollback {
@@ -310,30 +309,25 @@ impl ScrollbackItem for Scrollback {
     fn ends_layout(&self) -> bool {
         self.ends
     }
-    fn sequence_identity(&self) -> Option<ItemIdentity> {
-        self.sequence.map(|id| Arc::new(id) as ItemIdentity)
-    }
-    fn packing_identity(&self) -> Option<ItemIdentity> {
-        self.packing.map(|id| Arc::new(id) as ItemIdentity)
-    }
-    fn packs(&self, previous: Option<&ItemIdentity>) -> bool {
-        self.packing.is_some()
-            && previous.and_then(|id| id.downcast_ref::<u32>()).copied() == self.packing
+    fn stream(&self) -> Option<(&str, &str)> {
+        self.stream
+            .as_ref()
+            .map(|(key, path)| (key.as_str(), path.as_str()))
     }
     fn continues(&self, previous: &dyn ScrollbackItem) -> bool {
-        self.sequence.is_some()
-            && previous
-                .sequence_identity()
-                .and_then(|id| id.downcast_ref::<u32>().copied())
-                == self.sequence
+        self.stream()
+            .zip(previous.stream())
+            .is_some_and(|(own, previous)| own == previous)
     }
     fn render(&self, options: ScrollbackRenderOptions) -> io::Result<Vec<String>> {
         if let Some(expected) = self.expected_previous {
             assert_eq!(
                 options
-                    .previous_packing
-                    .and_then(|id| id.downcast_ref::<u32>().copied()),
-                Some(expected)
+                    .previous_item
+                    .as_deref()
+                    .and_then(|previous| previous.stream())
+                    .map(|(key, _)| key.to_owned()),
+                Some(expected.to_string())
             );
         }
         assert!(options.inline_diff);
@@ -347,12 +341,11 @@ impl ScrollbackItem for Scrollback {
 fn scroll(text: &'static str, sequence: Option<u32>, completed: bool) -> Scrollback {
     Scrollback {
         text,
-        sequence,
+        stream: sequence.map(|id| (id.to_string(), String::new())),
         completed,
         layout: ScrollbackLayout::Compact,
         starts: true,
         ends: true,
-        packing: None,
         expected_previous: None,
     }
 }
@@ -392,13 +385,13 @@ fn layout_gaps_coalesce_and_packing_uses_consumer_value_equality() {
     let mut first = scroll("first", None, true);
     first.layout = ScrollbackLayout::Block;
     first.ends = false;
-    first.packing = Some(7);
+    first.stream = Some(("7".into(), String::new()));
     renderer.commit(Arc::new(first), &items, 12, 100).unwrap();
     output.take();
     let mut second = scroll("second", None, true);
     second.layout = ScrollbackLayout::Block;
     second.ends = false;
-    second.packing = Some(7);
+    second.stream = Some(("7".into(), String::new()));
     second.expected_previous = Some(7);
     renderer.commit(Arc::new(second), &items, 12, 100).unwrap();
     let packed = output.take();

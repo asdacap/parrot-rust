@@ -248,11 +248,7 @@ impl ProductionHost {
                 ));
                 let capture = skills_configuration.clone();
                 let persist = skills_configuration.clone();
-                let platform = if cfg!(target_os = "macos") {
-                    PathPlatform::MacOs
-                } else {
-                    PathPlatform::Unix
-                };
+                let platform = PathPlatform::current();
                 let roots = resolve_skill_roots(workspace, &user_home, &skill_directory, platform)
                     .map_err(internal)?;
                 let catalog = SkillCatalog::new(

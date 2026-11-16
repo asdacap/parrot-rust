@@ -104,17 +104,6 @@ pub struct StatusSlot {
     pub is_auto_update: bool,
 }
 
-/// One of the status consumers that may offer a slot.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StatusTarget {
-    /// Only the steering machinery at injection safe points.
-    Steer,
-    /// Only the status tool rendering on demand.
-    Tool,
-    /// Only the protocol live view rendered on demand for a human.
-    Live,
-}
-
 pub trait StatusProvider: Send + Sync {
     /// Names the slot for the collection. Keys must be unique within a
     /// collection.
@@ -127,25 +116,16 @@ pub trait StatusProvider: Send + Sync {
     ) -> BoxFuture<'a, StatusResult<StatusObservation>>;
 }
 
-/// A collection of StatusProviders bound to one target. The caller passes
-/// exactly the providers the target shows; the collection owns their order
-/// and key validation.
+/// A collection of StatusProviders. The caller passes exactly the providers
+/// one surface shows; the collection owns their order and key validation.
 pub struct StatusProviders {
-    target: StatusTarget,
     providers: Vec<Arc<dyn StatusProvider>>,
 }
 impl StatusProviders {
-    /// Creates the collection bound to the target. The caller passes exactly
-    /// the providers the target shows; providers are shared Arc handles, so
-    /// one set can back the collections of several targets.
-    /// Returns the target this collection is bound to.
-    pub fn target(&self) -> StatusTarget {
-        self.target
-    }
-    pub fn new(
-        target: StatusTarget,
-        mut providers: Vec<Arc<dyn StatusProvider>>,
-    ) -> Result<Self, StatusError> {
+    /// Creates the collection. The caller passes exactly the providers one
+    /// surface shows; providers are shared Arc handles, so one set can back
+    /// the collections of several surfaces.
+    pub fn new(mut providers: Vec<Arc<dyn StatusProvider>>) -> Result<Self, StatusError> {
         let mut keys = std::collections::HashSet::new();
         for provider in &providers {
             validate_key(provider.key(), "provider")?;
@@ -154,7 +134,7 @@ impl StatusProviders {
             }
         }
         providers.sort_by(|left, right| ordinal(left.key(), right.key()));
-        Ok(Self { target, providers })
+        Ok(Self { providers })
     }
 
     /// Observes every member once and joins the slot texts in key order.
@@ -168,11 +148,15 @@ impl StatusProviders {
         let slots = self
             .observe_slots(query, profile, additional, cancellation)
             .await?;
-        Ok(slots
+        Ok(Self::join_slots(&slots))
+    }
+
+    fn join_slots(slots: &[StatusSlot]) -> String {
+        slots
             .iter()
             .map(|slot| slot.text.as_str())
             .collect::<Vec<_>>()
-            .join("\n\n"))
+            .join("\n\n")
     }
 
     /// Observes every member once and returns the resulting slots in key
@@ -184,8 +168,19 @@ impl StatusProviders {
         additional: &[&dyn StatusProvider],
         cancellation: &dyn Cancellation,
     ) -> StatusResult<Vec<StatusSlot>> {
-        let mut providers: Vec<&dyn StatusProvider> =
-            self.providers.iter().map(Arc::as_ref).collect();
+        Self::observe_providers(&self.providers, query, profile, additional, cancellation).await
+    }
+
+    /// Observes the supplied base providers once each and returns the
+    /// resulting slots in key order. The join poll semantics match `observe`.
+    async fn observe_providers(
+        base: &[Arc<dyn StatusProvider>],
+        query: &StatusQuery,
+        profile: Option<&dyn StatusProvider>,
+        additional: &[&dyn StatusProvider],
+        cancellation: &dyn Cancellation,
+    ) -> StatusResult<Vec<StatusSlot>> {
+        let mut providers: Vec<&dyn StatusProvider> = base.iter().map(Arc::as_ref).collect();
         if let Some(extra) = profile {
             validate_key(extra.key(), "profile provider").map_err(OperationError::Failed)?;
             if providers
@@ -708,9 +703,9 @@ impl StatusProvidersFactory {
     ) -> Result<Self, StatusError> {
         Ok(Self {
             templates: templates.clone(),
-            steer: Arc::new(StatusProviders::new(StatusTarget::Steer, steer)?),
-            tool: Arc::new(StatusProviders::new(StatusTarget::Tool, tool)?),
-            live: Arc::new(StatusProviders::new(StatusTarget::Live, live)?),
+            steer: Arc::new(StatusProviders::new(steer)?),
+            tool: Arc::new(StatusProviders::new(tool)?),
+            live: Arc::new(StatusProviders::new(live)?),
         })
     }
     /// Renders the steering offering for one safe point over the supplied
@@ -761,10 +756,15 @@ impl StatusProvidersFactory {
             snapshot: statistics,
             templates: self.templates.clone(),
         };
-        StatusProviders::new(StatusTarget::Tool, vec![])
-            .map_err(OperationError::Failed)?
-            .observe(query, None, &[&statistics_provider], cancellation)
-            .await
+        let slots = StatusProviders::observe_providers(
+            &[],
+            query,
+            None,
+            &[&statistics_provider],
+            cancellation,
+        )
+        .await?;
+        Ok(StatusProviders::join_slots(&slots))
     }
     /// Renders the tool status over the source's snapshot.
     pub async fn tool(

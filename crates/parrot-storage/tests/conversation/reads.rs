@@ -248,7 +248,14 @@ async fn structured_conversation_reopens_in_order_and_respects_watermark() {
     );
     assert_eq!(
         restored
-            .conversation_after("agent".into(), items[1].sequence)
+            .events()
+            .transaction(move |tx| {
+                parrot_storage::conversation::reads::read_conversation(
+                    tx,
+                    "agent",
+                    items[1].sequence,
+                )
+            })
             .await
             .unwrap()
             .len(),
@@ -393,7 +400,12 @@ async fn structured_parts_calls_and_provider_content_are_exact() {
         [expected]
     );
     assert!(matches!(
-        reopened.conversation_after("agent".into(), -1).await,
+        reopened
+            .events()
+            .transaction(move |tx| {
+                parrot_storage::conversation::reads::read_conversation(tx, "agent", -1)
+            })
+            .await,
         Err(EventError::Argument(_))
     ));
     reopened.events().database().close().await.unwrap();
@@ -462,7 +474,6 @@ async fn materialized_images_use_part_metadata_without_decoding_bytes_or_file_fa
             None,
             &NeverCancelled,
         )
-        .await
         .unwrap();
     let id = artifact.artifact_id;
     let path = store.path_of(&id).unwrap();
@@ -522,7 +533,6 @@ async fn image_materialization_does_not_require_upload_or_artifact_metadata_rows
             None,
             &NeverCancelled,
         )
-        .await
         .unwrap();
     let part = ConversationPart::image(artifact.clone());
     repo.events()

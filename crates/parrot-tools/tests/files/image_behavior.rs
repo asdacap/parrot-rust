@@ -186,8 +186,8 @@ async fn image_references_preserve_each_bound_actual_filename_and_share_original
     let mut stored = Vec::new();
     fixture
         .repository
-        .open(&artifact.artifact_id, &NoCancel)
-        .await
+        .store()
+        .open(&artifact.artifact_id)
         .unwrap()
         .read_to_end(&mut stored)
         .unwrap();

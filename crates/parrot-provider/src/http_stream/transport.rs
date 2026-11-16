@@ -2,21 +2,21 @@ use super::{
     BoundedStream, ByteStream, Endpoint, HttpError, HttpFailure, IdleTimeoutStream,
     MAX_ERROR_BYTES, MAX_STREAM_BYTES, ProviderHttpClient, ResponseByteCounter,
 };
-use crate::anthropic::wire_json::selected_json_string;
+use crate::wire_json::selected_json_string;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use serde_json::value::RawValue;
 use std::{collections::BTreeMap, time::Duration};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum HttpMethod {
-    Get,
-    Post,
-}
-
 pub struct HttpRequest {
-    pub method: HttpMethod,
+    pub method: String,
     pub endpoint: Endpoint,
     pub headers: Vec<(String, String)>,
+    /// Applied by the transport outside the signed header set: AWS signs
+    /// request headers, not content headers.
+    pub content_type: Option<String>,
+    /// Excludes the standard content headers from the response surface,
+    /// matching the source streaming adapter's header contract.
+    pub filter_content_headers: bool,
     pub body: Vec<u8>,
 }
 
@@ -55,13 +55,14 @@ impl HttpTransport for ReqwestTransport {
                 return Err(HttpError::Cancelled);
             }
             let client = self.client.client_for(&request.endpoint)?;
-            let method = match request.method {
-                HttpMethod::Get => reqwest::Method::GET,
-                HttpMethod::Post => reqwest::Method::POST,
-            };
+            let method = reqwest::Method::from_bytes(request.method.as_bytes())
+                .map_err(|error| HttpError::Transport(error.to_string()))?;
             let mut outbound = client
                 .request(method, request.endpoint.into_url())
                 .body(request.body);
+            if let Some(content_type) = request.content_type {
+                outbound = outbound.header("Content-Type", content_type);
+            }
             for (name, value) in request.headers {
                 outbound = outbound.header(name, value);
             }
@@ -81,20 +82,21 @@ impl HttpTransport for ReqwestTransport {
             for name in response.headers().keys() {
                 // HttpResponseMessage.Headers excludes the standard content
                 // header collection even though both arrive on the same wire.
-                if [
-                    "allow",
-                    "content-disposition",
-                    "content-encoding",
-                    "content-language",
-                    "content-length",
-                    "content-location",
-                    "content-md5",
-                    "content-range",
-                    "content-type",
-                    "expires",
-                    "last-modified",
-                ]
-                .contains(&name.as_str())
+                if request.filter_content_headers
+                    && [
+                        "allow",
+                        "content-disposition",
+                        "content-encoding",
+                        "content-language",
+                        "content-length",
+                        "content-location",
+                        "content-md5",
+                        "content-range",
+                        "content-type",
+                        "expires",
+                        "last-modified",
+                    ]
+                    .contains(&name.as_str())
                 {
                     continue;
                 }
@@ -220,9 +222,11 @@ pub async fn open_stream(
     ];
     outbound.extend(headers);
     let request = HttpRequest {
-        method: HttpMethod::Post,
+        method: "POST".into(),
         endpoint: endpoint.into(),
         headers: outbound,
+        content_type: None,
+        filter_content_headers: true,
         body,
     };
     let response = if options.header_timeout.is_zero() {
@@ -262,9 +266,11 @@ pub async fn get(
         let mut response = transport
             .send(
                 HttpRequest {
-                    method: HttpMethod::Get,
+                    method: "GET".into(),
                     endpoint: endpoint.into(),
                     headers: outbound,
+                    content_type: None,
+                    filter_content_headers: true,
                     body: Vec::new(),
                 },
                 cancellation,

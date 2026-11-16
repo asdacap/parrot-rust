@@ -2,7 +2,7 @@
 //! raw until a source-style lookup actually visits them.
 use serde_json::value::RawValue;
 
-use super::wire_json::selected_json_string;
+use crate::wire_json::selected_json_string;
 
 pub(crate) struct RawObject<'a> {
     pub(crate) members: Vec<(&'a str, &'a RawValue)>,

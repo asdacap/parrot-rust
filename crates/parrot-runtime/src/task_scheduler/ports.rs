@@ -14,7 +14,6 @@ use parrot_domain::{
     protocol::messages::parrot::{Delivery, Event},
     values::agent_state::{
         ExecutionCheckpoint, TaskForkModeSnapshot, TaskResponseReference, TaskResultClaim,
-        TaskRunnerCheckpoint,
     },
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
@@ -192,22 +191,6 @@ impl Drop for TaskWorkerLease {
     fn drop(&mut self) {
         self.changed.notify_waiters();
     }
-}
-
-/// Persists a runner generation and announces its first owned reservation.
-pub trait TaskRunProgress: Send + Sync {
-    /// Identifies this graph as the owner of a stable prompt result.
-    fn claim(&self, prompt_id: &str) -> TaskResultClaim;
-    /// Waits outside worker lifecycle slots until this prompt may claim its worker.
-    fn acquire<'a>(
-        &'a self,
-        checkpoint: &'a TaskRunnerCheckpoint,
-        session: &'a dyn TaskSession,
-    ) -> BoxFuture<'a, ChildResult<TaskWorkerLease>>;
-    /// Rejects stale generations and commits progress before new prompt admission.
-    fn save(&self, checkpoint: TaskRunnerCheckpoint) -> BoxFuture<'_, ChildResult<()>>;
-    /// Releases the startup barrier once an owned worker operation is reserved.
-    fn reserve(&self);
 }
 
 pub(crate) fn state_error(

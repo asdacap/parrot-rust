@@ -3,7 +3,7 @@ use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_foundation::oauth::AuthError;
 use parrot_provider::{
     catalogs::Model,
-    http_stream::{ByteStream, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport},
+    http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
     responses_websocket::{ConnectedSocket, Connector, Headers, WebSocketError},
     sessions::{
         Content, Error, Event, EventStream, Message, Provider, Request, Session,
@@ -222,7 +222,7 @@ impl HttpTransport for Http {
                 .find(|(name, _)| name.eq_ignore_ascii_case("Authorization"))
                 .map(|(_, value)| value.clone());
             self.counts.http_requests.lock().unwrap().push(json!({
-                "method":match request.method { HttpMethod::Get => "GET", HttpMethod::Post => "POST" },
+                "method":request.method,
                 "url":request.endpoint.as_str(), "authorization":authorization,
                 "body_raw":String::from_utf8(request.body).expect("actual encoded HTTP body is UTF8"),
             }));

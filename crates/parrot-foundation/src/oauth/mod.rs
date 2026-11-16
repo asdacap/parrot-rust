@@ -15,11 +15,8 @@ mod flow_tests;
 static BROWSER_CALLBACK_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub use api_key_source::{ApiKeyEnvironment, StoredApiKeySource};
-pub use browser::{BrowserLaunchError, BrowserLauncher, SystemBrowserOpener};
-pub use client::{
-    CALLBACK_URL, CLIENT_ID, DEFAULT_ISSUER, OpenAiOAuthClient, OpenAiOAuthOptions,
-    extract_account_id,
-};
+pub use browser::{BrowserLaunchError, SystemBrowserOpener};
+pub use client::{OpenAiOAuthClient, OpenAiOAuthOptions};
 pub use flows::{AuthDiagnostic, AuthDiagnosticLog, AuthFlows, AuthOutput, DiagnosticSeverity};
 pub use model::{
     AuthError, BrowserOpener, CredentialStorage, DeviceAuthorization, OAuthAccess, OAuthClient,

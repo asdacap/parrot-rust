@@ -1,9 +1,9 @@
 use super::{
     signer::{AwsV4Signer, EMPTY_PAYLOAD_SHA256, sha256},
-    transport::{ImageHttpRequest, ImageTransport},
+    transport_error,
 };
 use crate::{
-    http_stream::{Endpoint, HttpError, HttpResponse},
+    http_stream::{Endpoint, HttpError, HttpRequest, HttpResponse},
     sessions::Error,
 };
 use chrono::{DateTime, Datelike, Utc};
@@ -133,7 +133,7 @@ impl<T: Clone + Send + Sync + 'static> Work<T> {
     }
 }
 struct State {
-    transport: Arc<dyn ImageTransport>,
+    transport: Arc<dyn crate::http_stream::HttpTransport>,
     config: BucketConfig,
     endpoint: url::Url,
     public_base: String,
@@ -146,7 +146,7 @@ struct State {
 pub struct S3ImageBucket(Arc<State>);
 impl S3ImageBucket {
     pub fn new(
-        transport: Arc<dyn ImageTransport>,
+        transport: Arc<dyn crate::http_stream::HttpTransport>,
         config: BucketConfig,
         clock: Arc<dyn Clock>,
         credentials: Arc<dyn CredentialSource>,
@@ -250,23 +250,24 @@ impl S3ImageBucket {
         relative: &str,
         body: Vec<u8>,
         content_type: Option<String>,
-    ) -> Result<ImageHttpRequest, Error> {
+    ) -> Result<HttpRequest, Error> {
         let endpoint = self
             .0
             .endpoint
             .join(relative)
             .map_err(|e| Error::Provider(e.to_string()))?;
-        Ok(ImageHttpRequest {
+        Ok(HttpRequest {
             method: method.into(),
             endpoint: super::uri::normalize_endpoint(&Endpoint::from(endpoint))?,
             headers: Vec::new(),
-            body,
             content_type,
+            filter_content_headers: false,
+            body,
         })
     }
     async fn send(
         &self,
-        mut request: ImageHttpRequest,
+        mut request: HttpRequest,
         hash: &str,
         timeout: Duration,
         cancellation: &dyn Cancellation,
@@ -280,7 +281,7 @@ impl S3ImageBucket {
     }
     async fn dispatch(
         &self,
-        request: ImageHttpRequest,
+        request: HttpRequest,
         timeout: Duration,
         cancellation: &dyn Cancellation,
     ) -> Result<HttpResponse, Error> {
@@ -296,7 +297,7 @@ impl S3ImageBucket {
             cause: Box::new(cause),
         };
         let result = tokio::select! { biased;
-            result=self.0.transport.send(request,cancellation)=>result,
+            result=self.0.transport.send(request,cancellation)=>result.map_err(transport_error),
             _=cancellation.cancelled()=>return Err(Error::Cancelled),
             _=tokio::time::sleep(timeout)=>return Err(failure(Error::Cancelled)),
         };
@@ -446,13 +447,14 @@ impl ImageBucket for S3ImageBucket {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<bool, Error>> {
         Box::pin(async move {
-            let request = ImageHttpRequest {
+            let request = HttpRequest {
                 method: "HEAD".into(),
                 endpoint: super::uri::normalize_endpoint(
                     &Endpoint::parse(url).map_err(|e| Error::Provider(e.to_string()))?,
                 )?,
                 headers: Vec::new(),
                 content_type: None,
+                filter_content_headers: false,
                 body: Vec::new(),
             };
             match self
@@ -518,11 +520,12 @@ mod clock_tests {
                 .unwrap();
             let timestamp = format_amz_date(time);
             assert!(timestamp.is_empty());
-            let mut request = ImageHttpRequest {
+            let mut request = HttpRequest {
                 method: "HEAD".into(),
                 endpoint: Endpoint::parse("https://example.com/bucket").unwrap(),
                 headers: Vec::new(),
                 content_type: None,
+                filter_content_headers: false,
                 body: Vec::new(),
             };
             assert_eq!(

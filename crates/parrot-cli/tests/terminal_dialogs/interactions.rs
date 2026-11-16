@@ -17,7 +17,7 @@ use std::{
 use native_fixture::{Fixture, RecordingDialog, Stop};
 use parrot_cli::{
     dispatch::dialog::{DialogOption, SlashDialog},
-    slash_sessions::{CallbackSessionBinding, RpcSlashSession},
+    slash_sessions::RpcSlashSession,
     terminal_dialogs::interactions::{
         CountdownCallback, PendingQuestionLifetime, QuestionCollector, QuestionCompletionOutcome,
         QuestionCountdown, QuestionInteractionOptions, complete_permission,
@@ -76,9 +76,7 @@ fn session(fixture: &mut Fixture) -> RpcSlashSession {
         },
         Arc::new(Mutex::new(config)),
         true,
-        Box::new(CallbackSessionBinding(Arc::new(|_, _| {
-            Box::pin(async { Ok(()) })
-        }))),
+        Arc::new(|_, _| Box::pin(async { Ok(()) })),
     )
 }
 

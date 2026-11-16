@@ -1,4 +1,4 @@
-use super::json::{source_compact, source_quote};
+use crate::wire_json::{source_compact, source_quote};
 use serde_json::value::RawValue;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},

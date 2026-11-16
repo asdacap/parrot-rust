@@ -2,9 +2,9 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_foundation::config::{Configuration, runtime::ImageUploadConfig};
 use parrot_provider::{
-    http_stream::{ByteStream, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport},
+    http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
     image_generation::{
-        ImageGenerationRequest, ImageHttpRequest, ImageTransport,
+        ImageGenerationRequest,
         bucket::{Clock, CredentialSource, StoredCredential},
     },
     responses_websocket::{ConnectedSocket, Connector, Headers, WebSocketError},
@@ -166,7 +166,9 @@ impl PairedHttp {
     }
 }
 // Both selected views below use this SAME Arc and recorder. They are not two
-// independent mocks whose behavior merely happens to agree.
+// independent mocks whose behavior merely happens to agree. The unified
+// transport classifies by URL shape: generation under /images/, S3 upload
+// under /b/, chat streaming everywhere else.
 impl HttpTransport for PairedHttp {
     fn send<'a>(
         &'a self,
@@ -174,64 +176,28 @@ impl HttpTransport for PairedHttp {
         ct: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async move {
-            let method = match request.method {
-                HttpMethod::Get => "GET",
-                HttpMethod::Post => "POST",
-            };
-            let post = method == "POST";
-            let url = request.endpoint.as_str().to_owned();
-            self.requests.lock().unwrap().push(Recorded {
-                kind: "stream",
-                method: method.into(),
-                url: url.clone(),
-                headers: request.headers,
-                content_type: None,
-                body: request.body,
-            });
-            if ct.is_cancelled() {
-                return Err(HttpError::Cancelled);
-            }
-            if post {
-                let call = self.chat_calls.fetch_add(1, Ordering::SeqCst);
-                if call == 0
-                    && matches!(self.behavior, Behavior::RejectUrl | Behavior::MissingObject)
-                {
-                    return Ok(response(
-                        400,
-                        br#"{"error":{"type":"invalid_request_error","message":"bad image"}}"#
-                            .to_vec(),
-                    ));
-                }
-                Ok(response(200, SUCCESS.as_bytes().to_vec()))
-            } else if url == "https://models.dev/api.json" {
-                Ok(response(200, b"{}".to_vec()))
-            } else if url.ends_with("/model/info") {
-                Ok(response(200, br#"{"data":[]}"#.to_vec()))
-            } else {
-                Ok(response(200, br#"{"data":[{"id":"m"}]}"#.to_vec()))
-            }
-        })
-    }
-}
-impl ImageTransport for PairedHttp {
-    fn send<'a>(
-        &'a self,
-        request: ImageHttpRequest,
-        ct: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<HttpResponse, Error>> {
-        Box::pin(async move {
             let path = request.endpoint.as_url().path().to_owned();
             let method = request.method.clone();
             let generation = path.contains("/images/");
+            let upload = path == "/b" || path.starts_with("/b/");
             self.requests.lock().unwrap().push(Recorded {
-                kind: "image",
+                kind: if generation || upload {
+                    "image"
+                } else {
+                    "stream"
+                },
                 method: method.clone(),
                 url: request.endpoint.as_str().to_owned(),
                 headers: request.headers,
-                content_type: request.content_type,
+                content_type: if generation || upload {
+                    request.content_type
+                } else {
+                    None
+                },
                 body: request.body,
             });
-            if self.behavior == Behavior::GatedPrepare && method == "HEAD" && path == "/b" {
+            if upload && self.behavior == Behavior::GatedPrepare && method == "HEAD" && path == "/b"
+            {
                 loop {
                     let notified = self.prepare_notify.notified();
                     tokio::pin!(notified);
@@ -243,7 +209,7 @@ impl ImageTransport for PairedHttp {
                 }
             }
             if ct.is_cancelled() {
-                return Err(Error::Cancelled);
+                return Err(HttpError::Cancelled);
             }
             if generation {
                 let body = if self.generation_status == 200 {
@@ -259,7 +225,29 @@ impl ImageTransport for PairedHttp {
             {
                 return Ok(response(404, vec![]));
             }
-            Ok(response(200, vec![]))
+            if !generation && !upload {
+                if method == "POST" {
+                    let call = self.chat_calls.fetch_add(1, Ordering::SeqCst);
+                    if call == 0
+                        && matches!(self.behavior, Behavior::RejectUrl | Behavior::MissingObject)
+                    {
+                        return Ok(response(
+                            400,
+                            br#"{"error":{"type":"invalid_request_error","message":"bad image"}}"#
+                                .to_vec(),
+                        ));
+                    }
+                    Ok(response(200, SUCCESS.as_bytes().to_vec()))
+                } else if request.endpoint.as_str() == "https://models.dev/api.json" {
+                    Ok(response(200, b"{}".to_vec()))
+                } else if request.endpoint.as_str().ends_with("/model/info") {
+                    Ok(response(200, br#"{"data":[]}"#.to_vec()))
+                } else {
+                    Ok(response(200, br#"{"data":[{"id":"m"}]}"#.to_vec()))
+                }
+            } else {
+                Ok(response(200, vec![]))
+            }
         })
     }
 }
@@ -272,7 +260,7 @@ impl HttpClients for Clients {
             .unwrap()
             .push((base.into(), invalid));
         let streaming: Arc<dyn HttpTransport> = self.0.clone();
-        let images: Arc<dyn ImageTransport> = self.0.clone();
+        let images: Arc<dyn HttpTransport> = self.0.clone();
         assert_eq!(
             Arc::as_ptr(&streaming) as *const (),
             Arc::as_ptr(&images) as *const ()

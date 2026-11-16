@@ -361,10 +361,7 @@ async fn observe_http(case_id: &str, input: &Value) -> Value {
                     .1
                     .clone()
             };
-            let method = match request.method {
-                HttpMethod::Get => "GET",
-                HttpMethod::Post => "POST",
-            };
+            let method = request.method.clone();
             return json!({"method":method,"uri":request.endpoint.as_str(),"body_hex":hex_encode(&request.body),"content_type":header("Content-Type"),"accept":header("Accept"),"custom":[header("X-Test")]});
         }
         let headers: serde_json::Map<String, Value> = response

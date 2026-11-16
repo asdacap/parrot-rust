@@ -42,7 +42,7 @@ fn answer_formats_resolved_recipient_single_and_numbered_multiline_answers() {
                 columns: 512,
                 color: false,
                 inline_diff: false,
-                previous_packing: None,
+                previous_item: None,
             },
         )
         .unwrap();

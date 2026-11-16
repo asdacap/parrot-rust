@@ -16,11 +16,91 @@ mod resources;
 use resources::BorrowedInvocationResources;
 #[path = "../../../parrot-runtime/tests/tool_settlement/runtime.rs"]
 mod runtime;
-use parrot_host::composition::invocation::{
-    InvocationSelection, InvocationServices, RetainedCompactTool,
+use parrot_domain::contracts::async_ops::OperationResult;
+use parrot_host::composition::invocation::{InlineRequest, InlineRoute, InvocationSelection};
+use parrot_runtime::tool_settlement::{
+    BorrowedTool, BorrowedToolState, SharedSecurity, ToolFailure, ToolInvocation, ToolMetadata,
+    ToolOutput,
 };
 use parrot_runtime::{agent_turn::lifecycle::ExecutionStatus, prompt_assembly::SessionPrompt};
 use parrot_tools::session::{self, Failure, SessionServices};
+use tokio::sync::mpsc;
+
+struct SessionToolAdapter<O: SessionServices> {
+    tool: Arc<session::SessionTool<O>>,
+    metadata: ToolMetadata,
+}
+impl<O> BorrowedTool<Security> for SessionToolAdapter<O>
+where
+    O: SessionServices<
+            Security = SharedSecurity<Security>,
+            Selection = InvocationSelection<Security>,
+        > + 'static,
+{
+    fn definition(&self) -> &ToolMetadata {
+        &self.metadata
+    }
+    fn enabled_after_interruption(&self) -> bool {
+        self.tool.enabled_after_interruption()
+    }
+    fn invoke<'a>(
+        &'a self,
+        invocation: ToolInvocation,
+        state: BorrowedToolState<'a, Security>,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, OperationResult<ToolOutput, ToolFailure>> {
+        Box::pin(async move {
+            let (sender, mut requests) = mpsc::channel::<InlineRequest>(1);
+            let scoped = InvocationSelection {
+                turn: state.selection.clone(),
+                route: Some(InlineRoute { sender }),
+            };
+            let security = SharedSecurity(state.selection.security.clone());
+            let call = session::Invocation {
+                call_id: invocation.call_id,
+                arguments_json: invocation.arguments_json,
+                prompt_templates: invocation.prompt_templates,
+            };
+            let invoke = self
+                .tool
+                .invoke(call, InvocationScope::new(security, scoped, cancellation));
+            tokio::pin!(invoke);
+            loop {
+                tokio::select! {
+                    result = &mut invoke => {
+                        return result.map(|output| ToolOutput::text(output.text)).map_err(|error| match error {
+                            OperationError::Cancelled => OperationError::Cancelled,
+                            OperationError::Failed(error) => OperationError::Failed(ToolFailure::new(
+                                error.to_string(),
+                                FailureKind::InvalidOperation,
+                            )),
+                        });
+                    }
+                    Some(InlineRequest::Estimate { reply }) = requests.recv() => {
+                        let result = state.resources.context.estimate_context(
+                            &state.selection.model,
+                            state.definitions,
+                            state.resources.conversation,
+                            state.resources.prompt,
+                            cancellation,
+                        ).await.map_err(|error| {
+                            let error = TurnError::Context(error);
+                            if error.is_cancelled() {
+                                OperationError::Cancelled
+                            } else {
+                                OperationError::Failed(Failure::new(
+                                    session::FailureKind::InvalidOperation,
+                                    error.to_string(),
+                                ))
+                            }
+                        });
+                        let _ = reply.send(result);
+                    }
+                }
+            }
+        })
+    }
+}
 
 struct Ancillary;
 impl SessionServices for Ancillary {
@@ -67,17 +147,22 @@ impl SessionServices for Ancillary {
     }
 }
 type Bridge = (
-    Arc<RetainedCompactTool<Security>>,
-    Arc<session::SessionTool<InvocationServices<Security, Ancillary>>>,
+    Arc<SessionToolAdapter<Ancillary>>,
+    Arc<session::SessionTool<Ancillary>>,
 );
 fn bridge() -> Bridge {
-    let services = Arc::new(InvocationServices::new(Arc::new(Ancillary)));
     let tool = Arc::new(session::SessionTool::new(
         session::Kind::CompactContext,
         ConfiguredToolDefinition::new("Compact current context", r#"{"type":"object"}"#),
-        services,
+        Arc::new(Ancillary),
     ));
-    let adapter = Arc::new(RetainedCompactTool::from_session(tool.clone()).unwrap());
+    let adapter = Arc::new(SessionToolAdapter {
+        tool: tool.clone(),
+        metadata: ToolMetadata {
+            name: "compact_context".into(),
+            aliases: vec![],
+        },
+    });
     (adapter, tool)
 }
 fn compact_step() -> Step {
@@ -421,9 +506,9 @@ impl SessionServices for StatusAncillary {
     }
 }
 type StatusBridge = (
-    Arc<RetainedCompactTool<Security>>,
+    Arc<SessionToolAdapter<StatusAncillary>>,
     Arc<StatusAncillary>,
-    Arc<session::SessionTool<InvocationServices<Security, StatusAncillary>>>,
+    Arc<session::SessionTool<StatusAncillary>>,
 );
 fn status_bridge() -> StatusBridge {
     status_bridge_with_prompt(None)
@@ -462,13 +547,19 @@ fn status_bridge_with_prompt(prompt_probe: Option<Arc<SessionPrompt>>) -> Status
         observed: Mutex::new(vec![]),
         prompt_probe,
     });
-    let services = Arc::new(InvocationServices::new(ancillary.clone()));
+    let services = ancillary.clone();
     let tool = Arc::new(session::SessionTool::new(
         session::Kind::Status,
         ConfiguredToolDefinition::new("Observe runtime status", r#"{"type":"object"}"#),
         services,
     ));
-    let adapter = Arc::new(RetainedCompactTool::from_status_session(tool.clone()).unwrap());
+    let adapter = Arc::new(SessionToolAdapter {
+        tool: tool.clone(),
+        metadata: ToolMetadata {
+            name: "status".into(),
+            aliases: vec![],
+        },
+    });
     (adapter, ancillary, tool)
 }
 fn status_step(call_id: &str) -> Step {

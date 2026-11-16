@@ -20,6 +20,21 @@ mod turn;
 pub mod usage;
 
 pub use crate::dispatch::hierarchy::AgentSessionHierarchy;
+
+pub(crate) fn duration_text(seconds: u64) -> String {
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 3600 {
+        format!("{}m {:02}s", seconds / 60, seconds % 60)
+    } else {
+        format!(
+            "{}h {:02}m {:02}s",
+            seconds / 3600,
+            (seconds / 60) % 60,
+            seconds % 60
+        )
+    }
+}
 pub use activity::{ActivityUpdate, RawActivityView};
 pub use model::*;
 pub use registry::ToolPresenterRegistry;

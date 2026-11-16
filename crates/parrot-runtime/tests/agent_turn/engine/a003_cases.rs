@@ -476,7 +476,7 @@ async fn a003_statistics_replay_exact_facts_tool_round_and_two_cumulative_termin
     let recovered = restored
         .repository
         .events()
-        .replay_statistics()
+        .replay_statistics_with_progress(None)
         .await
         .unwrap();
     let expected = AgentUsageTotals {

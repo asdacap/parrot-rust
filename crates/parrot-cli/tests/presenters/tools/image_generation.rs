@@ -41,7 +41,7 @@ fn imagegen_terminal_repeats_prompt_references_and_appends_error() {
                     columns: 32768,
                     color: false,
                     inline_diff: false,
-                    previous_packing: None
+                    previous_item: None
                 }
             )
             .unwrap()

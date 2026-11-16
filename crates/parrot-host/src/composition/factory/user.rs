@@ -1893,7 +1893,6 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
                         Some(upload.byte_length),
                         cancellation.as_ref(),
                     )
-                    .await
                     .map_err(RpcError::from)
             })
     }

@@ -1,68 +1,20 @@
-use super::{
-    AnthropicEvent, AnthropicParser, EncodeError, ParserError, PreparedRequest, RequestView, encode,
-};
+use super::{AnthropicEvent, AnthropicParser, EncodeError, ParserError, PreparedRequest, encode};
+use crate::view::RequestView;
 use crate::{
     catalogs::{CatalogError, Model, StandardModelDecoder, StandardModelError, merge_models},
     http_stream::{
         self, Endpoint, HttpError, HttpEventStream, HttpStreamEvent, HttpTransport,
         ResponseByteCounter, StreamOptions,
     },
+    sessions::provider::CompatibleOptions,
 };
-use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
+use parrot_domain::contracts::async_ops::Cancellation;
 use std::{collections::VecDeque, fmt, sync::Arc};
 
-/// Credential lookup is injected; this module never reads environment or stores.
-pub trait ApiKeySource: Send + Sync {
-    fn api_key<'a>(
-        &'a self,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<String, ProviderError>>;
-    fn has_credential<'a>(
-        &'a self,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<bool, ProviderError>>;
-}
-
-pub struct AnthropicOptions {
-    pub id: String,
-    pub base_url: String,
-    pub api_key_source: Arc<dyn ApiKeySource>,
-    pub headers: Vec<(String, String)>,
-    pub allow_insecure_localhost: bool,
-    pub allow_insecure_remote: bool,
-    pub models: Vec<Model>,
-    pub model_defaults: Vec<Model>,
-    pub external_models: Vec<Model>,
-    pub maximum_request_bytes: usize,
-    pub stream_idle_timeout_ms: i64,
-    pub header_timeout_ms: i64,
-    /// Application composition supplies its build identity, not a credential.
-    pub user_agent: String,
-}
-impl AnthropicOptions {
-    pub fn new(
-        id: impl Into<String>,
-        base_url: impl Into<String>,
-        api_key_source: Arc<dyn ApiKeySource>,
-    ) -> Self {
-        Self {
-            id: id.into(),
-            base_url: base_url.into(),
-            api_key_source,
-            headers: Vec::new(),
-            allow_insecure_localhost: false,
-            allow_insecure_remote: false,
-            models: Vec::new(),
-            model_defaults: Vec::new(),
-            external_models: Vec::new(),
-            maximum_request_bytes: 64 << 20,
-            stream_idle_timeout_ms: 300_000,
-            header_timeout_ms: 60_000,
-            user_agent: format!("parrot/{}", env!("CARGO_PKG_VERSION")),
-        }
-    }
-}
-
+/// Credential lookup is injected through the shared session seam; this module
+/// never reads environment or stores. Session credential failures map through
+/// `credential_error`; the adapter keeps its own diagnostic fidelity for parser
+/// and encoding failures.
 #[derive(Debug)]
 pub enum ProviderError {
     Http(HttpError),
@@ -116,9 +68,23 @@ impl From<CatalogError> for ProviderError {
         Self::Catalog(error)
     }
 }
+/// Maps a session credential failure into the adapter error without losing the
+/// typed authentication cause or cancellation.
+pub(crate) fn credential_error(error: crate::sessions::Error) -> ProviderError {
+    match error {
+        crate::sessions::Error::Authentication(error) => ProviderError::Authentication(error),
+        crate::sessions::Error::Cancelled => ProviderError::Http(HttpError::Cancelled),
+        crate::sessions::Error::Http(error) => ProviderError::Http(error),
+        crate::sessions::Error::Io(message) => {
+            ProviderError::Encode(EncodeError::Image(std::io::Error::other(message)))
+        }
+        crate::sessions::Error::Wire(message) => ProviderError::Parse(ParserError::Wire(message)),
+        error => ProviderError::Credential(error.to_string()),
+    }
+}
 
 pub struct AnthropicProvider {
-    options: AnthropicOptions,
+    options: CompatibleOptions,
     transport: Arc<dyn HttpTransport>,
     endpoint: Endpoint,
     models_endpoint: Endpoint,
@@ -126,7 +92,7 @@ pub struct AnthropicProvider {
 }
 impl AnthropicProvider {
     pub fn new(
-        options: AnthropicOptions,
+        options: CompatibleOptions,
         transport: Arc<dyn HttpTransport>,
     ) -> Result<Self, ProviderError> {
         if options.id.trim().is_empty() {
@@ -176,6 +142,7 @@ impl AnthropicProvider {
             .api_key_source
             .has_credential(cancellation)
             .await
+            .map_err(credential_error)
     }
     pub fn prepare(&self, request: &impl RequestView) -> Result<PreparedRequest, ProviderError> {
         Ok(encode(request, self.id())?)
@@ -243,7 +210,12 @@ impl AnthropicProvider {
         &self,
         cancellation: &dyn Cancellation,
     ) -> Result<Vec<(String, String)>, ProviderError> {
-        let key = self.options.api_key_source.api_key(cancellation).await?;
+        let key = self
+            .options
+            .api_key_source
+            .api_key(cancellation)
+            .await
+            .map_err(credential_error)?;
         if key.is_empty() {
             return Err(ProviderError::Provider(format!(
                 "provider: \"{}\" has no API key",

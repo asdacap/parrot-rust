@@ -1,8 +1,7 @@
-use super::view::{
-    ContentKind, ContentView, MessageView, RequestView, Role, ToolCallView, ToolDefinitionView,
-};
-use super::wire_json::{normalize_raw_json, quote};
+use crate::view::{ContentView, MessageView, RequestView, ToolCallView, ToolView};
 use crate::wire::encode_base64;
+use crate::wire_json::{normalize_raw_json, quote};
+use parrot_core::Role;
 use serde_json::value::RawValue;
 use std::{fmt, io};
 
@@ -155,7 +154,7 @@ fn message_text(message: &impl MessageView) -> String {
     message
         .contents()
         .iter()
-        .filter(|part| part.kind() == ContentKind::Text)
+        .filter(|part| part.is_text())
         .map(ContentView::text)
         .collect()
 }
@@ -174,7 +173,7 @@ fn ordinary_blocks(message: &impl MessageView) -> Result<Vec<String>, EncodeErro
     }
     let mut blocks = Vec::new();
     for part in message.contents() {
-        if part.kind() == ContentKind::Image {
+        if !part.is_text() {
             let source = if !part.image_url().is_empty() {
                 format!("{{\"type\":\"url\",\"url\":{}}}", quote(part.image_url()))
             } else {

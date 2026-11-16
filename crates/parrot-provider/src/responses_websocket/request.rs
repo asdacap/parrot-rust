@@ -1,5 +1,6 @@
 use super::WebSocketError;
-use crate::responses::{PreparedResponsesRequest, json::source_quote};
+use crate::responses::PreparedResponsesRequest;
+use crate::wire_json::source_quote;
 use serde_json::value::RawValue;
 use std::collections::HashMap;
 

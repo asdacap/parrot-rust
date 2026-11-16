@@ -123,21 +123,6 @@ impl LlmEvent {
         }
     }
 
-    pub fn reasoning_delta(
-        fragment: impl Into<String>,
-        reasoning_kind: LlmReasoningKind,
-        part_id: impl Into<String>,
-        completed: bool,
-    ) -> Self {
-        Self {
-            kind: LlmEventKind::ReasoningDelta,
-            text: fragment.into(),
-            reasoning_kind,
-            reasoning_part_id: part_id.into(),
-            reasoning_completed: completed,
-        }
-    }
-
     pub fn is_visible_output(&self) -> bool {
         matches!(
             self.kind,

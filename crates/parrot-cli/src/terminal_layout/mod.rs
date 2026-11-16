@@ -11,6 +11,11 @@ pub use final_format::{EnhancedFinalMessageRenderer, FinalFormatError, ToolYamlF
 pub use markdown::MarkdownRenderer;
 pub use terminal_line::{TerminalCellStyleSpan, TerminalLine, TerminalStyle};
 
+/// Style that applies its escape only when color output is enabled.
+pub(crate) fn style(color: bool, escape: &str) -> TerminalStyle {
+    TerminalStyle::new(if color { escape } else { "" })
+}
+
 use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_segmentation::UnicodeSegmentation;
 

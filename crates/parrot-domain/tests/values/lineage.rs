@@ -27,7 +27,6 @@ fn resolves_rooted_directories_and_orders_occupants_by_start() {
         directories.join(" "),
         "main/worker/leaf=leaf-1,leaf-2 main/worker=worker-1,worker-2 main=main worker=other-root"
     );
-    assert_eq!(lineage.unresolved(), &["orphan"]);
     assert!(lineage.contains("leaf-2"));
     assert!(!lineage.contains("orphan"));
     let workers = ["main", "worker"].map(str::to_owned);

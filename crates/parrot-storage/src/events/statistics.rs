@@ -163,10 +163,6 @@ fn ensure_agent(
     }
 }
 
-pub fn replay_statistics(tx: &Transaction<'_>) -> Result<AgentStatisticsReplay, EventError> {
-    replay_statistics_with_progress(tx, None)
-}
-
 pub fn replay_statistics_with_progress(
     tx: &Transaction<'_>,
     progress: Option<EventLoadProgress>,

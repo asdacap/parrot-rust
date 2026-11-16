@@ -356,7 +356,7 @@ async fn model_presets_save_and_select_exact_names_and_authoritative_result() {
 #[tokio::test]
 async fn rpc_slash_session_uses_authoritative_preset_response_without_writing_client_config() {
     use super::support::Temp;
-    use parrot_cli::slash_sessions::{CallbackSessionBinding, RpcSlashSession, SlashSession};
+    use parrot_cli::slash_sessions::{RpcSlashSession, SlashSession};
     use parrot_domain::protocol::messages::parrot::UserSession;
     use parrot_foundation::config::Configuration;
     use std::{
@@ -404,9 +404,9 @@ async fn rpc_slash_session_uses_authoritative_preset_response_without_writing_cl
         },
         configuration.clone(),
         false,
-        Box::new(CallbackSessionBinding(Arc::new(|_, _| {
+        Arc::new(|_, _| {
             Box::pin(async { panic!("preset selection must not replace the binding") })
-        }))),
+        }),
     );
     let mut dialog = Dialog::default();
     let activity = Activity::default();

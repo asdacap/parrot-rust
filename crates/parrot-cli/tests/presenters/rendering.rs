@@ -19,7 +19,7 @@ fn render_options(columns: usize, color: bool) -> ScrollbackRenderOptions {
         columns,
         color,
         inline_diff: true,
-        previous_packing: None,
+        previous_item: None,
     }
 }
 fn scroll(item: &Presentation, columns: usize, color: bool) -> Vec<String> {
@@ -425,16 +425,15 @@ fn diff_packing_compares_tool_and_path_by_value_not_arc_identity() {
     let same = diff_item("write", "a");
     let other_path = diff_item("write", "b");
     let other_tool = diff_item("edit", "a");
-    let packing = first.packing_identity();
-    assert!(same.packs(packing.as_ref()));
-    assert!(other_path.packs(packing.as_ref()));
-    assert!(!other_tool.packs(packing.as_ref()));
+    assert!(same.packs(Some(&first)));
+    assert!(other_path.packs(Some(&first)));
+    assert!(!other_tool.packs(Some(&first)));
     assert!(!same.ends_layout());
     assert!(!same.continues(&first));
     let same_rows = ScrollbackItem::render(
         &same,
         ScrollbackRenderOptions {
-            previous_packing: packing.clone(),
+            previous_item: Some(Arc::new(first.clone())),
             ..render_options(80, false)
         },
     )
@@ -444,7 +443,7 @@ fn diff_packing_compares_tool_and_path_by_value_not_arc_identity() {
     let other_rows = ScrollbackItem::render(
         &other_path,
         ScrollbackRenderOptions {
-            previous_packing: packing,
+            previous_item: Some(Arc::new(first.clone())),
             ..render_options(80, false)
         },
     )

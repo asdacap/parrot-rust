@@ -214,17 +214,3 @@ fn tail(value: &str, maximum: usize) -> String {
         .collect::<Vec<_>>();
     lines[lines.len().saturating_sub(maximum)..].join("\n")
 }
-fn duration_text(seconds: u64) -> String {
-    if seconds < 60 {
-        format!("{seconds}s")
-    } else if seconds < 3600 {
-        format!("{}m {:02}s", seconds / 60, seconds % 60)
-    } else {
-        format!(
-            "{}h {:02}m {:02}s",
-            seconds / 3600,
-            (seconds / 60) % 60,
-            seconds % 60
-        )
-    }
-}

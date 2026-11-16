@@ -93,7 +93,11 @@ async fn durable_facts_reopen_without_aggregate_projection_or_current_pricing_hi
     repository.events().database().close().await.unwrap();
 
     let reopened = fixture.repository();
-    let _replay = reopened.events().replay_statistics().await.unwrap();
+    let _replay = reopened
+        .events()
+        .replay_statistics_with_progress(None)
+        .await
+        .unwrap();
     let sessions = reopened.agent_history_session_ids().await.unwrap();
     assert_eq!(sessions.len(), 1, "source session IDs Single()");
     assert_eq!(sessions[0], "main");
@@ -197,7 +201,11 @@ async fn facts_replay_tree_request_history_original_literals(effort: Option<&str
         .await
         .unwrap();
     repository.events().append_usage_fact(tool).await.unwrap();
-    let _replay = repository.events().replay_statistics().await.unwrap();
+    let _replay = repository
+        .events()
+        .replay_statistics_with_progress(None)
+        .await
+        .unwrap();
 
     assert!(
         repository

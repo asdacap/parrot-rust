@@ -102,6 +102,11 @@ pub fn read_conversation(
     agent: &str,
     watermark: i64,
 ) -> Result<Vec<ConversationItem>, EventError> {
+    if watermark < 0 {
+        return Err(EventError::Argument(
+            "watermark must not be negative".into(),
+        ));
+    }
     Ok(read_durable_tail(tx, agent, watermark, true)?
         .into_iter()
         .map(|history| history.item)
@@ -237,20 +242,8 @@ impl ConversationRepository {
     }
 
     pub async fn conversation(&self, agent: String) -> Result<Vec<ConversationItem>, EventError> {
-        self.conversation_after(agent, 0).await
-    }
-    pub async fn conversation_after(
-        &self,
-        agent: String,
-        watermark: i64,
-    ) -> Result<Vec<ConversationItem>, EventError> {
-        if watermark < 0 {
-            return Err(EventError::Argument(
-                "watermark must not be negative".into(),
-            ));
-        }
         self.events
-            .transaction(move |tx| read_conversation(tx, &agent, watermark))
+            .transaction(move |tx| read_conversation(tx, &agent, 0))
             .await
     }
     pub async fn materialize(

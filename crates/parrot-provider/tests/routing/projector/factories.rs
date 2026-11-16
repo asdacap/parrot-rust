@@ -10,8 +10,8 @@ use parrot_foundation::{
 };
 use parrot_provider::{
     catalogs::Model,
-    http_stream::{ByteStream, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport},
-    image_generation::{ImageHttpRequest, ImageTransport, bucket::ImageBucket},
+    http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
+    image_generation::bucket::ImageBucket,
     responses_websocket::{ConnectedSocket, Connector, Headers, WebSocketError},
     routing::{
         auth::FoundationCredentials,
@@ -155,13 +155,10 @@ impl HttpTransport for Transport {
     ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async move {
             self.records.lock().unwrap().record(
-                match request.method {
-                    HttpMethod::Get => "GET",
-                    HttpMethod::Post => "POST",
-                },
+                request.method.as_str(),
                 request.endpoint.as_str(),
                 request.headers.clone(),
-                matches!(request.method, HttpMethod::Post).then_some(request.body.as_slice()),
+                (request.method == "POST").then_some(request.body.as_slice()),
             )?;
             if cancellation.is_cancelled() {
                 return Err(HttpError::Cancelled);
@@ -170,7 +167,7 @@ impl HttpTransport for Transport {
             if let Some(error) = reply.failure {
                 return Err(error);
             }
-            let content_type = if request.method == HttpMethod::Get {
+            let content_type = if request.method == "GET" {
                 "application/json; charset=utf-8"
             } else {
                 "text/event-stream; charset=utf-8"
@@ -189,14 +186,14 @@ impl HttpTransport for Transport {
     }
 }
 struct NoImages;
-impl ImageTransport for NoImages {
+impl HttpTransport for NoImages {
     fn send<'a>(
         &'a self,
-        _: ImageHttpRequest,
+        _: HttpRequest,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<HttpResponse, Error>> {
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async {
-            Err(Error::InvalidOperation(
+            Err(HttpError::Provider(
                 "fixture image transport was not supplied".into(),
             ))
         })
@@ -317,7 +314,7 @@ impl ImageBucketFactory for NoBuckets {
     fn build(
         &self,
         _: &parrot_foundation::config::runtime::ImageUploadConfig,
-        _: Arc<dyn ImageTransport>,
+        _: Arc<dyn HttpTransport>,
     ) -> Result<Arc<dyn ImageBucket>, Error> {
         Err(Error::InvalidOperation(
             "fixture image bucket was not supplied".into(),
@@ -342,7 +339,7 @@ fn transport(
     let records = Arc::new(Mutex::new(Records::default()));
     let handler = move |request: &HttpRequest| {
         let metadata = request.endpoint.as_str() == "https://models.dev/api.json";
-        let body = if request.method == HttpMethod::Get {
+        let body = if request.method == "GET" {
             if metadata {
                 catalogue.clone()
             } else {

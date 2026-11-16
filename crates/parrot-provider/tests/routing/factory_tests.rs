@@ -2,8 +2,8 @@ use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_foundation::config::Configuration;
 use parrot_provider::{
     catalogs::{Model, ModelMetadataFields},
-    http_stream::{ByteStream, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport},
-    image_generation::{ImageHttpRequest, ImageTransport, bucket::ImageBucket},
+    http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
+    image_generation::bucket::ImageBucket,
     responses_websocket::{ConnectedSocket, Connector, Headers, WebSocketError},
     routing::{
         auth::CredentialSources,
@@ -152,12 +152,12 @@ impl Connector for NoSocket {
     }
 }
 struct NoImages;
-impl ImageTransport for NoImages {
+impl HttpTransport for NoImages {
     fn send<'a>(
         &'a self,
-        _: ImageHttpRequest,
+        _: HttpRequest,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<HttpResponse, Error>> {
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async {
             panic!("image operations belong to the separately tested T34 capability")
         })
@@ -168,7 +168,7 @@ impl ImageBucketFactory for NoBucket {
     fn build(
         &self,
         _: &parrot_foundation::config::runtime::ImageUploadConfig,
-        _: Arc<dyn ImageTransport>,
+        _: Arc<dyn HttpTransport>,
     ) -> Result<Arc<dyn ImageBucket>, Error> {
         panic!("these fixtures do not configure image upload")
     }
@@ -231,7 +231,7 @@ impl Transport {
             .lock()
             .unwrap()
             .iter()
-            .filter(|r| r.method == HttpMethod::Post)
+            .filter(|r| r.method == "POST")
             .map(|r| String::from_utf8(r.body.clone()).unwrap())
             .collect()
     }
@@ -247,7 +247,7 @@ impl HttpTransport for Transport {
                 return Err(HttpError::Cancelled);
             }
             let uri = request.endpoint.as_url().clone();
-            let method = request.method;
+            let method = request.method.clone();
             self.requests.lock().unwrap().push(request);
             let (status, body) = if let Some(body) = &self.usage {
                 (200, body.clone())
@@ -261,13 +261,13 @@ impl HttpTransport for Transport {
                 Mode::LiveModels => (200, r#"{"data":[{"id":"live-model","context_window":321}]}"#.into()),
                 Mode::ExternalMembership if uri.as_str() == "https://models.dev/api.json" => (200, r#"{"first":{"id":"first","models":{"external":{"id":"external-first"}}},"second":{"id":"second","models":{"external":{"id":"external-second"}}},"ghost":{"id":"ghost","models":{"external":{"id":"external-ghost"}}}}"#.into()),
                 Mode::ExternalMembership => match uri.host_str().unwrap_or_default() { "first.test" => (200, r#"{"data":[{"id":"live-first"}]}"#.into()), "second.test" => (200, r#"{"data":[{"id":"live-second"}]}"#.into()), _ => (503, String::new()) },
-                Mode::OpenRouter if method == HttpMethod::Get => (200, r#"{"data":[{"id":"vendor/model","context_length":200000,"top_provider":{"max_completion_tokens":8192}}]}"#.into()),
+                Mode::OpenRouter if method == "GET" => (200, r#"{"data":[{"id":"vendor/model","context_length":200000,"top_provider":{"max_completion_tokens":8192}}]}"#.into()),
                 Mode::OpenRouter => (200, "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n".into()),
                 Mode::ChatGptModels => (200, r#"{"models":[{"slug":"live","display_name":"Live","context_window":321,"visibility":"list"}]}"#.into()),
                 Mode::ChatGptCall => (200, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".into()),
                 Mode::Google if uri.as_str() == "https://models.dev/api.json" => (200, r#"{"google":{"id":"google","models":{"gemini-fixture":{"id":"gemini-fixture","name":"Gemini Fixture","tool_call":true,"limit":{"context":32768,"output":8192}}}}}"#.into()),
                 Mode::Google if uri.as_str() == "https://generativelanguage.googleapis.com/v1beta/openai/models" => (200, r#"{"data":[{"id":"gemini-fixture"}]}"#.into()),
-                Mode::Google if uri.as_str() == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" && method == HttpMethod::Post => (200, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello from Gemini\"}}]}\n\ndata: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n".into()),
+                Mode::Google if uri.as_str() == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" && method == "POST" => (200, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello from Gemini\"}}]}\n\ndata: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n".into()),
                 Mode::Google => (404, "unexpected fixture endpoint".into()),
             }
             };
@@ -424,12 +424,11 @@ async fn predefined_google_discovers_models_and_streams_with_api_key_authenticat
         })
         .collect::<Vec<_>>();
     assert!(google_requests.iter().any(|request| {
-        request.method == HttpMethod::Get
-            && request.endpoint.as_url().path() == "/v1beta/openai/models"
+        request.method == "GET" && request.endpoint.as_url().path() == "/v1beta/openai/models"
     }));
     let post = google_requests
         .iter()
-        .find(|request| request.method == HttpMethod::Post)
+        .find(|request| request.method == "POST")
         .expect("the selected Google provider must send a chat request");
     assert_eq!(
         post.endpoint.as_url().path(),
@@ -460,7 +459,7 @@ async fn predefined_google_accepts_a_provider_credential() {
         .await
         .unwrap();
     assert!(transport.requests.lock().unwrap().iter().any(|request| {
-        request.method == HttpMethod::Post
+        request.method == "POST"
             && request.headers.iter().any(|(name, value)| {
                 name.eq_ignore_ascii_case("authorization") && value == "Bearer stored-fixture-key"
             })
@@ -909,7 +908,7 @@ async fn composed_usage_preserves_credentials_requests_decoding_and_retry_capabi
             let requests = transport.requests.lock().unwrap();
             assert_eq!(requests.len(), 1);
             let recorded = &requests[0];
-            assert_eq!(recorded.method, HttpMethod::Get);
+            assert_eq!(recorded.method, "GET");
             assert_eq!(
                 recorded.endpoint.as_url().as_str(),
                 match id {

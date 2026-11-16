@@ -27,12 +27,6 @@ impl WorkingDirectoryClaim {
         self.activation_guard = Some(guard);
         self
     }
-    pub fn workspace_associations(
-        &self,
-        canonical: &str,
-    ) -> io::Result<Option<Vec<UserSessionId>>> {
-        self.read_associations(canonical)
-    }
     pub fn admission_safety_status(
         &self,
         id: &UserSessionId,
@@ -361,7 +355,10 @@ impl WorkingDirectoryClaim {
             ..Default::default()
         }
     }
-    fn read_associations(&self, canonical: &str) -> io::Result<Option<Vec<UserSessionId>>> {
+    pub fn workspace_associations(
+        &self,
+        canonical: &str,
+    ) -> io::Result<Option<Vec<UserSessionId>>> {
         let mut result = BTreeMap::new();
         if let Some(files) = entries(&self.workspace_directory(canonical))? {
             for file in files {

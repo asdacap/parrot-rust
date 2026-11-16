@@ -122,361 +122,156 @@ fn event_stream(source: Box<dyn SessionEventStream>, observation: CallerSignal) 
     ))
 }
 
-#[tonic::async_trait]
-impl Parrot for GrpcService {
-    async fn list_models(
-        &self,
-        request: Request<wire::ListModelsRequest>,
-    ) -> Result<Response<wire::ListModelsResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .list_models(&request.into_inner(), observation.0.as_ref())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("ListModels", error))
+macro_rules! forward_parrot {
+    (infallible { $( $method:ident : $request:ident => $response:ident ),* $(,)? }
+     plain { $( $plain:ident : $plain_label:ident : $plain_request:ident => $plain_response:ident ),* $(,)? }
+     plain_async { $( $async_plain:ident : $async_plain_label:ident : $async_plain_request:ident => $async_plain_response:ident ),* $(,)? }
+     signal_ref { $( $signal:ident : $signal_label:ident : $signal_request:ident => $signal_response:ident ),* $(,)? }
+     signal_ref_async { $( $signal_async:ident : $signal_async_label:ident : $signal_async_request:ident => $signal_async_response:ident ),* $(,)? }
+     signal_owned { $( $owned:ident : $owned_label:ident : $owned_request:ident => $owned_response:ident ),* $(,)? }) => {
+        #[tonic::async_trait]
+        impl Parrot for GrpcService {
+            $(async fn $method(
+                &self,
+                request: Request<wire::$request>,
+            ) -> Result<Response<wire::$response>, Status> {
+                Ok(Response::new(self.service.$method(&request.into_inner())))
+            })*
+
+            $(async fn $plain(
+                &self,
+                request: Request<wire::$plain_request>,
+            ) -> Result<Response<wire::$plain_response>, Status> {
+                self.service
+                    .$plain(&request.into_inner())
+                    .map(Response::new)
+                    .map_err(|error| self.failure(stringify!($plain_label), error))
+            })*
+
+            $(async fn $async_plain(
+                &self,
+                request: Request<wire::$async_plain_request>,
+            ) -> Result<Response<wire::$async_plain_response>, Status> {
+                self.service
+                    .$async_plain(&request.into_inner())
+                    .await
+                    .map(Response::new)
+                    .map_err(|error| self.failure(stringify!($async_plain_label), error))
+            })*
+
+            $(async fn $signal(
+                &self,
+                request: Request<wire::$signal_request>,
+            ) -> Result<Response<wire::$signal_response>, Status> {
+                let observation = CallerSignal(Arc::new(Signal::new()));
+                self.service
+                    .$signal(&request.into_inner(), observation.0.as_ref())
+                    .map(Response::new)
+                    .map_err(|error| self.failure(stringify!($signal_label), error))
+            })*
+
+            $(async fn $signal_async(
+                &self,
+                request: Request<wire::$signal_async_request>,
+            ) -> Result<Response<wire::$signal_async_response>, Status> {
+                let observation = CallerSignal(Arc::new(Signal::new()));
+                self.service
+                    .$signal_async(&request.into_inner(), observation.0.as_ref())
+                    .await
+                    .map(Response::new)
+                    .map_err(|error| self.failure(stringify!($signal_async_label), error))
+            })*
+
+            $(async fn $owned(
+                &self,
+                request: Request<wire::$owned_request>,
+            ) -> Result<Response<wire::$owned_response>, Status> {
+                let observation = CallerSignal(Arc::new(Signal::new()));
+                self.service
+                    .$owned(&request.into_inner(), observation.0.clone())
+                    .await
+                    .map(Response::new)
+                    .map_err(|error| self.failure(stringify!($owned_label), error))
+            })*
+
+            async fn upload_attachment(
+                &self,
+                request: Request<tonic::Streaming<wire::AttachmentUploadFrame>>,
+            ) -> Result<Response<wire::AttachmentUploadResponse>, Status> {
+                let observation = CallerSignal(Arc::new(Signal::new()));
+                let mut stream = IncomingUpload {
+                    stream: request.into_inner(),
+                    failure: None,
+                };
+                self.service
+                    .upload_attachment(&mut stream, observation.0.as_ref())
+                    .await
+                    .map(Response::new)
+                    .map_err(|error| {
+                        stream
+                            .failure
+                            .unwrap_or_else(|| self.failure("UploadAttachment", error))
+                    })
+            }
+
+            type ListenStream = EventStream;
+
+            async fn listen(
+                &self,
+                request: Request<wire::ListenRequest>,
+            ) -> Result<Response<Self::ListenStream>, Status> {
+                let observation = CallerSignal(Arc::new(Signal::new()));
+                let source = self
+                    .service
+                    .listen(&request.into_inner(), observation.0.clone())
+                    .map_err(|error| self.failure("Listen", error))?;
+                Ok(Response::new(event_stream(source, observation)))
+            }
+        }
+    };
+}
+
+forward_parrot! {
+    infallible {
+        list_model_aliases: ListModelAliasesRequest => ListModelAliasesResponse,
+        list_modes: ListModesRequest => ListModesResponse,
     }
-
-    async fn list_model_aliases(
-        &self,
-        request: Request<wire::ListModelAliasesRequest>,
-    ) -> Result<Response<wire::ListModelAliasesResponse>, Status> {
-        Ok(Response::new(
-            self.service.list_model_aliases(&request.into_inner()),
-        ))
+    plain {
+        configure_model_alias: ConfigureModelAlias : ConfigureModelAliasRequest => ConfigureModelAliasResponse,
+        list_sessions: ListSessions : ListSessionsRequest => ListSessionsResponse,
+        set_standing_instruction: SetStandingInstruction : SetStandingInstructionRequest => SetStandingInstructionResponse,
+        list_pending_questions: ListPendingQuestions : ListPendingQuestionsRequest => ListPendingQuestionsResponse,
+        reply_question: ReplyQuestion : ReplyQuestionRequest => ReplyQuestionResponse,
+        reject_question: RejectQuestion : RejectQuestionRequest => RejectQuestionResponse,
     }
-
-    async fn configure_model_alias(
-        &self,
-        request: Request<wire::ConfigureModelAliasRequest>,
-    ) -> Result<Response<wire::ConfigureModelAliasResponse>, Status> {
-        self.service
-            .configure_model_alias(&request.into_inner())
-            .map(Response::new)
-            .map_err(|error| self.failure("ConfigureModelAlias", error))
+    plain_async {
+        update_session: UpdateSession : UpdateSessionRequest => UserSession,
+        list_pending_permissions: ListPendingPermissions : ListPendingPermissionsRequest => ListPendingPermissionsResponse,
+        reply_permission: ReplyPermission : ReplyPermissionRequest => ReplyPermissionResponse,
     }
-
-    async fn list_provider_model_alias_defaults(
-        &self,
-        request: Request<wire::ListProviderModelAliasDefaultsRequest>,
-    ) -> Result<Response<wire::ListProviderModelAliasDefaultsResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .list_provider_model_alias_defaults(&request.into_inner(), observation.0.as_ref())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("ListProviderModelAliasDefaults", error))
+    signal_ref {
+        set_model_preset: SetModelPreset : SetModelPresetRequest => SetModelPresetResponse,
+        select_model_preset: SelectModelPreset : SelectModelPresetRequest => SelectModelPresetResponse,
+        list_model_presets: ListModelPresets : ListModelPresetsRequest => ListModelPresetsResponse,
+        attach_session: AttachSession : AttachSessionRequest => UserSession,
+        set_context_limit: SetContextLimit : SetContextLimitRequest => SetContextLimitResponse,
+        sandbox_enable: SandboxEnable : SandboxEnableRequest => SandboxEnableResponse,
     }
-
-    async fn apply_provider_model_alias_defaults(
-        &self,
-        request: Request<wire::ApplyProviderModelAliasDefaultsRequest>,
-    ) -> Result<Response<wire::ApplyProviderModelAliasDefaultsResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .apply_provider_model_alias_defaults(&request.into_inner(), observation.0.as_ref())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("ApplyProviderModelAliasDefaults", error))
+    signal_ref_async {
+        list_models: ListModels : ListModelsRequest => ListModelsResponse,
+        list_provider_model_alias_defaults: ListProviderModelAliasDefaults : ListProviderModelAliasDefaultsRequest => ListProviderModelAliasDefaultsResponse,
+        apply_provider_model_alias_defaults: ApplyProviderModelAliasDefaults : ApplyProviderModelAliasDefaultsRequest => ApplyProviderModelAliasDefaultsResponse,
+        list_skills: ListSkills : ListSkillsRequest => ListSkillsResponse,
+        configure_skill: ConfigureSkill : ConfigureSkillRequest => ConfigureSkillResponse,
+        session_status: SessionStatus : SessionStatusRequest => SessionStatusResponse,
     }
-
-    async fn set_model_preset(
-        &self,
-        request: Request<wire::SetModelPresetRequest>,
-    ) -> Result<Response<wire::SetModelPresetResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .set_model_preset(&request.into_inner(), observation.0.as_ref())
-            .map(Response::new)
-            .map_err(|error| self.failure("SetModelPreset", error))
-    }
-
-    async fn select_model_preset(
-        &self,
-        request: Request<wire::SelectModelPresetRequest>,
-    ) -> Result<Response<wire::SelectModelPresetResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .select_model_preset(&request.into_inner(), observation.0.as_ref())
-            .map(Response::new)
-            .map_err(|error| self.failure("SelectModelPreset", error))
-    }
-
-    async fn list_model_presets(
-        &self,
-        request: Request<wire::ListModelPresetsRequest>,
-    ) -> Result<Response<wire::ListModelPresetsResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .list_model_presets(&request.into_inner(), observation.0.as_ref())
-            .map(Response::new)
-            .map_err(|error| self.failure("ListModelPresets", error))
-    }
-
-    async fn list_modes(
-        &self,
-        request: Request<wire::ListModesRequest>,
-    ) -> Result<Response<wire::ListModesResponse>, Status> {
-        Ok(Response::new(
-            self.service.list_modes(&request.into_inner()),
-        ))
-    }
-
-    async fn list_skills(
-        &self,
-        request: Request<wire::ListSkillsRequest>,
-    ) -> Result<Response<wire::ListSkillsResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .list_skills(&request.into_inner(), observation.0.as_ref())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("ListSkills", error))
-    }
-
-    async fn configure_skill(
-        &self,
-        request: Request<wire::ConfigureSkillRequest>,
-    ) -> Result<Response<wire::ConfigureSkillResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .configure_skill(&request.into_inner(), observation.0.as_ref())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("ConfigureSkill", error))
-    }
-
-    async fn list_sessions(
-        &self,
-        request: Request<wire::ListSessionsRequest>,
-    ) -> Result<Response<wire::ListSessionsResponse>, Status> {
-        self.service
-            .list_sessions(&request.into_inner())
-            .map(Response::new)
-            .map_err(|error| self.failure("ListSessions", error))
-    }
-
-    async fn create_session(
-        &self,
-        request: Request<wire::CreateSessionRequest>,
-    ) -> Result<Response<wire::UserSession>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .create_session(&request.into_inner(), observation.0.clone())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("CreateSession", error))
-    }
-
-    async fn resume_session(
-        &self,
-        request: Request<wire::ResumeSessionRequest>,
-    ) -> Result<Response<wire::UserSession>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .resume_session(&request.into_inner(), observation.0.clone())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("ResumeSession", error))
-    }
-
-    async fn attach_session(
-        &self,
-        request: Request<wire::AttachSessionRequest>,
-    ) -> Result<Response<wire::UserSession>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .attach_session(&request.into_inner(), observation.0.as_ref())
-            .map(Response::new)
-            .map_err(|error| self.failure("AttachSession", error))
-    }
-
-    async fn update_session(
-        &self,
-        request: Request<wire::UpdateSessionRequest>,
-    ) -> Result<Response<wire::UserSession>, Status> {
-        self.service
-            .update_session(&request.into_inner())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("UpdateSession", error))
-    }
-
-    async fn set_goal(
-        &self,
-        request: Request<wire::SetGoalRequest>,
-    ) -> Result<Response<wire::SetGoalResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .set_goal(&request.into_inner(), observation.0.clone())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("SetGoal", error))
-    }
-
-    async fn set_standing_instruction(
-        &self,
-        request: Request<wire::SetStandingInstructionRequest>,
-    ) -> Result<Response<wire::SetStandingInstructionResponse>, Status> {
-        self.service
-            .set_standing_instruction(&request.into_inner())
-            .map(Response::new)
-            .map_err(|error| self.failure("SetStandingInstruction", error))
-    }
-
-    async fn send_message(
-        &self,
-        request: Request<wire::SendMessageRequest>,
-    ) -> Result<Response<wire::SendMessageResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .send_message(&request.into_inner(), observation.0.clone())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("SendMessage", error))
-    }
-
-    async fn upload_attachment(
-        &self,
-        request: Request<tonic::Streaming<wire::AttachmentUploadFrame>>,
-    ) -> Result<Response<wire::AttachmentUploadResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        let mut stream = IncomingUpload {
-            stream: request.into_inner(),
-            failure: None,
-        };
-        self.service
-            .upload_attachment(&mut stream, observation.0.as_ref())
-            .await
-            .map(Response::new)
-            .map_err(|error| {
-                stream
-                    .failure
-                    .unwrap_or_else(|| self.failure("UploadAttachment", error))
-            })
-    }
-
-    async fn interrupt(
-        &self,
-        request: Request<wire::InterruptRequest>,
-    ) -> Result<Response<wire::InterruptResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .interrupt(&request.into_inner(), observation.0.clone())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("Interrupt", error))
-    }
-
-    async fn compact(
-        &self,
-        request: Request<wire::CompactRequest>,
-    ) -> Result<Response<wire::CompactResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .compact(&request.into_inner(), observation.0.clone())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("Compact", error))
-    }
-
-    async fn set_context_limit(
-        &self,
-        request: Request<wire::SetContextLimitRequest>,
-    ) -> Result<Response<wire::SetContextLimitResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .set_context_limit(&request.into_inner(), observation.0.as_ref())
-            .map(Response::new)
-            .map_err(|error| self.failure("SetContextLimit", error))
-    }
-
-    async fn sandbox_enable(
-        &self,
-        request: Request<wire::SandboxEnableRequest>,
-    ) -> Result<Response<wire::SandboxEnableResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .sandbox_enable(&request.into_inner(), observation.0.as_ref())
-            .map(Response::new)
-            .map_err(|error| self.failure("SandboxEnable", error))
-    }
-
-    async fn session_status(
-        &self,
-        request: Request<wire::SessionStatusRequest>,
-    ) -> Result<Response<wire::SessionStatusResponse>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        self.service
-            .session_status(&request.into_inner(), observation.0.as_ref())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("SessionStatus", error))
-    }
-
-    async fn list_pending_questions(
-        &self,
-        request: Request<wire::ListPendingQuestionsRequest>,
-    ) -> Result<Response<wire::ListPendingQuestionsResponse>, Status> {
-        self.service
-            .list_pending_questions(&request.into_inner())
-            .map(Response::new)
-            .map_err(|error| self.failure("ListPendingQuestions", error))
-    }
-
-    async fn reply_question(
-        &self,
-        request: Request<wire::ReplyQuestionRequest>,
-    ) -> Result<Response<wire::ReplyQuestionResponse>, Status> {
-        self.service
-            .reply_question(&request.into_inner())
-            .map(Response::new)
-            .map_err(|error| self.failure("ReplyQuestion", error))
-    }
-
-    async fn reject_question(
-        &self,
-        request: Request<wire::RejectQuestionRequest>,
-    ) -> Result<Response<wire::RejectQuestionResponse>, Status> {
-        self.service
-            .reject_question(&request.into_inner())
-            .map(Response::new)
-            .map_err(|error| self.failure("RejectQuestion", error))
-    }
-
-    async fn list_pending_permissions(
-        &self,
-        request: Request<wire::ListPendingPermissionsRequest>,
-    ) -> Result<Response<wire::ListPendingPermissionsResponse>, Status> {
-        self.service
-            .list_pending_permissions(&request.into_inner())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("ListPendingPermissions", error))
-    }
-
-    async fn reply_permission(
-        &self,
-        request: Request<wire::ReplyPermissionRequest>,
-    ) -> Result<Response<wire::ReplyPermissionResponse>, Status> {
-        self.service
-            .reply_permission(&request.into_inner())
-            .await
-            .map(Response::new)
-            .map_err(|error| self.failure("ReplyPermission", error))
-    }
-
-    type ListenStream = EventStream;
-
-    async fn listen(
-        &self,
-        request: Request<wire::ListenRequest>,
-    ) -> Result<Response<Self::ListenStream>, Status> {
-        let observation = CallerSignal(Arc::new(Signal::new()));
-        let source = self
-            .service
-            .listen(&request.into_inner(), observation.0.clone())
-            .map_err(|error| self.failure("Listen", error))?;
-        Ok(Response::new(event_stream(source, observation)))
+    signal_owned {
+        create_session: CreateSession : CreateSessionRequest => UserSession,
+        resume_session: ResumeSession : ResumeSessionRequest => UserSession,
+        set_goal: SetGoal : SetGoalRequest => SetGoalResponse,
+        send_message: SendMessage : SendMessageRequest => SendMessageResponse,
+        interrupt: Interrupt : InterruptRequest => InterruptResponse,
+        compact: Compact : CompactRequest => CompactResponse,
     }
 }
 

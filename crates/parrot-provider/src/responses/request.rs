@@ -1,9 +1,7 @@
-use super::json::{source_compact, source_quote};
-use super::view::{
-    ResponsesContentKind, ResponsesContentView, ResponsesMessageView, ResponsesRequestView,
-    ResponsesRole, ResponsesToolCallView, ResponsesToolDefinitionView,
-};
 use crate::image_inspection::image_reference;
+use crate::view::{ContentView, MessageView, RequestView, ToolCallView, ToolView};
+use crate::wire_json::{source_compact, source_quote};
+use parrot_core::Role;
 use serde_json::value::RawValue;
 use std::io;
 
@@ -37,8 +35,8 @@ impl std::fmt::Display for ResponsesPrepareError {
 }
 impl std::error::Error for ResponsesPrepareError {}
 
-pub fn prepare<R: ResponsesRequestView>(
-    request: &R,
+pub fn prepare(
+    request: &impl RequestView,
     provider_id: &str,
 ) -> Result<PreparedResponsesRequest, ResponsesPrepareError> {
     let mut input = Vec::new();
@@ -73,7 +71,7 @@ pub fn prepare<R: ResponsesRequestView>(
     };
 
     let reasoning = {
-        let effort = request.reasoning_effort();
+        let effort = request.reasoning_effort().unwrap_or_default();
         let summary = request.reasoning_summary();
         (!effort.is_empty() || !summary.is_empty()).then(|| {
             let mut fields = Vec::new();
@@ -123,12 +121,12 @@ pub fn prepare<R: ResponsesRequestView>(
     Ok(PreparedResponsesRequest { body: object(body) })
 }
 
-fn add_message<M: ResponsesMessageView>(
+fn add_message<M: MessageView>(
     message: &M,
     provider_id: &str,
     input: &mut Vec<String>,
 ) -> Result<(), ResponsesPrepareError> {
-    if message.role() == ResponsesRole::Assistant
+    if message.role() == Role::Assistant
         && message.provider_id() == provider_id
         && let Some(items) = replayable_output(message.provider_content())
     {
@@ -139,46 +137,44 @@ fn add_message<M: ResponsesMessageView>(
         );
         return Ok(());
     }
-    if message.role() == ResponsesRole::Tool {
+    if message.role() == Role::Tool {
         input.push(object(vec![
             ("type", quote("function_call_output")),
             ("call_id", quote(message.tool_call_id())),
-            ("output", quote(message.content())),
+            ("output", quote(message.text())),
         ]));
         return Ok(());
     }
 
     let role = match message.role() {
-        ResponsesRole::System => "developer",
-        ResponsesRole::User => "user",
-        ResponsesRole::Assistant => "assistant",
-        ResponsesRole::Tool => unreachable!(),
+        Role::System => "developer",
+        Role::User => "user",
+        Role::Assistant => "assistant",
+        Role::Tool => unreachable!(),
     };
     let mut content = Vec::new();
     for part in message.contents() {
-        match part.kind() {
-            ResponsesContentKind::Image => {
-                let reference =
-                    image_reference(Some(part.image_url()), part.image_media_type(), || {
-                        part.read_image().map_err(ResponsesPrepareError::ImageIo)
-                    })?;
-                content.push(object(vec![
-                    ("type", quote("input_image")),
-                    ("image_url", quote(&reference)),
-                ]));
-            }
-            ResponsesContentKind::Text if !part.text().is_empty() => content.push(object(vec![
+        if !part.is_text() {
+            let reference = image_reference(Some(part.image_url()), part.media_type(), || {
+                part.read_image()
+            })
+            .map_err(ResponsesPrepareError::ImageIo)?;
+            content.push(object(vec![
+                ("type", quote("input_image")),
+                ("image_url", quote(&reference)),
+            ]));
+        } else if !part.text().is_empty() {
+            content.push(object(vec![
                 (
                     "type",
-                    quote(if message.role() == ResponsesRole::Assistant {
+                    quote(if message.role() == Role::Assistant {
                         "output_text"
                     } else {
                         "input_text"
                     }),
                 ),
                 ("text", quote(part.text())),
-            ])),
-            ResponsesContentKind::Text => {}
+            ]));
         }
     }
     if !content.is_empty() || message.tool_calls().is_empty() {

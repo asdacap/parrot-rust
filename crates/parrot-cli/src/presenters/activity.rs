@@ -16,15 +16,15 @@ use super::{
     AgentSessionHierarchy, AgentTaskProgressFormatter, LiveModelAliasIcon, PresenterResult,
     TaskAgentLine, ToolPresenterRegistry,
 };
+use crate::presenters::duration_text;
 use crate::terminal_frames::{
-    ItemIdentity, LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions, LiveBufferRetention,
+    LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions, LiveBufferRetention, SPINNER_FRAMES,
     ScrollbackItem, ScrollbackLayout, ScrollbackRenderOptions,
 };
 use crate::terminal_layout::{
     EnhancedFinalMessageRenderer, TerminalCellStyleSpan, TerminalLine, TerminalStyle, TerminalText,
+    style,
 };
-
-const SPINNERS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 #[derive(Default)]
 pub struct ActivityUpdate {
@@ -70,25 +70,8 @@ pub(crate) enum ActivityValue {
     },
 }
 
-fn duration_text(seconds: i64) -> String {
-    if seconds < 60 {
-        format!("{seconds}s")
-    } else if seconds < 3600 {
-        format!("{}m {:02}s", seconds / 60, seconds % 60)
-    } else {
-        format!(
-            "{}h {:02}m {:02}s",
-            seconds / 3600,
-            (seconds / 60) % 60,
-            seconds % 60
-        )
-    }
-}
 fn agent_duration(milliseconds: i64) -> String {
-    duration_text(milliseconds.saturating_add(500).max(0) / 1000)
-}
-fn style(color: bool, escape: &str) -> TerminalStyle {
-    TerminalStyle::new(if color { escape } else { "" })
+    duration_text(milliseconds.saturating_add(500).max(0) as u64 / 1000)
 }
 fn viewport(text: &str, width: usize) -> String {
     let text = text.replace('\n', " ");
@@ -180,16 +163,10 @@ impl ScrollbackItem for ActivityItem {
             Self::Tool(value) => value.ends_layout(),
         }
     }
-    fn packing_identity(&self) -> Option<ItemIdentity> {
+    fn stream(&self) -> Option<(&str, &str)> {
         match self {
-            Self::Value(value) => value.packing_identity(),
-            Self::Tool(value) => value.packing_identity(),
-        }
-    }
-    fn packs(&self, previous: Option<&ItemIdentity>) -> bool {
-        match self {
-            Self::Value(value) => value.packs(previous),
-            Self::Tool(value) => value.packs(previous),
+            Self::Value(value) => value.stream(),
+            Self::Tool(value) => value.stream(),
         }
     }
     fn continues(&self, _: &dyn ScrollbackItem) -> bool {
@@ -222,7 +199,7 @@ impl ActivityValue {
                 });
             }
             Self::Spinner { text, frame } => (
-                SPINNERS[frame % 10].to_string(),
+                SPINNER_FRAMES[frame % SPINNER_FRAMES.len()].to_string(),
                 vec![TerminalText::clip(&TerminalText::sanitize(text), columns)],
                 LiveBufferRetention::Tail,
                 marker_style,
@@ -243,7 +220,7 @@ impl ActivityValue {
                 muted_style,
             ),
             Self::Progress { progress, frame } => (
-                SPINNERS[frame % 10].to_string(),
+                SPINNER_FRAMES[frame % SPINNER_FRAMES.len()].to_string(),
                 vec![super::progress::format_progress(progress, columns)],
                 LiveBufferRetention::Fixed,
                 marker_style,
@@ -311,7 +288,7 @@ impl ActivityValue {
                 );
                 let label = format!(
                     "$ {summary} (process {name} running {})",
-                    duration_text(elapsed_ms / 1000)
+                    duration_text(elapsed_ms as u64 / 1000)
                 );
                 let marker = if process.activity_kind
                     == wire::ShellProcessActivityKind::SHELL_PROCESS_ACTIVITY_KIND_MONITOR.into()
@@ -322,7 +299,7 @@ impl ActivityValue {
                         String::new()
                     }
                 } else {
-                    SPINNERS[frame % 10].to_string()
+                    SPINNER_FRAMES[frame % SPINNER_FRAMES.len()].to_string()
                 };
                 (
                     marker,
@@ -421,7 +398,7 @@ impl ActivityValue {
                                 columns: options.columns,
                                 color: options.color,
                                 inline_diff: false,
-                                previous_packing: None,
+                                previous_item: None,
                             },
                             decoration,
                         )?
@@ -629,12 +606,6 @@ impl ScrollbackItem for HierarchicalScrollbackValue {
     }
     fn ends_layout(&self) -> bool {
         self.value.ends_layout()
-    }
-    fn packing_identity(&self) -> Option<ItemIdentity> {
-        self.value.packing_identity()
-    }
-    fn packs(&self, previous: Option<&ItemIdentity>) -> bool {
-        self.value.packs(previous)
     }
     fn continues(&self, _: &dyn ScrollbackItem) -> bool {
         false
@@ -1925,7 +1896,7 @@ impl RawActivityView {
                 let state = &self.agents[owner];
                 let lead = TerminalText::sanitize(&format!(
                     "{} [{}] ",
-                    SPINNERS[self.frame % 10],
+                    SPINNER_FRAMES[self.frame % SPINNER_FRAMES.len()],
                     self.hierarchy.get_label(owner).unwrap_or("")
                 ))
                 .replace('\n', "");

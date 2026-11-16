@@ -216,16 +216,14 @@ async fn persist_image(
     display_name: &str,
     origin: &str,
 ) -> parrot_storage::artifacts::Result<ImageArtifactMetadata> {
-    repository
-        .persist(
-            Cursor::new(bytes),
-            display_name,
-            origin,
-            None,
-            None,
-            &NeverCancelled,
-        )
-        .await
+    repository.persist(
+        Cursor::new(bytes),
+        display_name,
+        origin,
+        None,
+        None,
+        &NeverCancelled,
+    )
 }
 
 fn setup_repository(label: &str) -> (TempDir, SessionDatabase, ImageArtifactRepository) {
@@ -317,8 +315,8 @@ async fn upload_free_reads_do_not_require_a_registry() {
         .unwrap();
     let mut bytes = Vec::new();
     repository
-        .open(&image.artifact_id, &NeverCancelled)
-        .await
+        .store()
+        .open(&image.artifact_id)
         .unwrap()
         .read_to_end(&mut bytes)
         .unwrap();
@@ -345,8 +343,8 @@ async fn upload_free_reads_do_not_require_a_registry() {
     );
     bytes.clear();
     repository
-        .open(&image.artifact_id, &NeverCancelled)
-        .await
+        .store()
+        .open(&image.artifact_id)
         .unwrap()
         .read_to_end(&mut bytes)
         .unwrap();

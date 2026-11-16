@@ -8,10 +8,10 @@ use crate::slash_settings::{
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 
 use super::{
-    ApplicationExit, CommandEnvironment, CompactCommand, GoalCommand, ModeCommand, ModeSelection,
-    ModesCommand, SandboxEnableCommand, SessionsCommand, SkillsCommand, SlashCommand,
-    SlashCommandRegistry, SlashFailure, StandingInstructionCommand, StatusCommand,
-    TaskLimitCommand, WorkspaceNavigation, WorkspaceSessionsCommand,
+    CommandEnvironment, CompactCommand, GoalCommand, ModeCommand, ModeSelection, ModesCommand,
+    SandboxEnableCommand, SessionsCommand, SkillsCommand, SlashCommand, SlashCommandRegistry,
+    SlashFailure, StandingInstructionCommand, StatusCommand, TaskLimitCommand, WorkspaceNavigation,
+    WorkspaceSessionsCommand,
 };
 
 pub struct ClearCommand;
@@ -101,10 +101,10 @@ impl SlashCommand for VersionCommand {
 }
 
 pub struct ExitCommand {
-    application: Arc<dyn ApplicationExit>,
+    application: ExitApplication,
 }
 impl ExitCommand {
-    pub fn new(application: Arc<dyn ApplicationExit>) -> Self {
+    pub fn new(application: ExitApplication) -> Self {
         Self { application }
     }
 }
@@ -121,22 +121,13 @@ impl SlashCommand for ExitCommand {
         _: &'a mut CommandEnvironment<'_>,
         c: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
-        self.application.exit(c)
+        (self.application)(c)
     }
 }
 
-pub type ExitApplication =
-    Arc<dyn Fn() -> BoxFuture<'static, Result<(), SlashFailure>> + Send + Sync>;
-pub struct CallbackApplicationExit(pub ExitApplication);
-impl ApplicationExit for CallbackApplicationExit {
-    fn exit<'a>(&'a self, c: &'a dyn Cancellation) -> BoxFuture<'a, Result<(), SlashFailure>> {
-        Box::pin(async move {
-            c.check()
-                .map_err(|_| tonic::Status::cancelled("operation cancelled"))?;
-            (self.0)().await
-        })
-    }
-}
+pub type ExitApplication = Arc<
+    dyn for<'a> Fn(&'a dyn Cancellation) -> BoxFuture<'a, Result<(), SlashFailure>> + Send + Sync,
+>;
 
 /// The ONE real SlashCommands.Create registry. Both CLI and browser consumers
 /// construct these same T66 settings handlers and T67 session-control handlers.
@@ -144,14 +135,14 @@ pub struct SlashCommands;
 impl SlashCommands {
     pub fn create(
         services: SettingsServices,
-        application: Option<Arc<dyn ApplicationExit>>,
+        application: Option<ExitApplication>,
         version: impl Into<String>,
     ) -> SlashCommandRegistry {
         Self::create_core(services, application, version.into(), None)
     }
     pub fn create_terminal(
         services: SettingsServices,
-        application: Option<Arc<dyn ApplicationExit>>,
+        application: Option<ExitApplication>,
         version: impl Into<String>,
         navigation: Arc<dyn WorkspaceNavigation>,
     ) -> SlashCommandRegistry {
@@ -159,7 +150,7 @@ impl SlashCommands {
     }
     fn create_core(
         services: SettingsServices,
-        application: Option<Arc<dyn ApplicationExit>>,
+        application: Option<ExitApplication>,
         version: String,
         navigation: Option<Arc<dyn WorkspaceNavigation>>,
     ) -> SlashCommandRegistry {

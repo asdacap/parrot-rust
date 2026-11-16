@@ -20,7 +20,7 @@ fn rows(arguments: &str, result: &str, columns: usize) -> Vec<String> {
             columns,
             color: false,
             inline_diff: true,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap()

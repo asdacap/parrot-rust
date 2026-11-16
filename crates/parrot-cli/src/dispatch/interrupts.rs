@@ -1,20 +1,9 @@
 use std::sync::{Arc, Mutex};
 
-pub trait InterruptListener: Send + Sync {
-    fn interrupted(&self) -> bool;
-}
-
-pub struct CliInterruptListener<F: Fn() -> bool + Send + Sync>(pub F);
-impl<F: Fn() -> bool + Send + Sync> InterruptListener for CliInterruptListener<F> {
-    fn interrupted(&self) -> bool {
-        (self.0)()
-    }
-}
-
 /// SIGINT is offered to the single installed session listener. SIGTERM calls
 /// `terminate` directly and cannot be claimed by a running turn.
 pub struct Interrupts {
-    listener: Mutex<Option<Arc<dyn InterruptListener>>>,
+    listener: Mutex<Option<Arc<dyn Fn() -> bool + Send + Sync>>>,
     stop: Arc<dyn Fn() + Send + Sync>,
 }
 
@@ -26,7 +15,7 @@ impl Interrupts {
         }
     }
 
-    pub fn install(&self, listener: Arc<dyn InterruptListener>) {
+    pub fn install(&self, listener: Arc<dyn Fn() -> bool + Send + Sync>) {
         *self.listener.lock().expect("interrupt listener poisoned") = Some(listener);
     }
 
@@ -40,7 +29,7 @@ impl Interrupts {
             .lock()
             .expect("interrupt listener poisoned")
             .clone();
-        if !listener.is_some_and(|listener| listener.interrupted()) {
+        if !listener.is_some_and(|listener| listener()) {
             (self.stop)();
         }
     }

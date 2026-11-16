@@ -420,7 +420,6 @@ impl HostedSession for Hosted {
                     Some(upload.byte_length),
                     cancellation,
                 )
-                .await
                 .map_err(RpcError::from)
         })
     }

@@ -942,14 +942,17 @@ impl parrot_provider::http_stream::ByteStream for ImageBytes {
 }
 struct GenerationHttp {
     status: u16,
-    requests: Mutex<Vec<parrot_provider::image_generation::ImageHttpRequest>>,
+    requests: Mutex<Vec<parrot_provider::http_stream::HttpRequest>>,
 }
-impl parrot_provider::image_generation::ImageTransport for GenerationHttp {
+impl parrot_provider::http_stream::HttpTransport for GenerationHttp {
     fn send<'a>(
         &'a self,
-        request: parrot_provider::image_generation::ImageHttpRequest,
+        request: parrot_provider::http_stream::HttpRequest,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<parrot_provider::http_stream::HttpResponse, Error>> {
+    ) -> BoxFuture<
+        'a,
+        Result<parrot_provider::http_stream::HttpResponse, parrot_provider::http_stream::HttpError>,
+    > {
         Box::pin(async move {
             self.requests.lock().unwrap().push(request);
             const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";

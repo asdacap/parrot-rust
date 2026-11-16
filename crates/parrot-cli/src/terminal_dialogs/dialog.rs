@@ -9,6 +9,7 @@ use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use tonic::Status;
 
 use crate::{
+    chat_loops::{cancelled, check},
     dispatch::dialog::{DialogOption, SlashDialog},
     terminal_frames::{
         LiveBufferCaret, LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions,
@@ -16,7 +17,7 @@ use crate::{
         spinner_text,
     },
     terminal_input::{IncrementalEditor, PromptState, TerminalKey, TerminalKeyKind},
-    terminal_layout::{TerminalLine, TerminalStyle, TerminalText},
+    terminal_layout::{TerminalLine, TerminalText, style},
 };
 
 const MAXIMUM_INPUT_RUNES: usize = 4096;
@@ -324,12 +325,6 @@ impl Drop for ResetInput {
 }
 
 use parrot_core::NeverCancelled;
-fn cancelled() -> Status {
-    Status::cancelled("operation cancelled")
-}
-fn check(c: &dyn Cancellation) -> Result<(), Status> {
-    c.check().map_err(|_| cancelled())
-}
 fn is_cancellation(key: &TerminalKey) -> bool {
     matches!(
         key.kind,
@@ -424,9 +419,6 @@ fn spinner_items(activity: &str, frame: usize) -> Vec<Arc<dyn LiveBufferItem>> {
             frame,
         }),
     ]
-}
-fn style(color: bool, sequence: &str) -> TerminalStyle {
-    TerminalStyle::new(if color { sequence } else { "" })
 }
 
 #[derive(Clone, Debug)]

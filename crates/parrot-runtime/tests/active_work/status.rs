@@ -114,19 +114,16 @@ impl StatusProvider for Scripted {
 #[tokio::test]
 async fn observe_composes_available_status_by_key_and_resamples_providers() {
     let selection = Scripted::new("runtime:selection", "selection {call}");
-    let registry = StatusProviders::new(
-        StatusTarget::Tool,
-        vec![
-            selection.clone(),
-            Arc::new(Scripted {
-                available: false,
-                ..Arc::try_unwrap(Scripted::new("runtime:unavailable", "ignored"))
-                    .ok()
-                    .unwrap()
-            }),
-            Scripted::new("runtime:blank", "  \t\n"),
-        ],
-    )
+    let registry = StatusProviders::new(vec![
+        selection.clone(),
+        Arc::new(Scripted {
+            available: false,
+            ..Arc::try_unwrap(Scripted::new("runtime:unavailable", "ignored"))
+                .ok()
+                .unwrap()
+        }),
+        Scripted::new("runtime:blank", "  \t\n"),
+    ])
     .unwrap();
     let profile = ProfileStatusProvider {
         key: "profile:plan".into(),
@@ -168,10 +165,10 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
         "runtime:bad\u{a0}key",
     ] {
         assert!(
-            StatusProviders::new(StatusTarget::Tool, vec![Scripted::new(key, "x")]).is_err(),
+            StatusProviders::new(vec![Scripted::new(key, "x")]).is_err(),
             "{key:?}"
         );
-        let registry = StatusProviders::new(StatusTarget::Tool, vec![]).unwrap();
+        let registry = StatusProviders::new(vec![]).unwrap();
         assert!(
             registry
                 .observe(
@@ -196,8 +193,8 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
         );
     }
     let first = Scripted::new("runtime:selection", "x");
-    assert!(StatusProviders::new(StatusTarget::Tool, vec![first.clone(), first.clone()]).is_err());
-    let registry = StatusProviders::new(StatusTarget::Tool, vec![first.clone()]).unwrap();
+    assert!(StatusProviders::new(vec![first.clone(), first.clone()]).is_err());
+    let registry = StatusProviders::new(vec![first.clone()]).unwrap();
     assert!(
         registry
             .observe(&query(), Some(first.as_ref()), &[], &NeverCancelled)
@@ -233,14 +230,11 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
 }
 #[tokio::test]
 async fn registry_preserves_utf16_ordinal_order_and_case_sensitive_namespaces() {
-    let registry = StatusProviders::new(
-        StatusTarget::Tool,
-        vec![
-            Scripted::new("runtime:\u{e000}", "bmp"),
-            Scripted::new("runtime:\u{10000}", "astral"),
-            Scripted::new("Runtime:key", "upper"),
-        ],
-    )
+    let registry = StatusProviders::new(vec![
+        Scripted::new("runtime:\u{e000}", "bmp"),
+        Scripted::new("runtime:\u{10000}", "astral"),
+        Scripted::new("Runtime:key", "upper"),
+    ])
     .unwrap();
     assert_eq!(
         registry
@@ -283,23 +277,20 @@ impl StatusProvider for Rendezvous {
 async fn registry_starts_all_observations_and_joins_errors_with_provider_source() {
     let barrier = Arc::new(tokio::sync::Barrier::new(2));
     let finished = Arc::new(AtomicUsize::new(0));
-    let registry = StatusProviders::new(
-        StatusTarget::Tool,
-        vec![
-            Arc::new(Rendezvous {
-                key: "runtime:a",
-                barrier: barrier.clone(),
-                finished: finished.clone(),
-                fail: true,
-            }),
-            Arc::new(Rendezvous {
-                key: "runtime:b",
-                barrier,
-                finished: finished.clone(),
-                fail: false,
-            }),
-        ],
-    )
+    let registry = StatusProviders::new(vec![
+        Arc::new(Rendezvous {
+            key: "runtime:a",
+            barrier: barrier.clone(),
+            finished: finished.clone(),
+            fail: true,
+        }),
+        Arc::new(Rendezvous {
+            key: "runtime:b",
+            barrier,
+            finished: finished.clone(),
+            fail: false,
+        }),
+    ])
     .unwrap();
     let error = tokio::time::timeout(
         Duration::from_secs(2),
@@ -342,8 +333,7 @@ impl StatusProvider for CancelProvider {
 }
 #[tokio::test]
 async fn registry_propagates_actual_caller_cancellation_without_fabricating_a_section() {
-    let registry =
-        StatusProviders::new(StatusTarget::Tool, vec![Arc::new(CancelProvider)]).unwrap();
+    let registry = StatusProviders::new(vec![Arc::new(CancelProvider)]).unwrap();
     let cancel = Signal::new();
     cancel.cancel();
     assert!(matches!(
@@ -1295,11 +1285,8 @@ impl StatusProvider for ImmediateFailure {
 }
 #[tokio::test]
 async fn registry_wraps_foreign_cancellation_and_faults_take_precedence_after_join() {
-    let registry = StatusProviders::new(
-        StatusTarget::Tool,
-        vec![Arc::new(ImmediateFailure { cancelled: true })],
-    )
-    .unwrap();
+    let registry =
+        StatusProviders::new(vec![Arc::new(ImmediateFailure { cancelled: true })]).unwrap();
     assert_eq!(
         registry
             .observe(&query(), None, &[], &NeverCancelled)
@@ -1308,13 +1295,10 @@ async fn registry_wraps_foreign_cancellation_and_faults_take_precedence_after_jo
             .to_string(),
         "runtime:a-cancel: operation cancelled"
     );
-    let registry = StatusProviders::new(
-        StatusTarget::Tool,
-        vec![
-            Arc::new(ImmediateFailure { cancelled: true }),
-            Arc::new(ImmediateFailure { cancelled: false }),
-        ],
-    )
+    let registry = StatusProviders::new(vec![
+        Arc::new(ImmediateFailure { cancelled: true }),
+        Arc::new(ImmediateFailure { cancelled: false }),
+    ])
     .unwrap();
     let cancelled = Signal::new();
     cancelled.cancel();

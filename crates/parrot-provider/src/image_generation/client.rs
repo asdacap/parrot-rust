@@ -1,9 +1,9 @@
-use super::transport::{ImageHttpRequest, ImageTransport};
+use super::transport_error;
 use crate::{
-    anthropic::wire_json::quote,
-    http_stream::Endpoint,
+    http_stream::{Endpoint, HttpRequest, HttpTransport},
     image_inspection::{ImageInspection, image_reference},
     sessions::Error,
+    wire_json::quote,
 };
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::{fmt::Write, sync::Arc, time::Duration};
@@ -41,14 +41,14 @@ pub trait ImageHeaders: Send + Sync {
 }
 
 pub struct ImageGenerationClient {
-    transport: Arc<dyn ImageTransport>,
+    transport: Arc<dyn HttpTransport>,
     generation_endpoint: Endpoint,
     edit_endpoint: Endpoint,
     headers: Arc<dyn ImageHeaders>,
 }
 impl ImageGenerationClient {
     pub fn new(
-        transport: Arc<dyn ImageTransport>,
+        transport: Arc<dyn HttpTransport>,
         generation_endpoint: Endpoint,
         edit_endpoint: Endpoint,
         headers: Arc<dyn ImageHeaders>,
@@ -83,16 +83,18 @@ impl ImageGenerationClient {
             let response = self
                 .transport
                 .send(
-                    ImageHttpRequest {
+                    HttpRequest {
                         method: "POST".into(),
                         endpoint: super::uri::normalize_endpoint(endpoint)?,
                         headers,
                         content_type: Some("application/json".into()),
+                        filter_content_headers: false,
                         body,
                     },
                     &token,
                 )
-                .await?;
+                .await
+                .map_err(transport_error)?;
             if !(200..300).contains(&response.status) {
                 return Err(provider(format!(
                     "provider: image generation failed (HTTP {})",
@@ -386,44 +388,14 @@ impl std::io::Read for JsonBodyReader {
 }
 
 fn decode_base64(text: &str) -> Option<Vec<u8>> {
-    let bytes: Vec<u8> = text
+    let compact: Vec<u8> = text
         .bytes()
         .filter(|byte| !matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
         .collect();
-    if !bytes.len().is_multiple_of(4) {
-        return None;
-    }
-    let mut result = Vec::with_capacity(bytes.len() / 4 * 3);
-    for (index, chunk) in bytes.as_chunks::<4>().0.iter().enumerate() {
-        let digit = |byte| match byte {
-            b'A'..=b'Z' => Some(byte - b'A'),
-            b'a'..=b'z' => Some(byte - b'a' + 26),
-            b'0'..=b'9' => Some(byte - b'0' + 52),
-            b'+' => Some(62),
-            b'/' => Some(63),
-            _ => None,
-        };
-        let a = digit(chunk[0])?;
-        let b = digit(chunk[1])?;
-        let final_chunk = index + 1 == bytes.len() / 4;
-        result.push((a << 2) | (b >> 4));
-        if chunk[2] == b'=' {
-            if !final_chunk || chunk[3] != b'=' {
-                return None;
-            }
-        } else {
-            let c = digit(chunk[2])?;
-            result.push((b << 4) | (c >> 2));
-            if chunk[3] == b'=' {
-                if !final_chunk {
-                    return None;
-                }
-            } else {
-                result.push((c << 6) | digit(chunk[3])?);
-            }
-        }
-    }
-    Some(result)
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(compact)
+        .ok()
 }
 
 struct Deadline<'a> {

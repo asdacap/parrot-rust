@@ -50,20 +50,16 @@ fn common_request_borrows_all_adapters_without_losing_raw_json() {
     };
     assert_eq!(request.clone(), request);
     assert_eq!(
-        chat_completions::RequestView::provider_preferences(&request),
+        parrot_provider::view::RequestView::provider_preferences(&request),
         request.provider_preferences
     );
     assert_eq!(
-        responses::ResponsesRequestView::provider_preferences(&request),
-        request.provider_preferences
-    );
-    assert_eq!(
-        responses::ResponsesRequestView::reasoning_effort(&request),
-        "high"
-    );
-    assert_eq!(
-        chat_completions::RequestView::reasoning_effort(&request),
+        parrot_provider::view::RequestView::reasoning_effort(&request),
         Some("high")
+    );
+    assert_eq!(
+        parrot_provider::view::RequestView::reasoning_summary(&request),
+        "detailed"
     );
     assert_eq!(Message::system("system").role, Role::System);
     assert!(

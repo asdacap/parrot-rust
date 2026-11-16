@@ -1,9 +1,6 @@
 use parrot_provider::{
-    http_stream::Endpoint,
-    image_generation::{
-        signer::{AwsV4Signer, sha256},
-        transport::ImageHttpRequest,
-    },
+    http_stream::{Endpoint, HttpRequest},
+    image_generation::signer::{AwsV4Signer, sha256},
 };
 
 #[test]
@@ -42,11 +39,12 @@ fn signs_the_three_published_s3_examples() {
                 (k.into(), v.into())
             })
             .collect();
-        let mut request = ImageHttpRequest {
+        let mut request = HttpRequest {
             method: method.into(),
             endpoint: Endpoint::parse(url).unwrap(),
             headers,
             content_type: Some("ignored/content-header".into()),
+            filter_content_headers: false,
             body: body.as_bytes().to_vec(),
         };
         let hash = sha256(body.as_bytes());
@@ -80,7 +78,7 @@ fn signs_the_three_published_s3_examples() {
 fn query_sorting_escapes_plus_once_and_content_headers_are_not_signed() {
     let signer = AwsV4Signer::new("a".into(), "s".into(), "eu-west-1".into());
     let signed = |url: &str| {
-        let mut request = ImageHttpRequest {
+        let mut request = HttpRequest {
             method: "GET".into(),
             endpoint: Endpoint::parse(url).unwrap(),
             headers: vec![
@@ -89,6 +87,7 @@ fn query_sorting_escapes_plus_once_and_content_headers_are_not_signed() {
             ],
             body: vec![],
             content_type: Some("image/png".into()),
+            filter_content_headers: false,
         };
         signer
             .sign(&mut request, &sha256(&[]), "20200102T030405Z")
@@ -116,11 +115,12 @@ fn pinned_source_native_uri_vectors_preserve_invalid_utf8_and_host_override() {
             "06275b254b2d50ffbb01a51c31af808994ebd8d6695fd2d6f6af309fbdcf8436",
         ),
     ] {
-        let mut request = ImageHttpRequest {
+        let mut request = HttpRequest {
             method: "GET".into(),
             endpoint: Endpoint::parse(url).unwrap(),
             headers,
             content_type: None,
+            filter_content_headers: false,
             body: vec![],
         };
         AwsV4Signer::new(
@@ -199,11 +199,12 @@ fn all_source_uri_constructor_vectors_match_actual_request_uri_and_signature() {
         {
             headers.push(("Host".into(), header.into()));
         }
-        let mut request = ImageHttpRequest {
+        let mut request = HttpRequest {
             method: "GET".into(),
             endpoint,
             headers,
             content_type: None,
+            filter_content_headers: false,
             body: vec![],
         };
         signer
@@ -316,11 +317,12 @@ fn original_source_case58_uses_normalized_dispatch_uri_and_same_signature() {
         .chunks(2)
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect::<Vec<_>>();
-    let mut request = ImageHttpRequest {
+    let mut request = HttpRequest {
         method: input["method"].as_str().unwrap().into(),
         endpoint: Endpoint::parse(input["url"].as_str().unwrap()).unwrap(),
         headers,
         content_type: None,
+        filter_content_headers: false,
         body,
     };
     let payload_hash = sha256(&request.body);

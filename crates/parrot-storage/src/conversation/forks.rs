@@ -69,43 +69,6 @@ impl From<rusqlite::Error> for ForkError {
     }
 }
 impl ConversationRepository {
-    pub async fn latest_usable_checkpoint(
-        &self,
-        agent: String,
-        title: String,
-        before: i64,
-    ) -> Result<Option<HistoryCheckpoint>, EventError> {
-        self.events
-            .transaction(move |tx| read_latest_usable_checkpoint(tx, &agent, &title, before))
-            .await
-    }
-
-    pub async fn active_checkpoint_assistant_sequences(
-        &self,
-        agent: String,
-    ) -> Result<BTreeSet<i64>, EventError> {
-        self.events
-            .transaction(move |tx| {
-                let watermark =
-                    compaction::read_snapshot(tx, &agent)?.map_or(0, |snapshot| snapshot.watermark);
-                Ok(read_checkpoints(tx, &agent)?
-                    .into_iter()
-                    .filter(|checkpoint| checkpoint.assistant_sequence > watermark)
-                    .map(|checkpoint| checkpoint.assistant_sequence)
-                    .collect())
-            })
-            .await
-    }
-
-    pub async fn effective_conversation_groups(
-        &self,
-        agent: String,
-    ) -> Result<EffectiveConversationHistory, EventError> {
-        self.events
-            .transaction(move |tx| read_effective_conversation_groups(tx, &agent))
-            .await
-    }
-
     pub async fn initialize_forked_agent_history(
         &self,
         source: String,
@@ -200,6 +163,18 @@ pub fn read_latest_usable_checkpoint(
         .into_iter()
         .find(|checkpoint| checkpoint.title == title)
         .filter(|checkpoint| checkpoint.assistant_sequence < before))
+}
+
+pub fn read_active_checkpoint_assistant_sequences(
+    tx: &Transaction<'_>,
+    agent: &str,
+) -> Result<BTreeSet<i64>, EventError> {
+    let watermark = compaction::read_snapshot(tx, agent)?.map_or(0, |snapshot| snapshot.watermark);
+    Ok(read_checkpoints(tx, agent)?
+        .into_iter()
+        .filter(|checkpoint| checkpoint.assistant_sequence > watermark)
+        .map(|checkpoint| checkpoint.assistant_sequence)
+        .collect())
 }
 
 pub fn read_effective_conversation_groups(

@@ -80,21 +80,6 @@ pub trait SlashActivity: Send + Sync {
     ) -> BoxFuture<'a, Result<(), SlashFailure>>;
 }
 
-pub trait ApplicationExit: Send + Sync {
-    fn exit<'a>(
-        &'a self,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), SlashFailure>>;
-}
-
-pub trait SlashSessionBinding: Send {
-    fn replace<'a>(
-        &'a mut self,
-        session: UserSession,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<(), SlashFailure>>;
-}
-
 pub trait SlashSession: Send {
     fn current_session(&self) -> &UserSession;
     fn id(&self) -> &str {

@@ -1,7 +1,9 @@
+use parrot_core::Role;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::responses::*;
 use parrot_provider::responses_websocket::*;
 use parrot_provider::sessions::Error as ProviderError;
+use parrot_provider::view::{ContentView, MessageView, RequestView, ToolCallView, ToolView};
 use serde_json::{Value, json};
 use std::{
     collections::VecDeque,
@@ -174,9 +176,9 @@ impl HttpFallback for Http {
 }
 
 struct Empty;
-impl ResponsesContentView for Empty {
-    fn kind(&self) -> ResponsesContentKind {
-        ResponsesContentKind::Text
+impl ContentView for Empty {
+    fn is_text(&self) -> bool {
+        true
     }
     fn text(&self) -> &str {
         ""
@@ -184,14 +186,14 @@ impl ResponsesContentView for Empty {
     fn image_url(&self) -> &str {
         ""
     }
-    fn image_media_type(&self) -> &str {
+    fn media_type(&self) -> &str {
         ""
     }
     fn read_image(&self) -> Result<Vec<u8>, io::Error> {
         Ok(Vec::new())
     }
 }
-impl ResponsesToolCallView for Empty {
+impl ToolCallView for Empty {
     fn id(&self) -> &str {
         ""
     }
@@ -202,7 +204,7 @@ impl ResponsesToolCallView for Empty {
         "{}"
     }
 }
-impl ResponsesToolDefinitionView for Empty {
+impl ToolView for Empty {
     fn name(&self) -> &str {
         ""
     }
@@ -217,14 +219,14 @@ struct Message {
     text: String,
     replay: bool,
 }
-impl ResponsesMessageView for Message {
+impl MessageView for Message {
     type Content = Empty;
     type ToolCall = Empty;
-    fn role(&self) -> ResponsesRole {
+    fn role(&self) -> Role {
         if self.replay {
-            ResponsesRole::Assistant
+            Role::Assistant
         } else {
-            ResponsesRole::Tool
+            Role::Tool
         }
     }
     fn contents(&self) -> &[Empty] {
@@ -236,7 +238,7 @@ impl ResponsesMessageView for Message {
     fn tool_call_id(&self) -> &str {
         "call"
     }
-    fn content(&self) -> &str {
+    fn text(&self) -> &str {
         &self.text
     }
     fn provider_id(&self) -> &str {
@@ -250,7 +252,7 @@ struct Request {
     messages: Vec<Message>,
     instructions: String,
 }
-impl ResponsesRequestView for Request {
+impl RequestView for Request {
     fn service_tier(&self) -> &str {
         ""
     }
@@ -271,8 +273,8 @@ impl ResponsesRequestView for Request {
     fn max_output_tokens(&self) -> i32 {
         0
     }
-    fn reasoning_effort(&self) -> &str {
-        ""
+    fn reasoning_effort(&self) -> Option<&str> {
+        None
     }
     fn reasoning_summary(&self) -> &str {
         ""

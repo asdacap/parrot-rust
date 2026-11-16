@@ -94,11 +94,19 @@ async fn conversation_state(
         items: repository
             .read_conversation_tail(agent.into(), watermark)
             .await?,
-        checkpoint_sequences: repository
-            .active_checkpoint_assistant_sequences(agent.into())
-            .await?
-            .into_iter()
-            .collect(),
+        checkpoint_sequences: {
+            let agent = agent.to_owned();
+            repository
+                .events()
+                .transact(move |tx| {
+                    parrot_storage::conversation::forks::read_active_checkpoint_assistant_sequences(
+                        tx, &agent,
+                    )
+                })
+                .await?
+                .into_iter()
+                .collect()
+        },
         snapshot,
     })
 }

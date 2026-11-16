@@ -1,10 +1,17 @@
 //! Input-only observations through production APIs. Captured category labels
 //! identify fixture outcomes, not Rust runtime exception types.
-#[path = "../../src/anthropic/wire_json.rs"]
+#[path = "../../src/wire_json.rs"]
 mod wire_json;
 
+use parrot_core::Role;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
-use parrot_provider::{anthropic::*, catalogs::Model, http_stream::*};
+use parrot_provider::view::{ContentView, MessageView, RequestView, ToolCallView, ToolView};
+use parrot_provider::{
+    anthropic::*,
+    catalogs::Model,
+    http_stream::*,
+    sessions::provider::{ApiKeySource, CompatibleOptions},
+};
 use serde_json::{Value, json};
 use std::sync::{
     Arc, Mutex,
@@ -137,12 +144,8 @@ impl<'a> MessageView for Message<'a> {
     }
 }
 impl ContentView for Json<'_> {
-    fn kind(&self) -> ContentKind {
-        if s(self, "kind") == "text" {
-            ContentKind::Text
-        } else {
-            ContentKind::Image
-        }
+    fn is_text(&self) -> bool {
+        s(self, "kind") == "text"
     }
     fn text(&self) -> &str {
         s(self, "text")
@@ -157,7 +160,7 @@ impl ContentView for Json<'_> {
         Ok(unhex(s(self, "image_hex")))
     }
 }
-impl ToolDefinitionView for Json<'_> {
+impl ToolView for Json<'_> {
     fn name(&self) -> &str {
         s(self, "name")
     }
@@ -213,11 +216,11 @@ impl ApiKeySource for Key {
     fn api_key<'a>(
         &'a self,
         c: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<String, ProviderError>> {
+    ) -> BoxFuture<'a, Result<String, parrot_provider::sessions::Error>> {
         Box::pin(async move {
             self.api.fetch_add(1, Ordering::SeqCst);
             if c.is_cancelled() {
-                Err(HttpError::Cancelled.into())
+                Err(parrot_provider::sessions::Error::Cancelled)
             } else {
                 Ok(self.value.clone())
             }
@@ -226,11 +229,11 @@ impl ApiKeySource for Key {
     fn has_credential<'a>(
         &'a self,
         c: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<bool, ProviderError>> {
+    ) -> BoxFuture<'a, Result<bool, parrot_provider::sessions::Error>> {
         Box::pin(async move {
             self.has.fetch_add(1, Ordering::SeqCst);
             if c.is_cancelled() {
-                Err(HttpError::Cancelled.into())
+                Err(parrot_provider::sessions::Error::Cancelled)
             } else {
                 Ok(!self.value.is_empty())
             }
@@ -298,7 +301,7 @@ impl HttpTransport for Transport {
                     headers.insert(name, Value::String(value));
                 }
             }
-            let is_post = request.method == HttpMethod::Post;
+            let is_post = request.method == "POST";
             if is_post {
                 content_headers.insert(
                     "Content-Length".into(),
@@ -596,8 +599,11 @@ async fn observe_inner(_case_id: &str, input: &Value) -> (Value, Option<String>)
             let body = transport.body.lock().unwrap().take().unwrap();
             parse(body, &token, input, &mut events, cancel_after).await?;
         } else {
-            let mut config =
-                AnthropicOptions::new(s(input, "provider_id"), s(options, "base_url"), key.clone());
+            let mut config = CompatibleOptions::new(
+                s(input, "provider_id"),
+                s(options, "base_url"),
+                key.clone(),
+            );
             config.user_agent = "parrot/0.0.0-dev".into();
             config.headers = options["headers"]
                 .as_object()
@@ -716,4 +722,34 @@ fn authentication_projection_uses_source_exception_categories() {
         assert_eq!(observed["category"], category);
         assert_eq!(observed["message"], message);
     }
+}
+
+#[test]
+fn escaping_variants_stay_javascript_safe() {
+    // Both variants keep numeric lexemes and duplicate properties; only the
+    // HTML-sensitive `+` and backtick escapes differ.
+    let mixed = "a\tb\nc\\d\"e<f>g&h'i+j`k\u{7f}\u{2028}";
+    let html_safe = wire_json::quote(mixed);
+    let responses = wire_json::source_quote(mixed);
+    for escaped in [&html_safe, &responses] {
+        let parsed: serde_json::Value =
+            serde_json::from_str(escaped).expect("escaping stays valid JSON");
+        assert_eq!(parsed.as_str(), Some(mixed));
+    }
+    assert!(html_safe.contains("\\u002B"));
+    assert!(html_safe.contains("\\u0060"));
+    assert!(!responses.contains("\\u002B"));
+    assert!(!responses.contains("\\u0060"));
+    assert!(responses.contains("\\u2028"));
+
+    let doc = format!("{{\"text\":{responses},\"n\": 100000000000000000000, \"z\":1, \"z\":2}}");
+    let compacted = wire_json::source_compact(&doc).unwrap();
+    assert_eq!(
+        compacted,
+        format!("{{\"text\":{responses},\"n\":100000000000000000000,\"z\":1,\"z\":2}}")
+    );
+    let normalized = wire_json::normalize_raw_json(&doc).unwrap();
+    assert!(normalized.contains("\\u002B"));
+    assert!(normalized.contains("100000000000000000000"));
+    assert!(normalized.contains("\"z\":1,\"z\":2"));
 }

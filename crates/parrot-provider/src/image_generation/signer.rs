@@ -1,4 +1,4 @@
-use super::transport::ImageHttpRequest;
+use crate::http_stream::HttpRequest;
 use crate::sessions::Error;
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
@@ -24,7 +24,7 @@ impl AwsV4Signer {
     }
     pub fn sign(
         &self,
-        request: &mut ImageHttpRequest,
+        request: &mut HttpRequest,
         payload_hash: &str,
         amz_date: &str,
     ) -> Result<(), Error> {

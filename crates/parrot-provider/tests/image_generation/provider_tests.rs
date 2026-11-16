@@ -6,13 +6,10 @@ use parrot_foundation::{
 use parrot_provider::{
     catalogs::Model,
     http_stream::{
-        ByteStream, Endpoint, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport,
+        ByteStream, Endpoint, HttpError, HttpRequest, HttpResponse, HttpTransport,
         ProviderHttpClient, ProviderHttpClientCatalog, ReqwestTransport,
     },
-    image_generation::{
-        ImageGenerationReference, ImageGenerationRequest, ImageHttpRequest, ImageTransport,
-        ReqwestImageTransport,
-    },
+    image_generation::{ImageGenerationReference, ImageGenerationRequest},
     responses_websocket::{ConnectedSocket, Connector, Headers, WebSocketError},
     sessions::{
         Content, Error, Provider, Session,
@@ -175,18 +172,18 @@ impl ByteStream for Body {
     }
 }
 struct Images {
-    requests: Mutex<Vec<ImageHttpRequest>>,
+    requests: Mutex<Vec<HttpRequest>>,
     status: u16,
     body: Vec<u8>,
     delay: Mutex<Duration>,
     cancel_on_send: Mutex<Option<Arc<Token>>>,
 }
-impl ImageTransport for Images {
+impl HttpTransport for Images {
     fn send<'a>(
         &'a self,
-        request: ImageHttpRequest,
+        request: HttpRequest,
         ct: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<HttpResponse, Error>> {
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async move {
             self.requests.lock().unwrap().push(request);
             let cancel = self.cancel_on_send.lock().unwrap().clone();
@@ -194,11 +191,11 @@ impl ImageTransport for Images {
                 cancel.cancel();
             }
             if ct.is_cancelled() {
-                return Err(Error::Cancelled);
+                return Err(HttpError::Cancelled);
             }
             let delay = *self.delay.lock().unwrap();
             if !delay.is_zero() {
-                tokio::select! {biased;_=ct.cancelled()=>return Err(Error::Cancelled),_=tokio::time::sleep(delay)=>{}}
+                tokio::select! {biased;_=ct.cancelled()=>return Err(HttpError::Cancelled),_=tokio::time::sleep(delay)=>{}}
             }
             Ok(HttpResponse {
                 status: self.status,
@@ -297,7 +294,7 @@ impl Fixture {
         assert_eq!(self.usage.0.load(Ordering::SeqCst), 0);
     }
 }
-fn header<'a>(request: &'a ImageHttpRequest, name: &str) -> &'a str {
+fn header<'a>(request: &'a HttpRequest, name: &str) -> &'a str {
     request
         .headers
         .iter()
@@ -704,16 +701,18 @@ async fn both_transport_views_share_the_selected_client_scope_and_disposal_witho
         Endpoint::parse("https://other.invalid/images/generations").unwrap()
     ));
     let stream = ReqwestTransport::new(selected.clone());
-    let images = ReqwestImageTransport::new(selected.clone());
+    let images = ReqwestTransport::new(selected.clone());
     selected.dispose();
     let ct = Token::default();
     assert!(matches!(
         stream
             .send(
                 HttpRequest {
-                    method: HttpMethod::Get,
+                    method: "GET".into(),
                     endpoint: Endpoint::parse("https://selected.invalid/models").unwrap(),
                     headers: vec![],
+                    content_type: None,
+                    filter_content_headers: true,
                     body: vec![]
                 },
                 &ct
@@ -724,18 +723,19 @@ async fn both_transport_views_share_the_selected_client_scope_and_disposal_witho
     assert!(matches!(
         images
             .send(
-                ImageHttpRequest {
+                HttpRequest {
                     method: "POST".into(),
                     endpoint: Endpoint::parse("https://selected.invalid/images/generations")
                         .unwrap(),
                     headers: vec![],
                     content_type: Some("application/json".into()),
+                    filter_content_headers: false,
                     body: vec![]
                 },
                 &ct
             )
             .await,
-        Err(Error::Http(HttpError::Disposed))
+        Err(HttpError::Disposed)
     ));
     assert!(same.is_disposed());
 }

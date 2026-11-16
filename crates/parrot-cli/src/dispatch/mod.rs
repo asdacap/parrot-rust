@@ -19,6 +19,10 @@ use std::{fmt, io::Write};
 
 pub use arguments::{Command, RuntimeCommand, parse};
 
+pub(crate) fn check(cancellation: &dyn Cancellation) -> Result<(), DispatchError> {
+    cancellation.check().map_err(|_| DispatchError::Cancelled)
+}
+
 pub const EXIT_SUCCESS: i32 = 0;
 pub const EXIT_USAGE: i32 = 2;
 pub const EXIT_FAILURE: i32 = 1;

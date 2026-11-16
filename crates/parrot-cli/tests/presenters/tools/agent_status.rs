@@ -44,7 +44,7 @@ fn resolves_agent_name_and_preserves_all_status_lines() {
             columns: 512,
             color: false,
             inline_diff: true,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap();

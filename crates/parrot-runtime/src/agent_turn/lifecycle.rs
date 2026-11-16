@@ -756,9 +756,6 @@ impl<B: DrainBackend> AgentSession<B> {
         });
         (true, execution)
     }
-    pub fn wake(&self, activity: Option<IncomingActivity>) -> (bool, ExecutionHandle) {
-        self.wake_unclaimed(activity)
-    }
     /// Checks for recoverable conversation/input work without starting a drain.
     pub fn has_recovery_work(&self) -> BoxFuture<'_, Result<bool, LifecycleError>> {
         Box::pin(async move {

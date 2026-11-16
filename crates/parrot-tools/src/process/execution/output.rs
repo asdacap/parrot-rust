@@ -357,6 +357,7 @@ impl ProcessOutput {
         self.path.is_some()
     }
     /// Raw inline units preserve even an explicitly requested lone surrogate.
+    #[cfg(test)]
     pub fn text_utf16(&self) -> &[u16] {
         &self.units
     }

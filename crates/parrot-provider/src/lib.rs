@@ -3,7 +3,9 @@
 mod lazy_stream;
 mod provider_error;
 mod retry_after;
+pub mod view;
 mod wire;
+pub(crate) mod wire_json;
 
 pub mod anthropic;
 pub mod catalogs;

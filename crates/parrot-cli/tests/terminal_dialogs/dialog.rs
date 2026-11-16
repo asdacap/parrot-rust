@@ -201,7 +201,7 @@ async fn print_commits_all_lines_without_opening_a_dialog() {
                 columns: 80,
                 color: false,
                 inline_diff: false,
-                previous_packing: None
+                previous_item: None
             })
             .unwrap(),
         lines

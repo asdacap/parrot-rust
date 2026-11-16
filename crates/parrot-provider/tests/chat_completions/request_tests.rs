@@ -1,5 +1,7 @@
 use super::stream_tests::completion;
+use parrot_core::Role;
 use parrot_provider::chat_completions::*;
+use parrot_provider::view::{ContentView, MessageView, RequestView, ToolCallView, ToolView};
 use serde_json::Value;
 
 #[derive(Clone)]
@@ -43,7 +45,7 @@ impl RequestView for Request {
 }
 #[derive(Clone)]
 struct Message {
-    role: MessageRole,
+    role: Role,
     text: String,
     contents: Vec<Content>,
     id: String,
@@ -53,8 +55,8 @@ struct Message {
 }
 impl MessageView for Message {
     type Content = Content;
-    type Call = Call;
-    fn role(&self) -> MessageRole {
+    type ToolCall = Call;
+    fn role(&self) -> Role {
         self.role
     }
     fn text(&self) -> &str {
@@ -107,7 +109,7 @@ impl ContentView for Content {
             _ => "",
         }
     }
-    fn read_image(&self) -> Result<Vec<u8>, RequestError> {
+    fn read_image(&self) -> std::io::Result<Vec<u8>> {
         match self {
             Self::Image { bytes, .. } => Ok(bytes.clone()),
             _ => Ok(Vec::new()),
@@ -148,7 +150,7 @@ impl ToolView for Tool {
         &self.schema
     }
 }
-fn message(role: MessageRole, text: &str) -> Message {
+fn message(role: Role, text: &str) -> Message {
     Message {
         role,
         text: text.into(),
@@ -168,7 +170,7 @@ fn request_has_source_top_level_fields_and_omits_unset_values() {
     let mut request = Request {
         model: "vendor/model".into(),
         instructions: "follow instructions".into(),
-        messages: vec![message(MessageRole::User, "hello")],
+        messages: vec![message(Role::User, "hello")],
         tools: vec![],
         effort: Some("xhigh".into()),
         preferences: "".into(),
@@ -198,7 +200,7 @@ fn request_has_source_top_level_fields_and_omits_unset_values() {
 
 #[test]
 fn request_wraps_nonleading_system_and_preserves_message_call_order() {
-    let mut later = message(MessageRole::System, "turn <reminder> & safe");
+    let mut later = message(Role::System, "turn <reminder> & safe");
     later.calls = vec![
         Call {
             id: "second".into(),
@@ -211,7 +213,7 @@ fn request_wraps_nonleading_system_and_preserves_message_call_order() {
             args: "[]".into(),
         },
     ];
-    let mut assistant = message(MessageRole::Assistant, "");
+    let mut assistant = message(Role::Assistant, "");
     assistant.calls.push(Call {
         id: "call_1".into(),
         name: "exec".into(),
@@ -244,7 +246,7 @@ fn tool_schema_preferences_and_multimodal_content_keep_order_and_raw_numbers() {
         model: "m".into(),
         instructions: String::new(),
         messages: vec![Message {
-            role: MessageRole::User,
+            role: Role::User,
             text: "ignored".into(),
             contents: vec![
                 Content::Text("caption".into()),
@@ -288,9 +290,9 @@ fn request_instructions_and_system_updates_have_source_wire_escaping() {
         model: "vendor/model".into(),
         instructions: "Follow repository rules.".into(),
         messages: vec![
-            message(MessageRole::System, "history guidance"),
-            message(MessageRole::User, "hello"),
-            message(MessageRole::System, "turn <reminder> & safe"),
+            message(Role::System, "history guidance"),
+            message(Role::User, "hello"),
+            message(Role::System, "turn <reminder> & safe"),
         ],
         tools: vec![],
         effort: None,
@@ -328,7 +330,7 @@ fn request_instructions_and_system_updates_have_source_wire_escaping() {
 
 #[test]
 fn quoted_request_fields_escape_html_sensitive_characters() {
-    let mut user = message(MessageRole::User, "<>&");
+    let mut user = message(Role::User, "<>&");
     user.id = "<>&".into();
     user.calls = vec![
         Call {
@@ -399,7 +401,7 @@ fn literal_backslash_u_sequences_remain_literal() {
     let request = Request {
         model: "m".into(),
         instructions: "".into(),
-        messages: vec![message(MessageRole::User, input)],
+        messages: vec![message(Role::User, input)],
         tools: vec![],
         effort: None,
         preferences: "".into(),
@@ -418,10 +420,7 @@ fn unicode_quotes_and_controls_keep_values_and_message_order() {
     let request = Request {
         model: "m".into(),
         instructions: "".into(),
-        messages: vec![
-            message(MessageRole::User, input),
-            message(MessageRole::System, input),
-        ],
+        messages: vec![message(Role::User, input), message(Role::System, input)],
         tools: vec![],
         effort: None,
         preferences: "".into(),
@@ -449,7 +448,7 @@ fn raw_schema_and_preferences_keep_verbatim_spelling() {
     let schema = r#"{"type":"object","minimum":1e+02,"enum":["<>&","\\u003C"],"order":[2,1]}"#;
     let preferences = r#" {"route":"<>&","literal":"\\u003C","order":[2,1]} "#;
     let arguments = r#"{"text":"<>&","literal":"\\u003C"}"#;
-    let mut assistant = message(MessageRole::Assistant, "");
+    let mut assistant = message(Role::Assistant, "");
     assistant.calls.push(Call {
         id: "call_1".into(),
         name: "read".into(),
@@ -515,7 +514,7 @@ fn unusable_native_reasoning_payloads_fall_back_to_ordinary_history() {
         ("test", ""),
     ];
     for (provider_id, raw) in cases {
-        let mut assistant = message(MessageRole::Assistant, "answer");
+        let mut assistant = message(Role::Assistant, "answer");
         assistant.provider_id = provider_id.into();
         assistant.raw = raw.into();
         assistant.calls.push(Call {
@@ -581,7 +580,7 @@ fn reasoning_field_variants_round_trip_with_tools_outside_assistant_text() {
             "ReasoningContent": replay.reasoning_content,
             "Reasoning": replay.reasoning,
         });
-        let mut assistant = message(MessageRole::Assistant, &completion.assistant_text);
+        let mut assistant = message(Role::Assistant, &completion.assistant_text);
         assistant.provider_id = "test".into();
         assistant.raw = replay_json.to_string();
         assistant.calls = completion
@@ -593,7 +592,7 @@ fn reasoning_field_variants_round_trip_with_tools_outside_assistant_text() {
                 args: call.arguments_json.clone(),
             })
             .collect();
-        let mut tool_result = message(MessageRole::Tool, "read complete");
+        let mut tool_result = message(Role::Tool, "read complete");
         tool_result.id = "call_1".into();
         let request = Request {
             model: "different-model".into(),
@@ -601,7 +600,7 @@ fn reasoning_field_variants_round_trip_with_tools_outside_assistant_text() {
             messages: vec![
                 assistant,
                 tool_result,
-                message(MessageRole::User, "summarize that file"),
+                message(Role::User, "summarize that file"),
             ],
             tools: vec![],
             effort: None,
@@ -635,9 +634,9 @@ fn empty_instructions_keep_the_leading_history_system_message_unwrapped() {
         model: "model".into(),
         instructions: String::new(),
         messages: vec![
-            message(MessageRole::System, "history guidance"),
-            message(MessageRole::User, "hello"),
-            message(MessageRole::System, "turn <reminder>"),
+            message(Role::System, "history guidance"),
+            message(Role::User, "hello"),
+            message(Role::System, "turn <reminder>"),
         ],
         tools: vec![],
         effort: None,
@@ -660,8 +659,8 @@ fn empty_instructions_keep_the_leading_history_system_message_unwrapped() {
         model: "model".into(),
         instructions: String::new(),
         messages: vec![
-            message(MessageRole::User, "hello"),
-            message(MessageRole::System, "turn <reminder>"),
+            message(Role::User, "hello"),
+            message(Role::System, "turn <reminder>"),
         ],
         tools: vec![],
         effort: None,
@@ -679,7 +678,7 @@ fn empty_instructions_keep_the_leading_history_system_message_unwrapped() {
 
 #[test]
 fn provider_reasoning_replay_is_gated_and_restored_without_ordinary_fallback_merge() {
-    let mut assistant = message(MessageRole::Assistant, "answer");
+    let mut assistant = message(Role::Assistant, "answer");
     assistant.provider_id = "test".into();
     assistant.raw=r#"{"Version":1,"Protocol":"chat-completions","ReasoningContent":"think","Reasoning":"other","unknown":1}"#.into();
     assistant.calls.push(Call {
@@ -791,7 +790,7 @@ fn reasoning_history_continuation_preserves_tool_result_and_user() {
         instructions: String::new(),
         messages: vec![
             {
-                let mut assistant = message(MessageRole::Assistant, "checking");
+                let mut assistant = message(Role::Assistant, "checking");
                 assistant.provider_id = "test".into();
                 assistant.raw =
                     r#"{"Version":1,"Protocol":"chat-completions","Reasoning":"private thought"}"#
@@ -804,11 +803,11 @@ fn reasoning_history_continuation_preserves_tool_result_and_user() {
                 assistant
             },
             {
-                let mut result = message(MessageRole::Tool, "read complete");
+                let mut result = message(Role::Tool, "read complete");
                 result.id = "call_read".into();
                 result
             },
-            message(MessageRole::User, "summarize that file"),
+            message(Role::User, "summarize that file"),
         ],
         tools: vec![],
         effort: None,
@@ -846,7 +845,7 @@ fn both_reasoning_fields_round_trip_from_stream_completion() {
     let completion = completion(&state, "test");
     let replay = completion.provider_content.unwrap();
     let assistant = {
-        let mut assistant = message(MessageRole::Assistant, &completion.assistant_text);
+        let mut assistant = message(Role::Assistant, &completion.assistant_text);
         assistant.provider_id = replay.provider_id;
         assistant.raw = serde_json::json!({
             "Version": replay.version,

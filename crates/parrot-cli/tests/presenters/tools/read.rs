@@ -27,7 +27,7 @@ fn rendered_with(
             columns: 32768,
             color,
             inline_diff: true,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap()

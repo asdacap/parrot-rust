@@ -40,7 +40,7 @@ fn read_image_renders_one_line_size_and_dimensions_or_compact_without_metadata()
                     columns: 32768,
                     color: false,
                     inline_diff: false,
-                    previous_packing: None
+                    previous_item: None
                 }
             )
             .unwrap(),

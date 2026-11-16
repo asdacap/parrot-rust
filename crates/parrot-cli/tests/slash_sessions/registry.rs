@@ -193,9 +193,7 @@ async fn mode_clear_and_modes_use_shared_activity_and_actual_replacement() {
         initial(),
         configuration,
         true,
-        Box::new(CallbackSessionBinding(Arc::new(|_, _| {
-            Box::pin(async { Ok(()) })
-        }))),
+        Arc::new(|_, _| Box::pin(async { Ok(()) })),
     );
     let registry = SlashCommands::create(
         SettingsServices {

@@ -257,7 +257,7 @@ impl ParrotService {
             sessions: entries
                 .into_iter()
                 .map(|entry| {
-                    let state = if self.sessions.contains(entry.id.value()) {
+                    let state = if self.sessions.find(entry.id.value()).is_ok() {
                         wire::SessionState::SESSION_STATE_ACTIVE
                     } else if entry.state == SessionCatalogState::Corrupt {
                         wire::SessionState::SESSION_STATE_CORRUPT

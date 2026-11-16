@@ -6,14 +6,10 @@ mod surface;
 
 pub use crate::terminal_layout::{TerminalCellStyleSpan, TerminalLine, TerminalStyle};
 pub use renderer::TerminalFrameRenderer;
-pub use scheduling::{SPINNER_INTERVAL, spinner_text};
+pub use scheduling::{SPINNER_FRAMES, SPINNER_INTERVAL, spinner_text};
 
-use std::any::Any;
 use std::io;
 use std::sync::Arc;
-
-/// Opaque consumer identity. Packing is decided by the item, not pointer identity.
-pub type ItemIdentity = Arc<dyn Any + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveBufferCaret {
@@ -59,7 +55,7 @@ pub struct ScrollbackRenderOptions {
     pub columns: usize,
     pub color: bool,
     pub inline_diff: bool,
-    pub previous_packing: Option<ItemIdentity>,
+    pub previous_item: Option<Arc<dyn ScrollbackItem>>,
 }
 
 pub trait ScrollbackItem: Send + Sync {
@@ -73,14 +69,16 @@ pub trait ScrollbackItem: Send + Sync {
     fn ends_layout(&self) -> bool {
         true
     }
-    fn sequence_identity(&self) -> Option<ItemIdentity> {
+    /// Packing stream of the item. Consecutive non-empty items with an equal
+    /// first component pack together, and an equal second component suppresses
+    /// the repeated heading. `None` for items that never pack.
+    fn stream(&self) -> Option<(&str, &str)> {
         None
     }
-    fn packing_identity(&self) -> Option<ItemIdentity> {
-        None
-    }
-    fn packs(&self, _previous: Option<&ItemIdentity>) -> bool {
-        false
+    fn packs(&self, previous: Option<&dyn ScrollbackItem>) -> bool {
+        self.stream()
+            .zip(previous.and_then(|previous| previous.stream()))
+            .is_some_and(|(item, previous)| item.0 == previous.0)
     }
     fn continues(&self, previous: &dyn ScrollbackItem) -> bool;
     fn render(&self, options: ScrollbackRenderOptions) -> io::Result<Vec<String>>;

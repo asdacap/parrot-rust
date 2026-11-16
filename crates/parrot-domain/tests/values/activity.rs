@@ -51,8 +51,22 @@ fn setup() -> (Arc<ControlledClock>, AgentSessionActivity) {
     (clock, activity)
 }
 
+fn reasoning_event(
+    text: impl Into<String>,
+    reasoning_kind: LlmReasoningKind,
+    part_id: impl Into<String>,
+    completed: bool,
+) -> LlmEvent {
+    let mut event = LlmEvent::new(LlmEventKind::ReasoningDelta);
+    event.text = text.into();
+    event.reasoning_kind = reasoning_kind;
+    event.reasoning_part_id = part_id.into();
+    event.reasoning_completed = completed;
+    event
+}
+
 fn summary(text: &str, part: &str, completed: bool) -> LlmEvent {
-    LlmEvent::reasoning_delta(text, LlmReasoningKind::Summary, part, completed)
+    reasoning_event(text, LlmReasoningKind::Summary, part, completed)
 }
 
 #[test]
@@ -60,16 +74,11 @@ fn provider_activity_excludes_completed_and_raw_reasoning_content() {
     let (time, activity) = setup();
     activity.observe_provider_event(&LlmEvent::new(LlmEventKind::Completed));
     assert_eq!(activity.capture().latest_provider_activity_age, None);
-    activity.observe_provider_event(&LlmEvent::reasoning_delta(
-        "private",
-        LlmReasoningKind::Raw,
-        "",
-        true,
-    ));
+    activity.observe_provider_event(&reasoning_event("private", LlmReasoningKind::Raw, "", true));
     let empty = activity.capture();
     activity.observe_provider_event(&LlmEvent::text_delta("text"));
     time.advance(1);
-    activity.observe_provider_event(&LlmEvent::reasoning_delta(
+    activity.observe_provider_event(&reasoning_event(
         "reasoning",
         LlmReasoningKind::Raw,
         "",

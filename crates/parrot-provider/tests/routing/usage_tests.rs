@@ -1,6 +1,6 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::{
-    http_stream::{ByteStream, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport},
+    http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
     routing::usage::{KimiUsageReporter, OpenCodeGoUsageReporter},
     sessions::{
         Error,
@@ -218,7 +218,7 @@ async fn canonical_kimi_and_opencode_reporter_tuples_preserve_exact_http_and_dec
             let requests = transport.requests.lock().unwrap();
             assert_eq!(requests.len(), 1);
             let request = &requests[0];
-            assert_eq!(request.method, HttpMethod::Get);
+            assert_eq!(request.method, "GET");
             assert_eq!(
                 request.endpoint.as_str(),
                 if open_code {

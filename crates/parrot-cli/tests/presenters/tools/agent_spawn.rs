@@ -22,7 +22,7 @@ fn rendered(
             columns,
             color,
             inline_diff: true,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap()

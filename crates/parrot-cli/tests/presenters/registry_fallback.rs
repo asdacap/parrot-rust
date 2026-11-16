@@ -24,7 +24,7 @@ fn rows(item: Presentation) -> Vec<String> {
             columns: 32768,
             color: false,
             inline_diff: true,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap()
@@ -75,7 +75,7 @@ fn actual_registry_spawn_preserves_full_prompt_under_nested_activity_decoration(
         columns: 24,
         color: false,
         inline_diff: false,
-        previous_packing: None,
+        previous_item: None,
     };
     let expected = registry
         .present_terminal(&call, &terminal)

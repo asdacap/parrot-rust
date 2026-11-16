@@ -1,12 +1,11 @@
-use parrot_provider::anthropic::{
-    ContentKind, ContentView, EncodeError, MessageView, RequestView, Role, ToolCallView,
-    ToolDefinitionView, encode,
-};
+use parrot_core::Role;
+use parrot_provider::anthropic::{EncodeError, encode};
+use parrot_provider::view::{ContentView, MessageView, RequestView, ToolCallView, ToolView};
 use serde_json::{Value, json};
 use std::{cell::Cell, io};
 
 struct Part {
-    kind: ContentKind,
+    is_text_flag: bool,
     text: String,
     url: String,
     bytes: Vec<u8>,
@@ -16,7 +15,7 @@ struct Part {
 impl Part {
     fn text(text: &str) -> Self {
         Self {
-            kind: ContentKind::Text,
+            is_text_flag: true,
             text: text.into(),
             url: String::new(),
             bytes: vec![],
@@ -26,7 +25,7 @@ impl Part {
     }
     fn image(url: &str, bytes: &[u8]) -> Self {
         Self {
-            kind: ContentKind::Image,
+            is_text_flag: false,
             url: url.into(),
             bytes: bytes.into(),
             ..Self::text("")
@@ -34,8 +33,8 @@ impl Part {
     }
 }
 impl ContentView for Part {
-    fn kind(&self) -> ContentKind {
-        self.kind
+    fn is_text(&self) -> bool {
+        self.is_text_flag
     }
     fn text(&self) -> &str {
         &self.text
@@ -76,7 +75,7 @@ struct Tool {
     schema: String,
     description: String,
 }
-impl ToolDefinitionView for Tool {
+impl ToolView for Tool {
     fn name(&self) -> &str {
         "lookup"
     }
