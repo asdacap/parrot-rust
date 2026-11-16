@@ -21,12 +21,12 @@ impl CancellationSource {
     }
 
     pub(super) fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::poll_fn(|context| {
+        Box::pin(std::future::poll_fn(|cx| {
             let mut waker = self.waker.lock().unwrap();
             if self.is_cancelled() {
                 Poll::Ready(())
             } else {
-                *waker = Some(context.waker().clone());
+                *waker = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -71,13 +71,13 @@ fn token_notification_wakes_pending_work() {
     let token = CancellationToken::new(&source);
     let wakes = Arc::new(WakeCounter::default());
     let waker = Waker::from(wakes.clone());
-    let mut context = Context::from_waker(&waker);
+    let mut cx = Context::from_waker(&waker);
     let mut waiting = token.cancelled();
-    assert!(waiting.as_mut().poll(&mut context).is_pending());
+    assert!(waiting.as_mut().poll(&mut cx).is_pending());
     assert_eq!(wakes.0.load(Ordering::SeqCst), 0);
     source.cancel();
     assert_eq!(wakes.0.load(Ordering::SeqCst), 1);
-    assert!(waiting.as_mut().poll(&mut context).is_ready());
+    assert!(waiting.as_mut().poll(&mut cx).is_ready());
 }
 
 struct JoiningTools {
@@ -132,7 +132,7 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
     };
     let wakes = Arc::new(WakeCounter::default());
     let waker = Waker::from(wakes.clone());
-    let mut context = Context::from_waker(&waker);
+    let mut cx = Context::from_waker(&waker);
 
     state.budget = AgentState::default();
     let result = {
@@ -142,7 +142,7 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
             &provider,
             CancellationToken::new(provider.cancellation.as_ref())
         ));
-        assert!(running.as_mut().poll(&mut context).is_pending());
+        assert!(running.as_mut().poll(&mut cx).is_pending());
         assert!(tools.admitted.load(Ordering::SeqCst));
         assert!(!joined.load(Ordering::SeqCst));
         source.cancel();

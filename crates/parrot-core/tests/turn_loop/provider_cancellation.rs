@@ -29,12 +29,12 @@ impl Provider for WaitingProvider {
             self.entered.store(true, Ordering::SeqCst);
             cancellation.cancelled().await;
             let mut yielded = false;
-            std::future::poll_fn(|context| {
+            std::future::poll_fn(|cx| {
                 if yielded {
                     Poll::Ready(())
                 } else {
                     yielded = true;
-                    context.waker().wake_by_ref();
+                    cx.waker().wake_by_ref();
                     Poll::Pending
                 }
             })
@@ -56,7 +56,7 @@ fn entry_cancellation_reaches_inflight_provider_and_awaits_cleanup() {
         cleaned: AtomicBool::new(false),
     };
     let waker = Waker::from(Arc::new(ThreadWake(thread::current())));
-    let mut context = Context::from_waker(&waker);
+    let mut cx = Context::from_waker(&waker);
     state.budget = AgentState::default();
     {
         let mut running = std::pin::pin!(run(
@@ -65,10 +65,10 @@ fn entry_cancellation_reaches_inflight_provider_and_awaits_cleanup() {
             &provider,
             CancellationToken::new(&source),
         ));
-        assert!(running.as_mut().poll(&mut context).is_pending());
+        assert!(running.as_mut().poll(&mut cx).is_pending());
         assert!(provider.entered.load(Ordering::SeqCst));
         source.cancel();
-        assert!(running.as_mut().poll(&mut context).is_pending());
+        assert!(running.as_mut().poll(&mut cx).is_pending());
         assert!(!provider.cleaned.load(Ordering::SeqCst));
         assert_eq!(finish(running), Err(Error::cancelled()));
         assert!(provider.cleaned.load(Ordering::SeqCst));

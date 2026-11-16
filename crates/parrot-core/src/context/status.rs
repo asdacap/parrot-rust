@@ -23,8 +23,8 @@ pub(crate) async fn fit_status(
                 provider.estimate_input_tokens(&request.instructions, &request.tools, &messages)?;
             Ok(ContextSnapshot::estimate(tokens, configuration))
         },
-        |context| async move {
-            let offering = states.read_status_offering(context).await?;
+        |snapshot| async move {
+            let offering = states.read_status_offering(snapshot).await?;
             Ok(join_status_offering(&offering))
         },
     )
@@ -39,15 +39,15 @@ where
     S: Clone + Eq,
     F: Future<Output = Result<String, E>>,
 {
-    let mut context = estimate("")?;
-    let mut content = render(context.clone()).await?;
+    let mut snapshot = estimate("")?;
+    let mut content = render(snapshot.clone()).await?;
     for _ in 0..8 {
-        let rendered = estimate(&content)?;
-        if rendered == context {
+        let next = estimate(&content)?;
+        if next == snapshot {
             break;
         }
-        context = rendered;
-        content = render(context.clone()).await?;
+        snapshot = next;
+        content = render(snapshot.clone()).await?;
     }
     Ok(content)
 }

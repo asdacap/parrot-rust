@@ -13,9 +13,9 @@ use std::{
 
 fn finish<F: Future>(future: F) -> F::Output {
     let waker = Waker::noop();
-    let mut context = Context::from_waker(waker);
+    let mut cx = Context::from_waker(waker);
     let mut future = std::pin::pin!(future);
-    match future.as_mut().poll(&mut context) {
+    match future.as_mut().poll(&mut cx) {
         Poll::Ready(result) => result,
         Poll::Pending => panic!("in-memory settlement must complete immediately"),
     }

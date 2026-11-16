@@ -149,7 +149,7 @@ pub struct TurnServices<'a> {
     pub skills: &'a dyn SkillProvider,
     pub tools: &'a dyn Tools,
     pub provider: &'a dyn Provider,
-    pub publisher: &'a dyn EventPublisher,
+    pub event_publisher: &'a dyn EventPublisher,
     pub hooks: &'a dyn TurnHooks,
 }
 

@@ -33,7 +33,7 @@ impl SkillPreparation {
             return Ok(PreparedSkillPrompt::default());
         }
 
-        let preparation = SkillTemplates {
+        let templates = SkillTemplates {
             unavailable: states
                 .get_config(ConfigKey::SkillUnavailableTemplate)
                 .await?
@@ -47,23 +47,22 @@ impl SkillPreparation {
                 .await?
                 .into_prompt_template()?,
         };
-        let preparation = &preparation;
-        let mut rendering = SkillRendering::new(preparation)?;
+        let mut rendering = SkillRendering::new(&templates)?;
         for (skill, _) in selected {
             if cancellation.is_cancelled() {
                 return Err(Error::cancelled());
             }
             match skill_provider.read_skill_content(&skill).await? {
-                SkillContent::Text(content) => rendering.selected(preparation, &skill, &content)?,
+                SkillContent::Text(content) => rendering.selected(&templates, &skill, &content)?,
                 SkillContent::Unavailable(message) => {
-                    rendering.diagnostic(preparation, &skill.name, &message)?;
+                    rendering.diagnostic(&templates, &skill.name, &message)?;
                 }
             }
         }
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
-        rendering.finish(preparation)
+        rendering.finish(&templates)
     }
 
     /// Detects skills newly selected by the promoted inputs and returns them in
@@ -101,8 +100,8 @@ impl SkillPreparation {
                     .iter()
                     .map(|(reference, _)| reference.clone())
                     .collect::<Vec<_>>();
-                let records = skill_provider.resolve_skill_references(&references).await?;
-                for (record, (_, position)) in records.into_iter().zip(mentions) {
+                let resolved = skill_provider.resolve_skill_references(&references).await?;
+                for (record, (_, position)) in resolved.into_iter().zip(mentions) {
                     if let Some(skill) = record
                         && self.selected_ids.insert(skill.id.clone())
                     {
@@ -143,7 +142,7 @@ fn escape(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn unavailable(preparation: &SkillTemplates, name: &str, message: &str) -> Result<String, Error> {
+fn unavailable(templates: &SkillTemplates, name: &str, message: &str) -> Result<String, Error> {
     let normalized = message.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut message = String::new();
     let mut units = 0;
@@ -155,7 +154,7 @@ fn unavailable(preparation: &SkillTemplates, name: &str, message: &str) -> Resul
         units += character.len_utf16();
     }
     render_template(
-        &preparation.unavailable,
+        &templates.unavailable,
         &[
             ("name".into(), escape(name)),
             ("message".into(), escape(&message)),
@@ -170,9 +169,9 @@ struct SkillRendering {
 }
 
 impl SkillRendering {
-    fn new(preparation: &SkillTemplates) -> Result<Self, Error> {
+    fn new(templates: &SkillTemplates) -> Result<Self, Error> {
         let summary = unavailable(
-            preparation,
+            templates,
             "selected skills",
             &format!(
                 "{} diagnostics omitted by the active-turn prompt budget",
@@ -216,47 +215,47 @@ impl SkillRendering {
 
     fn diagnostic(
         &mut self,
-        preparation: &SkillTemplates,
+        templates: &SkillTemplates,
         name: &str,
         message: &str,
     ) -> Result<(), Error> {
-        let value = unavailable(preparation, name, message)?;
-        self.notice(&value);
+        let rendered = unavailable(templates, name, message)?;
+        self.notice(&rendered);
         Ok(())
     }
 
     fn selected(
         &mut self,
-        preparation: &SkillTemplates,
+        templates: &SkillTemplates,
         skill: &Skill,
         content: &str,
     ) -> Result<(), Error> {
         if content.len() > MAXIMUM_SKILL_BYTES {
-            let value = render_template(
-                &preparation.too_large,
+            let rendered = render_template(
+                &templates.too_large,
                 &[
                     ("name".into(), escape(&skill.name)),
                     ("path".into(), escape(&skill.path)),
                     ("limit_bytes".into(), MAXIMUM_SKILL_BYTES.to_string()),
                 ],
             )?;
-            self.notice(&value);
+            self.notice(&rendered);
             return Ok(());
         }
-        let value = render_template(
-            &preparation.selected,
+        let rendered = render_template(
+            &templates.selected,
             &[
                 ("name".into(), escape(&skill.name)),
                 ("path".into(), escape(&skill.path)),
                 ("content".into(), content.into()),
             ],
         )?;
-        if self.fits(&value) {
-            self.append(&value);
+        if self.fits(&rendered) {
+            self.append(&rendered);
             self.prompt.loaded_paths.push(skill.path.clone());
         } else {
             self.diagnostic(
-                preparation,
+                templates,
                 &skill.name,
                 "selected skill instructions exceed the active-turn prompt budget",
             )?;
@@ -264,10 +263,10 @@ impl SkillRendering {
         Ok(())
     }
 
-    fn finish(mut self, preparation: &SkillTemplates) -> Result<PreparedSkillPrompt, Error> {
+    fn finish(mut self, templates: &SkillTemplates) -> Result<PreparedSkillPrompt, Error> {
         if self.omitted > 0 {
             let summary = unavailable(
-                preparation,
+                templates,
                 "selected skills",
                 &format!(
                     "{} diagnostics omitted by the active-turn prompt budget",

@@ -18,10 +18,10 @@ impl Wake for ThreadWake {
 }
 fn finish<F: Future>(future: F) -> F::Output {
     let waker = Waker::from(Arc::new(ThreadWake(thread::current())));
-    let mut context = Context::from_waker(&waker);
+    let mut cx = Context::from_waker(&waker);
     let mut future = std::pin::pin!(future);
     loop {
-        match future.as_mut().poll(&mut context) {
+        match future.as_mut().poll(&mut cx) {
             Poll::Ready(output) => return output,
             Poll::Pending => thread::park(),
         }

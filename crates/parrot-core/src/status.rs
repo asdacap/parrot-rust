@@ -35,7 +35,7 @@ impl fmt::Display for StatusKey {
 /// Safe points occur between provider requests.
 pub(crate) async fn steer_status(
     states: &mut dyn States,
-    state: &mut AgentState,
+    agent_state: &mut AgentState,
     provider: &dyn Provider,
     definitions: &[ToolDefinition],
     cancellation: CancellationToken<'_>,
@@ -45,14 +45,14 @@ pub(crate) async fn steer_status(
     }
     let instructions = states.capture_system_prompt().await?;
     let messages = states.read_conversation_state().await?.assemble_messages();
-    let configuration = states
+    let context_configuration = states
         .get_config(ConfigKey::Context)
         .await?
         .into_context()?;
     let tokens = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
-    let context = ContextSnapshot::estimate(tokens, &configuration);
-    let offering = states.read_status_offering(context).await?;
-    let mut standing = state.standing_statuses.clone();
+    let snapshot = ContextSnapshot::estimate(tokens, &context_configuration);
+    let offering = states.read_status_offering(snapshot).await?;
+    let mut standing = agent_state.standing_statuses.clone();
     if !status_steering_needed(&offering, &standing) {
         return Ok(());
     }
@@ -70,7 +70,7 @@ pub(crate) async fn steer_status(
                 tools: definitions.to_vec(),
                 ..ProviderRequest::default()
             },
-            &configuration,
+            &context_configuration,
             states,
             provider,
         )
@@ -98,7 +98,7 @@ pub(crate) async fn steer_status(
             },
         })
         .await?;
-    state.standing_statuses = standing;
+    agent_state.standing_statuses = standing;
     Ok(())
 }
 
@@ -139,42 +139,42 @@ mod tests {
     #[test]
     fn matching_standing_steers_nothing() {
         let current = offering(&[("selection", "a", true), ("time", "b", false)]);
-        let recorded = standing(&[("selection", "a"), ("time", "b")]);
-        assert!(!status_steering_needed(&current, &recorded));
+        let known = standing(&[("selection", "a"), ("time", "b")]);
+        assert!(!status_steering_needed(&current, &known));
     }
 
     #[test]
     fn changed_auto_hash_steers() {
         let current = offering(&[("selection", "a2", true), ("time", "b", false)]);
-        let recorded = standing(&[("selection", "a"), ("time", "b")]);
-        assert!(status_steering_needed(&current, &recorded));
+        let known = standing(&[("selection", "a"), ("time", "b")]);
+        assert!(status_steering_needed(&current, &known));
     }
 
     #[test]
     fn non_auto_change_alone_steers_nothing() {
         let current = offering(&[("selection", "a", true), ("time", "b2", false)]);
-        let recorded = standing(&[("selection", "a"), ("time", "b")]);
-        assert!(!status_steering_needed(&current, &recorded));
+        let known = standing(&[("selection", "a"), ("time", "b")]);
+        assert!(!status_steering_needed(&current, &known));
     }
 
     #[test]
     fn unchanged_after_restart_steers_nothing() {
         let restored = offering(&[("selection", "a2", true), ("time", "b2", false)]);
-        let recorded = standing(&[("selection", "a2"), ("time", "b2")]);
-        assert!(!status_steering_needed(&restored, &recorded));
+        let known = standing(&[("selection", "a2"), ("time", "b2")]);
+        assert!(!status_steering_needed(&restored, &known));
     }
 
     #[test]
     fn auto_slot_without_standing_hash_counts_as_changed() {
         let current = offering(&[("selection", "a", true), ("work", "w", true)]);
-        let recorded = standing(&[("selection", "a")]);
-        assert!(status_steering_needed(&current, &recorded));
+        let known = standing(&[("selection", "a")]);
+        assert!(status_steering_needed(&current, &known));
     }
 
     #[test]
     fn empty_offering_steers_nothing() {
         let current = StatusOffering::default();
-        let recorded = standing(&[("selection", "a")]);
-        assert!(!status_steering_needed(&current, &recorded));
+        let known = standing(&[("selection", "a")]);
+        assert!(!status_steering_needed(&current, &known));
     }
 }
