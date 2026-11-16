@@ -444,6 +444,17 @@ fn status_bridge_with_prompt(prompt_probe: Option<Arc<SessionPrompt>>) -> Status
                         templates: templates(),
                     }),
                 ],
+                vec![],
+                vec![
+                    Arc::new(GeneratedTimeStatusProvider {
+                        clock: Arc::new(TestClock),
+                        started_at: SystemTime::UNIX_EPOCH,
+                        templates: templates(),
+                    }),
+                    Arc::new(SelectionStatusProvider {
+                        templates: templates(),
+                    }),
+                ],
             )
             .unwrap(),
         ),

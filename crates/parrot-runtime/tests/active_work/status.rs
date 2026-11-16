@@ -95,9 +95,6 @@ impl StatusProvider for Scripted {
     fn key(&self) -> &str {
         &self.key
     }
-    fn should_show(&self, _surface: StatusTarget) -> bool {
-        true
-    }
     fn observe<'a>(
         &'a self,
         query: &'a StatusQuery,
@@ -263,9 +260,6 @@ impl StatusProvider for Rendezvous {
     fn key(&self) -> &str {
         self.key
     }
-    fn should_show(&self, _surface: StatusTarget) -> bool {
-        true
-    }
     fn observe<'a>(
         &'a self,
         _: &'a StatusQuery,
@@ -334,9 +328,6 @@ struct CancelProvider;
 impl StatusProvider for CancelProvider {
     fn key(&self) -> &str {
         "runtime:cancel"
-    }
-    fn should_show(&self, _surface: StatusTarget) -> bool {
-        true
     }
     fn observe<'a>(
         &'a self,
@@ -883,6 +874,24 @@ async fn runtime_tree_changes_do_not_trigger_status_steering() {
                     templates: catalog(""),
                 }),
             ],
+            vec![Arc::new(RuntimeTreeStatusProvider {
+                source: source.clone(),
+                templates: catalog(""),
+            })],
+            vec![
+                Arc::new(GeneratedTimeStatusProvider {
+                    clock: clock(),
+                    started_at: SystemTime::UNIX_EPOCH,
+                    templates: catalog(""),
+                }),
+                Arc::new(SelectionStatusProvider {
+                    templates: catalog(""),
+                }),
+                Arc::new(RuntimeTreeStatusProvider {
+                    source: source.clone(),
+                    templates: catalog(""),
+                }),
+            ],
         )
         .unwrap(),
     );
@@ -1005,6 +1014,18 @@ async fn runtime_status_preserves_additional_provider_order_exclusions_and_per_c
             }),
             Scripted::new("runtime:queues", "Runtime:\n- agent: main"),
         ],
+        vec![Scripted::new("runtime:queues", "Runtime:\n- agent: main")],
+        vec![
+            Arc::new(GeneratedTimeStatusProvider {
+                clock: clock(),
+                started_at: SystemTime::UNIX_EPOCH,
+                templates: catalog(""),
+            }),
+            Arc::new(SelectionStatusProvider {
+                templates: catalog(""),
+            }),
+            Scripted::new("runtime:queues", "Runtime:\n- agent: main"),
+        ],
     )
     .unwrap();
     let query = query();
@@ -1107,6 +1128,17 @@ async fn status_rejects_invalid_profile_keys() {
                 templates: catalog(""),
             }),
         ],
+        vec![],
+        vec![
+            Arc::new(GeneratedTimeStatusProvider {
+                clock: clock(),
+                started_at: SystemTime::UNIX_EPOCH,
+                templates: catalog(""),
+            }),
+            Arc::new(SelectionStatusProvider {
+                templates: catalog(""),
+            }),
+        ],
     )
     .unwrap();
     let mut bad = query();
@@ -1138,6 +1170,18 @@ async fn bound_context_status_uses_actual_full_status_and_preserves_snapshot_and
     let runtime = Arc::new(
         StatusProvidersFactory::new(
             catalog(""),
+            vec![
+                Arc::new(GeneratedTimeStatusProvider {
+                    clock: clock(),
+                    started_at: SystemTime::UNIX_EPOCH,
+                    templates: catalog(""),
+                }),
+                Arc::new(SelectionStatusProvider {
+                    templates: catalog(""),
+                }),
+                Scripted::new("runtime:queues", "Runtime:\n- agent: main"),
+            ],
+            vec![Scripted::new("runtime:queues", "Runtime:\n- agent: main")],
             vec![
                 Arc::new(GeneratedTimeStatusProvider {
                     clock: clock(),
@@ -1234,9 +1278,6 @@ impl StatusProvider for ImmediateFailure {
         } else {
             "runtime:z-failure"
         }
-    }
-    fn should_show(&self, _surface: StatusTarget) -> bool {
-        true
     }
     fn observe<'a>(
         &'a self,
@@ -1517,6 +1558,17 @@ async fn context_slot_merges_usage_line_with_once_per_band_reminder() {
                     templates: catalog(""),
                 }),
             ],
+            vec![],
+            vec![
+                Arc::new(GeneratedTimeStatusProvider {
+                    clock: clock(),
+                    started_at: SystemTime::UNIX_EPOCH,
+                    templates: catalog(""),
+                }),
+                Arc::new(SelectionStatusProvider {
+                    templates: catalog(""),
+                }),
+            ],
         )
         .unwrap(),
     );
@@ -1630,6 +1682,8 @@ async fn factory_binds_a_sourced_steering_seam_over_the_source_snapshot() {
     let factory = StatusProvidersFactory::new(
         catalog(""),
         vec![Scripted::new("runtime:scripted", "scripted slot")],
+        vec![Scripted::new("runtime:scripted", "scripted slot")],
+        vec![Scripted::new("runtime:scripted", "scripted slot")],
     )
     .unwrap();
     let offering = factory
@@ -1651,6 +1705,8 @@ async fn factory_binds_a_sourced_steering_seam_over_the_source_snapshot() {
 async fn factory_renders_the_tool_surface_over_a_source_snapshot() {
     let factory = StatusProvidersFactory::new(
         catalog(""),
+        vec![Scripted::new("runtime:scripted", "scripted slot")],
+        vec![Scripted::new("runtime:scripted", "scripted slot")],
         vec![Scripted::new("runtime:scripted", "scripted slot")],
     )
     .unwrap();

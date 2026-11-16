@@ -17,6 +17,8 @@ async fn saving_publication_failure_leaves_history_unchanged_and_reports_failure
     let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
         crate::context::templates(),
         vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
     )
     .unwrap();
     let events = Events::new(history.clone());
@@ -101,6 +103,8 @@ async fn committed_status_publication_requires_true_success_not_sqlite_failure()
     let prompt = EpochPrompt::default();
     let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
         crate::context::templates(),
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
         vec![Arc::new(Status::default())],
     )
     .unwrap();
@@ -193,6 +197,8 @@ async fn committed_status_publication_failure_preserves_replacement_without_rese
     let calibration = prompt.agent_state.last_request_statistic.clone();
     let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
         crate::context::templates(),
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
         vec![Arc::new(Status::default())],
     )
     .unwrap();

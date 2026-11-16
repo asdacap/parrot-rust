@@ -384,9 +384,6 @@ impl parrot_runtime::active_work::status::StatusProvider for ReentrantStatusProv
     fn key(&self) -> &str {
         "runtime:reentrant"
     }
-    fn should_show(&self, _: parrot_runtime::active_work::status::StatusTarget) -> bool {
-        true
-    }
     fn observe<'a>(
         &'a self,
         _: &'a parrot_runtime::active_work::status::StatusQuery,
@@ -431,6 +428,8 @@ impl TurnStatus<Security> for ReentrantBinding {
                     .unwrap()
                     .1,
                 ),
+                vec![Arc::new(ReentrantStatusProvider(self.0.clone()))],
+                vec![Arc::new(ReentrantStatusProvider(self.0.clone()))],
                 vec![Arc::new(ReentrantStatusProvider(self.0.clone()))],
             )
             .unwrap(),

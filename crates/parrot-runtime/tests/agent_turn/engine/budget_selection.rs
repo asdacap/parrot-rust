@@ -12,8 +12,13 @@ struct InitialStatus;
 impl TurnStatus<Security> for InitialStatus {
     fn factory(&self) -> Arc<parrot_runtime::active_work::status::StatusProvidersFactory> {
         Arc::new(
-            parrot_runtime::active_work::status::StatusProvidersFactory::new(templates(), vec![])
-                .unwrap(),
+            parrot_runtime::active_work::status::StatusProvidersFactory::new(
+                templates(),
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap(),
         )
     }
     fn bind_identity(
@@ -68,6 +73,21 @@ impl RealReminderStatus {
         Arc::new(Self(Arc::new(
             parrot_runtime::active_work::status::StatusProvidersFactory::new(
                 templates(),
+                vec![
+                    Arc::new(
+                        parrot_runtime::active_work::status::GeneratedTimeStatusProvider {
+                            clock: Arc::new(FixedStatusClock),
+                            started_at: SystemTime::UNIX_EPOCH,
+                            templates: templates(),
+                        },
+                    ),
+                    Arc::new(
+                        parrot_runtime::active_work::status::SelectionStatusProvider {
+                            templates: templates(),
+                        },
+                    ),
+                ],
+                vec![],
                 vec![
                     Arc::new(
                         parrot_runtime::active_work::status::GeneratedTimeStatusProvider {

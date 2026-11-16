@@ -415,9 +415,6 @@ impl parrot_runtime::active_work::status::StatusProvider for Status {
     fn key(&self) -> &str {
         "test:fixture"
     }
-    fn should_show(&self, _: parrot_runtime::active_work::status::StatusTarget) -> bool {
-        true
-    }
     fn observe<'a>(
         &'a self,
         _: &'a parrot_runtime::active_work::status::StatusQuery,
@@ -613,6 +610,8 @@ async fn actual_checkpoint_compaction_reopen_and_full_fork_preserve_tool_causali
     let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
         templates(),
         vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
     )
     .unwrap();
     let events = Events::new(history.clone());
@@ -748,6 +747,8 @@ async fn second_compaction_uses_snapshot_once_and_advances_only_after_new_histor
     let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
         templates(),
         vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
     )
     .unwrap();
     let events = Events::new(history.clone());
@@ -868,6 +869,8 @@ async fn terminal_publication_failure_preserves_snapshot_without_reporting_faile
     let mut prompt = EpochPrompt::default();
     let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
         templates(),
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
         vec![Arc::new(Status::default())],
     )
     .unwrap();

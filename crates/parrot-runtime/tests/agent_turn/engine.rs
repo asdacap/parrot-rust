@@ -654,9 +654,6 @@ impl parrot_runtime::active_work::status::StatusProvider for TraceStatusProvider
     fn key(&self) -> &str {
         "runtime:trace"
     }
-    fn should_show(&self, _: parrot_runtime::active_work::status::StatusTarget) -> bool {
-        true
-    }
     fn observe<'a>(
         &'a self,
         _: &'a parrot_runtime::active_work::status::StatusQuery,
@@ -685,6 +682,8 @@ impl TurnStatus<Security> for OfferingStatus {
             parrot_runtime::active_work::status::StatusProvidersFactory::new(
                 templates(),
                 vec![Arc::new(TraceStatusProvider(self.0.clone()))],
+                vec![Arc::new(TraceStatusProvider(self.0.clone()))],
+                vec![Arc::new(TraceStatusProvider(self.0.clone()))],
             )
             .unwrap(),
         )
@@ -711,8 +710,13 @@ impl TurnStatus<Security> for OfferingStatus {
 impl TurnStatus<Security> for Status {
     fn factory(&self) -> Arc<parrot_runtime::active_work::status::StatusProvidersFactory> {
         Arc::new(
-            parrot_runtime::active_work::status::StatusProvidersFactory::new(templates(), vec![])
-                .unwrap(),
+            parrot_runtime::active_work::status::StatusProvidersFactory::new(
+                templates(),
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap(),
         )
     }
     fn bind_identity(

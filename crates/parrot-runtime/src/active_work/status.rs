@@ -119,9 +119,6 @@ pub trait StatusProvider: Send + Sync {
     /// Names the slot for the collection. Keys must be unique within a
     /// collection.
     fn key(&self) -> &str;
-    /// Declares whether this slot is offered for the requested surface. This
-    /// decides membership only; the rendering is identical wherever shown.
-    fn should_show(&self, surface: StatusTarget) -> bool;
     /// Renders one slot observation on demand from the provider's own state.
     fn observe<'a>(
         &'a self,
@@ -130,20 +127,25 @@ pub trait StatusProvider: Send + Sync {
     ) -> BoxFuture<'a, StatusResult<StatusObservation>>;
 }
 
-/// A collection of StatusProviders bound to one target. Creation evaluates
-/// each provider's should_show against that target, so the collection offers
-/// exactly the slots that declared membership for it.
+/// A collection of StatusProviders bound to one target. The caller passes
+/// exactly the providers the target shows; the collection owns their order
+/// and key validation.
 pub struct StatusProviders {
+    target: StatusTarget,
     providers: Vec<Arc<dyn StatusProvider>>,
 }
 impl StatusProviders {
-    /// Creates the collection bound to the target. Providers are shared Arc
-    /// handles, so one set can back the collections of several targets.
+    /// Creates the collection bound to the target. The caller passes exactly
+    /// the providers the target shows; providers are shared Arc handles, so
+    /// one set can back the collections of several targets.
+    /// Returns the target this collection is bound to.
+    pub fn target(&self) -> StatusTarget {
+        self.target
+    }
     pub fn new(
         target: StatusTarget,
         mut providers: Vec<Arc<dyn StatusProvider>>,
     ) -> Result<Self, StatusError> {
-        providers.retain(|provider| provider.should_show(target));
         let mut keys = std::collections::HashSet::new();
         for provider in &providers {
             validate_key(provider.key(), "provider")?;
@@ -152,7 +154,7 @@ impl StatusProviders {
             }
         }
         providers.sort_by(|left, right| ordinal(left.key(), right.key()));
-        Ok(Self { providers })
+        Ok(Self { target, providers })
     }
 
     /// Observes every member once and joins the slot texts in key order.
@@ -321,9 +323,6 @@ impl StatusProvider for ProfileStatusProvider {
     fn key(&self) -> &str {
         &self.key
     }
-    fn should_show(&self, surface: StatusTarget) -> bool {
-        matches!(surface, StatusTarget::Steer | StatusTarget::Live)
-    }
     fn observe<'a>(
         &'a self,
         _query: &'a StatusQuery,
@@ -347,9 +346,6 @@ pub struct SelectionStatusProvider {
 impl StatusProvider for SelectionStatusProvider {
     fn key(&self) -> &str {
         "runtime:selection"
-    }
-    fn should_show(&self, surface: StatusTarget) -> bool {
-        matches!(surface, StatusTarget::Steer | StatusTarget::Live)
     }
     fn observe<'a>(
         &'a self,
@@ -394,9 +390,6 @@ pub struct GeneratedTimeStatusProvider {
 impl StatusProvider for GeneratedTimeStatusProvider {
     fn key(&self) -> &str {
         "runtime:generated-time"
-    }
-    fn should_show(&self, surface: StatusTarget) -> bool {
-        matches!(surface, StatusTarget::Steer | StatusTarget::Live)
     }
     fn observe<'a>(
         &'a self,
@@ -577,9 +570,6 @@ impl StatusProvider for ContextStatusProvider {
     fn key(&self) -> &str {
         "runtime:context"
     }
-    fn should_show(&self, _surface: StatusTarget) -> bool {
-        true
-    }
     fn observe<'a>(
         &'a self,
         query: &'a StatusQuery,
@@ -613,9 +603,6 @@ pub struct StatisticsStatusProvider {
 impl StatusProvider for StatisticsStatusProvider {
     fn key(&self) -> &str {
         "runtime:statistics"
-    }
-    fn should_show(&self, surface: StatusTarget) -> bool {
-        matches!(surface, StatusTarget::Tool | StatusTarget::Live)
     }
     fn observe<'a>(
         &'a self,
@@ -711,19 +698,19 @@ pub struct StatusProvidersFactory {
 impl StatusProvidersFactory {
     /// Composes the factory for one agent session. This is the composition
     /// factory entry; every other caller receives a composed factory. The
-    /// caller decides the provider set, including any built-in sections.
+    /// caller passes each surface's providers manually, so membership is a
+    /// composition decision.
     pub fn new(
         templates: Arc<PromptTemplateCatalog>,
-        providers: Vec<Arc<dyn StatusProvider>>,
+        steer: Vec<Arc<dyn StatusProvider>>,
+        tool: Vec<Arc<dyn StatusProvider>>,
+        live: Vec<Arc<dyn StatusProvider>>,
     ) -> Result<Self, StatusError> {
         Ok(Self {
             templates: templates.clone(),
-            steer: Arc::new(StatusProviders::new(
-                StatusTarget::Steer,
-                providers.clone(),
-            )?),
-            tool: Arc::new(StatusProviders::new(StatusTarget::Tool, providers.clone())?),
-            live: Arc::new(StatusProviders::new(StatusTarget::Live, providers)?),
+            steer: Arc::new(StatusProviders::new(StatusTarget::Steer, steer)?),
+            tool: Arc::new(StatusProviders::new(StatusTarget::Tool, tool)?),
+            live: Arc::new(StatusProviders::new(StatusTarget::Live, live)?),
         })
     }
     /// Renders the steering offering for one safe point over the supplied

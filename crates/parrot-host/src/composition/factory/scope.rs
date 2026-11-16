@@ -58,7 +58,7 @@ use parrot_runtime::{
         status::{
             ContextSnapshotSource, GeneratedTimeStatusProvider, SelectionStatusProvider,
             StatusError, StatusObservation, StatusProvider, StatusProvidersFactory, StatusQuery,
-            StatusResult, StatusTarget,
+            StatusResult,
         },
     },
     agent_turn::{
@@ -687,9 +687,6 @@ struct TaskStatus {
 impl StatusProvider for TaskStatus {
     fn key(&self) -> &str {
         "runtime:agent-tasks"
-    }
-    fn should_show(&self, _surface: StatusTarget) -> bool {
-        true
     }
     fn observe<'a>(
         &'a self,
@@ -1340,27 +1337,33 @@ where
                     ],
                     templates: self.user.templates.clone(),
                 });
+                let generated_time = Arc::new(GeneratedTimeStatusProvider {
+                    clock: self.config.clock.clone(),
+                    started_at: self.user.started_at,
+                    templates: self.user.templates.clone(),
+                });
+                let selection_status = Arc::new(SelectionStatusProvider {
+                    templates: self.user.templates.clone(),
+                });
+                let tree_status = Arc::new(RuntimeTreeStatusProvider {
+                    source: Arc::new(ScopedTree(Arc::downgrade(&registry))),
+                    templates: self.user.templates.clone(),
+                });
+                let task_status = Arc::new(TaskStatus {
+                    tasks: tasks.scheduler().clone(),
+                    templates: self.user.templates.clone(),
+                });
                 let status_factory = Arc::new(
                     StatusProvidersFactory::new(
                         self.user.templates.clone(),
                         vec![
-                            Arc::new(GeneratedTimeStatusProvider {
-                                clock: self.config.clock.clone(),
-                                started_at: self.user.started_at,
-                                templates: self.user.templates.clone(),
-                            }),
-                            Arc::new(SelectionStatusProvider {
-                                templates: self.user.templates.clone(),
-                            }),
-                            Arc::new(RuntimeTreeStatusProvider {
-                                source: Arc::new(ScopedTree(Arc::downgrade(&registry))),
-                                templates: self.user.templates.clone(),
-                            }),
-                            Arc::new(TaskStatus {
-                                tasks: tasks.scheduler().clone(),
-                                templates: self.user.templates.clone(),
-                            }),
+                            generated_time.clone(),
+                            selection_status.clone(),
+                            tree_status.clone(),
+                            task_status.clone(),
                         ],
+                        vec![tree_status.clone(), task_status.clone()],
+                        vec![generated_time, selection_status, tree_status, task_status],
                     )
                     .map_err(child)?,
                 );

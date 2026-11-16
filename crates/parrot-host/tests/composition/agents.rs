@@ -332,6 +332,8 @@ mod fixture {
                         .1,
                     ),
                     vec![],
+                    vec![],
+                    vec![],
                 )
                 .unwrap(),
             )

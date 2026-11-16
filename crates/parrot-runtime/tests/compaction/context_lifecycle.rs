@@ -29,6 +29,8 @@ async fn provider_template_failure_retains_native_prompt_error_and_terminal_publ
     let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
         crate::context::templates(),
         vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
     )
     .unwrap();
     let events = Events::new(history.clone());
@@ -98,6 +100,8 @@ async fn forced_unbounded_and_precancelled_compaction_make_no_provider_or_event_
     let mut prompt = EpochPrompt::default();
     let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
         crate::context::templates(),
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
         vec![Arc::new(Status::default())],
     )
     .unwrap();
@@ -212,6 +216,8 @@ async fn image_artifacts_are_materialized_loaded_by_summary_provider_and_retaine
     let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
         crate::context::templates(),
         vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
     )
     .unwrap();
     let events = Events::new(history.clone());
@@ -292,6 +298,8 @@ async fn long_committed_history_ignores_checkpoint_boundaries_and_preserves_dura
     let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
         crate::context::templates(),
         vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
     )
     .unwrap();
     let events = Events::new(history.clone());
@@ -358,6 +366,8 @@ async fn direct_epoch_no_progress_with_nonpositive_input_limit_reports_source_fa
         let mut prompt = EpochPrompt::default();
         let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
             crate::context::templates(),
+            vec![Arc::new(Status::default())],
+            vec![Arc::new(Status::default())],
             vec![Arc::new(Status::default())],
         )
         .unwrap();
@@ -443,6 +453,8 @@ async fn provider_failure_keeps_snapshot_absent_budget_calibration_and_top_level
         let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
             crate::context::templates(),
             vec![Arc::new(Status::default())],
+            vec![Arc::new(Status::default())],
+            vec![Arc::new(Status::default())],
         )
         .unwrap();
         let events = Events::new(history.clone());
@@ -526,6 +538,8 @@ async fn oversized_durable_history_is_truncated_only_in_summary_requests_without
     let mut prompt = EpochPrompt::default();
     let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
         crate::context::templates(),
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
         vec![Arc::new(Status::default())],
     )
     .unwrap();
