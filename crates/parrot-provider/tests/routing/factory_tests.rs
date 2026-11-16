@@ -943,7 +943,7 @@ async fn composed_usage_preserves_credentials_requests_decoding_and_retry_capabi
 #[test]
 fn actual_factory_selects_all_configured_implementations_and_never_uses_catalogue_endpoints() {
     let fixture = Fixture::new(
-        "providers:\n  generic:\n    base_url: https://configured.test/v1\n  kimi-api:\n    base_url: https://configured.test/v1\n  kimi-code:\n    base_url: https://configured.test/v1\n  opencode-go:\n    base_url: https://configured.test/v1\n",
+        "providers:\n  generic:\n    base_url: https://configured.test/v1\n  kimi-api:\n    base_url: https://configured.test/v1\n  kimi-code:\n    base_url: https://configured.test/v1\n  opencode-go:\n    base_url: https://configured.test/v1\n  openrouter-batch:\n    type: openrouter-batch\n    base_url: https://configured.test/v1\n",
     );
     let configuration = fixture.load();
     let credentials = Credentials(BTreeMap::new());
@@ -951,6 +951,7 @@ fn actual_factory_selects_all_configured_implementations_and_never_uses_catalogu
         ("openai", ProviderImplementation::OpenAi),
         ("chatgpt", ProviderImplementation::ChatGpt),
         ("openrouter", ProviderImplementation::OpenRouter),
+        ("openrouter-batch", ProviderImplementation::OpenRouterBatch),
         ("opencode-go", ProviderImplementation::OpenCodeGo),
         ("opencode-zen", ProviderImplementation::Compatible),
         ("kimi-code", ProviderImplementation::KimiCode),
@@ -989,6 +990,16 @@ fn actual_factory_selects_all_configured_implementations_and_never_uses_catalogu
     anthropic.base_url.clear();
     assert!(!ProviderImplementation::Anthropic.can_build(&anthropic));
     assert!(ProviderImplementation::ChatGpt.can_build(&anthropic));
+    let mut batch = generic.clone();
+    batch.provider_type = "openrouter-batch".into();
+    assert_eq!(
+        ProviderImplementation::resolve("generic", &batch),
+        ProviderImplementation::OpenRouterBatch
+    );
+    assert_eq!(
+        ProviderImplementation::resolve("openrouter-batch", generic),
+        ProviderImplementation::OpenRouterBatch
+    );
     let mut invalid = generic.clone();
     invalid.provider_type = "unsupported".into();
     let error = match build_provider(ProviderBuildInputs {
@@ -1059,4 +1070,52 @@ fn built_image_cost(configuration: &Configuration, credentials: &Credentials, id
             1024,
         ),
     )
+}
+
+#[test]
+fn batch_provider_builds_from_the_openrouter_catalog_and_rejects_responses_protocol() {
+    let fixture = Fixture::new(
+        "providers:\n  openrouter-batch:\n    type: openrouter-batch\n    protocol: chat-completions\n    base_url: https://openrouter.test/api/v1\n    api_key_env: BATCH_KEY\n",
+    );
+    let configuration = fixture.load();
+    let config = &configuration.models.providers["openrouter-batch"];
+    let credentials = Credentials::one("openrouter-batch", "batch-key");
+    let external = Model::new("vendor/batched", "openrouter");
+    let built = build_provider(ProviderBuildInputs {
+        id: "openrouter-batch",
+        config,
+        credentials: credentials.as_ref(),
+        transport: Transport::new(Mode::Unavailable),
+        images: Arc::new(NoImages),
+        connector: Arc::new(NoSocket),
+        external_models: &[external],
+        maximum_request_bytes: 64 << 20,
+    })
+    .unwrap();
+    assert_eq!(
+        built.implementation,
+        ProviderImplementation::OpenRouterBatch
+    );
+    assert_eq!(built.provider.id(), "openrouter-batch");
+    let seeds: Vec<String> = built.seed.iter().map(|model| model.id.clone()).collect();
+    assert!(seeds.contains(&"vendor/batched".to_string()));
+    let mut responses = config.clone();
+    responses.protocol = "responses".into();
+    let error = match build_provider(ProviderBuildInputs {
+        id: "openrouter-batch",
+        config: &responses,
+        credentials: credentials.as_ref(),
+        transport: Transport::new(Mode::Unavailable),
+        images: Arc::new(NoImages),
+        connector: Arc::new(NoSocket),
+        external_models: &[],
+        maximum_request_bytes: 64 << 20,
+    }) {
+        Ok(_) => panic!("responses protocol must fail for the batch provider"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error.to_string(),
+        "provider: unsupported protocol \"responses\" for \"openrouter-batch\""
+    );
 }

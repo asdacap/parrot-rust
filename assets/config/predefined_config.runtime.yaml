@@ -841,6 +841,12 @@ providers:
       require_parameters: true
       data_collection: deny
       zdr: true
+  openrouter-batch:
+    type: openrouter-batch
+    protocol: chat-completions
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    models_dev_id: openrouter
   opencode-go:
     protocol: chat-completions
     base_url: https://opencode.ai/zen/go/v1

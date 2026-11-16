@@ -14,6 +14,7 @@ pub mod compaction;
 pub mod http_stream;
 pub mod image_generation;
 pub mod image_inspection;
+pub mod openrouter_batch;
 pub mod responses;
 pub mod responses_websocket;
 pub mod routing;

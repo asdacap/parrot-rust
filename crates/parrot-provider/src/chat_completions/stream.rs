@@ -276,6 +276,75 @@ pub fn parse_data(
     parse_data_text(&event.data, state)
 }
 
+/// Decodes one full non-streaming Chat Completions body, such as a Batch API
+/// result entry, through the same parser as the streamed protocol. A body
+/// carrying an `error` object fails with its `ProviderFailure`.
+pub fn decode_completion_body(
+    body: &str,
+    provider_id: &str,
+) -> Result<ChatCompletion, ChatStreamError> {
+    let root: BTreeMap<String, Box<RawValue>> =
+        serde_json::from_str(body).map_err(ChatStreamError::InvalidJson)?;
+    let choices_raw = root
+        .get("choices")
+        .map(|raw| raw.get())
+        .filter(|raw| raw.starts_with('['))
+        .unwrap_or("[]");
+    let choices: Vec<Box<RawValue>> =
+        serde_json::from_str(choices_raw).map_err(ChatStreamError::InvalidJson)?;
+    let mut synthetic = String::from("{\"choices\":[");
+    for (index, choice_raw) in choices.iter().enumerate() {
+        if index > 0 {
+            synthetic.push(',');
+        }
+        let choice = raw_object(choice_raw.get());
+        let message = choice
+            .as_ref()
+            .and_then(|choice| choice.get("message"))
+            .map(|raw| raw.get())
+            .filter(|raw| raw.starts_with('{'))
+            .unwrap_or("{}");
+        synthetic.push_str(&format!("{{\"index\":{index},\"delta\":{message}"));
+        if let Some(finish_raw) = choice
+            .as_ref()
+            .and_then(|choice| choice.get("finish_reason"))
+            .filter(|raw| raw.get().starts_with('"'))
+        {
+            synthetic.push_str(",\"finish_reason\":");
+            synthetic.push_str(finish_raw.get());
+        }
+        synthetic.push('}');
+    }
+    synthetic.push(']');
+    if let Some(error_raw) = root
+        .get("error")
+        .map(|raw| raw.get())
+        .filter(|raw| raw.starts_with('{'))
+    {
+        synthetic.push_str(",\"error\":");
+        synthetic.push_str(error_raw);
+    }
+    if let Some(usage_raw) = root
+        .get("usage")
+        .map(|raw| raw.get())
+        .filter(|raw| raw.starts_with('{'))
+    {
+        synthetic.push_str(",\"usage\":");
+        synthetic.push_str(usage_raw);
+    }
+    synthetic.push('}');
+    let mut state = ParseState::default();
+    let mut outcome = parse_data_text(&synthetic, &mut state);
+    if let Err(ChatStreamError::Provider(failure)) = &mut outcome {
+        failure.response_body = crate::wire::bound_body(body);
+    }
+    outcome?;
+    if !state.0.finish_seen {
+        return Err(ChatStreamError::UnexpectedEof);
+    }
+    Ok(state.0.complete(provider_id))
+}
+
 // Public because callers may incrementally feed SSE events, but state remains
 // explicit and owned by each independent conversation.
 #[derive(Default)]

@@ -1887,6 +1887,15 @@
       "catalogue_body": "{\"first\":{\"id\":\"first\",\"models\":{\"external\":{\"id\":\"external-first\"}}},\"second\":{\"id\":\"second\",\"models\":{\"external\":{\"id\":\"external-second\"}}},\"ghost\":{\"id\":\"ghost\",\"api\":\"https://ghost.invalid/v1\",\"models\":{\"external\":{\"id\":\"external-ghost\"}}}}"
     },
     {
+      "case_id": "t32-builder-openrouter-batch",
+      "family": "builder",
+      "yaml": "providers:\n  openrouter-batch:\n    type: openrouter-batch\n    protocol: chat-completions\n    base_url: https://openrouter.test/api/v1\n    api_key_env: \"\"\n    models_dev_id: openrouter\n",
+      "credentials": {
+        "openrouter-batch": "batch-key"
+      },
+      "catalogue_body": "{\"openrouter\":{\"id\":\"openrouter\",\"models\":{\"vendor/batched\":{\"id\":\"vendor/batched\",\"name\":\"Batched\"}}}}"
+    },
+    {
       "case_id": "t32-configuration-preset-rollback-false",
       "family": "configuration",
       "providers": [

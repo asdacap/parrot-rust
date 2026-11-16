@@ -14,6 +14,23 @@ pub fn prepare(
     request: &impl RequestView,
     provider_id: &str,
 ) -> Result<PreparedRequest, RequestError> {
+    prepare_body(request, provider_id, true)
+}
+
+/// Prepares the request body without `stream` and `stream_options` for a
+/// Batch API request entry, which rejects streaming flags.
+pub fn prepare_batch_body(
+    request: &impl RequestView,
+    provider_id: &str,
+) -> Result<PreparedRequest, RequestError> {
+    prepare_body(request, provider_id, false)
+}
+
+fn prepare_body(
+    request: &impl RequestView,
+    provider_id: &str,
+    streaming: bool,
+) -> Result<PreparedRequest, RequestError> {
     let mut body = String::from("{\"model\":");
     quoted(&mut body, request.model())?;
     body.push_str(",\"messages\":[");
@@ -57,7 +74,9 @@ pub fn prepare(
         }
         body.push(']');
     }
-    body.push_str(",\"stream\":true,\"stream_options\":{\"include_usage\":true}");
+    if streaming {
+        body.push_str(",\"stream\":true,\"stream_options\":{\"include_usage\":true}");
+    }
     if let Some(effort) = request
         .reasoning_effort()
         .filter(|effort| !effort.is_empty())
