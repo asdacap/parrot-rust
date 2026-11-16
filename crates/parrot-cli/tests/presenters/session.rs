@@ -1532,3 +1532,51 @@ fn orders_and_deduplicates_queue_snapshot_and_starts_only_main_turn() {
     assert!(!frame.contains("stale queue"));
     assert!(!frame.contains("hidden queue"));
 }
+
+#[test]
+fn clipboard_write_notice_carries_the_sequence_once_and_never_while_replaying() {
+    let mut data = wire::ClipboardWrite::new();
+    data.base64_text = "SGVsbG8gZnJvbSBwYXJyb3Q=".into();
+    let notice = event(
+        "root",
+        Payload::AgentNotice(wire::AgentNotice {
+            kind: "clipboard_write".into(),
+            notice: String::new(),
+            data: data.write_to_bytes().unwrap(),
+            ..Default::default()
+        }),
+    );
+    let mut live = configured(200);
+    let update = live.observe(&notice).unwrap();
+    assert_eq!(
+        update.terminal_bytes,
+        b"\x1b]52;c;SGVsbG8gZnJvbSBwYXJyb3Q=\x07"
+    );
+    let mut replay = SessionHarness::new(200, false, true);
+    replay
+        .set_session("build", "provider/model", false)
+        .unwrap();
+    let update = replay.observe(&notice).unwrap();
+    assert!(update.terminal_bytes.is_empty());
+    let notice_text = event(
+        "root",
+        Payload::AgentNotice(wire::AgentNotice {
+            kind: "unrelated".into(),
+            notice: "visible text".into(),
+            ..Default::default()
+        }),
+    );
+    let update = live.observe(&notice_text).unwrap();
+    assert!(update.terminal_bytes.is_empty());
+    let notice = event(
+        "root",
+        Payload::AgentNotice(wire::AgentNotice {
+            kind: "clipboard_write".into(),
+            notice: String::new(),
+            data: b"not-protobuf".to_vec(),
+            ..Default::default()
+        }),
+    );
+    let update = live.observe(&notice).unwrap();
+    assert!(update.terminal_bytes.is_empty());
+}

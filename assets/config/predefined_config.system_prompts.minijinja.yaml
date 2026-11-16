@@ -208,6 +208,10 @@ prompt_templates:
     template: 'No exit reminder titled {title}. Active titles: {titles}'
     allowed_arguments: [title, titles]
     required_arguments: [title, titles]
+  clipboard-tool.copied:
+    template: 'Copied {bytes} bytes to the clipboard.'
+    allowed_arguments: [bytes]
+    required_arguments: [bytes]
   exec-command.stderr-summary:
     template: '<{line_count} lines omitted to save context>'
     allowed_arguments: [line_count]

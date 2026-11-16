@@ -6,22 +6,26 @@ use std::{fmt, marker::PhantomData, sync::Arc};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, OperationError},
+        events::EventPublisher,
         filesystem::{AuthorizedMutationService, AuthorizedReadService},
         interactions::{AgentCommunication, QuestionRequester},
         runtime::{AgentRuntime, TaskController},
         security::{AccessSnapshot, InvocationScope},
         tools::{ParallelSafety, Tool},
     },
+    protocol::messages::parrot::Event,
     values::tools::{ConfiguredToolDefinition, MissingToolDefinition, ToolDefinitionCatalog},
 };
 use parrot_foundation::{config::Configuration, template_catalog::PromptTemplateCatalog};
 use parrot_storage::artifacts::{ImageArtifactMetadata, ImageArtifactRepository};
+use parrot_storage::conversation::AgentHistoryView;
 
 use crate::{
     agents::{
         self, AgentSelection, AgentTool, AgentToolError, AgentToolKind, ModelSelector,
         questions::{AskTool, QuestionTool, ReplyTool},
     },
+    clipboard::ClipboardCopyTool,
     files::{
         self, EditTool, FileToolError, FileToolOutcome, GlobTool, ReadImageTool, ReadTool,
         WorkspacePaths, WriteTool,
@@ -226,6 +230,15 @@ impl From<Invocation> for tasks_queues::ToolInvocation {
             call_id: i.call_id,
             arguments_json: i.arguments_json,
             assistant_sequence: i.assistant_sequence,
+        }
+    }
+}
+impl From<Invocation> for crate::clipboard::Invocation {
+    fn from(i: Invocation) -> Self {
+        Self {
+            call_id: i.call_id,
+            arguments_json: i.arguments_json,
+            prompt_templates: i.prompt_templates,
         }
     }
 }
@@ -664,6 +677,48 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> Sess
     }
 }
 
+pub struct ClipboardFactories<S, T> {
+    clipboard: Factory<S, T>,
+}
+pub struct ClipboardServices<P> {
+    pub history: AgentHistoryView,
+    pub publisher: Arc<P>,
+    /// False when the user session cannot prompt its user. A clipboard write is
+    /// a user-facing effect, so the tool is omitted for non-interactive sessions.
+    pub interactive: bool,
+    pub agent_depth: i32,
+}
+impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static>
+    ClipboardFactories<S, T>
+{
+    pub fn new<P>(
+        services: ClipboardServices<P>,
+        definitions: &ToolDefinitionCatalog,
+    ) -> Result<Self, MissingToolDefinition>
+    where
+        P: EventPublisher<Event = Event> + 'static,
+        P::Error: fmt::Display,
+    {
+        Ok(Self {
+            clipboard: bind(
+                "clipboard_copy",
+                &[],
+                services.interactive && services.agent_depth == 0,
+                ClipboardCopyTool::new(
+                    definitions.describe("clipboard_copy")?.clone(),
+                    services.history,
+                    services.publisher,
+                ),
+                unit,
+            ),
+        })
+    }
+
+    pub fn clipboard(&self) -> &Factory<S, T> {
+        &self.clipboard
+    }
+}
+
 pub struct TaskQueueFactories<S, T> {
     set: Factory<S, T>,
     get: Factory<S, T>,
@@ -739,6 +794,7 @@ impl<S: AccessSnapshot + 'static, T: Send + 'static> Catalog<S, T> {
         session: SessionFactories<S, T>,
         tasks: TaskQueueFactories<S, T>,
         web: WebFetchFactory<S, T>,
+        clipboard: ClipboardFactories<S, T>,
     ) -> Self {
         let [exec, stdin, interrupt_process, monitor] = process.0;
         Self {
@@ -771,6 +827,7 @@ impl<S: AccessSnapshot + 'static, T: Send + 'static> Catalog<S, T> {
                 session.compact,
                 session.permission,
                 session.progress,
+                clipboard.clipboard,
             ],
         }
     }

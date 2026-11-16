@@ -14,6 +14,7 @@ use super::activity::{ActivityUpdate, RawActivityView};
 use super::streams::{
     QueueSnapshotStreamReader, ShellProcessSnapshotStreamReader, StreamObservation,
 };
+use super::tools::clipboard;
 use super::turn::{response_boundary, response_owner};
 use super::{
     AgentTaskDeclarationFormatter, AgentTaskProgressFormatter, EnhancedTurnRenderer,
@@ -33,6 +34,9 @@ pub struct PresentationUpdate {
     pub started_main_turn: bool,
     pub finished_main_turn: bool,
     pub complete_plan: Option<wire::PlanCompleted>,
+    /// Raw bytes to write to the CLI terminal stream before rendering, such as
+    /// the OSC 52 sequence of a live clipboard write notice.
+    pub terminal_bytes: Vec<u8>,
 }
 
 pub struct EnhancedSessionPresenter {
@@ -237,6 +241,12 @@ impl EnhancedSessionPresenter {
             Some(Payload::InputCanceled(input)) if foreground => {
                 self.pending_steers
                     .retain(|pending| pending.input_id != input.input_id);
+            }
+            Some(Payload::AgentNotice(notice))
+                if notice.kind == clipboard::CLIPBOARD_WRITE_NOTICE_KIND && !replaying =>
+            {
+                update.terminal_bytes =
+                    clipboard::clipboard_write_sequence(notice).unwrap_or_default();
             }
             _ => {}
         }

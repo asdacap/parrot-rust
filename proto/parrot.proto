@@ -719,6 +719,11 @@ message ExitReminderChanged {
   string title = 3;
 }
 
+// The data of a "clipboard_write" notice.
+message ClipboardWrite {
+  string base64_text = 1;
+}
+
 message SkillLoadedEvent {
   string path = 1;
 }

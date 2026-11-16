@@ -1581,6 +1581,7 @@ name = "parrot-tools"
 version = "0.0.0-dev"
 dependencies = [
  "async-compression",
+ "base64",
  "cookie_store",
  "libc",
  "mime",

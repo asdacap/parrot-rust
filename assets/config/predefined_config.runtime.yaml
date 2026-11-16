@@ -755,6 +755,22 @@ tools:
       - path
       - content
       additionalProperties: false
+  clipboard_copy:
+    description: >-
+      Copy text to the user's clipboard with the terminal-native OSC 52 sequence. The terminal
+      emulator sets the clipboard, so this works over SSH. Only offered in interactive
+      top-level agent sessions.
+    parameters:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 1048576
+          description: Exact text to place on the clipboard, capped at 1 MiB.
+      required:
+      - text
+      additionalProperties: false
 # Tools disabled globally, keyed by tool ID. True disables a tool; false in a
 # higher-precedence layer re-enables an inherited disabled entry.
 disabled_tools: {}
