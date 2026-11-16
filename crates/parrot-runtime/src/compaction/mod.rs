@@ -5,7 +5,7 @@ mod context;
 mod conversation;
 pub use context::{
     ContextCompactionResult, ContextController, ContextError, ContextEvents, ContextResult,
-    ContextStatus, EpochInput, EpochResult, provider_message,
+    EpochInput, EpochResult, provider_message,
 };
 pub(crate) use conversation::materialize_message;
 pub use parrot_core::{StatusKey, StatusOffer, StatusOffering, StatusStanding};

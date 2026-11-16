@@ -151,7 +151,7 @@ async fn skill_session(
         prompt: Box::new(StaticSystemPrompt(instructions)),
         skills,
         context: fixture.controller(),
-        status: Arc::new(Status(trace.clone())),
+        status: Arc::new(Status),
         completion_sources: vec![],
         templates,
         reminders,
@@ -262,7 +262,12 @@ async fn selected_skill_prompt_follows_original_steer_and_new_turn_history_and_e
         for catalog_item in ["$first", "$second", &first_path, &second_path] {
             assert!(requests[0].instructions.contains(catalog_item));
         }
-        let first = requests[0].messages.last().unwrap();
+        let first = requests[0]
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == sessions::Role::User)
+            .unwrap();
         assert_eq!(first.role, sessions::Role::User);
         assert!(first.content().contains("SECOND BODY"));
         assert!(!first.content().contains("FIRST BODY"));
@@ -324,7 +329,7 @@ async fn selected_skill_prompt_follows_original_steer_and_new_turn_history_and_e
         .join(" | ");
     assert_eq!(
         history,
-        "user: use $second then $second | skill: SECOND | assistant:  | tool: settled | user: also $first | skill: FIRST | assistant: first answer | user: next turn $first $third | skill: FIRST THIRD | assistant: second answer"
+        "user: use $second then $second | skill: SECOND | system: Context: 0% used (0 estimated tokens / 100k limit); reminders every 10%; automatic compaction at 95%. | assistant:  | tool: settled | user: also $first | skill: FIRST | assistant: first answer | user: next turn $first $third | skill: FIRST THIRD | assistant: second answer"
     );
     // The source-format JSONL intentionally escapes '<'. Compare parsed
     // message parts, not an invalid assumption about their wire spelling.
@@ -465,7 +470,10 @@ async fn core_skill_prompt_uses_configured_minijinja_without_interpreting_skill_
     {
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].messages.last().unwrap().content(), expected);
+        assert_eq!(
+            requests[0].messages.iter().rev().nth(1).unwrap().content(),
+            expected
+        );
     }
     assert!(
         fixture

@@ -114,16 +114,19 @@ impl StatusProvider for Scripted {
 #[tokio::test]
 async fn observe_composes_available_status_by_key_and_resamples_providers() {
     let selection = Scripted::new("runtime:selection", "selection {call}");
-    let registry = StatusRegistry::new(vec![
-        selection.clone(),
-        Arc::new(Scripted {
-            available: false,
-            ..Arc::try_unwrap(Scripted::new("runtime:unavailable", "ignored"))
-                .ok()
-                .unwrap()
-        }),
-        Scripted::new("runtime:blank", "  \t\n"),
-    ])
+    let registry = StatusProviders::new(
+        StatusTarget::Tool,
+        vec![
+            selection.clone(),
+            Arc::new(Scripted {
+                available: false,
+                ..Arc::try_unwrap(Scripted::new("runtime:unavailable", "ignored"))
+                    .ok()
+                    .unwrap()
+            }),
+            Scripted::new("runtime:blank", "  \t\n"),
+        ],
+    )
     .unwrap();
     let profile = ProfileStatusProvider {
         key: "profile:plan".into(),
@@ -165,10 +168,10 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
         "runtime:bad\u{a0}key",
     ] {
         assert!(
-            StatusRegistry::new(vec![Scripted::new(key, "x")]).is_err(),
+            StatusProviders::new(StatusTarget::Tool, vec![Scripted::new(key, "x")]).is_err(),
             "{key:?}"
         );
-        let registry = StatusRegistry::new(vec![]).unwrap();
+        let registry = StatusProviders::new(StatusTarget::Tool, vec![]).unwrap();
         assert!(
             registry
                 .observe(
@@ -193,8 +196,8 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
         );
     }
     let first = Scripted::new("runtime:selection", "x");
-    assert!(StatusRegistry::new(vec![first.clone(), first.clone()]).is_err());
-    let registry = StatusRegistry::new(vec![first.clone()]).unwrap();
+    assert!(StatusProviders::new(StatusTarget::Tool, vec![first.clone(), first.clone()]).is_err());
+    let registry = StatusProviders::new(StatusTarget::Tool, vec![first.clone()]).unwrap();
     assert!(
         registry
             .observe(&query(), Some(first.as_ref()), &[], &NeverCancelled)
@@ -230,11 +233,14 @@ async fn register_rejects_unstable_and_duplicate_keys_including_all_per_call_ext
 }
 #[tokio::test]
 async fn registry_preserves_utf16_ordinal_order_and_case_sensitive_namespaces() {
-    let registry = StatusRegistry::new(vec![
-        Scripted::new("runtime:\u{e000}", "bmp"),
-        Scripted::new("runtime:\u{10000}", "astral"),
-        Scripted::new("Runtime:key", "upper"),
-    ])
+    let registry = StatusProviders::new(
+        StatusTarget::Tool,
+        vec![
+            Scripted::new("runtime:\u{e000}", "bmp"),
+            Scripted::new("runtime:\u{10000}", "astral"),
+            Scripted::new("Runtime:key", "upper"),
+        ],
+    )
     .unwrap();
     assert_eq!(
         registry
@@ -277,20 +283,23 @@ impl StatusProvider for Rendezvous {
 async fn registry_starts_all_observations_and_joins_errors_with_provider_source() {
     let barrier = Arc::new(tokio::sync::Barrier::new(2));
     let finished = Arc::new(AtomicUsize::new(0));
-    let registry = StatusRegistry::new(vec![
-        Arc::new(Rendezvous {
-            key: "runtime:a",
-            barrier: barrier.clone(),
-            finished: finished.clone(),
-            fail: true,
-        }),
-        Arc::new(Rendezvous {
-            key: "runtime:b",
-            barrier,
-            finished: finished.clone(),
-            fail: false,
-        }),
-    ])
+    let registry = StatusProviders::new(
+        StatusTarget::Tool,
+        vec![
+            Arc::new(Rendezvous {
+                key: "runtime:a",
+                barrier: barrier.clone(),
+                finished: finished.clone(),
+                fail: true,
+            }),
+            Arc::new(Rendezvous {
+                key: "runtime:b",
+                barrier,
+                finished: finished.clone(),
+                fail: false,
+            }),
+        ],
+    )
     .unwrap();
     let error = tokio::time::timeout(
         Duration::from_secs(2),
@@ -333,7 +342,8 @@ impl StatusProvider for CancelProvider {
 }
 #[tokio::test]
 async fn registry_propagates_actual_caller_cancellation_without_fabricating_a_section() {
-    let registry = StatusRegistry::new(vec![Arc::new(CancelProvider)]).unwrap();
+    let registry =
+        StatusProviders::new(StatusTarget::Tool, vec![Arc::new(CancelProvider)]).unwrap();
     let cancel = Signal::new();
     cancel.cancel();
     assert!(matches!(
@@ -848,22 +858,50 @@ async fn runtime_tree_changes_do_not_trigger_status_steering() {
         ..RuntimeTreeSnapshot::default()
     })));
     let runtime = Arc::new(
-        RuntimeStatus::new(
+        StatusProvidersFactory::new(
             catalog(""),
-            clock(),
-            SystemTime::UNIX_EPOCH,
+            vec![
+                Arc::new(GeneratedTimeStatusProvider {
+                    clock: clock(),
+                    started_at: SystemTime::UNIX_EPOCH,
+                    templates: catalog(""),
+                }),
+                Arc::new(SelectionStatusProvider {
+                    templates: catalog(""),
+                }),
+                Arc::new(RuntimeTreeStatusProvider {
+                    source: source.clone(),
+                    templates: catalog(""),
+                }),
+            ],
             vec![Arc::new(RuntimeTreeStatusProvider {
                 source: source.clone(),
                 templates: catalog(""),
             })],
+            vec![
+                Arc::new(GeneratedTimeStatusProvider {
+                    clock: clock(),
+                    started_at: SystemTime::UNIX_EPOCH,
+                    templates: catalog(""),
+                }),
+                Arc::new(SelectionStatusProvider {
+                    templates: catalog(""),
+                }),
+                Arc::new(RuntimeTreeStatusProvider {
+                    source: source.clone(),
+                    templates: catalog(""),
+                }),
+            ],
         )
         .unwrap(),
     );
     let mut query = query();
     query.session_id = "root".into();
-    let bound = runtime.bind_context(query, "profile prompt".into());
     let snapshot = ContextSnapshot::new(100, 1000, Some(10), 90);
-    let initial = bound.slots(&snapshot, &NeverCancelled).await.unwrap();
+    let initial = runtime
+        .steer(&query, "profile prompt", &snapshot, &NeverCancelled)
+        .await
+        .unwrap();
     assert!(parrot_core::status_steering_needed(
         &initial,
         &BTreeMap::new()
@@ -874,7 +912,10 @@ async fn runtime_tree_changes_do_not_trigger_status_steering() {
         .collect();
 
     source.0.lock().unwrap().activity[0].1 = DrainState::Running;
-    let updated = bound.slots(&snapshot, &NeverCancelled).await.unwrap();
+    let updated = runtime
+        .steer(&query, "profile prompt", &snapshot, &NeverCancelled)
+        .await
+        .unwrap();
     let tree_key = parrot_core::StatusKey::new("runtime:queues");
     assert_eq!(initial[&tree_key].text, "Runtime:\n- agent: main");
     assert_eq!(updated[&tree_key].text, "Runtime:\n- agent: main (running)");
@@ -960,19 +1001,45 @@ async fn runtime_tree_reports_idle_root_custom_model_cycles_and_unknown_owners_w
 }
 #[tokio::test]
 async fn runtime_status_preserves_additional_provider_order_exclusions_and_per_call_isolation() {
-    let runtime = RuntimeStatus::new(
+    let runtime = StatusProvidersFactory::new(
         catalog(""),
-        clock(),
-        SystemTime::UNIX_EPOCH,
+        vec![
+            Arc::new(GeneratedTimeStatusProvider {
+                clock: clock(),
+                started_at: SystemTime::UNIX_EPOCH,
+                templates: catalog(""),
+            }),
+            Arc::new(SelectionStatusProvider {
+                templates: catalog(""),
+            }),
+            Scripted::new("runtime:queues", "Runtime:\n- agent: main"),
+        ],
         vec![Scripted::new("runtime:queues", "Runtime:\n- agent: main")],
+        vec![
+            Arc::new(GeneratedTimeStatusProvider {
+                clock: clock(),
+                started_at: SystemTime::UNIX_EPOCH,
+                templates: catalog(""),
+            }),
+            Arc::new(SelectionStatusProvider {
+                templates: catalog(""),
+            }),
+            Scripted::new("runtime:queues", "Runtime:\n- agent: main"),
+        ],
     )
     .unwrap();
     let query = query();
     let full = runtime
-        .observe_with_context(
+        .live(
             &query,
             "profile prompt",
-            ContextSnapshot::new(123, 1000, Some(12), 90),
+            Arc::new(FixedSnapshotSource(ContextSnapshot::new(
+                123,
+                1000,
+                Some(12),
+                90,
+            ))),
+            &AgentSessionStatistics::new(AgentSessionStatisticsSnapshot::default()),
             &NeverCancelled,
         )
         .await
@@ -990,22 +1057,36 @@ async fn runtime_status_preserves_additional_provider_order_exclusions_and_per_c
         )
     );
     assert!(full.contains("\n\nRuntime:\n- agent: main\n\nActive profile: build"));
-    assert!(full.ends_with("\n\nActive profile: build\nModel: provider/model"));
+    assert!(
+        full.contains("Active profile: build\nModel: provider/model\n\nStatistics (lifetime):")
+    );
     let (first, second) = tokio::join!(
-        runtime.observe_runtime(
+        runtime.tool(
             &query,
-            ContextSnapshot::new(100, 1000, Some(10), 90),
+            Arc::new(FixedSnapshotSource(ContextSnapshot::new(
+                100,
+                1000,
+                Some(10),
+                90
+            ))),
             &NeverCancelled
         ),
-        runtime.observe_runtime(
+        runtime.tool(
             &query,
-            ContextSnapshot::new(800, 1000, Some(80), 90),
+            Arc::new(FixedSnapshotSource(ContextSnapshot::new(
+                800,
+                1000,
+                Some(80),
+                90
+            ))),
             &NeverCancelled
         )
     );
+    let first = first.unwrap();
+    let second = second.unwrap();
     for (text, present, absent) in [
-        (first.unwrap(), "10% used", "80% used"),
-        (second.unwrap(), "80% used", "10% used"),
+        (&first, "10% used", "80% used"),
+        (&second, "80% used", "10% used"),
     ] {
         assert!(text.contains(present));
         assert!(!text.contains(absent));
@@ -1014,13 +1095,14 @@ async fn runtime_status_preserves_additional_provider_order_exclusions_and_per_c
             "Active profile:",
             "Model:",
             "The time is:",
-            "notification band",
         ] {
             assert!(!text.contains(excluded));
         }
     }
+    assert!(!first.contains("notification band"));
+    assert!(second.contains("Context usage entered the 80% notification band"));
     let statistics = runtime
-        .observe_statistics(
+        .statistics(
             &query,
             AgentSessionStatisticsSnapshot::default(),
             &NeverCancelled,
@@ -1034,15 +1116,45 @@ async fn runtime_status_preserves_additional_provider_order_exclusions_and_per_c
 }
 #[tokio::test]
 async fn status_rejects_invalid_profile_keys() {
-    let runtime = RuntimeStatus::new(catalog(""), clock(), SystemTime::UNIX_EPOCH, vec![]).unwrap();
+    let runtime = StatusProvidersFactory::new(
+        catalog(""),
+        vec![
+            Arc::new(GeneratedTimeStatusProvider {
+                clock: clock(),
+                started_at: SystemTime::UNIX_EPOCH,
+                templates: catalog(""),
+            }),
+            Arc::new(SelectionStatusProvider {
+                templates: catalog(""),
+            }),
+        ],
+        vec![],
+        vec![
+            Arc::new(GeneratedTimeStatusProvider {
+                clock: clock(),
+                started_at: SystemTime::UNIX_EPOCH,
+                templates: catalog(""),
+            }),
+            Arc::new(SelectionStatusProvider {
+                templates: catalog(""),
+            }),
+        ],
+    )
+    .unwrap();
     let mut bad = query();
     bad.profile = "bad profile".into();
     assert!(
         runtime
-            .observe_with_context(
+            .live(
                 &bad,
                 "text",
-                ContextSnapshot::new(1, 10, Some(10), 90),
+                Arc::new(FixedSnapshotSource(ContextSnapshot::new(
+                    1,
+                    10,
+                    Some(10),
+                    90
+                ))),
+                &AgentSessionStatistics::new(AgentSessionStatisticsSnapshot::default()),
                 &NeverCancelled
             )
             .await
@@ -1056,24 +1168,47 @@ async fn status_rejects_invalid_profile_keys() {
 async fn bound_context_status_uses_actual_full_status_and_preserves_snapshot_and_cancellation() {
     use parrot_runtime::compaction::ContextError;
     let runtime = Arc::new(
-        RuntimeStatus::new(
+        StatusProvidersFactory::new(
             catalog(""),
-            clock(),
-            SystemTime::UNIX_EPOCH,
+            vec![
+                Arc::new(GeneratedTimeStatusProvider {
+                    clock: clock(),
+                    started_at: SystemTime::UNIX_EPOCH,
+                    templates: catalog(""),
+                }),
+                Arc::new(SelectionStatusProvider {
+                    templates: catalog(""),
+                }),
+                Scripted::new("runtime:queues", "Runtime:\n- agent: main"),
+            ],
             vec![Scripted::new("runtime:queues", "Runtime:\n- agent: main")],
+            vec![
+                Arc::new(GeneratedTimeStatusProvider {
+                    clock: clock(),
+                    started_at: SystemTime::UNIX_EPOCH,
+                    templates: catalog(""),
+                }),
+                Arc::new(SelectionStatusProvider {
+                    templates: catalog(""),
+                }),
+                Scripted::new("runtime:queues", "Runtime:\n- agent: main"),
+            ],
         )
         .unwrap(),
     );
-    let bound = runtime.bind_context(query(), "profile prompt".into());
-    let first = bound
-        .slots(
+    let first = runtime
+        .steer(
+            &query(),
+            "profile prompt",
             &ContextSnapshot::new(100, 1000, Some(10), 90),
             &NeverCancelled,
         )
         .await
         .unwrap();
-    let second = bound
-        .slots(
+    let second = runtime
+        .steer(
+            &query(),
+            "profile prompt",
             &ContextSnapshot::new(800, 1000, Some(80), 90),
             &NeverCancelled,
         )
@@ -1100,15 +1235,25 @@ async fn bound_context_status_uses_actual_full_status_and_preserves_snapshot_and
     let cancelled = Signal::new();
     cancelled.cancel();
     assert!(matches!(
-        bound
-            .slots(&ContextSnapshot::new(1, 10, Some(10), 90), &cancelled)
+        runtime
+            .steer(
+                &query(),
+                "profile prompt",
+                &ContextSnapshot::new(1, 10, Some(10), 90),
+                &cancelled,
+            )
             .await,
         Err(ContextError::Cancelled)
     ));
     let runtime_only = runtime
-        .observe_runtime(
+        .tool(
             &query(),
-            ContextSnapshot::new(1, 10, Some(10), 90),
+            Arc::new(FixedSnapshotSource(ContextSnapshot::new(
+                1,
+                10,
+                Some(10),
+                90,
+            ))),
             &NeverCancelled,
         )
         .await
@@ -1150,8 +1295,11 @@ impl StatusProvider for ImmediateFailure {
 }
 #[tokio::test]
 async fn registry_wraps_foreign_cancellation_and_faults_take_precedence_after_join() {
-    let registry =
-        StatusRegistry::new(vec![Arc::new(ImmediateFailure { cancelled: true })]).unwrap();
+    let registry = StatusProviders::new(
+        StatusTarget::Tool,
+        vec![Arc::new(ImmediateFailure { cancelled: true })],
+    )
+    .unwrap();
     assert_eq!(
         registry
             .observe(&query(), None, &[], &NeverCancelled)
@@ -1160,10 +1308,13 @@ async fn registry_wraps_foreign_cancellation_and_faults_take_precedence_after_jo
             .to_string(),
         "runtime:a-cancel: operation cancelled"
     );
-    let registry = StatusRegistry::new(vec![
-        Arc::new(ImmediateFailure { cancelled: true }),
-        Arc::new(ImmediateFailure { cancelled: false }),
-    ])
+    let registry = StatusProviders::new(
+        StatusTarget::Tool,
+        vec![
+            Arc::new(ImmediateFailure { cancelled: true }),
+            Arc::new(ImmediateFailure { cancelled: false }),
+        ],
+    )
     .unwrap();
     let cancelled = Signal::new();
     cancelled.cancel();
@@ -1394,13 +1545,40 @@ async fn registry_runtime_tree_source_missing_process_service_is_error_not_silen
 }
 #[tokio::test]
 async fn context_slot_merges_usage_line_with_once_per_band_reminder() {
-    let runtime =
-        Arc::new(RuntimeStatus::new(catalog(""), clock(), SystemTime::UNIX_EPOCH, vec![]).unwrap());
+    let runtime = Arc::new(
+        StatusProvidersFactory::new(
+            catalog(""),
+            vec![
+                Arc::new(GeneratedTimeStatusProvider {
+                    clock: clock(),
+                    started_at: SystemTime::UNIX_EPOCH,
+                    templates: catalog(""),
+                }),
+                Arc::new(SelectionStatusProvider {
+                    templates: catalog(""),
+                }),
+            ],
+            vec![],
+            vec![
+                Arc::new(GeneratedTimeStatusProvider {
+                    clock: clock(),
+                    started_at: SystemTime::UNIX_EPOCH,
+                    templates: catalog(""),
+                }),
+                Arc::new(SelectionStatusProvider {
+                    templates: catalog(""),
+                }),
+            ],
+        )
+        .unwrap(),
+    );
     let snapshot = ContextSnapshot::new(550, 1000, Some(55), 90);
     let context_key = parrot_core::StatusKey::new("runtime:context");
 
-    let bound = runtime.bind_context(query(), "profile prompt".into());
-    let offering = bound.slots(&snapshot, &NeverCancelled).await.unwrap();
+    let offering = runtime
+        .steer(&query(), "profile prompt", &snapshot, &NeverCancelled)
+        .await
+        .unwrap();
     let context = offering.get(&context_key).unwrap();
     assert_eq!(context.hash, "context:provider/model:1000:false:50");
     assert!(context.is_auto_update);
@@ -1418,7 +1596,10 @@ async fn context_slot_merges_usage_line_with_once_per_band_reminder() {
     // Below the band threshold the reminder disappears while the usage line
     // stays, and the hash records the inactive band.
     let early = ContextSnapshot::new(490, 1000, Some(49), 90);
-    let offering = bound.slots(&early, &NeverCancelled).await.unwrap();
+    let offering = runtime
+        .steer(&query(), "profile prompt", &early, &NeverCancelled)
+        .await
+        .unwrap();
     let context = offering.get(&context_key).unwrap();
     assert_eq!(context.hash, "context:provider/model:1000:false:none");
     assert!(context.text.contains("Context: 49% used"));
@@ -1426,14 +1607,20 @@ async fn context_slot_merges_usage_line_with_once_per_band_reminder() {
 
     // Usage changes inside one band leave the hash unchanged.
     let within = ContextSnapshot::new(590, 1000, Some(59), 90);
-    let offering = bound.slots(&within, &NeverCancelled).await.unwrap();
+    let offering = runtime
+        .steer(&query(), "profile prompt", &within, &NeverCancelled)
+        .await
+        .unwrap();
     let context = offering.get(&context_key).unwrap();
     assert_eq!(context.hash, "context:provider/model:1000:false:50");
     assert!(context.text.contains("Context: 59% used"));
 
     // A missing usage observation also records the inactive band.
     let unknown = ContextSnapshot::new(550, 1000, None, 90);
-    let offering = bound.slots(&unknown, &NeverCancelled).await.unwrap();
+    let offering = runtime
+        .steer(&query(), "profile prompt", &unknown, &NeverCancelled)
+        .await
+        .unwrap();
     let context = offering.get(&context_key).unwrap();
     assert_eq!(context.hash, "context:provider/model:1000:false:none");
     assert!(context.text.contains("unavailable"));
@@ -1448,8 +1635,13 @@ async fn context_slot_merges_usage_line_with_once_per_band_reminder() {
         trigger_tokens: Some(8_000),
         has_context_limit_override: true,
     };
-    let offering = bound
-        .slots(&override_snapshot, &NeverCancelled)
+    let offering = runtime
+        .steer(
+            &query(),
+            "profile prompt",
+            &override_snapshot,
+            &NeverCancelled,
+        )
         .await
         .unwrap();
     let context = offering.get(&context_key).unwrap();
@@ -1467,8 +1659,64 @@ async fn context_slot_merges_usage_line_with_once_per_band_reminder() {
 
     let mut other = query();
     other.requested_model = "other/model".into();
-    let other_bound = runtime.bind_context(other, "profile prompt".into());
-    let offering = other_bound.slots(&snapshot, &NeverCancelled).await.unwrap();
+    let offering = runtime
+        .steer(&other, "profile prompt", &snapshot, &NeverCancelled)
+        .await
+        .unwrap();
     let context = offering.get(&context_key).unwrap();
     assert_eq!(context.hash, "context:other/model:1000:false:50");
+}
+
+struct FixedSnapshotSource(parrot_core::ContextSnapshot);
+impl ContextSnapshotSource for FixedSnapshotSource {
+    fn snapshot<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<ContextSnapshot, StatusError>> {
+        Box::pin(async move { Ok(self.0.clone()) })
+    }
+}
+
+#[tokio::test]
+async fn factory_binds_a_sourced_steering_seam_over_the_source_snapshot() {
+    let factory = StatusProvidersFactory::new(
+        catalog(""),
+        vec![Scripted::new("runtime:scripted", "scripted slot")],
+        vec![Scripted::new("runtime:scripted", "scripted slot")],
+        vec![Scripted::new("runtime:scripted", "scripted slot")],
+    )
+    .unwrap();
+    let offering = factory
+        .steer(
+            &query(),
+            "profile prompt",
+            &ContextSnapshot::new(550, 1000, Some(55), 90),
+            &NeverCancelled,
+        )
+        .await
+        .unwrap();
+    let texts: Vec<_> = offering.values().map(|offer| offer.text.clone()).collect();
+    assert!(texts.iter().any(|text| text.contains("profile prompt")));
+    assert!(texts.iter().any(|text| text.contains("55% used")));
+    assert!(texts.iter().any(|text| text.contains("scripted slot")));
+}
+
+#[tokio::test]
+async fn factory_renders_the_tool_surface_over_a_source_snapshot() {
+    let factory = StatusProvidersFactory::new(
+        catalog(""),
+        vec![Scripted::new("runtime:scripted", "scripted slot")],
+        vec![Scripted::new("runtime:scripted", "scripted slot")],
+        vec![Scripted::new("runtime:scripted", "scripted slot")],
+    )
+    .unwrap();
+    let source: Arc<dyn ContextSnapshotSource> = Arc::new(FixedSnapshotSource(
+        ContextSnapshot::new(550, 1000, Some(55), 90),
+    ));
+    let text = factory
+        .tool(&query(), source, &NeverCancelled)
+        .await
+        .unwrap();
+    assert!(text.contains("55% used"));
+    assert!(text.contains("scripted slot"));
 }

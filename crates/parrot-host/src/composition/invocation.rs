@@ -9,7 +9,6 @@ use parrot_domain::{
 };
 use parrot_runtime::{
     agent_turn::services::{TurnError, TurnSelection},
-    compaction::EpochInput,
     tool_settlement::{
         BorrowedTool, BorrowedToolState, SharedSecurity, ToolFailure, ToolInvocation, ToolMetadata,
         ToolOutput,
@@ -309,16 +308,13 @@ impl<S: AccessSnapshot + 'static> BorrowedTool<S> for RetainedCompactTool<S> {
                         });
                     }
                     Some(InlineRequest::Estimate { reply }) = requests.recv() => {
-                        let result = state.resources.context.estimate_context(EpochInput {
-                            selection: &state.selection.model,
-                            tools: state.definitions,
-                            conversation: state.resources.conversation,
-                            agent_state: state.resources.agent_state,
-                            prompt: state.resources.prompt,
-                            sessions: state.resources.sessions,
-                            status: state.resources.status,
-                            events: state.resources.events,
-                        }, cancellation).await
+                        let result = state.resources.context.estimate_context(
+                            &state.selection.model,
+                            state.definitions,
+                            state.resources.conversation,
+                            state.resources.prompt,
+                            cancellation,
+                        ).await
                             .map_err(|error| turn_failure(TurnError::Context(error)));
                         let _ = reply.send(result);
                     }

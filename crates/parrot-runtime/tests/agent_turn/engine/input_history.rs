@@ -83,7 +83,7 @@ async fn root_runtime(
         }),
         skills: Arc::new(Skills(trace.clone())),
         context: fixture.controller(),
-        status: Arc::new(Status(trace.clone())),
+        status: Arc::new(Status),
         completion_sources: callbacks,
         templates,
         reminders,
@@ -174,6 +174,7 @@ async fn two_steers_admitted_during_one_drain_preserve_exact_source_conversation
         &fixture,
         &[
             "user: first prompt",
+            "system: Context: 0% used (0 estimated tokens / 100k limit); reminders every 10%; automatic compaction at 95%.",
             "assistant: first answer",
             "user: second prompt",
             "assistant: second answer",
@@ -216,6 +217,7 @@ async fn all_three_queued_prompts_are_exhausted_into_exact_six_message_history()
         &fixture,
         &[
             "user: first prompt",
+            "system: Context: 0% used (0 estimated tokens / 100k limit); reminders every 10%; automatic compaction at 95%.",
             "assistant: first answer",
             "user: second prompt",
             "assistant: second answer",

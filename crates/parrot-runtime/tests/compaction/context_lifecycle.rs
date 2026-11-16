@@ -26,7 +26,13 @@ async fn provider_template_failure_retains_native_prompt_error_and_terminal_publ
         .materialize(&Default::default())
         .unwrap(),
     );
-    let status = Status::default();
+    let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+        crate::context::templates(),
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+    )
+    .unwrap();
     let events = Events::new(history.clone());
     let mut controller = fixture.controller(history, 90);
 
@@ -39,7 +45,15 @@ async fn provider_template_failure_retains_native_prompt_error_and_terminal_publ
                 agent_state: &mut parrot_core::AgentState::default(),
                 prompt: &prompt,
                 sessions: &sessions,
-                status: &status,
+                factory: &factory,
+                query: parrot_runtime::active_work::status::StatusQuery {
+                    session_id: "agent".into(),
+                    parent_session_id: String::new(),
+                    parent_session_name: String::new(),
+                    profile: "build".into(),
+                    requested_model: "provider/model".into(),
+                },
+                profile_prompt: String::new(),
                 events: &events,
             },
             None,
@@ -84,7 +98,13 @@ async fn forced_unbounded_and_precancelled_compaction_make_no_provider_or_event_
     let sessions = ProviderSessions::new();
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
     let mut prompt = EpochPrompt::default();
-    let status = Status::default();
+    let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+        crate::context::templates(),
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+    )
+    .unwrap();
     let events = Events::new(history.clone());
     let mut controller = fixture.controller(history.clone(), 90);
     assert!(
@@ -95,7 +115,7 @@ async fn forced_unbounded_and_precancelled_compaction_make_no_provider_or_event_
                     &mut conversation,
                     &mut prompt,
                     &sessions,
-                    &status,
+                    &factory,
                     &events
                 ),
                 None,
@@ -122,7 +142,7 @@ async fn forced_unbounded_and_precancelled_compaction_make_no_provider_or_event_
                     &mut conversation,
                     &mut prompt,
                     &sessions,
-                    &status,
+                    &factory,
                     &events
                 ),
                 None,
@@ -193,7 +213,13 @@ async fn image_artifacts_are_materialized_loaded_by_summary_provider_and_retaine
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
     let before = history.conversation().await.unwrap();
     let mut prompt = EpochPrompt::default();
-    let status = Status::default();
+    let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+        crate::context::templates(),
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+    )
+    .unwrap();
     let events = Events::new(history.clone());
     let mut controller = fixture.controller(history.clone(), 90);
     assert!(provider.image_reads.lock().unwrap().is_empty());
@@ -205,7 +231,7 @@ async fn image_artifacts_are_materialized_loaded_by_summary_provider_and_retaine
                     &mut conversation,
                     &mut prompt,
                     &sessions,
-                    &status,
+                    &factory,
                     &events
                 ),
                 None,
@@ -269,7 +295,13 @@ async fn long_committed_history_ignores_checkpoint_boundaries_and_preserves_dura
     let retained = conversation.messages()[202..].to_vec();
     let durable_history = history.conversation().await.unwrap();
     let mut prompt = EpochPrompt::default();
-    let status = Status::default();
+    let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+        crate::context::templates(),
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+    )
+    .unwrap();
     let events = Events::new(history.clone());
     let mut controller = fixture.controller(history.clone(), 90);
     let result = controller
@@ -279,7 +311,7 @@ async fn long_committed_history_ignores_checkpoint_boundaries_and_preserves_dura
                 &mut conversation,
                 &mut prompt,
                 &sessions,
-                &status,
+                &factory,
                 &events,
             ),
             None,
@@ -332,7 +364,13 @@ async fn direct_epoch_no_progress_with_nonpositive_input_limit_reports_source_fa
         let sessions = ProviderSessions::new();
         let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
         let mut prompt = EpochPrompt::default();
-        let status = Status::default();
+        let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+            crate::context::templates(),
+            vec![Arc::new(Status::default())],
+            vec![Arc::new(Status::default())],
+            vec![Arc::new(Status::default())],
+        )
+        .unwrap();
         let events = Events::new(history.clone());
         let mut controller = fixture.controller(history.clone(), 90);
         let outcome = controller
@@ -342,7 +380,7 @@ async fn direct_epoch_no_progress_with_nonpositive_input_limit_reports_source_fa
                     &mut conversation,
                     &mut prompt,
                     &sessions,
-                    &status,
+                    &factory,
                     &events,
                 ),
                 None,
@@ -412,7 +450,13 @@ async fn provider_failure_keeps_snapshot_absent_budget_calibration_and_top_level
         let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
         let before = conversation.messages().to_vec();
         let mut prompt = EpochPrompt::default();
-        let status = Status::default();
+        let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+            crate::context::templates(),
+            vec![Arc::new(Status::default())],
+            vec![Arc::new(Status::default())],
+            vec![Arc::new(Status::default())],
+        )
+        .unwrap();
         let events = Events::new(history.clone());
         let mut controller = fixture.controller(history.clone(), 90);
         prompt
@@ -426,7 +470,7 @@ async fn provider_failure_keeps_snapshot_absent_budget_calibration_and_top_level
                     &mut conversation,
                     &mut prompt,
                     &sessions,
-                    &status,
+                    &factory,
                     &events,
                 ),
                 None,
@@ -492,7 +536,13 @@ async fn oversized_durable_history_is_truncated_only_in_summary_requests_without
     let sessions = ProviderSessions::new();
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
     let mut prompt = EpochPrompt::default();
-    let status = Status::default();
+    let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+        crate::context::templates(),
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+        vec![Arc::new(Status::default())],
+    )
+    .unwrap();
     let events = Events::new(history.clone());
     let catalog = templates();
     let notice = catalog
@@ -520,7 +570,7 @@ async fn oversized_durable_history_is_truncated_only_in_summary_requests_without
                 &mut conversation,
                 &mut prompt,
                 &sessions,
-                &status,
+                &factory,
                 &events,
             ),
             None,

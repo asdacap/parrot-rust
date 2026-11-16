@@ -8,7 +8,9 @@ pub(super) struct RuntimeCompactionEffects<'a> {
     pub(super) state: &'a Mutex<State>,
     pub(super) prompt: &'a SessionPrompt,
     pub(super) selection: &'a ResolvedModelSelection,
-    pub(super) status: &'a dyn crate::compaction::ContextStatus,
+    pub(super) factory: &'a crate::active_work::status::StatusProvidersFactory,
+    pub(super) query: crate::active_work::status::StatusQuery,
+    pub(super) profile_prompt: String,
     pub(super) events: ContextEmitter<'a>,
 }
 
@@ -45,8 +47,8 @@ impl CompactionEffects for RuntimeCompactionEffects<'_> {
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<parrot_core::StatusOffering, parrot_core::Error>> {
         core_loop::adapt_operation(async move {
-            self.status
-                .slots(&context, cancellation)
+            self.factory
+                .steer(&self.query, &self.profile_prompt, &context, cancellation)
                 .await
                 .map_err(Into::into)
         })

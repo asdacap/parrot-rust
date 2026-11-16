@@ -252,7 +252,7 @@ async fn runtime(
         }),
         skills: Arc::new(Skills(trace.clone())),
         context: fixture.controller(),
-        status: Arc::new(Status(trace.clone())),
+        status: Arc::new(Status),
         completion_sources: vec![],
         templates,
         reminders,
@@ -371,7 +371,11 @@ async fn parent() {
     let before = &ready["observation"];
     assert_eq!(
         before["sql"]["message_history"],
-        json!(["user: first prompt", "assistant: first durable answer"])
+        json!([
+            "user: first prompt",
+            "system: Context: 0% used (0 estimated tokens / 100k limit); reminders every 10%; automatic compaction at 95%.",
+            "assistant: first durable answer"
+        ])
     );
     assert_eq!(before["pending"], true);
     assert_eq!(before["sql"]["inputs"][1]["message_id"], "queued-message");
@@ -439,6 +443,7 @@ async fn parent() {
     write_json(&root.join("after-recovery.json"), &recovered);
     let history = json!([
         "user: first prompt",
+        "system: Context: 0% used (0 estimated tokens / 100k limit); reminders every 10%; automatic compaction at 95%.",
         "assistant: first durable answer",
         "user: queued prompt",
         "assistant: queued recovered answer"

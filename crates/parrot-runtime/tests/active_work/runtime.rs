@@ -39,7 +39,6 @@ use parrot_runtime::{
         services::*,
     },
     children::*,
-    compaction::ContextStatus,
     event_broker::{BrokerError, EventBroker},
     interactions::*,
     prompt_assembly::{PromptResult, SystemPrompt},
@@ -100,10 +99,49 @@ impl TurnSkills for Skills {
     }
 }
 struct Status;
-impl ContextStatus for Status {}
 impl TurnStatus<Security> for Status {
-    fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
-        Arc::new(Self)
+    fn factory(&self) -> Arc<parrot_runtime::active_work::status::StatusProvidersFactory> {
+        let environment = std::collections::BTreeMap::from([
+            ("HOME".to_owned(), "/tmp/t47/home".to_owned()),
+            ("XDG_CONFIG_HOME".to_owned(), "/tmp/t47/config".to_owned()),
+            ("XDG_STATE_HOME".to_owned(), "/tmp/t47/state".to_owned()),
+            ("XDG_DATA_HOME".to_owned(), "/tmp/t47/data".to_owned()),
+            ("WORKDIR".to_owned(), "/tmp/t47/work".to_owned()),
+        ]);
+        Arc::new(
+            parrot_runtime::active_work::status::StatusProvidersFactory::new(
+                Arc::new(
+                    parrot_foundation::template_catalog::PromptTemplateCatalog::from_content(
+                        "",
+                        &environment,
+                    )
+                    .unwrap()
+                    .1,
+                ),
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap(),
+        )
+    }
+    fn bind_identity(
+        &self,
+        _: &TurnSelection<Security>,
+    ) -> (
+        parrot_runtime::active_work::status::StatusQuery,
+        parrot_runtime::plan_mode::ModeResult<String>,
+    ) {
+        (
+            parrot_runtime::active_work::status::StatusQuery {
+                session_id: String::new(),
+                parent_session_id: String::new(),
+                parent_session_name: String::new(),
+                profile: "test".into(),
+                requested_model: String::new(),
+            },
+            Ok(String::new()),
+        )
     }
 }
 struct Activity;
@@ -1461,16 +1499,17 @@ async fn retained_feedback_publication_failure_or_cancellation_preserves_committ
         );
         assert_eq!(root.endings().await, usize::from(cancel));
         let conversation = root.history.conversation().await.unwrap();
-        assert_eq!(conversation.len(), 3 + usize::from(cancel));
+        assert_eq!(conversation.len(), 4 + usize::from(cancel));
         assert_eq!(conversation[0].message.role, MessageRole::User);
-        assert_eq!(conversation[1].message.role, MessageRole::Assistant);
+        assert_eq!(conversation[1].message.role, MessageRole::System);
+        assert_eq!(conversation[2].message.role, MessageRole::Assistant);
         assert_eq!(
-            conversation[1].message.parts,
+            conversation[2].message.parts,
             [ConversationPart::text("answer")]
         );
-        assert_eq!(conversation[2].message.role, MessageRole::System);
+        assert_eq!(conversation[3].message.role, MessageRole::System);
         assert!(
-            parrot_storage::events::content(&conversation[2].message.parts)
+            parrot_storage::events::content(&conversation[3].message.parts)
                 .contains("still required")
         );
         assert_eq!(root.session.backend().reminders().titles().await, ["goal"]);

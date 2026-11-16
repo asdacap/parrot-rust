@@ -359,11 +359,50 @@ impl TurnSkills for Skills {
     }
 }
 struct Status(Arc<Mutex<Vec<TurnSelection<Security>>>>);
-impl ContextStatus for Status {}
 impl TurnStatus<Security> for Status {
-    fn bind(&self, selection: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
+    fn factory(&self) -> Arc<parrot_runtime::active_work::status::StatusProvidersFactory> {
+        let environment = std::collections::BTreeMap::from([
+            ("HOME".to_owned(), "/tmp/t47/home".to_owned()),
+            ("XDG_CONFIG_HOME".to_owned(), "/tmp/t47/config".to_owned()),
+            ("XDG_STATE_HOME".to_owned(), "/tmp/t47/state".to_owned()),
+            ("XDG_DATA_HOME".to_owned(), "/tmp/t47/data".to_owned()),
+            ("WORKDIR".to_owned(), "/tmp/t47/work".to_owned()),
+        ]);
+        Arc::new(
+            parrot_runtime::active_work::status::StatusProvidersFactory::new(
+                Arc::new(
+                    parrot_foundation::template_catalog::PromptTemplateCatalog::from_content(
+                        "",
+                        &environment,
+                    )
+                    .unwrap()
+                    .1,
+                ),
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap(),
+        )
+    }
+    fn bind_identity(
+        &self,
+        selection: &TurnSelection<Security>,
+    ) -> (
+        parrot_runtime::active_work::status::StatusQuery,
+        parrot_runtime::plan_mode::ModeResult<String>,
+    ) {
         self.0.lock().unwrap().push(selection.clone());
-        Arc::new(Self(self.0.clone()))
+        (
+            parrot_runtime::active_work::status::StatusQuery {
+                session_id: String::new(),
+                parent_session_id: String::new(),
+                parent_session_name: String::new(),
+                profile: "test".into(),
+                requested_model: String::new(),
+            },
+            Ok(String::new()),
+        )
     }
 }
 #[derive(Default)]

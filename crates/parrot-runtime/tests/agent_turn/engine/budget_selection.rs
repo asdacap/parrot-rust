@@ -3,37 +3,41 @@
 use super::*;
 use parrot_domain::contracts::async_ops::{Cancelled, Clock};
 use parrot_provider::compaction::{CompactionSettings, Compactor};
-use parrot_runtime::active_work::status::RuntimeStatus;
 use parrot_runtime::active_work::status::StatusQuery;
 use std::time::{Instant, SystemTime};
 
 /// Reproduces the original first-turn initial status injection for these
 /// budget fixtures: one offered static slot steers the assembly once.
-struct InitialStatus(Arc<Trace>);
-impl ContextStatus for InitialStatus {
-    fn slots<'a>(
-        &'a self,
-        _: &'a ContextSnapshot,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
-        Box::pin(async move {
-            self.0.push("status");
-            Ok([(
-                parrot_core::StatusKey::new("mode"),
-                parrot_core::StatusOffer {
-                    hash: "initial".into(),
-                    text: "actual status".into(),
-                    is_auto_update: false,
-                },
-            )]
-            .into_iter()
-            .collect())
-        })
-    }
-}
+struct InitialStatus;
 impl TurnStatus<Security> for InitialStatus {
-    fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
-        Arc::new(InitialStatus(self.0.clone()))
+    fn factory(&self) -> Arc<parrot_runtime::active_work::status::StatusProvidersFactory> {
+        Arc::new(
+            parrot_runtime::active_work::status::StatusProvidersFactory::new(
+                templates(),
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap(),
+        )
+    }
+    fn bind_identity(
+        &self,
+        _: &TurnSelection<Security>,
+    ) -> (
+        parrot_runtime::active_work::status::StatusQuery,
+        parrot_runtime::plan_mode::ModeResult<String>,
+    ) {
+        (
+            parrot_runtime::active_work::status::StatusQuery {
+                session_id: String::new(),
+                parent_session_id: String::new(),
+                parent_session_name: String::new(),
+                profile: "test".into(),
+                requested_model: String::new(),
+            },
+            Ok(String::new()),
+        )
     }
 }
 /// The model budget inputs shared by every budget fixture composition.
@@ -63,23 +67,58 @@ impl Clock for FixedStatusClock {
 }
 /// Offers the real runtime status slots, including the context reminder, so the
 /// end-to-end test exercises the actual band hash through the engine estimator.
-struct RealReminderStatus(Arc<RuntimeStatus>);
+struct RealReminderStatus(Arc<parrot_runtime::active_work::status::StatusProvidersFactory>);
 impl RealReminderStatus {
     fn new() -> Arc<Self> {
         Arc::new(Self(Arc::new(
-            RuntimeStatus::new(
+            parrot_runtime::active_work::status::StatusProvidersFactory::new(
                 templates(),
-                Arc::new(FixedStatusClock),
-                SystemTime::UNIX_EPOCH,
+                vec![
+                    Arc::new(
+                        parrot_runtime::active_work::status::GeneratedTimeStatusProvider {
+                            clock: Arc::new(FixedStatusClock),
+                            started_at: SystemTime::UNIX_EPOCH,
+                            templates: templates(),
+                        },
+                    ),
+                    Arc::new(
+                        parrot_runtime::active_work::status::SelectionStatusProvider {
+                            templates: templates(),
+                        },
+                    ),
+                ],
                 vec![],
+                vec![
+                    Arc::new(
+                        parrot_runtime::active_work::status::GeneratedTimeStatusProvider {
+                            clock: Arc::new(FixedStatusClock),
+                            started_at: SystemTime::UNIX_EPOCH,
+                            templates: templates(),
+                        },
+                    ),
+                    Arc::new(
+                        parrot_runtime::active_work::status::SelectionStatusProvider {
+                            templates: templates(),
+                        },
+                    ),
+                ],
             )
             .unwrap(),
         )))
     }
 }
 impl TurnStatus<Security> for RealReminderStatus {
-    fn bind(&self, selection: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
-        self.0.bind_context(
+    fn factory(&self) -> Arc<parrot_runtime::active_work::status::StatusProvidersFactory> {
+        self.0.clone()
+    }
+    fn bind_identity(
+        &self,
+        selection: &TurnSelection<Security>,
+    ) -> (
+        parrot_runtime::active_work::status::StatusQuery,
+        parrot_runtime::plan_mode::ModeResult<String>,
+    ) {
+        (
             StatusQuery {
                 session_id: "agent".into(),
                 parent_session_id: String::new(),
@@ -87,7 +126,7 @@ impl TurnStatus<Security> for RealReminderStatus {
                 profile: selection.profile.id.clone(),
                 requested_model: "scripted/model".into(),
             },
-            "Standing profile instructions".into(),
+            Ok("Standing profile instructions".into()),
         )
     }
 }
@@ -151,8 +190,8 @@ impl BudgetRuntime {
         profile: TurnProfile,
         tools: Arc<BudgetTools>,
     ) -> Self {
-        Self::compose(fixture, provider, limits, profile, tools, |trace| {
-            Arc::new(InitialStatus(trace.clone()))
+        Self::compose(fixture, provider, limits, profile, tools, |_| {
+            Arc::new(InitialStatus)
         })
         .await
     }
@@ -977,7 +1016,7 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
     let fixture = Fixture::new();
     let provider = Scripted::new(vec![
         Step::complete("first answer"),
-        Step::complete("second answer"),
+        Step::complete_with_input("second answer", 5_200),
         Step::complete("third answer"),
     ]);
     let runtime = BudgetRuntime::compose(
@@ -1028,23 +1067,18 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
     let standing = runtime.read_standing_statuses().await;
     assert!(standing.contains_key(&parrot_core::StatusKey::new("runtime:context")));
     assert!(standing.contains_key(&parrot_core::StatusKey::new("profile:original")));
-    let reminder = {
+    {
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 2);
         assert!(requests[0].messages.iter().any(|message| {
             message.role == sessions::Role::System
                 && message.content().contains("Standing profile instructions")
         }));
-        let message = requests[1].messages.last().unwrap();
-        assert!(!message.content().contains("Standing profile instructions"));
-        assert_eq!(message.role, sessions::Role::System);
-        assert!(
-            message
-                .content()
-                .contains("Context usage entered the 50% notification band")
-        );
-        message.content().to_owned()
-    };
+        assert!(!requests[1].messages.iter().any(|message| {
+            message.role == sessions::Role::System
+                && message.content().contains("notification band")
+        }));
+    }
 
     let third = runtime
         .send("third prompt", protocol::Delivery::DELIVERY_STEER)
@@ -1053,9 +1087,22 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
         bounded(third.execution.join()).await.unwrap().status,
         ExecutionStatus::Succeeded
     );
-    {
+    let reminder = {
         let requests = provider.requests.lock().unwrap();
         assert_eq!(requests.len(), 3);
+        let message = requests[2]
+            .messages
+            .iter()
+            .find(|message| {
+                message.role == sessions::Role::System
+                    && message.content().contains("50% notification band")
+            })
+            .unwrap();
+        assert!(!message.content().contains("Standing profile instructions"));
+        message.content().to_owned()
+    };
+    {
+        let requests = provider.requests.lock().unwrap();
         assert_eq!(
             requests[2]
                 .messages

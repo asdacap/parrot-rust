@@ -1,8 +1,10 @@
 //! Turn-owned service boundaries. Concrete settlement, status and security stay with their owners.
 use super::provider_call::{OutputWriter, ProviderActivity, ProviderCallError};
 use crate::{
-    compaction::{ContextController, ContextError, ContextEvents, ContextStatus},
+    active_work::status::{StatusProvidersFactory, StatusQuery},
+    compaction::{ContextController, ContextError, ContextEvents},
     event_broker::BrokerError,
+    plan_mode::ModeResult,
     prompt_assembly::{AgentSkills, PromptError, PromptResult},
 };
 use parrot_core::ErrorCode;
@@ -71,7 +73,6 @@ pub struct TurnResources<'a> {
     pub context: &'a mut ContextController,
     pub prompt: &'a crate::prompt_assembly::SessionPrompt,
     pub sessions: &'a sessions::ProviderSessions,
-    pub status: &'a dyn ContextStatus,
     pub events: &'a dyn ContextEvents,
     pub usage: &'a super::usage::SessionUsageRecorder,
 }
@@ -155,7 +156,12 @@ where
 }
 
 pub trait TurnStatus<S: AccessSnapshot>: Send + Sync {
-    fn bind(&self, selection: &TurnSelection<S>) -> Arc<dyn ContextStatus>;
+    /// Returns the session's status providers factory.
+    fn factory(&self) -> Arc<StatusProvidersFactory>;
+    /// Resolves the bound identity for one turn selection: the status query
+    /// and the profile prompt, with mode resolution errors deferred to the
+    /// caller.
+    fn bind_identity(&self, selection: &TurnSelection<S>) -> (StatusQuery, ModeResult<String>);
 }
 
 pub trait SessionOutput: OutputWriter {
