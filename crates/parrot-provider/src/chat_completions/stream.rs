@@ -49,6 +49,9 @@ pub struct ChatCompletion {
     pub input_tokens: i32,
     pub cached_input_tokens: i32,
     pub output_tokens: i32,
+    /// What the provider says the request cost, in billionths of a US
+    /// dollar, when it reports `usage.cost` (OpenRouter does).
+    pub cost: Option<i64>,
     pub assistant_text: String,
     pub tool_calls: Vec<ToolCall>,
     pub provider_content: Option<ChatReplay>,
@@ -119,6 +122,7 @@ struct State {
     input: i32,
     cached_input: i32,
     output: i32,
+    cost: Option<i64>,
     text: String,
     reasoning_content: String,
     reasoning: String,
@@ -158,6 +162,7 @@ impl State {
             input_tokens: self.input,
             cached_input_tokens: self.cached_input,
             output_tokens: self.output,
+            cost: self.cost,
             assistant_text: self.text.clone(),
             tool_calls: self
                 .tools
@@ -480,6 +485,11 @@ fn parse_data_text(data: &str, state: &mut ParseState) -> Result<Vec<ChatEvent>,
             .transpose()?
             .unwrap_or(0);
         state.0.output = raw_int(&usage, "completion_tokens")?;
+        state.0.cost = usage
+            .get("cost")
+            .and_then(|raw| raw.get().parse::<f64>().ok())
+            .filter(|dollars| dollars.is_finite() && *dollars >= 0.0)
+            .map(|dollars| (dollars * 1e9).round() as i64);
     }
     Ok(events)
 }

@@ -87,6 +87,8 @@ pub struct AgentCompletionUsage {
     pub input_tokens: i64,
     pub cached_input_tokens: i64,
     pub output_tokens: i64,
+    /// What the provider says the request cost, in US dollars, if it says.
+    pub cost: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -116,6 +118,16 @@ impl AgentUsageIncrement {
         let cached_input_price = pricing.cached_input_price.unwrap_or(pricing.input_price);
         let input_cost = ((input_tokens - cached_input_tokens) as f64 * pricing.input_price)
             + (cached_input_tokens as f64 * cached_input_price);
+        let output_cost = completed.output_tokens as f64 * pricing.output_price;
+        // The provider's own cost wins, split as the prices would split it.
+        let (input_cost, output_cost) = match completed.cost {
+            Some(cost) if input_cost + output_cost > 0.0 => {
+                let input_share = input_cost / (input_cost + output_cost);
+                (cost * input_share, cost * (1.0 - input_share))
+            }
+            Some(cost) => (cost, 0.0),
+            None => (input_cost, output_cost),
+        };
         Self {
             key,
             totals: AgentUsageTotals {
@@ -124,7 +136,7 @@ impl AgentUsageIncrement {
                 output_tokens: completed.output_tokens,
                 tool_calls: 0,
                 input_cost: 0.0 + input_cost,
-                output_cost: 0.0 + (completed.output_tokens as f64 * pricing.output_price),
+                output_cost: 0.0 + output_cost,
             },
             context_size: Some(completed.input_tokens),
             context_limit: Some(pricing.context_window),

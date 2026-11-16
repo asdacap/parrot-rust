@@ -58,9 +58,10 @@ fn text_reasoning_finish_and_usage_are_separate_and_complete() {
         (
             final_state.input_tokens,
             final_state.cached_input_tokens,
-            final_state.output_tokens
+            final_state.output_tokens,
+            final_state.cost
         ),
-        (11, 5, 3)
+        (11, 5, 3, None)
     );
     assert_eq!(
         final_state
@@ -211,19 +212,20 @@ fn usage_values_replace_previous_values_and_bad_integer_fails() {
     let mut state = ParseState::default();
     feed(
         &mut state,
-        r#"{"usage":{"prompt_tokens":10,"completion_tokens":4}}"#,
+        r#"{"usage":{"prompt_tokens":10,"completion_tokens":4,"cost":0.5}}"#,
     );
     feed(
         &mut state,
-        r#"{"usage":{"prompt_tokens":2,"prompt_tokens_details":{"cached_tokens":1},"completion_tokens":3}}"#,
+        r#"{"usage":{"prompt_tokens":2,"prompt_tokens_details":{"cached_tokens":1},"completion_tokens":3,"cost":0.0000123}}"#,
     );
     assert_eq!(
         (
             completion(&state, "p").input_tokens,
             completion(&state, "p").cached_input_tokens,
-            completion(&state, "p").output_tokens
+            completion(&state, "p").output_tokens,
+            completion(&state, "p").cost
         ),
-        (2, 1, 3)
+        (2, 1, 3, Some(12_300))
     );
     assert!(matches!(
         parse_data(

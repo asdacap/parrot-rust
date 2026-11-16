@@ -130,6 +130,7 @@ fn completion_uses_actual_identity_and_cached_pricing_presence() {
                 input_tokens: 100,
                 cached_input_tokens: 20,
                 output_tokens: 10,
+                cost: None,
             },
             AgentUsagePricing {
                 input_price: 0.125,
@@ -163,6 +164,7 @@ fn pricing_clamps_only_priced_input_not_recorded_usage() {
                 input_tokens: input,
                 cached_input_tokens: cached,
                 output_tokens: output,
+                cost: None,
             },
             AgentUsagePricing {
                 input_price: 2.0,
@@ -177,6 +179,33 @@ fn pricing_clamps_only_priced_input_not_recorded_usage() {
         assert_eq!(usage.totals.input_cost, input_cost);
         assert_eq!(usage.totals.output_cost, output as f64 * 3.0);
         assert_eq!(usage.context_size, Some(input));
+    }
+}
+
+#[test]
+fn reported_cost_replaces_the_priced_one_split_as_the_prices_split_it() {
+    for (input_price, output_price, input_cost, output_cost) in
+        [(0.0625, 0.25, 3.0, 1.0), (0.0, 0.0, 4.0, 0.0)]
+    {
+        let usage = AgentUsageIncrement::from_completion(
+            key(None),
+            AgentCompletionUsage {
+                input_tokens: 96,
+                cached_input_tokens: 0,
+                output_tokens: 8,
+                cost: Some(4.0),
+            },
+            AgentUsagePricing {
+                input_price,
+                cached_input_price: None,
+                output_price,
+                context_window: 1000,
+            },
+        );
+        assert_eq!(
+            (usage.totals.input_cost, usage.totals.output_cost),
+            (input_cost, output_cost)
+        );
     }
 }
 

@@ -421,6 +421,7 @@ async fn batches_fragments_by_source_stream_and_returns_the_whole_last_completio
         input_tokens: -2,
         cached_input_tokens: 9,
         output_tokens: 12,
+        cost: None,
         assistant_text: "authoritative".into(),
         tool_calls: vec![ToolCall {
             id: "call".into(),

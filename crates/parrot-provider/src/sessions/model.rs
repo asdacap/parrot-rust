@@ -282,6 +282,9 @@ pub struct Completion {
     pub input_tokens: i32,
     pub cached_input_tokens: i32,
     pub output_tokens: i32,
+    /// What the provider says the request cost, in billionths of a US
+    /// dollar, if it says.
+    pub cost: Option<i64>,
     pub assistant_text: String,
     pub tool_calls: Vec<ToolCall>,
     pub provider_id: String,
@@ -394,6 +397,7 @@ impl From<chat_completions::ChatCompletion> for Completion {
             input_tokens: completion.input_tokens,
             cached_input_tokens: completion.cached_input_tokens,
             output_tokens: completion.output_tokens,
+            cost: completion.cost,
             assistant_text: completion.assistant_text,
             tool_calls: completion.tool_calls,
             provider_id,
@@ -409,6 +413,7 @@ impl From<responses::ResponsesCompletion> for Completion {
             input_tokens: completion.input_tokens,
             cached_input_tokens: completion.cached_input_tokens,
             output_tokens: completion.output_tokens,
+            cost: None,
             assistant_text: completion.assistant_text,
             tool_calls: completion.tool_calls,
             provider_id: completion.provider_id,
@@ -424,6 +429,7 @@ impl From<anthropic::CompletedMessage> for Completion {
             input_tokens: completion.input_tokens,
             cached_input_tokens: completion.cached_input_tokens,
             output_tokens: completion.output_tokens,
+            cost: None,
             assistant_text: completion.assistant_text,
             tool_calls: completion.tool_calls,
             provider_id: completion.provider_id,

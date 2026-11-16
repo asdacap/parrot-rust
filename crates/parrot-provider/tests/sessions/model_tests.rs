@@ -243,6 +243,7 @@ fn chat_completion_replay_round_trips_through_origin_only() {
         input_tokens: 9,
         cached_input_tokens: 2,
         output_tokens: 4,
+        cost: None,
         assistant_text: "answer".into(),
         tool_calls: vec![],
         provider_content: Some(chat_completions::ChatReplay {

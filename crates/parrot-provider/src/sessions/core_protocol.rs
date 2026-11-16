@@ -41,6 +41,7 @@ impl From<parrot_core::ProviderResponse> for Completion {
             input_tokens: response.input_tokens,
             cached_input_tokens: response.cached_input_tokens,
             output_tokens: response.output_tokens,
+            cost: None,
             assistant_text: response.assistant_text,
             tool_calls: response.tool_calls,
             provider_id: response.provider_id,
@@ -195,6 +196,7 @@ mod tests {
             input_tokens: -13,
             cached_input_tokens: i32::MIN,
             output_tokens: i32::MAX,
+            cost: None,
             assistant_text: "assistant \u{0000} text".into(),
             tool_calls: vec![ToolCall {
                 id: "tool-call".into(),

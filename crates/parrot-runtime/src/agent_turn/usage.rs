@@ -110,6 +110,7 @@ impl SessionUsageRecorder {
                 input_tokens: i64::from(completed.input_tokens),
                 cached_input_tokens: i64::from(completed.cached_input_tokens),
                 output_tokens: i64::from(completed.output_tokens),
+                cost: completed.cost.map(|nanos| nanos as f64 / 1e9),
             },
             AgentUsagePricing {
                 input_price: model.input_price,
