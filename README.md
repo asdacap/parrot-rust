@@ -34,63 +34,12 @@ cross-version locking or simultaneous same-workspace safety guarantee**.
 | GLM-5.3-Flash through CoreWeave NVFP4 | High | 71 | 42 | 0 | 62.8% | 1.432B | 1.392B (97.21%) | 8.95M | $52.22 |
 | MiMo V2.6 Flash through Cohere FP8 | High requested, semantics unverified | 61 | 52 | 0 | 54.0% | 2.152B | 1.981B (92.06%) | 17.93M | $34.49 |
 
-Ten execution-error attempts were rerun on master `f71ad31c` on November 16, 2026.
-The table replaces only their outcomes, without selecting the best attempt.
-GLM Koota query predicates and MiMo Boa passed. Seven retries failed graded tests.
-DeepSeek Pwntools again reached a verifier timeout. All six GQL and Participle
-retries reached grading without the earlier attachment startup errors.
+Results include error-only reruns on master `f71ad31c`. Token counts and costs
+include all attempts, including MiMo's credit-interrupted work.
 
-These are combined results across client revisions, not fresh full-suite runs.
-Token counts and costs include original attempts and error-only reruns, including
-MiMo's archived credit-blocked work. Prior raw results remain unchanged.
-See the [error-only rerun report](/mnt/workspace/parrot-benchmark-reports/deepswe-errors-latest-master-2026-11-16/README.md).
-
-Costs reprice captured provider token counts at official model-vendor API rates,
-verified November 16, 2026. Sources are [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing),
-[Z.AI pricing](https://docs.z.ai/guides/overview/pricing), and
-[Xiaomi MiMo overseas real-time pricing](https://mimo.mi.com/docs/en-US/price/pay-as-you-go).
-No OpenRouter serving-provider prices or discounts are used.
-
-Input includes cache reads and repeated history transmissions. Root and child
-agents are included. Cost equals uncached input times its rate, plus cached
-input times its rate, plus output times its rate. These counterfactual estimates
-preserve the observed token counts and cache hits, which can differ on vendor APIs.
-They exclude separately billed vendor services and are not invoices.
-
-DeepSeek charges half price off-peak. Peak hours are 01:00 to 04:00 and 06:00 to
-10:00 UTC on weekdays, excluding Chinese public holidays. The table shows both
-whole-run rate scenarios, not a timestamp-weighted bill. DeepSeek's provider
-capture has more generations than its client ledger.
-
-MiMo resumed after credit exhaustion. Its score preserves the 60 earlier completed
-outcomes and uses continuation results for 53 eligible tasks, without best-of selection.
-Before the latest-master error reruns, MiMo's cumulative official-rate estimate
-was $33.61, including archived credit-blocked work. The table adds the four error
-reruns to that cumulative usage, rather than dropping earlier failed-attempt costs.
-Two tiny preflights are excluded. The endpoint accepted a high-effort request and
-returned reasoning, but does not advertise effort-level control.
-
-See the [MiMo continuation report](/mnt/workspace/parrot-benchmark-reports/deepswe-cohere-mimo-resume-2026-11-16/README.md)
-and [CoreWeave GLM report](/mnt/workspace/parrot-benchmark-reports/deepswe-coreweave-glm-full-2026-11-15/README.md)
-for outcome evidence and usage reconciliation. These runs do not isolate model
-performance from serving-provider differences.
-
-### DeepSeek through DeepInfra FP8
-
-The November 15, 2026 DeepSWE run used DeepSeek V4.1 Flash 1017 through
-OpenRouter's DeepInfra FP8 endpoint. Reasoning effort was `high`, concurrency
-was 16, and benchmark retries were disabled.
-
-The original full-suite pass rate was **61.1%**, with three execution errors.
-After error-only reruns, two became graded failures and one verifier timeout remains.
-
-Including the error-only reruns, the official-rate estimate is **$31.27 at peak
-rates** or **$15.63 at off-peak rates**. These are vendor API pricing scenarios,
-not the amount charged by DeepInfra.
-
-See the [full run report](/mnt/workspace/parrot-benchmark-reports/deepswe-deepinfra-deepseek-full-2026-11-15/README.md)
-for task results, usage reconciliation, immutable client provenance, and
-verification commands.
+Costs are estimates using official [DeepSeek](https://api-docs.deepseek.com/quick_start/pricing),
+[Z.AI](https://docs.z.ai/guides/overview/pricing), and
+[Xiaomi MiMo](https://mimo.mi.com/docs/en-US/price/pay-as-you-go) API prices.
 
 ## Design philosophy
 
