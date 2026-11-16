@@ -1,15 +1,9 @@
 use super::*;
 
-pub(super) struct MemoryStatus {
-    pub(super) contexts: Mutex<Vec<ContextSnapshot>>,
-}
+pub(super) struct MemoryStatus;
 
 impl MemoryStatus {
-    pub(super) fn offering(
-        &self,
-        context: ContextSnapshot,
-    ) -> BoxFuture<'_, Result<StatusOffering, Error>> {
-        self.contexts.lock().unwrap().push(context);
+    pub(super) fn offering(&self) -> BoxFuture<'_, Result<StatusOffering, Error>> {
         Box::pin(async move {
             let mut offering = StatusOffering::default();
             offering.insert(
@@ -44,9 +38,7 @@ impl Default for MemoryCompaction {
             contexts: VecDeque::new(),
             saved_state: AgentState::default(),
             effect_state: None,
-            status: MemoryStatus {
-                contexts: Mutex::default(),
-            },
+            status: MemoryStatus,
         }
     }
 }

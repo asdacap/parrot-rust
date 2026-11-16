@@ -1,5 +1,4 @@
 use super::config::{ConfigKey, ConfigValue};
-use super::context::ContextSnapshot;
 use super::conversation::ConversationState;
 use super::message::{ConversationTurn, InputAdmission, PromotedInput};
 use super::turn::AgentState;
@@ -17,14 +16,11 @@ pub trait States: Send + Sync {
     ) -> BoxFuture<'_, Result<crate::ConversationReceipt, Error>> {
         Box::pin(async { Err(Error::unsupported("States.add_conversation_messages")) })
     }
-    /// Reads the status slots offered for the supplied context snapshot, each
-    /// with a source-computed hash and rendered text. Callers join the slot
-    /// texts to assemble the full status. Defaults to no statuses, which
+    /// Reads the status slots each status source offers from its own state,
+    /// each with a source-computed hash and rendered text. Callers join the
+    /// slot texts to assemble the full status. Defaults to no statuses, which
     /// steers nothing.
-    fn read_status_offering(
-        &self,
-        _context: ContextSnapshot,
-    ) -> BoxFuture<'_, Result<crate::StatusOffering, Error>> {
+    fn read_status_offering(&self) -> BoxFuture<'_, Result<crate::StatusOffering, Error>> {
         Box::pin(async { Ok(crate::StatusOffering::default()) })
     }
     /// Reads typed configuration without rendering prompts or deciding request policy.

@@ -1,8 +1,6 @@
 use crate::{
-    AgentState, CancellationToken, ConfigKey, ContextSnapshot, ConversationAddition,
-    ConversationEvent, ConversationOrigin, ConversationPersistence, Error, Message, Provider,
-    ProviderRequest, Role, States, StatusKey, ToolDefinition, context::fit_status,
-    status_steering_needed,
+    AgentState, CancellationToken, ConversationAddition, ConversationEvent, ConversationOrigin,
+    ConversationPersistence, Error, Message, Role, States, StatusKey, status_steering_needed,
 };
 use std::fmt;
 
@@ -28,7 +26,7 @@ impl fmt::Display for StatusKey {
     }
 }
 
-/// Injects full fitted status without a standing baseline. Later auto-update
+/// Injects the full offered status without a standing baseline. Later auto-update
 /// changes inject only auto-update slots with changed identities.
 /// After each message, the agent state records cumulative standing identities so
 /// unchanged slots stay known across updates and restarts.
@@ -36,22 +34,12 @@ impl fmt::Display for StatusKey {
 pub(crate) async fn steer_status(
     states: &mut dyn States,
     state: &mut AgentState,
-    provider: &dyn Provider,
-    definitions: &[ToolDefinition],
     cancellation: CancellationToken<'_>,
 ) -> Result<(), Error> {
     if cancellation.is_cancelled() {
         return Err(Error::cancelled());
     }
-    let instructions = states.capture_system_prompt().await?;
-    let messages = states.read_conversation_state().await?.assemble_messages();
-    let configuration = states
-        .get_config(ConfigKey::Context)
-        .await?
-        .into_context()?;
-    let tokens = provider.estimate_input_tokens(&instructions, definitions, &messages)?;
-    let context = ContextSnapshot::estimate(tokens, &configuration);
-    let offering = states.read_status_offering(context).await?;
+    let offering = states.read_status_offering().await?;
     let mut standing = state.standing_statuses.clone();
     if !status_steering_needed(&offering, &standing) {
         return Ok(());
@@ -62,26 +50,11 @@ pub(crate) async fn steer_status(
             standing.is_empty() || (offer.is_auto_update && standing.get(key) != Some(&offer.hash))
         })
         .collect::<Vec<_>>();
-    let content = if standing.is_empty() {
-        fit_status(
-            &ProviderRequest {
-                instructions,
-                messages,
-                tools: definitions.to_vec(),
-                ..ProviderRequest::default()
-            },
-            &configuration,
-            states,
-            provider,
-        )
-        .await?
-    } else {
-        updates
-            .iter()
-            .map(|(_, offer)| offer.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    };
+    let content = updates
+        .iter()
+        .map(|(_, offer)| offer.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
     for (key, offer) in updates {
         standing.insert(key.clone(), offer.hash.clone());
     }

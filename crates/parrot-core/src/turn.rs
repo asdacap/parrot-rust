@@ -71,14 +71,7 @@ impl AgentTurn<'_> {
             } else {
                 &catalog.normal
             };
-            steer_status(
-                self.states,
-                &mut self.state,
-                self.provider,
-                definitions,
-                cancellation,
-            )
-            .await?;
+            steer_status(self.states, &mut self.state, cancellation).await?;
             if flags.final_phase {
                 let content =
                     rendering::render_template(self.states, ConfigKey::FinalRequestTemplate, &[])

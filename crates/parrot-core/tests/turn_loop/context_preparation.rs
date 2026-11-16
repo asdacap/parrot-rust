@@ -13,7 +13,7 @@ fn reminder_band_steering_does_not_repeat_on_tool_followups_or_later_turns() {
     state.enqueue_message(Delivery::Queue, "another question");
     assert_eq!(state.run(), Ok(Outcome::Completed("second answer".into())));
 
-    assert_eq!(state.status_steered, ["fitted status"]);
+    assert_eq!(state.status_steered, ["runtime:context-reminder"]);
     assert_eq!(
         state.budget.standing_statuses,
         status_standing(&[("runtime:context-reminder", "band-50")])
@@ -52,7 +52,7 @@ fn core_records_each_final_request_before_rendering_and_retains_final_catalogs()
     let mut state = MemoryState::new([Reply::tools("call"), Reply::final_response("answer")]);
     state.maximum = 1;
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(state.final_requests, [1]);
+    assert_eq!(state.final_requests, [0]);
     assert_eq!(state.capture_catalogs(), [vec!["read"], vec!["read"]]);
     assert!(state.tools.flags.lock().unwrap()[0].final_phase);
     let trace = state.trace.values();
@@ -79,7 +79,6 @@ fn raw_and_calibrated_triggers_compact_and_keep_sampled_instructions() {
                 .last_request_statistic
                 .observe_usage("memory/model", 0, 950);
         }
-        state.request().estimate_script.push_back(0);
         state
             .request()
             .estimate_script

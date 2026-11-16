@@ -14,6 +14,7 @@ pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) templates: &'a PromptTemplateCatalog,
     pub(super) publisher: &'a Publisher,
     pub(super) usage: &'a SessionUsageRecorder,
+    pub(super) compactor: &'a parrot_provider::compaction::Compactor,
     pub(super) event_id: &'a Arc<dyn Fn() -> String + Send + Sync>,
     pub(super) events: ContextEmitter<'a>,
     pub(super) binding: Arc<TurnBinding<S>>,
@@ -39,6 +40,7 @@ impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
             templates: &backend.templates,
             publisher: backend.publisher.as_ref(),
             usage: &backend.usage,
+            compactor: &backend.compactor,
             event_id: &backend.event_id,
             events: ContextEmitter::new(
                 &backend.history,
@@ -326,10 +328,14 @@ where
 
     fn read_status_offering(
         &self,
-        context: CoreContextSnapshot,
     ) -> BoxFuture<'_, Result<parrot_core::StatusOffering, CoreError>> {
         adapt_operation(async move {
             let selection = self.binding.capture_selection()?;
+            let configuration = self
+                .compactor
+                .capture_context_configuration(&selection.model);
+            let statistics = self.usage.capture();
+            let context = CoreContextSnapshot::estimate(statistics.context_size, &configuration);
             let status = self.status.bind(&selection);
             let slots = status
                 .slots(&context, self.cancellation)
