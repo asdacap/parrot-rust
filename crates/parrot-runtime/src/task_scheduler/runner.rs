@@ -1,12 +1,14 @@
-use super::{
-    TaskConfiguration, TaskRunProgress, TaskSession, ports::render, values::serialize_tasks,
-};
+use super::service::RunProgress;
+use super::{TaskConfiguration, TaskSession, ports::render, values::serialize_tasks};
 use crate::{
     agent_turn::lifecycle::ExecutionStatus as SessionStatus,
     children::{ChildError, ChildResult},
 };
 use parrot_domain::{
-    contracts::{agent_tasks::TaskArtifactParser, async_ops::Cancellation},
+    contracts::{
+        agent_tasks::TaskArtifactParser, async_ops::Cancellation,
+        security::RestrictableAccessSnapshot,
+    },
     values::{
         agent_state::{TaskRunnerCheckpoint, TaskRunnerPhase},
         agent_tasks::{AcceptanceVerdict, ExecutionStatus, LeafResponse, Task, TaskPayload},
@@ -58,11 +60,11 @@ impl<P: TaskArtifactParser + 'static> TaskRunner<P> {
             response_reference: None,
         })
     }
-    pub async fn run(
+    pub(super) async fn run<S: RestrictableAccessSnapshot + 'static>(
         &self,
         mut checkpoint: TaskRunnerCheckpoint,
         session: &dyn TaskSession,
-        progress: &dyn TaskRunProgress,
+        progress: &RunProgress<S, P>,
         cancellation: Arc<dyn Cancellation>,
     ) -> ChildResult<Task> {
         if let Some(outcome) = checkpoint.outcome.clone() {
@@ -153,22 +155,22 @@ impl<P: TaskArtifactParser + 'static> TaskRunner<P> {
             progress.save(checkpoint.clone()).await?;
         }
     }
-    async fn finish(
+    async fn finish<S: RestrictableAccessSnapshot + 'static>(
         &self,
         mut checkpoint: TaskRunnerCheckpoint,
         task: Task,
-        progress: &dyn TaskRunProgress,
+        progress: &RunProgress<S, P>,
     ) -> ChildResult<Task> {
         checkpoint.phase = TaskRunnerPhase::Completed;
         checkpoint.outcome = Some(task.clone());
         progress.save(checkpoint).await?;
         Ok(task)
     }
-    async fn run_and_parse(
+    async fn run_and_parse<S: RestrictableAccessSnapshot + 'static>(
         &self,
         session: &dyn TaskSession,
         checkpoint: &mut TaskRunnerCheckpoint,
-        progress: &dyn TaskRunProgress,
+        progress: &RunProgress<S, P>,
         cancellation: Arc<dyn Cancellation>,
     ) -> ChildResult<Result<LeafResponse, String>> {
         loop {
@@ -244,11 +246,11 @@ impl<P: TaskArtifactParser + 'static> TaskRunner<P> {
             }
         }
     }
-    async fn reserve_prompt(
+    async fn reserve_prompt<S: RestrictableAccessSnapshot + 'static>(
         &self,
         session: &dyn TaskSession,
         checkpoint: &TaskRunnerCheckpoint,
-        progress: &dyn TaskRunProgress,
+        progress: &RunProgress<S, P>,
         cancellation: Arc<dyn Cancellation>,
     ) -> ChildResult<super::TaskExecution> {
         loop {

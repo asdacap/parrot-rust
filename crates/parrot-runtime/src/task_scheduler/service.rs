@@ -8,7 +8,7 @@ use super::{
     concurrency::{TaskAdmission, TaskConcurrencyOwner},
     has_same_definition,
     notifier::{Notification, TaskNotifier},
-    ports::{CapturedSelection, TaskRunProgress, TaskWorkerLease, render, state_error},
+    ports::{CapturedSelection, TaskWorkerLease, render, state_error},
     status_name,
 };
 use crate::{
@@ -127,22 +127,24 @@ struct WorkerGate {
     gate: Arc<tokio::sync::Mutex<()>>,
     changed: Arc<tokio::sync::Notify>,
 }
-struct RunProgress<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> {
+pub(super) struct RunProgress<
+    S: RestrictableAccessSnapshot + 'static,
+    P: TaskArtifactParser + 'static,
+> {
     scheduler: Weak<TaskScheduler<S, P>>,
     index: usize,
     run: Arc<Run>,
     owner_session_id: String,
 }
-impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> TaskRunProgress
-    for RunProgress<S, P>
-{
-    fn claim(&self, prompt_id: &str) -> TaskResultClaim {
+/// Persists a runner generation and announces its first owned reservation.
+impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> RunProgress<S, P> {
+    pub(super) fn claim(&self, prompt_id: &str) -> TaskResultClaim {
         TaskResultClaim {
             owner_session_id: self.owner_session_id.clone(),
             claim_id: prompt_id.to_owned(),
         }
     }
-    fn acquire<'a>(
+    pub(super) fn acquire<'a>(
         &'a self,
         checkpoint: &'a TaskRunnerCheckpoint,
         session: &'a dyn TaskSession,
@@ -155,7 +157,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 .await
         })
     }
-    fn save(&self, checkpoint: TaskRunnerCheckpoint) -> BoxFuture<'_, ChildResult<()>> {
+    pub(super) fn save(&self, checkpoint: TaskRunnerCheckpoint) -> BoxFuture<'_, ChildResult<()>> {
         Box::pin(async move {
             let scheduler = self.scheduler.upgrade().ok_or(ChildError::Cancelled)?;
             let mut state = scheduler.gate.lock().await;
@@ -173,7 +175,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             scheduler.save_graph(&mut state).await
         })
     }
-    fn reserve(&self) {
+    pub(super) fn reserve(&self) {
         self.run.ready.finish(Ok(()));
     }
 }

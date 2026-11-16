@@ -14,10 +14,7 @@ impl<B: DrainBackend> AgentSession<B> {
         Ok(())
     }
 
-    pub(super) fn wake_unclaimed(
-        &self,
-        activity: Option<IncomingActivity>,
-    ) -> (bool, ExecutionHandle) {
+    pub fn wake(&self, activity: Option<IncomingActivity>) -> (bool, ExecutionHandle) {
         let mut state = self.inner.state.lock().expect("session poisoned");
         if self.inner.activation.is_active() && state.drain.is_some() {
             return self.wake_locked(&mut state, activity, None);

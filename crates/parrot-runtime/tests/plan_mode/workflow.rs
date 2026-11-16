@@ -268,7 +268,12 @@ async fn real_history_checkpoint_does_not_serialize_or_revive_the_workflow_owner
     assert!(
         history
             .repository()
-            .active_checkpoint_assistant_sequences("main".into())
+            .events()
+            .transaction(move |tx| {
+                parrot_storage::conversation::forks::read_active_checkpoint_assistant_sequences(
+                    tx, "main",
+                )
+            })
             .await
             .unwrap()
             .contains(&sequence)
@@ -291,7 +296,12 @@ async fn real_history_checkpoint_does_not_serialize_or_revive_the_workflow_owner
     assert!(
         history
             .repository()
-            .active_checkpoint_assistant_sequences("main".into())
+            .events()
+            .transaction(move |tx| {
+                parrot_storage::conversation::forks::read_active_checkpoint_assistant_sequences(
+                    tx, "main",
+                )
+            })
             .await
             .unwrap()
             .contains(&sequence)
