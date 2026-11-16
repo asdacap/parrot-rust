@@ -13,8 +13,7 @@ mod workspace;
 
 pub use catalog::{ModeCommand, ModeSelection, ModesCommand, SessionsCommand, StatusCommand};
 pub use commands::{
-    CallbackApplicationExit, ClearCommand, ExitApplication, ExitCommand, HelpCommand,
-    SlashCommands, VersionCommand,
+    ClearCommand, ExitApplication, ExitCommand, HelpCommand, SlashCommands, VersionCommand,
 };
 pub use completion::{SkillCompletion, SlashCommandCompletion};
 pub use contracts::*;
@@ -24,7 +23,7 @@ pub use controls::{
 };
 pub use operations::native_call;
 pub use registry::SlashCommandRegistry;
-pub use session::{CallbackSessionBinding, PollingSlashActivity, ReplaceSession, RpcSlashSession};
+pub use session::{PollingSlashActivity, ReplaceSession, RpcSlashSession};
 pub use web::{BrowserSlashDialog, WebCommandFactory};
 pub use workspace::{
     NavigationFailure, WorkspaceNavigation, WorkspaceSessionsCommand, parse_creation_instant,

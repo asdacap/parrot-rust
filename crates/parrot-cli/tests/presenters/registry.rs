@@ -70,7 +70,7 @@ fn terminal(item: Presentation) -> String {
             columns: 32768,
             color: false,
             inline_diff: true,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap()

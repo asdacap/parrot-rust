@@ -21,11 +21,19 @@ use crate::attachments::uploader::AttachmentError;
 use crate::dispatch::basic_render::RenderStreamError;
 use crate::dispatch::prepared_stream::PreparedSessionStream;
 use crate::slash_sessions::{
-    CallbackApplicationExit, NavigationFailure, SlashCommandRegistry, SlashCommands, SlashFailure,
+    ExitApplication, NavigationFailure, SlashCommandRegistry, SlashCommands, SlashFailure,
     native_call,
 };
 use crate::slash_settings::{AuthServices, SettingsServices};
 use crate::terminal_dialogs::navigation::TerminalSessionController;
+
+pub(crate) fn cancelled() -> Status {
+    Status::cancelled("operation cancelled")
+}
+
+pub(crate) fn check(cancellation: &dyn Cancellation) -> Result<(), Status> {
+    cancellation.check().map_err(|_| cancelled())
+}
 
 #[derive(Debug)]
 pub enum ChatLoopFailure {
@@ -328,14 +336,16 @@ pub(crate) async fn reconcile_loop(
 }
 
 /// Builds the slash-command exit callback that cancels the loop lifetime.
-pub(crate) fn application_exit(lifetime: Arc<Signal>) -> Arc<CallbackApplicationExit> {
-    Arc::new(CallbackApplicationExit(Arc::new(move || {
+pub(crate) fn application_exit(lifetime: Arc<Signal>) -> ExitApplication {
+    Arc::new(move |c: &dyn Cancellation| {
         let lifetime = lifetime.clone();
         Box::pin(async move {
+            c.check()
+                .map_err(|_| tonic::Status::cancelled("operation cancelled"))?;
             lifetime.cancel();
             Ok(())
         })
-    })))
+    })
 }
 
 /// Builds the terminal slash-command registry the input loops rebuild per
@@ -343,7 +353,7 @@ pub(crate) fn application_exit(lifetime: Arc<Signal>) -> Arc<CallbackApplication
 pub(crate) fn terminal_commands(
     client: WebClient,
     auth: Arc<AuthServices>,
-    exit: Arc<CallbackApplicationExit>,
+    exit: ExitApplication,
     version: String,
     controller: Arc<TerminalSessionController>,
 ) -> SlashCommandRegistry {

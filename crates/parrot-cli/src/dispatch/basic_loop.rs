@@ -18,17 +18,17 @@ use parrot_domain::{
 use parrot_foundation::config::Configuration;
 use parrot_host::web::router::WebClient;
 use parrot_runtime::agent_turn::lifecycle::Signal;
-use tonic::{Code, Status};
+use tonic::Code;
 
 use crate::{
     attachments::uploader::AttachmentError,
     chat_loops::{
         Binding, ChatLoopFailure, Interaction, Interactions, SessionSnapshot, application_exit,
-        interrupt_loop, reconcile_loop, stop_binding, terminal_commands,
+        check, interrupt_loop, reconcile_loop, stop_binding, terminal_commands,
     },
     slash_sessions::{
-        CallbackSessionBinding, CommandEnvironment, NavigationFailure, PollingSlashActivity,
-        RpcSlashSession, SkillRefresh, SlashFailure, SlashSession, native_call,
+        CommandEnvironment, NavigationFailure, PollingSlashActivity, RpcSlashSession, SkillRefresh,
+        SlashFailure, SlashSession, native_call,
     },
     slash_settings::{AuthServices, model_alias},
     terminal_dialogs::{
@@ -48,7 +48,7 @@ use super::{
         BasicRenderer, RenderOutcome, RenderStreamError, render_turn, write_plan_report,
     },
     dialog::{BasicSlashDialog, DialogInput, SlashDialog},
-    interrupts::{CliInterruptListener, Interrupts},
+    interrupts::Interrupts,
     prepared_stream::PreparedSessionStream,
 };
 
@@ -415,10 +415,10 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             initial,
             shared.clone(),
         ));
-        self.interrupts.install(Arc::new(CliInterruptListener({
+        self.interrupts.install(Arc::new({
             let shared = shared.clone();
             move || shared.interrupt()
-        })));
+        }));
         let interrupts = self.interrupts.clone();
         let input_loop = self.input_loop(shared.clone(), controller.clone());
         let rendering = shared.render_loop();
@@ -942,7 +942,7 @@ fn make_session(
         snapshot.session.clone(),
         configuration,
         true,
-        Box::new(CallbackSessionBinding({
+        {
             let shared = shared.clone();
             Arc::new(move |session, c| {
                 let shared = shared.clone();
@@ -958,12 +958,8 @@ fn make_session(
                         })
                 })
             })
-        })),
+        },
     )
-}
-fn check(c: &dyn Cancellation) -> Result<(), Status> {
-    c.check()
-        .map_err(|error| Status::cancelled(error.to_string()))
 }
 fn is_cancelled(error: &ChatLoopFailure) -> bool {
     match error {
@@ -1098,6 +1094,7 @@ async fn complete_basic_question(
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use tonic::Status;
 
     fn pending() -> wire::PendingQuestion {
         wire::PendingQuestion {

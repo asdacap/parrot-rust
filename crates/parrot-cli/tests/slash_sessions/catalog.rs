@@ -8,9 +8,8 @@ use std::{
 };
 
 use parrot_cli::slash_sessions::{
-    CallbackSessionBinding, CommandEnvironment, ModeCommand, ModeSelection, ModesCommand,
-    RpcSlashSession, SessionsCommand, SkillRefresh, SlashActivity, SlashCommand, SlashFailure,
-    SlashSession, StatusCommand,
+    CommandEnvironment, ModeCommand, ModeSelection, ModesCommand, RpcSlashSession, SessionsCommand,
+    SkillRefresh, SlashActivity, SlashCommand, SlashFailure, SlashSession, StatusCommand,
 };
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation},
@@ -69,9 +68,7 @@ fn session(fixture: &mut Fixture) -> RpcSlashSession {
             .unwrap(),
         )),
         true,
-        Box::new(CallbackSessionBinding(Arc::new(|_, _| {
-            Box::pin(async { Ok(()) })
-        }))),
+        Arc::new(|_, _| Box::pin(async { Ok(()) })),
     )
 }
 fn refresh(trace: Arc<Mutex<Vec<String>>>, failure: bool) -> SkillRefresh {

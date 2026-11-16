@@ -4,6 +4,7 @@
 //! configuration. Workspace candidate roots are data, not filesystem grants.
 
 use super::arguments::ChatSessionStart;
+use crate::chat_loops::{cancelled, check};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation},
@@ -542,12 +543,6 @@ impl WebStartup for LocalChatStartup {
     }
 }
 
-fn cancelled() -> Status {
-    Status::cancelled("operation cancelled")
-}
-fn check(cancellation: &dyn Cancellation) -> Result<(), Status> {
-    cancellation.check().map_err(|_| cancelled())
-}
 fn attach_status(error: AttachError) -> Status {
     match error {
         AttachError::Rpc(status) => *status,

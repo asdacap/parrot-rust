@@ -1,15 +1,15 @@
 //! Source tool-report rendering over the delivered T71 frame interfaces.
 
-use std::{io, sync::Arc};
+use std::io;
 
 use parrot_domain::protocol::messages::parrot as wire;
 
 use crate::{
     terminal_frames::{
-        ItemIdentity, LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions,
-        LiveBufferRetention, ScrollbackItem, ScrollbackLayout, ScrollbackRenderOptions,
+        LiveBufferItem, LiveBufferRender, LiveBufferRenderOptions, LiveBufferRetention,
+        ScrollbackItem, ScrollbackLayout, ScrollbackRenderOptions,
     },
-    terminal_layout::{MarkdownRenderer, TerminalLine, TerminalStyle, TerminalText},
+    terminal_layout::{MarkdownRenderer, TerminalLine, TerminalStyle, TerminalText, style},
 };
 
 use super::model::{
@@ -259,9 +259,6 @@ pub(crate) fn display_label(value: &str) -> String {
         ToolDisplayText::truncate_utf8(&label, MAXIMUM_LABEL_BYTES - '…'.len_utf8()).0 + "…"
     }
 }
-fn style(color: bool, code: &str) -> TerminalStyle {
-    TerminalStyle::new(if color { code } else { "" })
-}
 fn muted(color: bool) -> TerminalStyle {
     style(color, "\x1b[38;5;245m")
 }
@@ -340,7 +337,7 @@ impl Presentation {
                         columns: options.columns,
                         color: options.color,
                         inline_diff: false,
-                        previous_packing: None,
+                        previous_item: None,
                     },
                     decoration,
                 )?,
@@ -392,10 +389,10 @@ impl Presentation {
                 diff,
             } => {
                 let previous = options
-                    .previous_packing
-                    .as_ref()
-                    .and_then(|identity| identity.downcast_ref::<DiffPacking>());
-                if previous.is_none_or(|previous| previous.tool_name != *tool_name) {
+                    .previous_item
+                    .as_deref()
+                    .and_then(|previous| previous.stream());
+                if previous.is_none_or(|previous| previous.0 != tool_name) {
                     return render_tool(
                         &ToolReport::terminal(
                             format!("{tool_name} {path}"),
@@ -407,7 +404,7 @@ impl Presentation {
                         decoration,
                     );
                 }
-                let heading = if previous.is_some_and(|previous| previous.path == *path) {
+                let heading = if previous.is_some_and(|previous| previous.1 == path) {
                     ""
                 } else {
                     path
@@ -423,11 +420,6 @@ impl Presentation {
             }
         }
     }
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct DiffPacking {
-    tool_name: String,
-    path: String,
 }
 impl ScrollbackItem for Presentation {
     fn is_completed(&self) -> bool {
@@ -445,24 +437,12 @@ impl ScrollbackItem for Presentation {
     fn ends_layout(&self) -> bool {
         !matches!(self, Self::Diff { .. })
     }
-    fn packing_identity(&self) -> Option<ItemIdentity> {
+    fn stream(&self) -> Option<(&str, &str)> {
         match self {
             Self::Diff {
                 tool_name, path, ..
-            } => Some(Arc::new(DiffPacking {
-                tool_name: tool_name.clone(),
-                path: path.clone(),
-            })),
+            } => Some((tool_name, path)),
             _ => None,
-        }
-    }
-    fn packs(&self, previous: Option<&ItemIdentity>) -> bool {
-        match (
-            self,
-            previous.and_then(|previous| previous.downcast_ref::<DiffPacking>()),
-        ) {
-            (Self::Diff { tool_name, .. }, Some(previous)) => *tool_name == previous.tool_name,
-            _ => false,
         }
     }
     fn continues(&self, _previous: &dyn ScrollbackItem) -> bool {

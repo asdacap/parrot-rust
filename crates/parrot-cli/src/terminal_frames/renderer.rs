@@ -4,9 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use super::surface::TerminalSurface;
 use super::{
-    ItemIdentity, LiveBufferCaret, LiveBufferItem, LiveBufferRenderOptions, LiveBufferRetention,
-    ScrollbackItem, ScrollbackLayout, ScrollbackRenderOptions, TerminalFrame, TerminalLine,
-    TerminalStyle,
+    LiveBufferCaret, LiveBufferItem, LiveBufferRenderOptions, LiveBufferRetention, ScrollbackItem,
+    ScrollbackLayout, ScrollbackRenderOptions, TerminalFrame, TerminalLine, TerminalStyle,
 };
 use crate::terminal_layout::TerminalText;
 
@@ -33,7 +32,7 @@ struct State<W> {
     committed_gap: bool,
     frame: Option<TerminalFrame>,
     last_layout: ScrollbackLayout,
-    last_packing: Option<ItemIdentity>,
+    last_item: Option<Arc<dyn ScrollbackItem>>,
     rendered_height: usize,
     rendered_width: usize,
 }
@@ -58,7 +57,7 @@ impl<W: Write + Send> TerminalFrameRenderer<W> {
                 committed_gap: false,
                 frame: None,
                 last_layout: ScrollbackLayout::Compact,
-                last_packing: None,
+                last_item: None,
                 rendered_height: 0,
                 rendered_width: 0,
             }),
@@ -122,7 +121,7 @@ impl<W: Write + Send> TerminalFrameRenderer<W> {
             columns: width,
             color: self.color,
             inline_diff: self.inline_diff,
-            previous_packing: None,
+            previous_item: None,
         };
         let lines = state.render_scrollback(&emitted, options)?;
         let available = if lines.is_empty() {
@@ -272,7 +271,7 @@ impl<W: Write> State<W> {
     ) -> io::Result<Vec<String>> {
         let mut output = Vec::new();
         for item in items {
-            options.previous_packing = self.last_packing.clone();
+            options.previous_item = self.last_item.clone();
             let rendered = item.render(options.clone())?;
             let layout = item.layout();
             let needs_gap = match layout {
@@ -286,7 +285,7 @@ impl<W: Write> State<W> {
             };
             if item.starts_layout()
                 && !rendered.is_empty()
-                && !item.packs(self.last_packing.as_ref())
+                && !item.packs(self.last_item.as_deref())
                 && needs_gap
             {
                 output.push(String::new());
@@ -296,7 +295,7 @@ impl<W: Write> State<W> {
                 self.committed = true;
                 self.committed_gap = false;
                 self.last_layout = layout;
-                self.last_packing = item.packing_identity();
+                self.last_item = Some(item.clone());
             }
             output.extend(rendered);
             if item.ends_layout() && layout != ScrollbackLayout::Compact && !self.committed_gap {

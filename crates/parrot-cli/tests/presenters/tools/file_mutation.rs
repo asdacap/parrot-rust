@@ -9,7 +9,7 @@ fn rows(item: &Presentation) -> Vec<String> {
             columns: 80,
             color: false,
             inline_diff: true,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap()

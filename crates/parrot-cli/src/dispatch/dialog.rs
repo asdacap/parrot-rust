@@ -10,6 +10,8 @@ use std::io::{self, BufRead, Write};
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use tonic::Status;
 
+use crate::chat_loops::check;
+
 /// The source option matches its ID exactly (labels are not aliases).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DialogOption {
@@ -415,12 +417,6 @@ impl<R: DialogInput, W: Write + Send, E: Write + Send> SlashDialog for BasicSlas
     ) -> BoxFuture<'a, Result<(), Status>> {
         work
     }
-}
-
-fn check(cancellation: &dyn Cancellation) -> Result<(), Status> {
-    cancellation
-        .check()
-        .map_err(|error| Status::cancelled(error.to_string()))
 }
 
 fn io_status(error: io::Error) -> Status {

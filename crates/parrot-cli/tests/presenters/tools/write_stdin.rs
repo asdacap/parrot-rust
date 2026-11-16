@@ -47,7 +47,7 @@ fn only_process_character_count_and_status_are_shown_after_redaction() {
             columns: 32768,
             color: false,
             inline_diff: true,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap()

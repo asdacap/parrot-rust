@@ -30,7 +30,7 @@ fn successful_assignment_output_preserves_full_instructions_and_acceptance_crite
                 columns,
                 color: false,
                 inline_diff: false,
-                previous_packing: None,
+                previous_item: None,
             },
         )
         .unwrap();
@@ -96,7 +96,7 @@ fn legacy_count_output_and_unsuccessful_outcomes_preserve_existing_rendering() {
             columns: 120,
             color: false,
             inline_diff: false,
-            previous_packing: None,
+            previous_item: None,
         };
         assert_eq!(
             ScrollbackItem::render(&actual, options.clone()).unwrap(),

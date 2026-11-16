@@ -42,7 +42,7 @@ fn terminal(
             columns,
             color: false,
             inline_diff: false,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap()

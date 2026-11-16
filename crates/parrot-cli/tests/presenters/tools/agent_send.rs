@@ -20,7 +20,7 @@ fn complete(call: &ToolCallPresentation, result: &str) -> (ToolReport, Vec<Strin
             columns: 512,
             color: false,
             inline_diff: false,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap();

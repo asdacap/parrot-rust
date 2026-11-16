@@ -12,8 +12,8 @@ use parrot_host::web::{
 use tonic::Status;
 
 use super::{
-    CallbackSessionBinding, CommandEnvironment, PollingSlashActivity, RpcSlashSession,
-    SkillRefresh, SlashActivity, SlashCommandRegistry, SlashCommands, SlashFailure, SlashSession,
+    CommandEnvironment, PollingSlashActivity, ReplaceSession, RpcSlashSession, SkillRefresh,
+    SlashActivity, SlashCommandRegistry, SlashCommands, SlashFailure, SlashSession,
 };
 use crate::{
     dispatch::dialog::{DialogOption, SlashDialog},
@@ -122,7 +122,7 @@ impl WebCommandFactory {
 impl WebSlashFactory for WebCommandFactory {
     fn create(&self, bindings: WebSlashBindings) -> Box<dyn WebSlashRegistry> {
         let dialog = bindings.dialog.clone();
-        let binding = CallbackSessionBinding(Arc::new(move |session, c| {
+        let binding: ReplaceSession = Arc::new(move |session, c| {
             let dialog = dialog.clone();
             Box::pin(async move {
                 dialog
@@ -130,13 +130,13 @@ impl WebSlashFactory for WebCommandFactory {
                     .await
                     .map_err(Into::into)
             })
-        }));
+        });
         let session = RpcSlashSession::new(
             bindings.client.clone(),
             bindings.initial_session,
             self.configuration.clone(),
             true,
-            Box::new(binding),
+            binding,
         );
         let registry = SlashCommands::create(
             SettingsServices {

@@ -20,7 +20,7 @@ fn status_output_preserves_all_lines_wrapping_and_sanitization() {
             columns,
             color: false,
             inline_diff: false,
-            previous_packing: None,
+            previous_item: None,
         };
         let item = StatusToolPresenter
             .present_terminal(&call, &terminal)

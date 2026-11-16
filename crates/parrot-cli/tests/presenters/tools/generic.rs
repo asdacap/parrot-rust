@@ -18,7 +18,7 @@ fn rendered(item: &Presentation) -> String {
             columns: 32_768,
             color: false,
             inline_diff: false,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap()

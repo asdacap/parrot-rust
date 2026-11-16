@@ -5,7 +5,7 @@ use std::{cmp::Ordering, io::Write};
 use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_storage::history_files::{SessionCatalog, SessionCatalogState};
 
-use super::{DispatchError, EXIT_SUCCESS};
+use super::{DispatchError, EXIT_SUCCESS, check};
 
 pub fn run(
     catalog: &SessionCatalog,
@@ -50,10 +50,6 @@ fn ordinal(left: Option<&str>, right: Option<&str>) -> Ordering {
         (None, Some(_)) => Ordering::Less,
         (Some(_), None) => Ordering::Greater,
     }
-}
-
-fn check(cancellation: &dyn Cancellation) -> Result<(), DispatchError> {
-    cancellation.check().map_err(|_| DispatchError::Cancelled)
 }
 
 #[cfg(test)]

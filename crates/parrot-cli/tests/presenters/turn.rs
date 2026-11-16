@@ -60,7 +60,7 @@ pub(crate) fn commits(items: &[Arc<dyn ScrollbackItem>], columns: usize) -> Stri
                 columns,
                 color: false,
                 inline_diff: true,
-                previous_packing: None,
+                previous_item: None,
             })
             .unwrap()
         })

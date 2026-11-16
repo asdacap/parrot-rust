@@ -97,7 +97,7 @@ fn commits_at(update: &ActivityUpdate, columns: usize) -> Vec<String> {
                 columns,
                 color: false,
                 inline_diff: false,
-                previous_packing: None,
+                previous_item: None,
             })
             .unwrap()
             .join("|")
@@ -925,7 +925,7 @@ fn reasoning_rows_pack_counted_summary_and_encrypted_entries_with_color() {
             columns: 160,
             color: true,
             inline_diff: false,
-            previous_packing: None,
+            previous_item: None,
         })
         .unwrap();
     assert_eq!(colored, [format!("\x1b[38;5;245m{expected}\x1b[0m")]);
@@ -1124,7 +1124,7 @@ fn task_rows_reserve_marker_indent_when_wrapping() {
                 columns: 14,
                 color: false,
                 inline_diff: false,
-                previous_packing: None,
+                previous_item: None,
             })
             .unwrap(),
         expected

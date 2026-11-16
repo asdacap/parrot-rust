@@ -107,14 +107,12 @@ pub fn initial() -> wire::UserSession {
 fn session(
     client: WebClient,
     configuration: Arc<Mutex<Configuration>>,
-    binding: Box<dyn SlashSessionBinding>,
+    binding: ReplaceSession,
 ) -> RpcSlashSession {
     RpcSlashSession::new(client, initial(), configuration, true, binding)
 }
-fn inert_binding() -> Box<dyn SlashSessionBinding> {
-    Box::new(CallbackSessionBinding(Arc::new(|_, _| {
-        Box::pin(async { Ok(()) })
-    })))
+fn inert_binding() -> ReplaceSession {
+    Arc::new(|_, _| Box::pin(async { Ok(()) }))
 }
 fn refresh_noop() -> SkillRefresh {
     Arc::new(|_| Box::pin(async { Ok(()) }))
@@ -326,11 +324,15 @@ async fn real_factory_registers_source_order_and_terminal_workspace_completion()
     let diagnostics = services.auth.diagnostics.clone();
     let exits = Arc::new(AtomicUsize::new(0));
     let observed = exits.clone();
-    let application: Arc<dyn ApplicationExit> =
-        Arc::new(CallbackApplicationExit(Arc::new(move || {
+    let application: ExitApplication = Arc::new(move |c: &dyn Cancellation| {
+        let observed = observed.clone();
+        Box::pin(async move {
+            c.check()
+                .map_err(|_| tonic::Status::cancelled("operation cancelled"))?;
             observed.fetch_add(1, Ordering::SeqCst);
-            Box::pin(async { Ok(()) })
-        })));
+            Ok(())
+        })
+    });
     let registry = SlashCommands::create(
         services.clone(),
         Some(application.clone()),
@@ -523,10 +525,10 @@ async fn clear_uses_configured_defaults_without_model_or_mode_prompts_before_new
     let mut session = session(
         fixture.client(),
         configuration,
-        Box::new(CallbackSessionBinding(Arc::new(move |session, _| {
+        Arc::new(move |session, _| {
             observed.lock().unwrap().push(session);
             Box::pin(async { Ok(()) })
-        }))),
+        }),
     );
     let registry = SlashCommands::create(
         SettingsServices {
@@ -827,9 +829,7 @@ async fn native_session_new_binding_failure_restores_complete_previous_session()
     let mut session = session(
         fixture.client(),
         configuration(&fixture.root),
-        Box::new(CallbackSessionBinding(Arc::new(|_, _| {
-            Box::pin(async { Err(SlashFailure::Command("bind failed".into())) })
-        }))),
+        Arc::new(|_, _| Box::pin(async { Err(SlashFailure::Command("bind failed".into())) })),
     );
     let previous = session.current_session().clone();
     let stop = Stop::new();
@@ -852,9 +852,7 @@ async fn dropping_pending_new_binding_restores_session_without_discarding_previo
     let mut session = session(
         fixture.client(),
         configuration(&fixture.root),
-        Box::new(CallbackSessionBinding(Arc::new(|_, _| {
-            Box::pin(std::future::pending())
-        }))),
+        Arc::new(|_, _| Box::pin(std::future::pending())),
     );
     let previous = session.current_session().clone();
     assert!(
@@ -986,14 +984,19 @@ async fn actual_skill_catalog_rpc_uses_selected_session_and_clears_on_failure_an
 async fn cancelled_exit_never_requests_shutdown_or_mutates_session() {
     let exits = Arc::new(AtomicUsize::new(0));
     let observed = exits.clone();
-    let application = CallbackApplicationExit(Arc::new(move || {
-        observed.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { Ok(()) })
-    }));
+    let application: ExitApplication = Arc::new(move |c: &dyn Cancellation| {
+        let observed = observed.clone();
+        Box::pin(async move {
+            c.check()
+                .map_err(|_| tonic::Status::cancelled("operation cancelled"))?;
+            observed.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        })
+    });
     let stop = Stop::new();
     stop.cancel();
     assert!(
-        matches!(application.exit(&stop).await,Err(SlashFailure::Rpc(status))if status.code()==Code::Cancelled)
+        matches!((application)(&stop).await,Err(SlashFailure::Rpc(status))if status.code()==Code::Cancelled)
     );
     assert_eq!(exits.load(Ordering::SeqCst), 0);
 }

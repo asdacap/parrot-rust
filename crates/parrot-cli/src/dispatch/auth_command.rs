@@ -16,6 +16,7 @@ use parrot_storage::diagnostics::{DiagnosticEvent, DiagnosticSeverity, FileDiagn
 use super::{
     DispatchError, EXIT_FAILURE, EXIT_SUCCESS, EXIT_USAGE,
     arguments::{AuthInput, AuthOptions, read_auth_input},
+    check,
 };
 
 /// Options have already passed the same command parser used by the entrypoint.
@@ -92,10 +93,6 @@ pub async fn run(
     check(cancellation)?;
     writeln!(output, "stored a credential for {}", options.provider)?;
     Ok(EXIT_SUCCESS)
-}
-
-fn check(cancellation: &dyn Cancellation) -> Result<(), DispatchError> {
-    cancellation.check().map_err(|_| DispatchError::Cancelled)
 }
 
 fn operation_failure<E: std::fmt::Display>(error: OperationError<E>) -> DispatchError {

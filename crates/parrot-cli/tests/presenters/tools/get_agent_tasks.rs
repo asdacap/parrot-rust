@@ -19,7 +19,7 @@ fn render(args: &str, result: &str, width: usize) -> Vec<String> {
             columns: width,
             color: false,
             inline_diff: false,
-            previous_packing: None,
+            previous_item: None,
         },
     )
     .unwrap()
