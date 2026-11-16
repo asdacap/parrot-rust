@@ -72,12 +72,20 @@ impl<S: AccessSnapshot> parrot_core::Provider for RuntimeProvider<'_, S> {
     {
         Box::pin(async move {
             let selection = self.binding.capture_selection().map_err(CoreError::from)?;
-            let status = self.status.bind(&selection);
+            let (query, prompt) = self.status.bind_identity(&selection);
+            let prompt = prompt.map_err(|error| {
+                TurnError::Context(crate::compaction::ContextError::Operation(
+                    error.to_string(),
+                ))
+            })?;
+            let factory = self.status.factory();
             let mut effects = RuntimeCompactionEffects {
                 state: self.state,
                 prompt: self.prompt,
                 selection: &selection.model,
-                status: status.as_ref(),
+                factory: factory.as_ref(),
+                query,
+                profile_prompt: prompt,
                 events: self.events,
             };
             self.compactor

@@ -1,6 +1,7 @@
 //! Awaited context epochs over the authoritative storage history.
 use super::effects::{NativeErrors, describe_error};
 use super::{CompactionError, CompactionObserver, ContextSize, ContextSnapshot};
+use crate::active_work::status::{StatusProvidersFactory, StatusQuery};
 use crate::prompt_assembly::{PromptError, SessionPrompt};
 use parrot_core::{
     ContextConfiguration as CoreContextConfiguration, NeverCancelled, PlanningError,
@@ -97,20 +98,6 @@ impl From<parrot_core::CompactionFailure> for ContextError {
 }
 pub type ContextResult<T> = Result<T, ContextError>;
 
-/// Offers the status slots for the bound agent, profile, and selection using the supplied context.
-pub trait ContextStatus: Send + Sync {
-    /// Offers the standing status slots for a safe point: source-computed
-    /// hashes in registry order, over the supplied usage snapshot. Defaults
-    /// to no slots, which steers nothing.
-    fn slots<'a>(
-        &'a self,
-        _context: &'a ContextSnapshot,
-        _cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
-        Box::pin(async { Ok(parrot_core::StatusOffering::default()) })
-    }
-}
-
 /// `emit` persists a new event; `publish_committed` requires its real transaction receipt.
 /// `publish` retains projection-only notices after their history effect commits;
 /// source status/reminder projection-only operations deliberately do not record the event.
@@ -140,7 +127,9 @@ pub struct EpochInput<'a> {
     pub agent_state: &'a mut parrot_core::AgentState,
     pub prompt: &'a SessionPrompt,
     pub sessions: &'a ProviderSessions,
-    pub status: &'a dyn ContextStatus,
+    pub factory: &'a StatusProvidersFactory,
+    pub query: StatusQuery,
+    pub profile_prompt: String,
     pub events: &'a dyn ContextEvents,
 }
 #[derive(Debug)]
@@ -181,14 +170,19 @@ impl ContextController {
         Ok(())
     }
 
+    /// Estimates the current epoch's input size without offering status, so
+    /// callers that only measure need no steering identity.
     pub async fn estimate_context(
         &mut self,
-        input: EpochInput<'_>,
+        selection: &ResolvedModelSelection,
+        tools: &[Tool],
+        conversation: &mut AgentConversation,
+        prompt: &SessionPrompt,
         cancellation: &dyn Cancellation,
     ) -> ContextResult<ContextSnapshot> {
-        self.ensure_epoch(input.prompt, cancellation).await?;
-        let instructions = input.prompt.build(input.selection, cancellation).await?;
-        self.estimate(&input, &instructions)
+        self.ensure_epoch(prompt, cancellation).await?;
+        let instructions = prompt.build(selection, cancellation).await?;
+        self.estimate(selection, tools, conversation, &instructions)
     }
 
     /// Explicit compaction bypasses the trigger, but not an unavailable input limit.
@@ -201,7 +195,12 @@ impl ContextController {
         cancellation.check().map_err(|_| ContextError::Cancelled)?;
         self.ensure_epoch(input.prompt, cancellation).await?;
         let instructions = input.prompt.build(input.selection, cancellation).await?;
-        let before = self.estimate(&input, &instructions)?;
+        let before = self.estimate(
+            input.selection,
+            input.tools,
+            input.conversation,
+            &instructions,
+        )?;
         if before.input_limit <= 0 {
             return Ok(ContextCompactionResult {
                 context: before,
@@ -212,7 +211,12 @@ impl ContextController {
             .compact_epoch(reborrow(&mut input), target, cancellation)
             .await?;
         Ok(ContextCompactionResult {
-            context: self.estimate(&input, &compacted.instructions)?,
+            context: self.estimate(
+                input.selection,
+                input.tools,
+                input.conversation,
+                &compacted.instructions,
+            )?,
             reduced: compacted.reduced,
         })
     }
@@ -400,22 +404,18 @@ impl ContextController {
 
     fn estimate(
         &self,
-        input: &EpochInput<'_>,
+        selection: &ResolvedModelSelection,
+        tools: &[Tool],
+        conversation: &AgentConversation,
         instructions: &str,
     ) -> ContextResult<ContextSnapshot> {
-        let configuration = self
-            .compactor
-            .capture_context_configuration(input.selection);
-        let messages = provider_messages(input.conversation)
+        let configuration = self.compactor.capture_context_configuration(selection);
+        let messages = provider_messages(conversation)
             .into_iter()
             .map(Into::into)
             .collect::<Vec<_>>();
-        let estimated = estimate_input_tokens(
-            &input.selection.canonical_model,
-            instructions,
-            input.tools,
-            &messages,
-        )?;
+        let estimated =
+            estimate_input_tokens(&selection.canonical_model, instructions, tools, &messages)?;
         Ok(ContextSnapshot::estimate(estimated, &configuration))
     }
     fn event(&self) -> ContextResult<Event> {
@@ -487,8 +487,13 @@ impl parrot_provider::compaction::CompactionEffects for EpochEffects<'_> {
     ) -> BoxFuture<'a, Result<parrot_core::StatusOffering, parrot_core::Error>> {
         Box::pin(async move {
             self.input
-                .status
-                .slots(&context, cancellation)
+                .factory
+                .steer(
+                    &self.input.query,
+                    &self.input.profile_prompt,
+                    &context,
+                    cancellation,
+                )
                 .await
                 .map_err(|error| self.capture_error(error))
         })
@@ -580,7 +585,9 @@ fn reborrow<'a>(input: &'a mut EpochInput<'_>) -> EpochInput<'a> {
         agent_state: &mut *input.agent_state,
         prompt: input.prompt,
         sessions: input.sessions,
-        status: input.status,
+        factory: input.factory,
+        query: input.query.clone(),
+        profile_prompt: input.profile_prompt.clone(),
         events: input.events,
     }
 }

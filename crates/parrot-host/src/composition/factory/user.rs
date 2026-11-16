@@ -2096,14 +2096,19 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
                 let profile = status
                     .profile_prompt(&observed.selection)
                     .map_err(internal)?;
-                let statistics = session.backend().usage().capture();
+                let statistics = core
+                    .services
+                    .statistics
+                    .get_agent_statistics(&scope.identity().session.session_id);
                 let full = status
-                    .runtime
-                    .observe_live(
+                    .factory
+                    .live(
                         &query,
                         &profile,
-                        observed.context,
-                        statistics,
+                        Arc::new(super::scope::CapturedSnapshotSource {
+                            context: observed.context,
+                        }),
+                        statistics.as_ref(),
                         cancellation.as_ref(),
                     )
                     .await

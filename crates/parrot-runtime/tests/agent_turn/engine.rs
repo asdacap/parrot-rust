@@ -305,9 +305,7 @@ impl Fixture {
             }),
             skills: Arc::new(Skills(trace.clone())),
             context: self.controller(),
-            status: overrides
-                .status
-                .unwrap_or_else(|| Arc::new(Status(trace.clone()))),
+            status: overrides.status.unwrap_or_else(|| Arc::new(Status)),
             completion_sources: callbacks,
             templates,
             reminders,
@@ -649,39 +647,91 @@ impl TurnSkills for Skills {
         })
     }
 }
-struct Status(Arc<Trace>);
-impl ContextStatus for Status {}
+struct Status;
 /// Leaves steering inert by default so exact-history assertions stay unchanged.
-struct OfferingStatus(Arc<Trace>);
-impl ContextStatus for OfferingStatus {
-    fn slots<'a>(
+struct TraceStatusProvider(Arc<Trace>);
+impl parrot_runtime::active_work::status::StatusProvider for TraceStatusProvider {
+    fn key(&self) -> &str {
+        "runtime:trace"
+    }
+    fn should_show(&self, _: parrot_runtime::active_work::status::StatusTarget) -> bool {
+        true
+    }
+    fn observe<'a>(
         &'a self,
-        _: &'a ContextSnapshot,
+        _: &'a parrot_runtime::active_work::status::StatusQuery,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
+    ) -> BoxFuture<
+        'a,
+        parrot_runtime::active_work::status::StatusResult<
+            parrot_runtime::active_work::status::StatusObservation,
+        >,
+    > {
         Box::pin(async move {
             self.0.push("status");
-            Ok([(
-                parrot_core::StatusKey::new("trace"),
-                parrot_core::StatusOffer {
-                    hash: "initial".into(),
-                    text: "actual status".into(),
-                    is_auto_update: false,
-                },
-            )]
-            .into_iter()
-            .collect())
+            Ok(
+                parrot_runtime::active_work::status::StatusObservation::available_text(
+                    "actual status",
+                )
+                .with_identity("initial", false),
+            )
         })
     }
 }
+struct OfferingStatus(Arc<Trace>);
 impl TurnStatus<Security> for OfferingStatus {
-    fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
-        Arc::new(OfferingStatus(self.0.clone()))
+    fn factory(&self) -> Arc<parrot_runtime::active_work::status::StatusProvidersFactory> {
+        Arc::new(
+            parrot_runtime::active_work::status::StatusProvidersFactory::new(
+                templates(),
+                vec![Arc::new(TraceStatusProvider(self.0.clone()))],
+            )
+            .unwrap(),
+        )
+    }
+    fn bind_identity(
+        &self,
+        _: &TurnSelection<Security>,
+    ) -> (
+        parrot_runtime::active_work::status::StatusQuery,
+        parrot_runtime::plan_mode::ModeResult<String>,
+    ) {
+        (
+            parrot_runtime::active_work::status::StatusQuery {
+                session_id: String::new(),
+                parent_session_id: String::new(),
+                parent_session_name: String::new(),
+                profile: "test".into(),
+                requested_model: String::new(),
+            },
+            Ok(String::new()),
+        )
     }
 }
 impl TurnStatus<Security> for Status {
-    fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
-        Arc::new(Status(self.0.clone()))
+    fn factory(&self) -> Arc<parrot_runtime::active_work::status::StatusProvidersFactory> {
+        Arc::new(
+            parrot_runtime::active_work::status::StatusProvidersFactory::new(templates(), vec![])
+                .unwrap(),
+        )
+    }
+    fn bind_identity(
+        &self,
+        _: &TurnSelection<Security>,
+    ) -> (
+        parrot_runtime::active_work::status::StatusQuery,
+        parrot_runtime::plan_mode::ModeResult<String>,
+    ) {
+        (
+            parrot_runtime::active_work::status::StatusQuery {
+                session_id: String::new(),
+                parent_session_id: String::new(),
+                parent_session_name: String::new(),
+                profile: "test".into(),
+                requested_model: String::new(),
+            },
+            Ok(String::new()),
+        )
     }
 }
 #[derive(Default)]

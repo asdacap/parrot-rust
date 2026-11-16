@@ -411,23 +411,27 @@ impl Default for Status {
         }
     }
 }
-impl ContextStatus for Status {
-    fn slots<'a>(
+impl parrot_runtime::active_work::status::StatusProvider for Status {
+    fn key(&self) -> &str {
+        "test:fixture"
+    }
+    fn should_show(&self, _: parrot_runtime::active_work::status::StatusTarget) -> bool {
+        true
+    }
+    fn observe<'a>(
         &'a self,
-        _: &'a ContextSnapshot,
+        _: &'a parrot_runtime::active_work::status::StatusQuery,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
-        Box::pin(async {
-            Ok([(
-                parrot_core::StatusKey::new("fixture"),
-                parrot_core::StatusOffer {
-                    hash: "fixture-hash".into(),
-                    text: self.fitted.clone(),
-                    is_auto_update: false,
-                },
-            )]
-            .into_iter()
-            .collect())
+    ) -> BoxFuture<
+        'a,
+        parrot_runtime::active_work::status::StatusResult<
+            parrot_runtime::active_work::status::StatusObservation,
+        >,
+    > {
+        Box::pin(async move {
+            use parrot_runtime::active_work::status::StatusObservation;
+            Ok(StatusObservation::available_text(self.fitted.clone())
+                .with_identity("fixture-hash", false))
         })
     }
 }
@@ -569,7 +573,7 @@ fn input<'a>(
     conversation: &'a mut AgentConversation,
     prompt: &'a mut EpochPrompt,
     sessions: &'a ProviderSessions,
-    status: &'a Status,
+    factory: &'a parrot_runtime::active_work::status::StatusProvidersFactory,
     events: &'a Events,
 ) -> EpochInput<'a> {
     EpochInput {
@@ -579,7 +583,15 @@ fn input<'a>(
         agent_state: &mut prompt.agent_state,
         prompt: &prompt.prompt,
         sessions,
-        status,
+        factory,
+        query: parrot_runtime::active_work::status::StatusQuery {
+            session_id: "agent".into(),
+            parent_session_id: String::new(),
+            parent_session_name: String::new(),
+            profile: "build".into(),
+            requested_model: "provider/model".into(),
+        },
+        profile_prompt: String::new(),
         events,
     }
 }
@@ -598,7 +610,11 @@ async fn actual_checkpoint_compaction_reopen_and_full_fork_preserve_tool_causali
     let selection = provider.selection(10000);
     let sessions = ProviderSessions::new();
     let mut prompt = EpochPrompt::default();
-    let status = Status::default();
+    let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+        templates(),
+        vec![Arc::new(Status::default())],
+    )
+    .unwrap();
     let events = Events::new(history.clone());
     let mut controller = fixture.controller(history.clone(), 90);
     let result = controller
@@ -608,7 +624,7 @@ async fn actual_checkpoint_compaction_reopen_and_full_fork_preserve_tool_causali
                 &mut conversation,
                 &mut prompt,
                 &sessions,
-                &status,
+                &factory,
                 &events,
             ),
             None,
@@ -639,7 +655,16 @@ async fn actual_checkpoint_compaction_reopen_and_full_fork_preserve_tool_causali
         conversation.messages()[0].content(),
         "Summary of the earlier conversation:\nsummary"
     );
-    assert_eq!(conversation.messages()[1].content(), status.fitted);
+    assert!(
+        conversation.messages()[1]
+            .content()
+            .contains("Context: 1% used")
+    );
+    assert!(
+        conversation.messages()[1]
+            .content()
+            .ends_with("\n\nfitted status")
+    );
     let messages = conversation.messages();
     let tools: Vec<_> = messages
         .iter()
@@ -720,7 +745,11 @@ async fn second_compaction_uses_snapshot_once_and_advances_only_after_new_histor
         .agent_state
         .last_request_statistic
         .observe_usage("scripted/model", 100, 1000);
-    let status = Status::default();
+    let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+        templates(),
+        vec![Arc::new(Status::default())],
+    )
+    .unwrap();
     let events = Events::new(history.clone());
     let mut controller = fixture.controller(history.clone(), 90);
     assert!(
@@ -731,7 +760,7 @@ async fn second_compaction_uses_snapshot_once_and_advances_only_after_new_histor
                     &mut conversation,
                     &mut prompt,
                     &sessions,
-                    &status,
+                    &factory,
                     &events
                 ),
                 None,
@@ -760,7 +789,7 @@ async fn second_compaction_uses_snapshot_once_and_advances_only_after_new_histor
                     &mut conversation,
                     &mut prompt,
                     &sessions,
-                    &status,
+                    &factory,
                     &events
                 ),
                 None,
@@ -789,7 +818,7 @@ async fn second_compaction_uses_snapshot_once_and_advances_only_after_new_histor
                     &mut conversation,
                     &mut prompt,
                     &sessions,
-                    &status,
+                    &factory,
                     &events
                 ),
                 None,
@@ -837,7 +866,11 @@ async fn terminal_publication_failure_preserves_snapshot_without_reporting_faile
     let sessions = ProviderSessions::new();
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
     let mut prompt = EpochPrompt::default();
-    let status = Status::default();
+    let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+        templates(),
+        vec![Arc::new(Status::default())],
+    )
+    .unwrap();
     let events = Events::new(history.clone());
     events.fail_finished.store(true, Ordering::Relaxed);
     prompt
@@ -852,7 +885,7 @@ async fn terminal_publication_failure_preserves_snapshot_without_reporting_faile
                 &mut conversation,
                 &mut prompt,
                 &sessions,
-                &status,
+                &factory,
                 &events,
             ),
             None,

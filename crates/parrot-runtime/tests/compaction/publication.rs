@@ -14,7 +14,11 @@ async fn saving_publication_failure_leaves_history_unchanged_and_reports_failure
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
     let before = conversation.messages().to_vec();
     let prompt = EpochPrompt::default();
-    let status = Status::default();
+    let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+        crate::context::templates(),
+        vec![Arc::new(Status::default())],
+    )
+    .unwrap();
     let events = Events::new(history.clone());
     events.fail_saving.store(true, Ordering::Relaxed);
     let mut controller = fixture.controller(history, 90);
@@ -28,7 +32,15 @@ async fn saving_publication_failure_leaves_history_unchanged_and_reports_failure
                 agent_state: &mut parrot_core::AgentState::default(),
                 prompt: &prompt.prompt,
                 sessions: &sessions,
-                status: &status,
+                factory: &factory,
+                query: parrot_runtime::active_work::status::StatusQuery {
+                    session_id: "agent".into(),
+                    parent_session_id: String::new(),
+                    parent_session_name: String::new(),
+                    profile: "build".into(),
+                    requested_model: "provider/model".into(),
+                },
+                profile_prompt: String::new(),
                 events: &events,
             },
             None,
@@ -87,7 +99,11 @@ async fn committed_status_publication_requires_true_success_not_sqlite_failure()
     let mut conversation = AgentConversation::new(history.clone()).await.unwrap();
     let before = conversation.messages().to_vec();
     let prompt = EpochPrompt::default();
-    let status: Box<dyn ContextStatus> = Box::new(Status::default());
+    let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+        crate::context::templates(),
+        vec![Arc::new(Status::default())],
+    )
+    .unwrap();
     let events = Events::new(history.clone());
     let mut controller = fixture.controller(history.clone(), 90);
     let error = controller
@@ -99,7 +115,15 @@ async fn committed_status_publication_requires_true_success_not_sqlite_failure()
                 agent_state: &mut parrot_core::AgentState::default(),
                 prompt: &prompt.prompt,
                 sessions: &sessions,
-                status: status.as_ref(),
+                factory: &factory,
+                query: parrot_runtime::active_work::status::StatusQuery {
+                    session_id: "agent".into(),
+                    parent_session_id: String::new(),
+                    parent_session_name: String::new(),
+                    profile: "build".into(),
+                    requested_model: "provider/model".into(),
+                },
+                profile_prompt: String::new(),
                 events: &events,
             },
             None,
@@ -167,7 +191,11 @@ async fn committed_status_publication_failure_preserves_replacement_without_rese
         .last_request_statistic
         .observe_usage("scripted/model", 100, 1000);
     let calibration = prompt.agent_state.last_request_statistic.clone();
-    let status = Status::default();
+    let factory = parrot_runtime::active_work::status::StatusProvidersFactory::new(
+        crate::context::templates(),
+        vec![Arc::new(Status::default())],
+    )
+    .unwrap();
     let events = Events::new(history.clone());
     events.fail_status.store(true, Ordering::Relaxed);
     let mut controller = fixture.controller(history.clone(), 90);
@@ -178,7 +206,7 @@ async fn committed_status_publication_failure_preserves_replacement_without_rese
                 &mut conversation,
                 &mut prompt,
                 &sessions,
-                &status,
+                &factory,
                 &events,
             ),
             None,

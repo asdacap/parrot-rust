@@ -300,7 +300,7 @@ async fn usage_runtime(
         }),
         skills: Arc::new(Skills(trace.clone())),
         context: fixture.controller(),
-        status: Arc::new(Status(trace.clone())),
+        status: Arc::new(Status),
         completion_sources: vec![],
         templates,
         reminders,

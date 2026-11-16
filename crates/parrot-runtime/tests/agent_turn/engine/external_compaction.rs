@@ -110,7 +110,12 @@ async fn external_compact_waits_for_active_provider_before_starting_real_compact
         .unwrap();
     let committed = events
         .iter()
-        .position(|event| event.has_agent_notice() && event.agent_notice().kind == "status")
+        .enumerate()
+        .filter(|(index, event)| {
+            *index > saving && event.has_agent_notice() && event.agent_notice().kind == "status"
+        })
+        .map(|(index, _)| index)
+        .next()
         .unwrap();
     assert!(started < saving && saving < committed && committed < finished);
     runtime.close().await;

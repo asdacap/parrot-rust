@@ -194,7 +194,13 @@ pub async fn complete(scope: &Arc<Scope<Security>>) -> Vec<Task> {
     .await
 }
 pub fn prompt(request: &Request) -> &str {
-    request.messages.last().expect("provider input").content()
+    request
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.role == parrot_provider::sessions::Role::User)
+        .expect("provider input")
+        .content()
 }
 pub fn conversation(request: &Request) -> String {
     request

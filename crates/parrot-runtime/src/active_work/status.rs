@@ -6,7 +6,8 @@ use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation, Clock, OperationError},
     values::{
         accounting::{
-            AgentSessionStatisticsSnapshot, AgentUsageKey, AgentUsageSnapshot, AgentUsageTotals,
+            AgentSessionStatistics, AgentSessionStatisticsSnapshot, AgentUsageKey,
+            AgentUsageSnapshot, AgentUsageTotals,
         },
         context::ContextSnapshot,
     },
@@ -94,7 +95,7 @@ impl StatusObservation {
     }
 }
 
-/// One offered status slot from a registry observation, in registry key order.
+/// One offered status slot from a StatusProviders observation, in key order.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StatusSlot {
     pub key: String,
@@ -115,7 +116,8 @@ pub enum StatusTarget {
 }
 
 pub trait StatusProvider: Send + Sync {
-    /// Names the slot for the registry. Keys must be unique within a registry.
+    /// Names the slot for the collection. Keys must be unique within a
+    /// collection.
     fn key(&self) -> &str;
     /// Declares whether this slot is offered for the requested surface. This
     /// decides membership only; the rendering is identical wherever shown.
@@ -128,11 +130,20 @@ pub trait StatusProvider: Send + Sync {
     ) -> BoxFuture<'a, StatusResult<StatusObservation>>;
 }
 
-pub struct StatusRegistry {
+/// A collection of StatusProviders bound to one target. Creation evaluates
+/// each provider's should_show against that target, so the collection offers
+/// exactly the slots that declared membership for it.
+pub struct StatusProviders {
     providers: Vec<Arc<dyn StatusProvider>>,
 }
-impl StatusRegistry {
-    pub fn new(mut providers: Vec<Arc<dyn StatusProvider>>) -> Result<Self, StatusError> {
+impl StatusProviders {
+    /// Creates the collection bound to the target. Providers are shared Arc
+    /// handles, so one set can back the collections of several targets.
+    pub fn new(
+        target: StatusTarget,
+        mut providers: Vec<Arc<dyn StatusProvider>>,
+    ) -> Result<Self, StatusError> {
+        providers.retain(|provider| provider.should_show(target));
         let mut keys = std::collections::HashSet::new();
         for provider in &providers {
             validate_key(provider.key(), "provider")?;
@@ -144,18 +155,16 @@ impl StatusRegistry {
         Ok(Self { providers })
     }
 
-    /// Observes every provider whose target offers the requested surface once
-    /// and joins the slot texts in registry key order.
+    /// Observes every member once and joins the slot texts in key order.
     pub async fn observe(
         &self,
         query: &StatusQuery,
         profile: Option<&dyn StatusProvider>,
         additional: &[&dyn StatusProvider],
-        target: StatusTarget,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
         let slots = self
-            .observe_slots(query, profile, additional, target, cancellation)
+            .observe_slots(query, profile, additional, cancellation)
             .await?;
         Ok(slots
             .iter()
@@ -164,23 +173,17 @@ impl StatusRegistry {
             .join("\n\n"))
     }
 
-    /// Observes every provider whose target offers the requested surface once
-    /// and returns the resulting slots in registry key order. The join poll
-    /// semantics match `observe` above.
+    /// Observes every member once and returns the resulting slots in key
+    /// order. The join poll semantics match `observe` above.
     pub async fn observe_slots(
         &self,
         query: &StatusQuery,
         profile: Option<&dyn StatusProvider>,
         additional: &[&dyn StatusProvider],
-        target: StatusTarget,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<Vec<StatusSlot>> {
-        let mut providers: Vec<&dyn StatusProvider> = self
-            .providers
-            .iter()
-            .map(Arc::as_ref)
-            .filter(|provider| provider.should_show(target))
-            .collect();
+        let mut providers: Vec<&dyn StatusProvider> =
+            self.providers.iter().map(Arc::as_ref).collect();
         if let Some(extra) = profile {
             validate_key(extra.key(), "profile provider").map_err(OperationError::Failed)?;
             if providers
@@ -684,146 +687,125 @@ pub fn format_tokens(count: i64) -> String {
     format!("{}{suffix}", number.strip_suffix(".0").unwrap_or(&number))
 }
 
-/// Captures belong to the calling real session/selection; no last-observation
-/// state is retained here. Each call receives its own immutable context/usage.
-pub(crate) struct RuntimeStatus {
+/// Produces the context snapshot for one observation on demand. Each surface
+/// wraps its own estimate path: the steering source estimates from the
+/// session's usage recorder and the compactor configuration, and the view
+/// sources estimate from the live conversation.
+pub trait ContextSnapshotSource: Send + Sync {
+    /// Produces the snapshot for one observation.
+    fn snapshot<'a>(
+        &'a self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<ContextSnapshot, StatusError>>;
+}
+
+/// Composes the status collections for one agent session and binds the
+/// steering seam. The host holds it; the per-surface collections share the
+/// provider set, and each surface supplies its own snapshot source.
+pub struct StatusProvidersFactory {
     templates: Arc<PromptTemplateCatalog>,
-    registry: Arc<StatusRegistry>,
+    steer: Arc<StatusProviders>,
+    tool: Arc<StatusProviders>,
+    live: Arc<StatusProviders>,
 }
-/// The status provider one agent session holds. Composes the engine at
-/// creation, binds the steering seam per turn, and renders the tool and
-/// live surfaces. The steering seam captures the query and the profile prompt
-/// at creation; the usage snapshot is supplied per slots call afterwards.
-pub struct RuntimeStatusProvider {
-    engine: RuntimeStatus,
-}
-impl RuntimeStatusProvider {
-    /// Composes the status engine for one agent session. This is the
-    /// composition factory entry; every other caller receives a composed
-    /// provider.
+impl StatusProvidersFactory {
+    /// Composes the factory for one agent session. This is the composition
+    /// factory entry; every other caller receives a composed factory. The
+    /// caller decides the provider set, including any built-in sections.
     pub fn new(
         templates: Arc<PromptTemplateCatalog>,
-        clock: Arc<dyn Clock>,
-        started_at: SystemTime,
         providers: Vec<Arc<dyn StatusProvider>>,
     ) -> Result<Self, StatusError> {
         Ok(Self {
-            engine: RuntimeStatus::new(templates, clock, started_at, providers)?,
+            templates: templates.clone(),
+            steer: Arc::new(StatusProviders::new(
+                StatusTarget::Steer,
+                providers.clone(),
+            )?),
+            tool: Arc::new(StatusProviders::new(StatusTarget::Tool, providers.clone())?),
+            live: Arc::new(StatusProviders::new(StatusTarget::Live, providers)?),
         })
     }
-    /// Binds the steering seam for one turn's identity. The usage snapshot is
-    /// supplied per slots call.
-    pub fn create(
-        &self,
-        query: StatusQuery,
-        profile_prompt: String,
-    ) -> Arc<dyn crate::compaction::ContextStatus> {
-        Arc::new(BoundContextStatus {
-            registry: self.engine.registry.clone(),
-            templates: self.engine.templates.clone(),
-            query,
-            profile_prompt,
-        })
-    }
-    pub async fn observe_runtime(
-        &self,
-        query: &StatusQuery,
-        context: ContextSnapshot,
-        cancellation: &dyn Cancellation,
-    ) -> StatusResult<String> {
-        self.engine
-            .observe_runtime(query, context, cancellation)
-            .await
-    }
-    pub async fn observe_statistics(
-        &self,
-        query: &StatusQuery,
-        statistics: AgentSessionStatisticsSnapshot,
-        cancellation: &dyn Cancellation,
-    ) -> StatusResult<String> {
-        self.engine
-            .observe_statistics(query, statistics, cancellation)
-            .await
-    }
-    pub async fn observe_live(
+    /// Renders the steering offering for one safe point over the supplied
+    /// snapshot. Callers invoke this wherever the context has changed.
+    pub async fn steer(
         &self,
         query: &StatusQuery,
         profile_prompt: &str,
-        context: ContextSnapshot,
+        context: &ContextSnapshot,
+        cancellation: &dyn Cancellation,
+    ) -> crate::compaction::ContextResult<parrot_core::StatusOffering> {
+        let profile = ProfileStatusProvider {
+            key: format!("profile:{}", query.profile),
+            prompt: profile_prompt.to_owned(),
+        };
+        let context_provider = ContextStatusProvider {
+            snapshot: context.clone(),
+            templates: self.templates.clone(),
+        };
+        self.steer
+            .observe_slots(query, Some(&profile), &[&context_provider], cancellation)
+            .await
+            .map_err(context_error)
+            .map(|slots| {
+                slots
+                    .into_iter()
+                    .map(|slot| {
+                        (
+                            parrot_core::StatusKey::new(slot.key),
+                            parrot_core::StatusOffer {
+                                hash: slot.hash,
+                                text: slot.text,
+                                is_auto_update: slot.is_auto_update,
+                            },
+                        )
+                    })
+                    .collect()
+            })
+    }
+    /// Renders the statistics section for the tool surface.
+    pub async fn statistics(
+        &self,
+        query: &StatusQuery,
         statistics: AgentSessionStatisticsSnapshot,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
-        self.engine
-            .observe_live(query, profile_prompt, context, statistics, cancellation)
+        let statistics_provider = StatisticsStatusProvider {
+            snapshot: statistics,
+            templates: self.templates.clone(),
+        };
+        StatusProviders::new(StatusTarget::Tool, vec![])
+            .map_err(OperationError::Failed)?
+            .observe(query, None, &[&statistics_provider], cancellation)
             .await
     }
-}
-
-impl RuntimeStatus {
-    pub(crate) fn new(
-        templates: Arc<PromptTemplateCatalog>,
-        clock: Arc<dyn Clock>,
-        started_at: SystemTime,
-        providers: Vec<Arc<dyn StatusProvider>>,
-    ) -> Result<Self, StatusError> {
-        let mut all: Vec<Arc<dyn StatusProvider>> = vec![
-            Arc::new(GeneratedTimeStatusProvider {
-                clock,
-                started_at,
-                templates: templates.clone(),
-            }),
-            Arc::new(SelectionStatusProvider {
-                templates: templates.clone(),
-            }),
-        ];
-        all.extend(providers);
-        Ok(Self {
-            templates,
-            registry: Arc::new(StatusRegistry::new(all)?),
-        })
-    }
-    pub(crate) async fn observe_runtime(
+    /// Renders the tool status over the source's snapshot.
+    pub async fn tool(
         &self,
         query: &StatusQuery,
-        context: ContextSnapshot,
+        source: Arc<dyn ContextSnapshotSource>,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
+        let context = Self::snapshot_from(&source, cancellation).await?;
         let context_provider = ContextStatusProvider {
             snapshot: context,
             templates: self.templates.clone(),
         };
-        self.registry
-            .observe(
-                query,
-                None,
-                &[&context_provider],
-                StatusTarget::Tool,
-                cancellation,
-            )
+        self.tool
+            .observe(query, None, &[&context_provider], cancellation)
             .await
     }
-    pub(crate) async fn observe_statistics(
-        &self,
-        query: &StatusQuery,
-        statistics: AgentSessionStatisticsSnapshot,
-        cancellation: &dyn Cancellation,
-    ) -> StatusResult<String> {
-        StatusRegistry::new(vec![Arc::new(StatisticsStatusProvider {
-            snapshot: statistics,
-            templates: self.templates.clone(),
-        })])
-        .map_err(OperationError::Failed)?
-        .observe(query, None, &[], StatusTarget::Tool, cancellation)
-        .await
-    }
-    pub(crate) async fn observe_live(
+    /// Renders the live status over the source's snapshot and a statistics
+    /// capture taken per observation.
+    pub async fn live(
         &self,
         query: &StatusQuery,
         profile_prompt: &str,
-        context: ContextSnapshot,
-        statistics: AgentSessionStatisticsSnapshot,
+        source: Arc<dyn ContextSnapshotSource>,
+        statistics: &AgentSessionStatistics,
         cancellation: &dyn Cancellation,
     ) -> StatusResult<String> {
+        let context = Self::snapshot_from(&source, cancellation).await?;
         let profile = ProfileStatusProvider {
             key: format!("profile:{}", query.profile),
             prompt: profile_prompt.to_owned(),
@@ -833,73 +815,29 @@ impl RuntimeStatus {
             templates: self.templates.clone(),
         };
         let statistics_provider = StatisticsStatusProvider {
-            snapshot: statistics,
+            snapshot: statistics.capture(),
             templates: self.templates.clone(),
         };
-        self.registry
+        self.live
             .observe(
                 query,
                 Some(&profile),
                 &[&context_provider, &statistics_provider],
-                StatusTarget::Live,
                 cancellation,
             )
             .await
     }
-}
-
-struct BoundContextStatus {
-    registry: Arc<StatusRegistry>,
-    templates: Arc<PromptTemplateCatalog>,
-    query: StatusQuery,
-    profile_prompt: String,
-}
-impl crate::compaction::ContextStatus for BoundContextStatus {
-    /// Offers the steering slots for the bound identity at one safe point:
-    /// the profile prompt and the context usage rendered from the supplied
-    /// snapshot, joined with the Steer registry providers.
-    fn slots<'a>(
-        &'a self,
-        context: &'a ContextSnapshot,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, crate::compaction::ContextResult<parrot_core::StatusOffering>> {
-        Box::pin(async move {
-            let profile = ProfileStatusProvider {
-                key: format!("profile:{}", self.query.profile),
-                prompt: self.profile_prompt.clone(),
-            };
-            let context_provider = ContextStatusProvider {
-                snapshot: context.clone(),
-                templates: self.templates.clone(),
-            };
-            self.registry
-                .observe_slots(
-                    &self.query,
-                    Some(&profile),
-                    &[&context_provider],
-                    StatusTarget::Steer,
-                    cancellation,
-                )
-                .await
-                .map_err(context_error)
-                .map(|slots| {
-                    slots
-                        .into_iter()
-                        .map(|slot| {
-                            (
-                                parrot_core::StatusKey::new(slot.key),
-                                parrot_core::StatusOffer {
-                                    hash: slot.hash,
-                                    text: slot.text,
-                                    is_auto_update: slot.is_auto_update,
-                                },
-                            )
-                        })
-                        .collect()
-                })
-        })
+    async fn snapshot_from(
+        source: &Arc<dyn ContextSnapshotSource>,
+        cancellation: &dyn Cancellation,
+    ) -> StatusResult<ContextSnapshot> {
+        source
+            .snapshot(cancellation)
+            .await
+            .map_err(OperationError::Failed)
     }
 }
+
 fn context_error(error: OperationError<StatusError>) -> crate::compaction::ContextError {
     use crate::compaction::ContextError;
     match error {

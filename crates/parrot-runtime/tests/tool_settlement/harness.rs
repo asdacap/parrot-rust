@@ -188,7 +188,6 @@ impl Harness {
             state: &self.runtime_state,
             history: &self.events.0,
             prompt: &self.prompt,
-            status: &Status,
             sessions: &self.sessions,
             usage: &self.usage,
             capture,

@@ -14,7 +14,7 @@ use crate::{
     active_work::exit_reminders::{ExitReminders, ReminderError},
     compaction::{
         CompactionObserver, ContextController, ContextError, ContextEvents, ContextResult,
-        EpochInput, provider_message,
+        provider_message,
     },
     event_broker::{BrokerError, EventBroker},
     prompt_assembly::{SessionPrompt, SystemPrompt},
@@ -268,7 +268,13 @@ where
             .restore_agent_state(self.agent_state.as_ref())
             .await?;
         let definitions = self.snapshot(selection)?.definitions().to_vec();
-        let status = self.status.bind(selection);
+        let (query, prompt) = self.status.bind_identity(selection);
+        let prompt = prompt.map_err(|error| {
+            TurnError::Context(crate::compaction::ContextError::Operation(
+                error.to_string(),
+            ))
+        })?;
+        let factory = self.status.factory();
         let events = ContextEmitter::new(
             &self.history,
             self.publisher.as_ref(),
@@ -281,16 +287,10 @@ where
             state
                 .context
                 .estimate_context(
-                    EpochInput {
-                        selection: &selection.model,
-                        tools: &definitions,
-                        conversation: &mut state.conversation,
-                        agent_state: &mut state.agent_state,
-                        prompt: &self.prompt,
-                        sessions: &self.sessions,
-                        status: status.as_ref(),
-                        events: &events,
-                    },
+                    &selection.model,
+                    &definitions,
+                    &mut state.conversation,
+                    &self.prompt,
                     cancellation,
                 )
                 .await
@@ -306,7 +306,9 @@ where
             state: &self.state,
             prompt: &self.prompt,
             selection: &selection.model,
-            status: status.as_ref(),
+            factory: &factory,
+            query: query.clone(),
+            profile_prompt: prompt.clone(),
             events,
         };
         let replacement = self

@@ -239,7 +239,6 @@ async fn retained_compact_invocation_only_acknowledges_without_mutating_context(
                 context: &mut harness.context,
                 prompt: &harness.prompt,
                 sessions: &harness.sessions,
-                status: &Status,
                 events: &harness.events,
                 usage: &harness.usage,
             },
@@ -306,10 +305,25 @@ async fn invalid_compact_target_returns_tool_error_without_compaction() {
 // The retained status tool must use the activity+context registry, not the full
 // observation (generated time, selection and profile) used for prompt injection.
 use parrot_domain::values::accounting::AgentSessionStatistics;
-use parrot_runtime::active_work::status::{RuntimeStatusProvider, StatusError, StatusQuery};
+use parrot_runtime::active_work::status::{
+    ContextSnapshotSource, GeneratedTimeStatusProvider, SelectionStatusProvider, StatusError,
+    StatusProvidersFactory, StatusQuery,
+};
+/// Serves an already captured snapshot to one status observation.
+struct CapturedStatusSnapshotSource {
+    context: ContextSnapshot,
+}
+impl ContextSnapshotSource for CapturedStatusSnapshotSource {
+    fn snapshot<'a>(
+        &'a self,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<ContextSnapshot, StatusError>> {
+        Box::pin(async move { Ok(self.context.clone()) })
+    }
+}
 struct StatusAncillary {
     other: Ancillary,
-    runtime: Arc<RuntimeStatusProvider>,
+    runtime: Arc<StatusProvidersFactory>,
     statistics: AgentSessionStatistics,
     observed: Mutex<Vec<ContextSnapshot>>,
     prompt_probe: Option<Arc<SessionPrompt>>,
@@ -378,7 +392,13 @@ impl SessionServices for StatusAncillary {
             }
             self.observed.lock().unwrap().push(snapshot.clone());
             self.runtime
-                .observe_runtime(&status_query(selection), snapshot, cancellation)
+                .tool(
+                    &status_query(selection),
+                    Arc::new(CapturedStatusSnapshotSource {
+                        context: snapshot.clone(),
+                    }),
+                    cancellation,
+                )
                 .await
                 .map_err(status_error)
         })
@@ -390,7 +410,7 @@ impl SessionServices for StatusAncillary {
     ) -> BoxFuture<'a, Result<String, OperationError<Failure>>> {
         Box::pin(async move {
             self.runtime
-                .observe_statistics(
+                .statistics(
                     &status_query(selection),
                     self.statistics.capture(),
                     cancellation,
@@ -412,11 +432,18 @@ fn status_bridge_with_prompt(prompt_probe: Option<Arc<SessionPrompt>>) -> Status
     let ancillary = Arc::new(StatusAncillary {
         other: Ancillary,
         runtime: Arc::new(
-            RuntimeStatusProvider::new(
+            StatusProvidersFactory::new(
                 templates(),
-                Arc::new(TestClock),
-                SystemTime::UNIX_EPOCH,
-                vec![],
+                vec![
+                    Arc::new(GeneratedTimeStatusProvider {
+                        clock: Arc::new(TestClock),
+                        started_at: SystemTime::UNIX_EPOCH,
+                        templates: templates(),
+                    }),
+                    Arc::new(SelectionStatusProvider {
+                        templates: templates(),
+                    }),
+                ],
             )
             .unwrap(),
         ),
@@ -470,7 +497,7 @@ async fn retained_status_tool_uses_actual_activity_context_statistics_and_same_i
     let query = status_query(&selection);
     let statistics = ancillary
         .runtime
-        .observe_statistics(&query, ancillary.statistics.capture(), &NeverCancelled)
+        .statistics(&query, ancillary.statistics.capture(), &NeverCancelled)
         .await
         .unwrap();
     let requests = provider.requests.lock().unwrap().clone();
@@ -481,7 +508,13 @@ async fn retained_status_tool_uses_actual_activity_context_statistics_and_same_i
     ] {
         let runtime = ancillary
             .runtime
-            .observe_runtime(&query, snapshot.clone(), &NeverCancelled)
+            .tool(
+                &query,
+                Arc::new(CapturedStatusSnapshotSource {
+                    context: snapshot.clone(),
+                }),
+                &NeverCancelled,
+            )
             .await
             .unwrap();
         let expected = templates()
@@ -499,11 +532,13 @@ async fn retained_status_tool_uses_actual_activity_context_statistics_and_same_i
         assert_eq!(result.content(), expected);
         let full = ancillary
             .runtime
-            .observe_live(
+            .live(
                 &query,
                 "PROFILE MUST NOT APPEAR IN STATUS TOOL",
-                snapshot.clone(),
-                Default::default(),
+                Arc::new(CapturedStatusSnapshotSource {
+                    context: snapshot.clone(),
+                }),
+                &ancillary.statistics,
                 &NeverCancelled,
             )
             .await
@@ -575,7 +610,6 @@ async fn retained_status_observes_current_borrowed_history_tools_and_epoch_witho
                     context: &mut harness.context,
                     prompt: &prompt,
                     sessions: &harness.sessions,
-                    status: &Status,
                     events: &harness.events,
                     usage: &harness.usage,
                 },
@@ -587,16 +621,10 @@ async fn retained_status_observes_current_borrowed_history_tools_and_epoch_witho
         let actual = harness
             .context
             .estimate_context(
-                EpochInput {
-                    selection: &harness.selection.model,
-                    tools: &definitions,
-                    conversation: &mut harness.conversation,
-                    agent_state: &mut harness.agent_state,
-                    prompt: &prompt,
-                    sessions: &harness.sessions,
-                    status: &Status,
-                    events: &harness.events,
-                },
+                &harness.selection.model,
+                &definitions,
+                &mut harness.conversation,
+                &prompt,
                 &NeverCancelled,
             )
             .await
@@ -647,7 +675,6 @@ async fn retained_status_precancel_does_not_estimate_and_external_selection_has_
                     context: &mut harness.context,
                     prompt: &harness.prompt,
                     sessions: &harness.sessions,
-                    status: &Status,
                     events: &harness.events,
                     usage: &harness.usage,
                 },

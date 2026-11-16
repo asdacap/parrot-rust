@@ -106,7 +106,7 @@ impl EdgeRuntime {
             }),
             skills: Arc::new(Skills(trace.clone())),
             context: fixture.controller(),
-            status: Arc::new(Status(trace.clone())),
+            status: Arc::new(Status),
             completion_sources: vec![],
             templates,
             reminders,
@@ -321,6 +321,10 @@ async fn length_completion_without_tools_preserves_exact_partial_assistant_histo
             .collect::<Vec<_>>(),
         [
             (MessageRole::User, "prompt".to_owned()),
+            (
+                MessageRole::System,
+                "Context: 0% used (0 estimated tokens / 100k limit); reminders every 10%; automatic compaction at 95%.".to_owned()
+            ),
             (MessageRole::Assistant, "partial answer".to_owned())
         ]
     );

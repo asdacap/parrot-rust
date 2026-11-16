@@ -13,7 +13,7 @@ pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) completion_sources: &'a [Arc<dyn CompletionStateSource>],
     pub(super) templates: &'a PromptTemplateCatalog,
     pub(super) publisher: &'a Publisher,
-    pub(super) usage: &'a SessionUsageRecorder,
+    pub(super) usage: Arc<SessionUsageRecorder>,
     pub(super) compactor: &'a parrot_provider::compaction::Compactor,
     pub(super) event_id: &'a Arc<dyn Fn() -> String + Send + Sync>,
     pub(super) events: ContextEmitter<'a>,
@@ -39,7 +39,7 @@ impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
             completion_sources: &backend.completion_sources,
             templates: &backend.templates,
             publisher: backend.publisher.as_ref(),
-            usage: &backend.usage,
+            usage: backend.usage.clone(),
             compactor: &backend.compactor,
             event_id: &backend.event_id,
             events: ContextEmitter::new(
@@ -334,14 +334,19 @@ where
             let configuration = self
                 .compactor
                 .capture_context_configuration(&selection.model);
+            let (query, prompt) = self.status.bind_identity(&selection);
+            let prompt = prompt.map_err(|error| {
+                TurnError::Context(crate::compaction::ContextError::Operation(
+                    error.to_string(),
+                ))
+            })?;
             let statistics = self.usage.capture();
             let context = CoreContextSnapshot::estimate(statistics.context_size, &configuration);
-            let status = self.status.bind(&selection);
-            let slots = status
-                .slots(&context, self.cancellation)
+            self.status
+                .factory()
+                .steer(&query, &prompt, &context, self.cancellation)
                 .await
-                .map_err(TurnError::Context)?;
-            Ok(slots)
+                .map_err(TurnError::Context)
         })
     }
 

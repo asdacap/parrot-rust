@@ -3,37 +3,36 @@
 use super::*;
 use parrot_domain::contracts::async_ops::{Cancelled, Clock};
 use parrot_provider::compaction::{CompactionSettings, Compactor};
-use parrot_runtime::active_work::status::RuntimeStatusProvider;
 use parrot_runtime::active_work::status::StatusQuery;
 use std::time::{Instant, SystemTime};
 
 /// Reproduces the original first-turn initial status injection for these
 /// budget fixtures: one offered static slot steers the assembly once.
-struct InitialStatus(Arc<Trace>);
-impl ContextStatus for InitialStatus {
-    fn slots<'a>(
-        &'a self,
-        _: &'a ContextSnapshot,
-        _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
-        Box::pin(async move {
-            self.0.push("status");
-            Ok([(
-                parrot_core::StatusKey::new("mode"),
-                parrot_core::StatusOffer {
-                    hash: "initial".into(),
-                    text: "actual status".into(),
-                    is_auto_update: false,
-                },
-            )]
-            .into_iter()
-            .collect())
-        })
-    }
-}
+struct InitialStatus;
 impl TurnStatus<Security> for InitialStatus {
-    fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
-        Arc::new(InitialStatus(self.0.clone()))
+    fn factory(&self) -> Arc<parrot_runtime::active_work::status::StatusProvidersFactory> {
+        Arc::new(
+            parrot_runtime::active_work::status::StatusProvidersFactory::new(templates(), vec![])
+                .unwrap(),
+        )
+    }
+    fn bind_identity(
+        &self,
+        _: &TurnSelection<Security>,
+    ) -> (
+        parrot_runtime::active_work::status::StatusQuery,
+        parrot_runtime::plan_mode::ModeResult<String>,
+    ) {
+        (
+            parrot_runtime::active_work::status::StatusQuery {
+                session_id: String::new(),
+                parent_session_id: String::new(),
+                parent_session_name: String::new(),
+                profile: "test".into(),
+                requested_model: String::new(),
+            },
+            Ok(String::new()),
+        )
     }
 }
 /// The model budget inputs shared by every budget fixture composition.
@@ -63,23 +62,43 @@ impl Clock for FixedStatusClock {
 }
 /// Offers the real runtime status slots, including the context reminder, so the
 /// end-to-end test exercises the actual band hash through the engine estimator.
-struct RealReminderStatus(Arc<RuntimeStatusProvider>);
+struct RealReminderStatus(Arc<parrot_runtime::active_work::status::StatusProvidersFactory>);
 impl RealReminderStatus {
     fn new() -> Arc<Self> {
         Arc::new(Self(Arc::new(
-            RuntimeStatusProvider::new(
+            parrot_runtime::active_work::status::StatusProvidersFactory::new(
                 templates(),
-                Arc::new(FixedStatusClock),
-                SystemTime::UNIX_EPOCH,
-                vec![],
+                vec![
+                    Arc::new(
+                        parrot_runtime::active_work::status::GeneratedTimeStatusProvider {
+                            clock: Arc::new(FixedStatusClock),
+                            started_at: SystemTime::UNIX_EPOCH,
+                            templates: templates(),
+                        },
+                    ),
+                    Arc::new(
+                        parrot_runtime::active_work::status::SelectionStatusProvider {
+                            templates: templates(),
+                        },
+                    ),
+                ],
             )
             .unwrap(),
         )))
     }
 }
 impl TurnStatus<Security> for RealReminderStatus {
-    fn bind(&self, selection: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
-        self.0.create(
+    fn factory(&self) -> Arc<parrot_runtime::active_work::status::StatusProvidersFactory> {
+        self.0.clone()
+    }
+    fn bind_identity(
+        &self,
+        selection: &TurnSelection<Security>,
+    ) -> (
+        parrot_runtime::active_work::status::StatusQuery,
+        parrot_runtime::plan_mode::ModeResult<String>,
+    ) {
+        (
             StatusQuery {
                 session_id: "agent".into(),
                 parent_session_id: String::new(),
@@ -87,7 +106,7 @@ impl TurnStatus<Security> for RealReminderStatus {
                 profile: selection.profile.id.clone(),
                 requested_model: "scripted/model".into(),
             },
-            "Standing profile instructions".into(),
+            Ok("Standing profile instructions".into()),
         )
     }
 }
@@ -151,8 +170,8 @@ impl BudgetRuntime {
         profile: TurnProfile,
         tools: Arc<BudgetTools>,
     ) -> Self {
-        Self::compose(fixture, provider, limits, profile, tools, |trace| {
-            Arc::new(InitialStatus(trace.clone()))
+        Self::compose(fixture, provider, limits, profile, tools, |_| {
+            Arc::new(InitialStatus)
         })
         .await
     }

@@ -377,22 +377,82 @@ impl ReentrantStatus {
         Ok(())
     }
 }
-impl ContextStatus for ReentrantStatus {
-    fn slots<'a>(
+/// Drives the reentrant live observation from the steering surface, proving
+/// the prompt gate stays unlocked while status is offered.
+struct ReentrantStatusProvider(Arc<ReentrantStatus>);
+impl parrot_runtime::active_work::status::StatusProvider for ReentrantStatusProvider {
+    fn key(&self) -> &str {
+        "runtime:reentrant"
+    }
+    fn should_show(&self, _: parrot_runtime::active_work::status::StatusTarget) -> bool {
+        true
+    }
+    fn observe<'a>(
         &'a self,
-        _context: &'a ContextSnapshot,
+        _: &'a parrot_runtime::active_work::status::StatusQuery,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<parrot_core::StatusOffering>> {
+    ) -> BoxFuture<
+        'a,
+        parrot_runtime::active_work::status::StatusResult<
+            parrot_runtime::active_work::status::StatusObservation,
+        >,
+    > {
         Box::pin(async move {
-            self.capture(cancellation).await?;
-            Ok(parrot_core::StatusOffering::default())
+            self.0.capture(cancellation).await.map_err(|error| {
+                OperationError::Failed(parrot_runtime::active_work::status::StatusError::new(
+                    error.to_string(),
+                ))
+            })?;
+            Ok(
+                parrot_runtime::active_work::status::StatusObservation::available_text(
+                    "reentrant status",
+                ),
+            )
         })
     }
 }
 struct ReentrantBinding(Arc<ReentrantStatus>);
 impl TurnStatus<Security> for ReentrantBinding {
-    fn bind(&self, _: &TurnSelection<Security>) -> Arc<dyn ContextStatus> {
-        self.0.clone()
+    fn factory(&self) -> Arc<parrot_runtime::active_work::status::StatusProvidersFactory> {
+        let environment = std::collections::BTreeMap::from([
+            ("HOME".to_owned(), "/tmp/t47/home".to_owned()),
+            ("XDG_CONFIG_HOME".to_owned(), "/tmp/t47/config".to_owned()),
+            ("XDG_STATE_HOME".to_owned(), "/tmp/t47/state".to_owned()),
+            ("XDG_DATA_HOME".to_owned(), "/tmp/t47/data".to_owned()),
+            ("WORKDIR".to_owned(), "/tmp/t47/work".to_owned()),
+        ]);
+        Arc::new(
+            parrot_runtime::active_work::status::StatusProvidersFactory::new(
+                Arc::new(
+                    parrot_foundation::template_catalog::PromptTemplateCatalog::from_content(
+                        "",
+                        &environment,
+                    )
+                    .unwrap()
+                    .1,
+                ),
+                vec![Arc::new(ReentrantStatusProvider(self.0.clone()))],
+            )
+            .unwrap(),
+        )
+    }
+    fn bind_identity(
+        &self,
+        _: &TurnSelection<Security>,
+    ) -> (
+        parrot_runtime::active_work::status::StatusQuery,
+        parrot_runtime::plan_mode::ModeResult<String>,
+    ) {
+        (
+            parrot_runtime::active_work::status::StatusQuery {
+                session_id: String::new(),
+                parent_session_id: String::new(),
+                parent_session_name: String::new(),
+                profile: "test".into(),
+                requested_model: String::new(),
+            },
+            Ok(String::new()),
+        )
     }
 }
 

@@ -56,7 +56,8 @@ use parrot_runtime::{
         progress::{AgentProgress, ProgressBlocker, ProgressSnapshotPublisher},
         runtime_tree::{RegistryRuntimeTreeSource, RuntimeTreeStatusProvider},
         status::{
-            RuntimeStatusProvider, StatusError, StatusObservation, StatusProvider, StatusQuery,
+            ContextSnapshotSource, GeneratedTimeStatusProvider, SelectionStatusProvider,
+            StatusError, StatusObservation, StatusProvider, StatusProvidersFactory, StatusQuery,
             StatusResult, StatusTarget,
         },
     },
@@ -71,7 +72,7 @@ use parrot_runtime::{
         AgentIdentity, ChildError, ChildResult, Operation, PreparedScope, Scope, ScopeFactory,
         ScopeParts, ServiceRegistration, SessionAdapter, SnapshotPublisher,
     },
-    compaction::{ContextController, ContextError, ContextResult, ContextStatus, StatusOffering},
+    compaction::ContextController,
     interactions::{AgentAskIdentity, AgentAsks},
     plan_mode::{ModeResult, UserSessionModes},
     prompt_assembly::{
@@ -741,7 +742,7 @@ impl<S: RestrictableAccessSnapshot + 'static> SelectionSource<S> for RoutedSelec
 }
 
 pub struct ScopedTurnStatus<S: RestrictableAccessSnapshot + 'static> {
-    pub runtime: Arc<RuntimeStatusProvider>,
+    pub factory: Arc<StatusProvidersFactory>,
     identity: Arc<AgentIdentity>,
     modes: Arc<UserSessionModes<S>>,
     configuration: Arc<Configuration>,
@@ -774,7 +775,10 @@ impl<S: RestrictableAccessSnapshot + 'static> ScopedTurnStatus<S> {
     }
 }
 impl<S: RestrictableAccessSnapshot + 'static> TurnStatus<S> for ScopedTurnStatus<S> {
-    fn bind(&self, selection: &TurnSelection<S>) -> Arc<dyn ContextStatus> {
+    fn factory(&self) -> Arc<StatusProvidersFactory> {
+        self.factory.clone()
+    }
+    fn bind_identity(&self, selection: &TurnSelection<S>) -> (StatusQuery, ModeResult<String>) {
         let prompt = if self.modes.has_workflow(&selection.profile.id) {
             self.modes
                 .resolve_profile(&selection.profile.id)
@@ -785,35 +789,20 @@ impl<S: RestrictableAccessSnapshot + 'static> TurnStatus<S> for ScopedTurnStatus
         } else {
             self.profile_prompt(selection)
         };
-        Arc::new(ScopedModeStatus {
-            runtime: self.runtime.clone(),
-            query: self.query(selection),
-            prompt,
-        })
+        (self.query(selection), prompt)
     }
 }
 
-struct ScopedModeStatus {
-    runtime: Arc<RuntimeStatusProvider>,
-    query: StatusQuery,
-    prompt: ModeResult<String>,
+/// Serves an already captured snapshot to one status observation.
+pub(crate) struct CapturedSnapshotSource {
+    pub(crate) context: ContextSnapshot,
 }
-impl ScopedModeStatus {
-    fn context(&self) -> ContextResult<Arc<dyn ContextStatus>> {
-        let prompt = self
-            .prompt
-            .as_ref()
-            .map_err(|error| ContextError::Operation(error.to_string()))?;
-        Ok(self.runtime.create(self.query.clone(), prompt.clone()))
-    }
-}
-impl ContextStatus for ScopedModeStatus {
-    fn slots<'a>(
+impl ContextSnapshotSource for CapturedSnapshotSource {
+    fn snapshot<'a>(
         &'a self,
-        context: &'a ContextSnapshot,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, ContextResult<StatusOffering>> {
-        Box::pin(async move { self.context()?.slots(context, cancellation).await })
+        _cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<ContextSnapshot, StatusError>> {
+        Box::pin(async move { Ok(self.context.clone()) })
     }
 }
 
@@ -910,10 +899,15 @@ impl<S: RestrictableAccessSnapshot + 'static> SessionServices for ScopedSessionS
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, OperationResult<String, Failure>> {
         Box::pin(async move {
+            let query = self.status.query(&selection.turn);
             let context = selection.estimate_context(cancellation).await?;
             self.status
-                .runtime
-                .observe_runtime(&self.status.query(&selection.turn), context, cancellation)
+                .factory
+                .tool(
+                    &query,
+                    Arc::new(CapturedSnapshotSource { context }),
+                    cancellation,
+                )
                 .await
                 .map_err(|error| match error {
                     OperationError::Cancelled => OperationError::Cancelled,
@@ -929,8 +923,8 @@ impl<S: RestrictableAccessSnapshot + 'static> SessionServices for ScopedSessionS
         Box::pin(async move {
             let session = self.link.session().map_err(operation_failure)?;
             self.status
-                .runtime
-                .observe_statistics(
+                .factory
+                .statistics(
                     &self.status.query(&selection.turn),
                     session.backend().usage().capture(),
                     cancellation,
@@ -1346,12 +1340,18 @@ where
                     ],
                     templates: self.user.templates.clone(),
                 });
-                let runtime_status = Arc::new(
-                    RuntimeStatusProvider::new(
+                let status_factory = Arc::new(
+                    StatusProvidersFactory::new(
                         self.user.templates.clone(),
-                        self.config.clock.clone(),
-                        self.user.started_at,
                         vec![
+                            Arc::new(GeneratedTimeStatusProvider {
+                                clock: self.config.clock.clone(),
+                                started_at: self.user.started_at,
+                                templates: self.user.templates.clone(),
+                            }),
+                            Arc::new(SelectionStatusProvider {
+                                templates: self.user.templates.clone(),
+                            }),
                             Arc::new(RuntimeTreeStatusProvider {
                                 source: Arc::new(ScopedTree(Arc::downgrade(&registry))),
                                 templates: self.user.templates.clone(),
@@ -1365,7 +1365,7 @@ where
                     .map_err(child)?,
                 );
                 let status = Arc::new(ScopedTurnStatus {
-                    runtime: runtime_status.clone(),
+                    factory: status_factory.clone(),
                     identity: identity.clone(),
                     modes: if identity.session.parent_session_id.is_empty() {
                         self.user.modes.clone()
@@ -1687,7 +1687,7 @@ where
                         ServiceRegistration::new::<dyn ProcessStatusSource>(process_status),
                         ServiceRegistration::new(agents.clone()),
                         ServiceRegistration::new(asks.clone()),
-                        ServiceRegistration::new(runtime_status),
+                        ServiceRegistration::new(status_factory),
                         ServiceRegistration::new(status),
                         ServiceRegistration::new(invocation_services),
                         ServiceRegistration::new(binding),

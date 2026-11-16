@@ -20,7 +20,6 @@ pub(super) struct RuntimeTools<'a, S: AccessSnapshot + 'static> {
     pub(super) state: &'a Mutex<State>,
     pub(super) history: &'a AgentHistoryView,
     pub(super) prompt: &'a SessionPrompt,
-    pub(super) status: &'a dyn TurnStatus<S>,
     pub(super) sessions: &'a ProviderSessions,
     pub(super) usage: &'a SessionUsageRecorder,
     pub(super) capture: &'a dyn SelectionSource<S>,
@@ -93,7 +92,6 @@ where
                     tools.normal.clone()
                 }
             };
-            let status = self.status.bind(&selection);
             let mut guard = self.state.lock().await;
             let state = &mut *guard;
             if request.starts_batch {
@@ -106,7 +104,6 @@ where
                 context: &mut state.context,
                 prompt: self.prompt,
                 sessions: self.sessions,
-                status: status.as_ref(),
                 events: self.events.as_ref(),
                 usage: self.usage,
             };
@@ -265,7 +262,6 @@ fn reborrow<'a>(resources: &'a mut TurnResources<'_>) -> TurnResources<'a> {
         context: resources.context,
         prompt: resources.prompt,
         sessions: resources.sessions,
-        status: resources.status,
         events: resources.events,
         usage: resources.usage,
     }

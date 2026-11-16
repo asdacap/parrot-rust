@@ -1925,9 +1925,9 @@ async fn actual_drain_and_external_observer_share_live_routing_and_same_prepared
         .get_service::<parrot_host::composition::factory::scope::ScopedTurnStatus<Security>>()
         .unwrap();
     let runtime_status = root
-        .get_service::<parrot_runtime::active_work::status::RuntimeStatusProvider>()
+        .get_service::<parrot_runtime::active_work::status::StatusProvidersFactory>()
         .unwrap();
-    assert!(Arc::ptr_eq(&status.runtime, &runtime_status));
+    assert!(Arc::ptr_eq(&status.factory, &runtime_status));
     assert_same_policy(&prepared.capture().unwrap(), &updated);
     assert_eq!(
         prepared.capture().unwrap().model.canonical_model.selector(),
@@ -2035,7 +2035,7 @@ async fn interactive_sessions_offer_tools_that_wait_for_the_user() {
 async fn actual_hosted_status_renders_live_context_and_one_statistics_capture() {
     use parrot_domain::values::accounting::{AgentUsageIncrement, AgentUsageKey, AgentUsageTotals};
     use parrot_host::composition::factory::scope::ScopedTurnStatus;
-    use parrot_runtime::active_work::status::RuntimeStatusProvider;
+    use parrot_runtime::active_work::status::StatusProvidersFactory;
 
     let fixture = Fixture::new(false, false).await;
     let hosted = bounded(fixture.open_with_selector("live")).await.unwrap();
@@ -2059,8 +2059,8 @@ async fn actual_hosted_status_renders_live_context_and_one_statistics_capture() 
     assert_eq!(current.model.routing_snapshot.revision, 1);
     let status = root.get_service::<ScopedTurnStatus<Security>>().unwrap();
     assert!(Arc::ptr_eq(
-        &status.runtime,
-        &root.get_service::<RuntimeStatusProvider>().unwrap()
+        &status.factory,
+        &root.get_service::<StatusProvidersFactory>().unwrap()
     ));
     let query = status.query(&current);
     let profile = status.profile_prompt(&current).unwrap();
@@ -2071,13 +2071,9 @@ async fn actual_hosted_status_renders_live_context_and_one_statistics_capture() 
         .get_agent_statistics(&root.identity().session.session_id);
     let before = session.backend().usage().capture();
     assert_eq!(before, statistics.capture());
-    let before_text = bounded(
-        status
-            .runtime
-            .observe_statistics(&query, before, &NeverCancelled),
-    )
-    .await
-    .unwrap();
+    let before_text = bounded(status.factory.statistics(&query, before, &NeverCancelled))
+        .await
+        .unwrap();
     fixture.prompt_selections.lock().unwrap().clear();
     let selections = fixture.prompt_selections.clone();
     let hook_statistics = statistics.clone();
@@ -2114,13 +2110,9 @@ async fn actual_hosted_status_renders_live_context_and_one_statistics_capture() 
     let after = session.backend().usage().capture();
     assert_eq!(after, statistics.capture());
     assert_eq!(after.own.totals.input_tokens, 971);
-    let after_text = bounded(
-        status
-            .runtime
-            .observe_statistics(&query, after, &NeverCancelled),
-    )
-    .await
-    .unwrap();
+    let after_text = bounded(status.factory.statistics(&query, after, &NeverCancelled))
+        .await
+        .unwrap();
     assert_ne!(before_text, after_text);
     assert!(rendered.contains(&before_text));
     assert!(!rendered.contains(&after_text));

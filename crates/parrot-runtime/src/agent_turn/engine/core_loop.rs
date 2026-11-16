@@ -162,7 +162,6 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                 state: &backend.state,
                 history: &backend.history,
                 prompt: &backend.prompt,
-                status: backend.status.as_ref(),
                 sessions: &backend.sessions,
                 usage: &backend.usage,
                 capture: backend.selection.as_ref(),
