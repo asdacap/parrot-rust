@@ -28,27 +28,45 @@ cross-version locking or simultaneous same-workspace safety guarantee**.
 
 ## Benchmark results
 
-| Full 113-task run | Reasoning effort | Passed | Failed tests | Errors | Pass rate | Input tokens including cached | Cached input tokens | Output tokens | Advertised prices per million, input / cache / output | Estimated cost |
-|---|---|---:|---:|---:|---:|---:|---:|---:|---|---:|
-| DeepSeek V4.1 Flash 1017 through DeepInfra FP8 | High | 69 | 41 | 3 | 61.1% | 1,078,262,923 | 1,048,038,016 | 12,672,433 | $0.20 / $0.006 / $0.60 | $19.94 |
-| GLM-5.3-Flash through CoreWeave NVFP4 | High | 70 | 40 | 3 | 61.9% | 1,408,835,276 | 1,369,923,904 | 8,769,033 | $0.12 / $0.02 / $0.38 | $35.40 |
-| MiMo V2.6 Flash through Cohere FP8 | High requested, semantics unverified | 60 | 49 | 4 | 53.1% | 1,932,926,436 | 1,774,678,240 | 15,817,603 | $0.14 / $0.003 / $0.28 | $31.91 |
+| 113-task cohort with error-only reruns | Reasoning effort | Passed | Failed tests | Errors | Pass rate | Cumulative input tokens including cached | Cumulative cached input tokens | Cumulative output tokens | Estimated cumulative cost |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| DeepSeek V4.1 Flash 1017 through DeepInfra FP8 | High | 69 | 43 | 1 | 61.1% | 1.114B | 1.083B (97.25%) | 12.98M | $31.27 peak; $15.63 off-peak |
+| GLM-5.3-Flash through CoreWeave NVFP4 | High | 71 | 42 | 0 | 62.8% | 1.432B | 1.392B (97.21%) | 8.95M | $52.22 |
+| MiMo V2.6 Flash through Cohere FP8 | High requested, semantics unverified | 61 | 52 | 0 | 54.0% | 2.152B | 1.981B (92.06%) | 17.93M | $34.49 |
 
-Costs use captured provider token counts and advertised prices before OpenRouter
-discounts. Input includes cache reads and repeated history transmissions.
-Root and child agents are included. These are calculated estimates, not invoices.
+Ten execution-error attempts were rerun on master `f71ad31c` on November 16, 2026.
+The table replaces only their outcomes, without selecting the best attempt.
+GLM Koota query predicates and MiMo Boa passed. Seven retries failed graded tests.
+DeepSeek Pwntools again reached a verifier timeout. All six GQL and Participle
+retries reached grading without the earlier attachment startup errors.
 
-Cost equals uncached input times its rate, plus cached input times its rate,
-plus output times its rate. DeepInfra's recorded 51% discount is excluded.
-Cohere and CoreWeave advertised no discount in the retained endpoint metadata.
-DeepSeek's provider capture has more generations than its client ledger, so
-its counts are not assumed to be a reconciled invoice.
+These are combined results across client revisions, not fresh full-suite runs.
+Token counts and costs include original attempts and error-only reruns, including
+MiMo's archived credit-blocked work. Prior raw results remain unchanged.
+See the [error-only rerun report](/mnt/workspace/parrot-benchmark-reports/deepswe-errors-latest-master-2026-11-16/README.md).
+
+Costs reprice captured provider token counts at official model-vendor API rates,
+verified November 16, 2026. Sources are [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing),
+[Z.AI pricing](https://docs.z.ai/guides/overview/pricing), and
+[Xiaomi MiMo overseas real-time pricing](https://mimo.mi.com/docs/en-US/price/pay-as-you-go).
+No OpenRouter serving-provider prices or discounts are used.
+
+Input includes cache reads and repeated history transmissions. Root and child
+agents are included. Cost equals uncached input times its rate, plus cached
+input times its rate, plus output times its rate. These counterfactual estimates
+preserve the observed token counts and cache hits, which can differ on vendor APIs.
+They exclude separately billed vendor services and are not invoices.
+
+DeepSeek charges half price off-peak. Peak hours are 01:00 to 04:00 and 06:00 to
+10:00 UTC on weekdays, excluding Chinese public holidays. The table shows both
+whole-run rate scenarios, not a timestamp-weighted bill. DeepSeek's provider
+capture has more generations than its client ledger.
 
 MiMo resumed after credit exhaustion. Its score preserves the 60 earlier completed
 outcomes and uses continuation results for 53 eligible tasks, without best-of selection.
-The $31.91 estimate excludes archived credit-blocked attempts. Including that work,
-MiMo used **2,074,207,476 input tokens**, including **1,907,096,032 cached tokens**,
-and **17,412,852 output tokens**, for an advertised-rate estimate of **$33.99**.
+Before the latest-master error reruns, MiMo's cumulative official-rate estimate
+was $33.61, including archived credit-blocked work. The table adds the four error
+reruns to that cumulative usage, rather than dropping earlier failed-attempt costs.
 Two tiny preflights are excluded. The endpoint accepted a high-effort request and
 returned reasoning, but does not advertise effort-level control.
 
@@ -63,12 +81,12 @@ The November 15, 2026 DeepSWE run used DeepSeek V4.1 Flash 1017 through
 OpenRouter's DeepInfra FP8 endpoint. Reasoning effort was `high`, concurrency
 was 16, and benchmark retries were disabled.
 
-The full-suite pass rate was **61.1%**. Two execution errors occurred during
-startup attachment parsing. The third was a verifier timeout.
+The original full-suite pass rate was **61.1%**, with three execution errors.
+After error-only reruns, two became graded failures and one verifier timeout remains.
 
-The advertised-rate estimate is **$19.94**, approximately **$0.176 per scheduled
-task**, using the provider token counts above. This excludes DeepInfra's 51%
-OpenRouter discount. It is not a reconciled invoice.
+Including the error-only reruns, the official-rate estimate is **$31.27 at peak
+rates** or **$15.63 at off-peak rates**. These are vendor API pricing scenarios,
+not the amount charged by DeepInfra.
 
 See the [full run report](/mnt/workspace/parrot-benchmark-reports/deepswe-deepinfra-deepseek-full-2026-11-15/README.md)
 for task results, usage reconciliation, immutable client provenance, and
