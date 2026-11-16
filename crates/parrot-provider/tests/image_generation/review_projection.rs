@@ -65,12 +65,12 @@ struct Transport {
     body: Mutex<Option<Chunks>>,
     requests: AtomicUsize,
 }
-impl ImageTransport for Transport {
+impl HttpTransport for Transport {
     fn send<'a>(
         &'a self,
-        _: ImageHttpRequest,
+        _: HttpRequest,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<HttpResponse, Error>> {
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async move {
             self.requests.fetch_add(1, Ordering::SeqCst);
             Ok(HttpResponse {

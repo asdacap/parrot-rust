@@ -1,12 +1,9 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::{
-    http_stream::{ByteStream, Endpoint, HttpError, HttpResponse},
-    image_generation::{
-        ImageHttpRequest, ImageTransport,
-        client::{
-            ImageGenerationClient, ImageGenerationReference, ImageGenerationRequest, ImageHeaders,
-            MAXIMUM_RESPONSE_BYTES, prepare,
-        },
+    http_stream::{ByteStream, Endpoint, HttpError, HttpRequest, HttpResponse, HttpTransport},
+    image_generation::client::{
+        ImageGenerationClient, ImageGenerationReference, ImageGenerationRequest, ImageHeaders,
+        MAXIMUM_RESPONSE_BYTES, prepare,
     },
     sessions::Error,
 };
@@ -69,20 +66,20 @@ impl ImageHeaders for Headers {
     }
 }
 struct Transport {
-    requests: Mutex<Vec<ImageHttpRequest>>,
+    requests: Mutex<Vec<HttpRequest>>,
     status: u16,
     body: Vec<u8>,
     length: Option<usize>,
 }
-impl ImageTransport for Transport {
+impl HttpTransport for Transport {
     fn send<'a>(
         &'a self,
-        request: ImageHttpRequest,
+        request: HttpRequest,
         ct: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<HttpResponse, Error>> {
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async move {
             if ct.is_cancelled() {
-                return Err(Error::Cancelled);
+                return Err(HttpError::Cancelled);
             }
             self.requests.lock().unwrap().push(request);
             Ok(HttpResponse {
@@ -420,12 +417,12 @@ struct PrefixTransport {
     reads: Arc<AtomicUsize>,
     drops: Arc<AtomicUsize>,
 }
-impl ImageTransport for PrefixTransport {
+impl HttpTransport for PrefixTransport {
     fn send<'a>(
         &'a self,
-        _: ImageHttpRequest,
+        _: HttpRequest,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<HttpResponse, Error>> {
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async move {
             Ok(HttpResponse {
                 status: 200,

@@ -18,7 +18,7 @@ pub use policy::{Endpoint, bearer_headers, endpoint_url, has_authority, validate
 pub use sse::{SseDecoder, SseEvent};
 pub use stream::{BoundedStream, ByteStream, IdleTimeoutStream, ResponseByteCounter, SseStream};
 pub use transport::{
-    HttpMethod, HttpRequest, HttpResponse, HttpTransport, ReqwestTransport, StreamOptions,
+    HttpRequest, HttpResponse, HttpTransport, ReqwestTransport, StreamOptions,
     StreamingHttpResponse, get, open_stream,
 };
 

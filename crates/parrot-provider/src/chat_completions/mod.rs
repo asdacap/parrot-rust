@@ -3,10 +3,7 @@
 mod request;
 mod stream;
 
-pub use request::{
-    ContentView, MessageRole, MessageView, PreparedRequest, RequestError, RequestView,
-    ToolCallView, ToolView, prepare,
-};
+pub use request::{PreparedRequest, RequestError, prepare};
 pub use stream::{
     ChatCompletion, ChatEvent, ChatReplay, ChatStream, ChatStreamError, ParseState,
     ProviderFailure, ReasoningKind, ToolCall, ToolCallReplay, parse_data,

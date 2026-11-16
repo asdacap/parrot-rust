@@ -5,7 +5,7 @@ use serde_json::{Value, value::RawValue};
 
 use super::encoder::tool_input;
 use super::raw_object::RawObject;
-use super::wire_json::{selected_json_string, serialize};
+use crate::wire_json::{selected_json_string, serialize};
 
 type Object<'a> = RawObject<'a>;
 
@@ -183,7 +183,7 @@ impl AnthropicParser {
             return Ok(Vec::new());
         }
         let raw: Box<RawValue> = serde_json::from_str(data).map_err(|error| {
-            ParserError::Json(super::wire_json::format_json_error(data, &error))
+            ParserError::Json(crate::wire_json::format_json_error(data, &error))
         })?;
         let Some(root) = RawObject::new(&raw) else {
             return Ok(Vec::new());

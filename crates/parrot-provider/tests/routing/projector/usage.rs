@@ -12,8 +12,7 @@ use parrot_foundation::{
 };
 use parrot_provider::{
     catalogs::Model,
-    http_stream::{ByteStream, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport},
-    image_generation::{ImageHttpRequest, ImageTransport},
+    http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
     responses_websocket::{ConnectedSocket, Connector, Headers, WebSocketError},
     routing::{
         auth::FoundationCredentials,
@@ -94,7 +93,7 @@ impl HttpTransport for UsageTransport {
             let body_raw = String::from_utf8(request.body)
                 .map_err(|error| HttpError::Transport(error.to_string()))?;
             self.requests.lock().unwrap().push(json!({
-                "method": match request.method { HttpMethod::Get => "GET", HttpMethod::Post => "POST" },
+                "method": request.method,
                 "uri": request.endpoint.as_str(), "headers": headers, "body_raw": body_raw,
             }));
             if cancellation.is_cancelled() {
@@ -232,14 +231,14 @@ impl Connector for NoSocket {
     }
 }
 struct NoImages;
-impl ImageTransport for NoImages {
+impl HttpTransport for NoImages {
     fn send<'a>(
         &'a self,
-        _: ImageHttpRequest,
+        _: HttpRequest,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<HttpResponse, Error>> {
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async {
-            Err(Error::InvalidOperation(
+            Err(HttpError::Provider(
                 "The usage probe does not generate images.".into(),
             ))
         })

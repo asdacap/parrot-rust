@@ -1,5 +1,9 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
-use parrot_provider::{anthropic::*, http_stream::*};
+use parrot_provider::{
+    anthropic::*,
+    http_stream::*,
+    sessions::provider::{ApiKeySource as SessionApiKeySource, CompatibleOptions},
+};
 use std::{
     future::pending,
     sync::{
@@ -21,11 +25,11 @@ struct Key {
     calls: AtomicUsize,
     value: String,
 }
-impl ApiKeySource for Key {
+impl SessionApiKeySource for Key {
     fn api_key<'a>(
         &'a self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<String, ProviderError>> {
+    ) -> BoxFuture<'a, Result<String, parrot_provider::sessions::Error>> {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(self.value.clone())
@@ -34,7 +38,7 @@ impl ApiKeySource for Key {
     fn has_credential<'a>(
         &'a self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<bool, ProviderError>> {
+    ) -> BoxFuture<'a, Result<bool, parrot_provider::sessions::Error>> {
         Box::pin(async move { Ok(!self.value.is_empty()) })
     }
 }
@@ -104,7 +108,7 @@ fn fixture(
         value: key.into(),
     });
     let provider = AnthropicProvider::new(
-        AnthropicOptions::new("custom", "https://example.test/v1", key.clone()),
+        CompatibleOptions::new("custom", "https://example.test/v1", key.clone()),
         transport.clone(),
     )
     .unwrap();
@@ -203,21 +207,27 @@ async fn missing_credential_fails_before_any_transport_call() {
 }
 
 struct AuthenticationFailure(parrot_foundation::oauth::AuthError);
-impl ApiKeySource for AuthenticationFailure {
+impl SessionApiKeySource for AuthenticationFailure {
     fn api_key<'a>(
         &'a self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<String, ProviderError>> {
+    ) -> BoxFuture<'a, Result<String, parrot_provider::sessions::Error>> {
         Box::pin(async move {
             tokio::task::yield_now().await;
-            Err(ProviderError::Authentication(self.0.clone()))
+            Err(parrot_provider::sessions::Error::Authentication(
+                self.0.clone(),
+            ))
         })
     }
     fn has_credential<'a>(
         &'a self,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<bool, ProviderError>> {
-        Box::pin(async move { Err(ProviderError::Authentication(self.0.clone())) })
+    ) -> BoxFuture<'a, Result<bool, parrot_provider::sessions::Error>> {
+        Box::pin(async move {
+            Err(parrot_provider::sessions::Error::Authentication(
+                self.0.clone(),
+            ))
+        })
     }
 }
 
@@ -229,7 +239,7 @@ fn authentication_fixture(
         body: Mutex::new(None),
     });
     let provider = AnthropicProvider::new(
-        AnthropicOptions::new(
+        CompatibleOptions::new(
             "custom",
             "https://example.test/v1",
             Arc::new(AuthenticationFailure(error)),

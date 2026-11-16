@@ -1,12 +1,11 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::{
-    http_stream::{ByteStream, HttpError, HttpResponse},
+    http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
     image_generation::{
         bucket::{
             BucketConfig, Clock, CredentialSource, ImageBucket, S3ImageBucket, StoredCredential,
         },
         signer::{AwsV4Signer, sha256},
-        transport::{ImageHttpRequest, ImageTransport},
     },
     sessions::Error,
 };
@@ -141,7 +140,7 @@ impl ByteStream for Bytes {
     }
 }
 struct Transport {
-    requests: Mutex<Vec<ImageHttpRequest>>,
+    requests: Mutex<Vec<HttpRequest>>,
     statuses: Mutex<VecDeque<i32>>,
     body: String,
 }
@@ -154,26 +153,26 @@ impl Transport {
         })
     }
 }
-impl ImageTransport for Transport {
+impl HttpTransport for Transport {
     fn send<'a>(
         &'a self,
-        request: ImageHttpRequest,
+        request: HttpRequest,
         ct: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<HttpResponse, Error>> {
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async move {
             self.requests.lock().unwrap().push(request);
             if ct.is_cancelled() {
-                return Err(Error::Cancelled);
+                return Err(HttpError::Cancelled);
             }
             let status = self.statuses.lock().unwrap().pop_front().unwrap_or(200);
             if status == -2 {
-                return Err(Error::Http(HttpError::Cancelled));
+                return Err(HttpError::Cancelled);
             }
             if status < 0 {
                 std::future::pending::<()>().await;
             }
             if status == 0 {
-                return Err(Error::Http(HttpError::Transport("unreachable".into())));
+                return Err(HttpError::Transport("unreachable".into()));
             }
             Ok(HttpResponse {
                 status: status as u16,
@@ -193,7 +192,7 @@ fn config() -> BucketConfig {
 fn bucket(t: Arc<Transport>, c: BucketConfig, credentials: Arc<Credentials>) -> S3ImageBucket {
     S3ImageBucket::new(t, c, Arc::new(Epoch), credentials).unwrap()
 }
-fn header<'a>(r: &'a ImageHttpRequest, name: &str) -> &'a str {
+fn header<'a>(r: &'a HttpRequest, name: &str) -> &'a str {
     &r.headers
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case(name))
@@ -355,11 +354,12 @@ async fn stored_credentials_override_environment_and_are_cached() {
             .unwrap();
     }
     let requests = t.requests.lock().unwrap();
-    let mut expected = ImageHttpRequest {
+    let mut expected = HttpRequest {
         method: "PUT".into(),
         endpoint: requests[0].endpoint.clone(),
         headers: vec![],
         content_type: None,
+        filter_content_headers: false,
         body: vec![],
     };
     AwsV4Signer::new(
@@ -667,7 +667,7 @@ async fn scripted_dispatch_cancellation_keeps_exact_original_cause_only_without_
         assert_cause(
             &error,
             &format!("image_upload: {path} timed out"),
-            &Error::Http(HttpError::Cancelled),
+            &Error::Cancelled,
         );
         assert_eq!(transport.requests.lock().unwrap().len(), 1);
     }

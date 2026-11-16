@@ -1,10 +1,8 @@
+use parrot_core::Role;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::http_stream::{ByteStream, HttpError, SseDecoder};
-use parrot_provider::responses::{
-    ResponsesContentKind, ResponsesContentView, ResponsesError, ResponsesEvent,
-    ResponsesMessageView, ResponsesParser, ResponsesRequestView, ResponsesRole,
-    ResponsesToolCallView, ResponsesToolDefinitionView, prepare,
-};
+use parrot_provider::responses::{ResponsesError, ResponsesEvent, ResponsesParser, prepare};
+use parrot_provider::view::{ContentView, MessageView, RequestView, ToolCallView, ToolView};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::{
@@ -97,7 +95,7 @@ pub struct ToolDefinition {
     parameters_json: String,
 }
 
-impl ResponsesRequestView for Request {
+impl RequestView for Request {
     fn service_tier(&self) -> &str {
         ""
     }
@@ -118,8 +116,8 @@ impl ResponsesRequestView for Request {
     fn max_output_tokens(&self) -> i32 {
         self.max_output_tokens
     }
-    fn reasoning_effort(&self) -> &str {
-        self.reasoning.as_ref().map_or("", |value| &value.effort)
+    fn reasoning_effort(&self) -> Option<&str> {
+        self.reasoning.as_ref().map(|value| value.effort.as_str())
     }
     fn reasoning_summary(&self) -> &str {
         self.reasoning.as_ref().map_or("", |value| &value.summary)
@@ -128,15 +126,15 @@ impl ResponsesRequestView for Request {
         &self.provider_preferences
     }
 }
-impl ResponsesMessageView for Message {
+impl MessageView for Message {
     type Content = Content;
     type ToolCall = ToolCall;
-    fn role(&self) -> ResponsesRole {
+    fn role(&self) -> Role {
         match self.role.as_str() {
-            "System" => ResponsesRole::System,
-            "Assistant" => ResponsesRole::Assistant,
-            "Tool" => ResponsesRole::Tool,
-            _ => ResponsesRole::User,
+            "System" => Role::System,
+            "Assistant" => Role::Assistant,
+            "Tool" => Role::Tool,
+            _ => Role::User,
         }
     }
     fn contents(&self) -> &[Content] {
@@ -148,7 +146,7 @@ impl ResponsesMessageView for Message {
     fn tool_call_id(&self) -> &str {
         &self.tool_call_id
     }
-    fn content(&self) -> &str {
+    fn text(&self) -> &str {
         &self.content
     }
     fn provider_id(&self) -> &str {
@@ -162,13 +160,9 @@ impl ResponsesMessageView for Message {
             .map_or("", |value| &value.content)
     }
 }
-impl ResponsesContentView for Content {
-    fn kind(&self) -> ResponsesContentKind {
-        if self.kind == "image_file" || self.kind == "image_link" {
-            ResponsesContentKind::Image
-        } else {
-            ResponsesContentKind::Text
-        }
+impl ContentView for Content {
+    fn is_text(&self) -> bool {
+        !(self.kind == "image_file" || self.kind == "image_link")
     }
     fn text(&self) -> &str {
         &self.text
@@ -176,7 +170,7 @@ impl ResponsesContentView for Content {
     fn image_url(&self) -> &str {
         &self.url
     }
-    fn image_media_type(&self) -> &str {
+    fn media_type(&self) -> &str {
         &self.media_type
     }
     fn read_image(&self) -> Result<Vec<u8>, io::Error> {
@@ -184,7 +178,7 @@ impl ResponsesContentView for Content {
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid synthetic base64"))
     }
 }
-impl ResponsesToolCallView for ToolCall {
+impl ToolCallView for ToolCall {
     fn id(&self) -> &str {
         &self.id
     }
@@ -195,7 +189,7 @@ impl ResponsesToolCallView for ToolCall {
         &self.arguments_json
     }
 }
-impl ResponsesToolDefinitionView for ToolDefinition {
+impl ToolView for ToolDefinition {
     fn name(&self) -> &str {
         &self.name
     }

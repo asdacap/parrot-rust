@@ -12,8 +12,7 @@ use parrot_provider::{
         ByteStream, Endpoint, HttpError, HttpFailure, HttpRequest, HttpResponse, HttpTransport,
     },
     image_generation::{
-        ImageGenerationReference, ImageGenerationRequest, ImageGenerationResult, ImageHttpRequest,
-        ImageTransport,
+        ImageGenerationReference, ImageGenerationRequest, ImageGenerationResult,
         bucket::{
             BucketConfig, Clock, CredentialSource, ImageBucket, S3ImageBucket, StoredCredential,
         },
@@ -158,7 +157,7 @@ struct Capture {
     body: Vec<u8>,
 }
 impl Capture {
-    fn from(request: ImageHttpRequest) -> Self {
+    fn from(request: HttpRequest) -> Self {
         let mut headers = BTreeMap::<String, String>::new();
         for (k, v) in request.headers {
             headers
@@ -260,12 +259,12 @@ impl Transport {
         )
     }
 }
-impl ImageTransport for Transport {
+impl HttpTransport for Transport {
     fn send<'a>(
         &'a self,
-        request: ImageHttpRequest,
+        request: HttpRequest,
         ct: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, Result<HttpResponse, Error>> {
+    ) -> BoxFuture<'a, Result<HttpResponse, HttpError>> {
         Box::pin(async move {
             let method = request.method.clone();
             let path = request.endpoint.as_url().path().to_owned();
@@ -273,11 +272,11 @@ impl ImageTransport for Transport {
             let (status, body, length, spaces) = if self.kind == "generation" {
                 if s(&self.c, "cancel") == "during-send" {
                     self.cancel.cancel();
-                    return Err(Error::Cancelled);
+                    return Err(HttpError::Cancelled);
                 }
                 let delay = n(&self.c, "header_delay_ms");
                 if delay > 0 {
-                    tokio::select! {_ = ct.cancelled()=>return Err(Error::Cancelled),_ = tokio::time::sleep(Duration::from_millis(delay as u64))=>{}}
+                    tokio::select! {_ = ct.cancelled()=>return Err(HttpError::Cancelled),_ = tokio::time::sleep(Duration::from_millis(delay as u64))=>{}}
                 }
                 let bytes = response_body(&self.c).into_bytes();
                 let spaces = if s(&self.c, "boundary") == "stream-overflow" {
@@ -300,11 +299,11 @@ impl ImageTransport for Transport {
                 )
             } else if self.kind == "bucket" {
                 if ct.is_cancelled() {
-                    return Err(Error::Cancelled);
+                    return Err(HttpError::Cancelled);
                 }
                 let configured = n(&self.c, "status") as u16;
                 if configured == 0 {
-                    return Err(Error::Http(HttpError::Transport("unreachable".into())));
+                    return Err(HttpError::Transport("unreachable".into()));
                 }
                 let exists = self
                     .c
@@ -712,11 +711,12 @@ fn signer(c: &Value) -> Result<(Value, Value), Error> {
             ));
         }
     }
-    let mut request = ImageHttpRequest {
+    let mut request = HttpRequest {
         method: s(c, "method").into(),
         endpoint: Endpoint::parse(s(c, "url")).unwrap(),
         headers,
         content_type: None,
+        filter_content_headers: false,
         body: bytes,
     };
     AwsV4Signer::new(

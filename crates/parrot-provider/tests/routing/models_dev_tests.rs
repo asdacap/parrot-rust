@@ -1,6 +1,6 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::{
-    http_stream::{ByteStream, HttpError, HttpMethod, HttpRequest, HttpResponse, HttpTransport},
+    http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
     routing::models_dev::ModelsDevInformationProvider,
     sessions::Error,
 };
@@ -116,7 +116,7 @@ async fn fetch_uses_fixed_unauthenticated_endpoint_and_decodes_catalogue() {
         .unwrap();
     let requests = transport.requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].method, HttpMethod::Get);
+    assert_eq!(requests[0].method, "GET");
     assert_eq!(
         requests[0].endpoint.as_url().as_str(),
         "https://models.dev/api.json"

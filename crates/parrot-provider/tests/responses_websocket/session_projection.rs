@@ -3,6 +3,7 @@
 //! T30 HTTP lifecycle events and T25 HTTP diagnostic/header production. All owned
 //! response/retry values, request bytes, turn-state arguments, connector calls and
 //! socket lifecycle counters are compared exactly.
+use parrot_core::Role;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_provider::http_stream::SseDecoder;
 use parrot_provider::responses::*;
@@ -12,6 +13,7 @@ use parrot_provider::responses_websocket::{
     Socket as SocketTrait, SocketState, WebSocketClient, WebSocketError, WebSocketRequest,
 };
 use parrot_provider::sessions::Error as ProviderError;
+use parrot_provider::view::{ContentView, MessageView, RequestView, ToolCallView, ToolView};
 use serde_json::value::RawValue;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -110,7 +112,7 @@ impl Cancellation for Cancel {
     }
 }
 struct Empty;
-impl ResponsesToolCallView for Empty {
+impl ToolCallView for Empty {
     fn id(&self) -> &str {
         ""
     }
@@ -121,7 +123,7 @@ impl ResponsesToolCallView for Empty {
         "{}"
     }
 }
-impl ResponsesToolDefinitionView for Empty {
+impl ToolView for Empty {
     fn name(&self) -> &str {
         ""
     }
@@ -134,9 +136,9 @@ impl ResponsesToolDefinitionView for Empty {
 }
 
 struct Content(String);
-impl ResponsesContentView for Content {
-    fn kind(&self) -> ResponsesContentKind {
-        ResponsesContentKind::Text
+impl ContentView for Content {
+    fn is_text(&self) -> bool {
+        true
     }
     fn text(&self) -> &str {
         &self.0
@@ -144,7 +146,7 @@ impl ResponsesContentView for Content {
     fn image_url(&self) -> &str {
         ""
     }
-    fn image_media_type(&self) -> &str {
+    fn media_type(&self) -> &str {
         ""
     }
     fn read_image(&self) -> Result<Vec<u8>, io::Error> {
@@ -152,7 +154,7 @@ impl ResponsesContentView for Content {
     }
 }
 struct ToolCall(ResponsesToolCall);
-impl ResponsesToolCallView for ToolCall {
+impl ToolCallView for ToolCall {
     fn id(&self) -> &str {
         &self.0.id
     }
@@ -164,7 +166,7 @@ impl ResponsesToolCallView for ToolCall {
     }
 }
 struct Message {
-    role: ResponsesRole,
+    role: Role,
     content: [Content; 1],
     tool_call_id: String,
     tool_calls: Vec<ToolCall>,
@@ -172,7 +174,7 @@ struct Message {
     provider_content: String,
 }
 impl Message {
-    fn text(role: ResponsesRole, text: String) -> Self {
+    fn text(role: Role, text: String) -> Self {
         Self {
             role,
             content: [Content(text)],
@@ -185,14 +187,14 @@ impl Message {
     fn from_input(input: &Value) -> Self {
         if let Some(text) = input.as_str() {
             return match text.strip_prefix("assistant:") {
-                Some(text) => Self::text(ResponsesRole::Assistant, text.into()),
-                None => Self::text(ResponsesRole::User, text.into()),
+                Some(text) => Self::text(Role::Assistant, text.into()),
+                None => Self::text(Role::User, text.into()),
             };
         }
         let role = match input["role"].as_str().unwrap() {
-            "user" => ResponsesRole::User,
-            "assistant" => ResponsesRole::Assistant,
-            "tool" => ResponsesRole::Tool,
+            "user" => Role::User,
+            "assistant" => Role::Assistant,
+            "tool" => Role::Tool,
             role => panic!("unknown message role {role}"),
         };
         let mut message = Self::text(role, input["text"].as_str().unwrap().into());
@@ -223,7 +225,7 @@ impl Message {
         message
     }
     fn from_completion(completion: &ResponsesCompletion) -> Self {
-        let mut message = Self::text(ResponsesRole::Assistant, completion.assistant_text.clone());
+        let mut message = Self::text(Role::Assistant, completion.assistant_text.clone());
         message.tool_calls = completion
             .tool_calls
             .iter()
@@ -237,10 +239,10 @@ impl Message {
         message
     }
 }
-impl ResponsesMessageView for Message {
+impl MessageView for Message {
     type Content = Content;
     type ToolCall = ToolCall;
-    fn role(&self) -> ResponsesRole {
+    fn role(&self) -> Role {
         self.role
     }
     fn contents(&self) -> &[Content] {
@@ -252,7 +254,7 @@ impl ResponsesMessageView for Message {
     fn tool_call_id(&self) -> &str {
         &self.tool_call_id
     }
-    fn content(&self) -> &str {
+    fn text(&self) -> &str {
         &self.content[0].0
     }
     fn provider_id(&self) -> &str {
@@ -268,7 +270,7 @@ struct Request {
     instructions: String,
     max_tokens: i32,
 }
-impl ResponsesRequestView for Request {
+impl RequestView for Request {
     fn service_tier(&self) -> &str {
         ""
     }
@@ -289,8 +291,8 @@ impl ResponsesRequestView for Request {
     fn max_output_tokens(&self) -> i32 {
         self.max_tokens
     }
-    fn reasoning_effort(&self) -> &str {
-        ""
+    fn reasoning_effort(&self) -> Option<&str> {
+        None
     }
     fn reasoning_summary(&self) -> &str {
         ""
@@ -306,10 +308,7 @@ pub fn request(
     chatgpt: bool,
 ) -> WebSocketRequest {
     let mut messages: Vec<_> = if let Some(count) = action["message_text_bytes"].as_u64() {
-        vec![Message::text(
-            ResponsesRole::User,
-            "x".repeat(count as usize),
-        )]
+        vec![Message::text(Role::User, "x".repeat(count as usize))]
     } else {
         action["messages"]
             .as_array()

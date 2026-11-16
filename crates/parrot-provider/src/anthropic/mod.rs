@@ -8,15 +8,7 @@ mod parser;
 mod provider;
 mod raw_object;
 mod replay;
-mod view;
-pub(crate) mod wire_json;
 
 pub use encoder::{EncodeError, PreparedRequest, encode};
 pub use parser::{AnthropicEvent, AnthropicParser, CompletedMessage, ParserError, ToolCall};
-pub use provider::{
-    AnthropicOptions, AnthropicProvider, AnthropicStream, AnthropicStreamEvent, ApiKeySource,
-    ProviderError,
-};
-pub use view::{
-    ContentKind, ContentView, MessageView, RequestView, Role, ToolCallView, ToolDefinitionView,
-};
+pub use provider::{AnthropicProvider, AnthropicStream, AnthropicStreamEvent, ProviderError};

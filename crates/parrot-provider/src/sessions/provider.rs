@@ -12,7 +12,6 @@ use crate::{
     http_stream::{self, Endpoint, HttpTransport, StreamOptions},
     image_generation::{
         ImageGenerationClient, ImageGenerationRequest, ImageGenerationResult, ImageHeaders,
-        ImageTransport,
     },
     lazy_stream::LazyEventStream,
     responses,
@@ -514,7 +513,7 @@ impl OpenAICompatibleProvider {
     pub fn new_with_images(
         options: CompatibleOptions,
         transport: Arc<dyn HttpTransport>,
-        images: Arc<dyn ImageTransport>,
+        images: Arc<dyn HttpTransport>,
         connector: Arc<dyn Connector>,
     ) -> Result<Self, Error> {
         let base_url = options.base_url.clone();
@@ -622,7 +621,7 @@ impl ChatGptProvider {
     pub fn new_with_images(
         options: ChatGptOptions,
         transport: Arc<dyn HttpTransport>,
-        images: Arc<dyn ImageTransport>,
+        images: Arc<dyn HttpTransport>,
         connector: Arc<dyn Connector>,
     ) -> Result<Self, Error> {
         let mut provider = Self::new(options, transport, connector)?;

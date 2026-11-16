@@ -9,7 +9,6 @@ use crate::{
     catalogs::filter_chatgpt_external,
     http_stream::{HttpTransport, ProviderHttpClientCatalog, ReqwestTransport},
     image_generation::{
-        ImageTransport, ReqwestImageTransport,
         bucket::{BucketConfig, Clock, CredentialSource, ImageBucket, S3ImageBucket},
         linking::ImageLinkingProvider,
     },
@@ -26,7 +25,7 @@ use std::{
 /// All transports share the provider's authority-scoped client selection.
 pub struct SelectedHttpClient {
     pub streaming: Arc<dyn HttpTransport>,
-    pub images: Arc<dyn ImageTransport>,
+    pub images: Arc<dyn HttpTransport>,
     pub connector: Arc<dyn Connector>,
 }
 pub trait HttpClients: Send + Sync {
@@ -59,7 +58,7 @@ impl HttpClients for CatalogHttpClients {
             .resolve(base_url, allow_invalid_tls_certificate)?;
         Ok(SelectedHttpClient {
             streaming: Arc::new(ReqwestTransport::new(client.clone())),
-            images: Arc::new(ReqwestImageTransport::new(client.clone())),
+            images: Arc::new(ReqwestTransport::new(client.clone())),
             connector: Arc::new(NativeConnector::new(client)),
         })
     }
@@ -69,7 +68,7 @@ pub trait ImageBucketFactory: Send + Sync {
     fn build(
         &self,
         config: &ImageUploadConfig,
-        transport: Arc<dyn ImageTransport>,
+        transport: Arc<dyn HttpTransport>,
     ) -> Result<Arc<dyn ImageBucket>, Error>;
 }
 /// Binds actual T34 upload machinery to injected clocks and credential storage.
@@ -86,7 +85,7 @@ impl ImageBucketFactory for S3ImageBucketFactory {
     fn build(
         &self,
         config: &ImageUploadConfig,
-        transport: Arc<dyn ImageTransport>,
+        transport: Arc<dyn HttpTransport>,
     ) -> Result<Arc<dyn ImageBucket>, Error> {
         let bucket = S3ImageBucket::new(
             transport,

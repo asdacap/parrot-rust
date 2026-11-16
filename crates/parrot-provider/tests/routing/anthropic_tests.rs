@@ -1,14 +1,14 @@
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_foundation::oauth::AuthError;
 use parrot_provider::{
-    anthropic::{AnthropicOptions, AnthropicProvider},
+    anthropic::AnthropicProvider,
     catalogs::{Model, StandardModelDecoder, StandardModelError},
     http_stream::{ByteStream, HttpError, HttpRequest, HttpResponse, HttpTransport},
-    routing::{
-        anthropic::{AnthropicApiKeySource, AnthropicBridge},
-        registry::ProviderRegistry,
+    routing::{anthropic::AnthropicBridge, registry::ProviderRegistry},
+    sessions::{
+        Content, Error, Event, Message, Provider, Request, Role,
+        provider::{ApiKeySource, CompatibleOptions},
     },
-    sessions::{Content, Error, Event, Message, Provider, Request, Role, provider::ApiKeySource},
 };
 use std::{
     collections::VecDeque,
@@ -158,11 +158,7 @@ fn fixture(
         drops: Arc::new(AtomicUsize::new(0)),
         reads: Arc::new(AtomicUsize::new(0)),
     });
-    let mut options = AnthropicOptions::new(
-        "anthropic-custom",
-        "https://example.test/v1",
-        Arc::new(AnthropicApiKeySource::new(key)),
-    );
+    let mut options = CompatibleOptions::new("anthropic-custom", "https://example.test/v1", key);
     options.maximum_request_bytes = maximum;
     options.headers = vec![
         ("anthropic-version".into(), "custom-version".into()),
