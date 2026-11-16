@@ -4,14 +4,23 @@ use std::{
     net::{IpAddr, SocketAddr},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
 };
 
 use super::support::{Artifacts, NoCancel, Selection, Services, Snapshot};
 use parrot_domain::contracts::{async_ops::BoxFuture, security::InvocationScope};
+use parrot_domain::values::identifiers::UserSessionId;
+use parrot_domain::{contracts::paths::RootOrigin, contracts::paths::SelectedSessionRoot};
 use parrot_foundation::{config::Configuration, template_catalog::PromptTemplateCatalog};
 use parrot_provider::sessions::model::Tool;
+use parrot_runtime::event_broker::EventBroker;
+use parrot_storage::{
+    conversation::{AgentHistoryView, ConversationRepository},
+    database::SessionDatabase,
+    events::EventRepository,
+    history_files::{AgentHistoryFile, SessionIndex, SessionMeta},
+};
 use parrot_tools::{
     catalog::{self, Catalog, Factory, Invocation},
     files::WorkspacePaths,
@@ -26,6 +35,56 @@ use parrot_tools::{
 pub struct WebState {
     pub sessions: AtomicUsize,
     pub requests: Mutex<Vec<String>>,
+}
+
+static CLIPBOARD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn clipboard_history() -> AgentHistoryView {
+    let sequence = CLIPBOARD_SEQUENCE.fetch_add(1, Ordering::SeqCst);
+    let directory = std::env::temp_dir().join(format!(
+        "catalog-clipboard-{}-{sequence}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(directory.join("scratch")).unwrap();
+    let root = SelectedSessionRoot::new(directory.clone(), RootOrigin::Current).unwrap();
+    let root_session = root.path().file_name().unwrap().to_str().unwrap();
+    let launch_directory = std::env::current_dir().unwrap();
+    let metadata = SessionIndex::new(
+        root.clone(),
+        UserSessionId::parse(root_session).unwrap(),
+        launch_directory.clone(),
+    )
+    .unwrap();
+    if metadata.find().unwrap().is_none() {
+        let mut session = SessionMeta::new(
+            root_session,
+            launch_directory.to_str().unwrap(),
+            "provider",
+            "model",
+        );
+        session.root_agent_name = Some("main".into());
+        session.mode = Some("initial".into());
+        metadata.initialize(session, "fixture-root".into()).unwrap();
+    }
+    let repository = ConversationRepository::new(
+        EventRepository::new(SessionDatabase::open(root.clone()).unwrap()),
+        metadata,
+    )
+    .unwrap();
+    let agent = format!("clipboard-{sequence}");
+    repository
+        .bind_agent_history(
+            agent.clone(),
+            Arc::new(
+                AgentHistoryFile::new(
+                    root.clone(),
+                    directory.join("history.jsonl"),
+                    vec![agent.clone()],
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap()
 }
 struct NetworkFixture(Arc<WebState>);
 impl Resolver for NetworkFixture {
@@ -172,7 +231,25 @@ impl Fixture {
             Options::default(),
         ));
         let web_factory = catalog::WebFetchFactory::new(fetcher, &definitions).unwrap();
-        let catalog = Catalog::new(process, agents, files, session, tasks, web_factory);
+        let clipboard = catalog::ClipboardFactories::new(
+            catalog::ClipboardServices {
+                history: clipboard_history(),
+                publisher: Arc::new(EventBroker::new()),
+                interactive: true,
+                agent_depth: depth,
+            },
+            &definitions,
+        )
+        .unwrap();
+        let catalog = Catalog::new(
+            process,
+            agents,
+            files,
+            session,
+            tasks,
+            web_factory,
+            clipboard,
+        );
         Self {
             catalog,
             configuration,

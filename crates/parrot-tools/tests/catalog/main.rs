@@ -35,6 +35,7 @@ async fn native_configuration_and_retained_factories_preserve_evolved_source_ord
                 name => vec![name],
             })
             .chain(std::iter::once("progress"))
+            .chain(std::iter::once("clipboard_copy"))
             .collect::<Vec<_>>(),
         fixture
             .catalog
@@ -43,7 +44,7 @@ async fn native_configuration_and_retained_factories_preserve_evolved_source_ord
             .map(|f| f.name())
             .collect::<Vec<_>>()
     );
-    assert_eq!(definitions.definitions().len(), 28);
+    assert_eq!(definitions.definitions().len(), 29);
     for factory in fixture.catalog.factories() {
         let configured = &fixture.configuration.runtime.tools[factory.name()];
         assert_eq!(factory.definition().description, configured.description);
@@ -77,7 +78,7 @@ async fn legacy_queue_definitions_do_not_restore_retired_tools() {
         .unwrap();
     }
     let fixture = Fixture::new(&overrides, true, 0);
-    assert_eq!(fixture.catalog.factories().len(), 28);
+    assert_eq!(fixture.catalog.factories().len(), 29);
     for name in REMOVED_QUEUE_TOOLS {
         assert!(fixture.configuration.runtime.tools.contains_key(name));
         assert!(fixture.find(name).is_none());
@@ -143,7 +144,7 @@ async fn exact_t26_native_configuration_actual_read_glob_catalog_to_real_provide
 async fn source_support_send_definition_and_interruption_flags_are_bound_without_recreating_tools()
 {
     let fixture = Fixture::new("", false, 1);
-    assert_eq!(fixture.catalog.factories().len(), 28);
+    assert_eq!(fixture.catalog.factories().len(), 29);
     assert_eq!(
         fixture
             .catalog
@@ -305,6 +306,7 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
             json!({"paths":["target.txt"],"reason":"Write output"}),
         ),
         ("progress", json!({"steps":0,"total_steps":2})),
+        ("clipboard_copy", json!({"text":"catalog"})),
     ];
     assert_eq!(
         cases.iter().map(|c| c.0).collect::<Vec<_>>(),

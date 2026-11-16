@@ -242,6 +242,7 @@ impl EnhancedCli {
             }),
             dimensions: self.terminal.dimensions.clone(),
             error: self.terminal.error.clone(),
+            output: self.terminal.output.clone(),
         });
         let shared = Arc::new(EnhancedSession {
             binding: tokio::sync::Mutex::new(Binding {
@@ -967,8 +968,17 @@ struct FrameView {
     state: Mutex<FrameState>,
     dimensions: TerminalDimensions,
     error: SharedOutput,
+    output: SharedOutput,
 }
 impl FrameView {
+    fn write_terminal_bytes(&self, update: &PresentationUpdate) -> io::Result<()> {
+        if update.terminal_bytes.is_empty() {
+            return Ok(());
+        }
+        let mut output = self.output.clone();
+        output.write_all(&update.terminal_bytes)?;
+        output.flush()
+    }
     fn replace_input(&self, input: Vec<Arc<dyn LiveBufferItem>>) -> io::Result<()> {
         let mut state = self
             .state
@@ -995,6 +1005,7 @@ impl FrameView {
         Ok(())
     }
     fn apply(&self, update: PresentationUpdate) -> io::Result<()> {
+        self.write_terminal_bytes(&update)?;
         let mut state = self
             .state
             .lock()
@@ -1012,6 +1023,7 @@ impl FrameView {
         self.draw(&state)
     }
     fn enqueue(&self, update: PresentationUpdate) -> io::Result<()> {
+        self.write_terminal_bytes(&update)?;
         if !update.errors.is_empty() {
             return self.apply(update);
         }

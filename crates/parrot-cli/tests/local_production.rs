@@ -355,6 +355,45 @@ impl Fixture {
             .cloned()
             .collect()
     }
+
+    /// Runs the real binary under `script` so its stdout is a terminal and the
+    /// enhanced renderer composes. The script's own stdout is a captured pipe.
+    fn spawn_script(&self, arguments: &[&str]) -> BinaryChild {
+        let binary = std::env::var_os("PARROT_TEST_BINARY")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_parrot")));
+        let mut command_line = shell_quote(&binary.display().to_string());
+        for argument in arguments {
+            command_line.push(' ');
+            command_line.push_str(&shell_quote(argument));
+        }
+        let mut command = Command::new("script");
+        command
+            .arg("-q")
+            .arg("-f")
+            .arg("-c")
+            .arg(&command_line)
+            .arg("/dev/null")
+            .current_dir(self.root.join("workspace"))
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+            .env("TMPDIR", std::env::temp_dir())
+            .env("HOME", self.root.join("home"))
+            .env("XDG_CONFIG_HOME", self.root.join("config"))
+            .env("XDG_STATE_HOME", &self.state)
+            .env("XDG_DATA_HOME", self.root.join("data"))
+            .env("PARROT_FIXTURE_KEY", "synthetic-key")
+            // Optional models.dev metadata must not contact a real remote host.
+            .env("HTTPS_PROXY", "http://127.0.0.1:1")
+            .env("HTTP_PROXY", "http://127.0.0.1:1")
+            .env("NO_PROXY", "127.0.0.1,localhost")
+            .stdin(Stdio::null());
+        BinaryChild::spawn(
+            command,
+            self.root
+                .join(format!("child-{}", NEXT.fetch_add(1, Ordering::Relaxed))),
+        )
+    }
 }
 
 impl Drop for Fixture {
@@ -407,6 +446,10 @@ fn assert_clean_exit(output: &Output) {
         !rendered.contains("LOCAL_CAPABILITY_UNAVAILABLE"),
         "{rendered}"
     );
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn assert_success(output: &Output) {
@@ -1025,4 +1068,73 @@ fn executable_reports_real_provider_failure_and_exits_after_owned_shutdown() {
         "{rendered}"
     );
     assert_eq!(fixture.chat_requests().len(), 1);
+}
+
+#[tokio::test]
+async fn enhanced_clipboard_resume_replays_the_line_without_recopying() {
+    assert!(
+        Command::new("script")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success()),
+        "util-linux script must be installed; it supplies the pty for the enhanced renderer"
+    );
+    let tool_call = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-clipboard\",\"type\":\"function\",\"function\":{\"name\":\"clipboard_copy\",\"arguments\":\"{\\\"text\\\":\\\"Hello from parrot\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n";
+    let fixture = Fixture::with_chat_responses(
+        false,
+        vec![tool_call, PROVIDER_SUCCESS_BODY, PROVIDER_SUCCESS_BODY],
+    );
+    let child = fixture.spawn_script(&[
+        "chat",
+        "--new-session",
+        "Copy hello to the clipboard with the clipboard_copy tool.",
+    ]);
+    let output = child.finish();
+    assert_clean_exit(&output);
+    let stdout = output.stdout.clone();
+    let sequence = b"\x1b]52;c;SGVsbG8gZnJvbSBwYXJyb3Q=\x07";
+    let occurrences = stdout
+        .windows(sequence.len())
+        .filter(|window| window == sequence)
+        .count();
+    assert_eq!(
+        occurrences,
+        1,
+        "the enhanced terminal must write the clipboard sequence exactly once; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rendered = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        rendered.contains("Copied 17 bytes to the clipboard"),
+        "the committed clipboard line must render; {rendered}"
+    );
+    let request = &fixture.chat_requests()[0];
+    assert!(
+        request.contains("\"clipboard_copy\""),
+        "the interactive top-level session must offer the tool; {request}"
+    );
+
+    // The same workspace resumes its last opened session. Replayed history
+    // re-renders the committed line but must not re-copy.
+    let resumed = fixture.spawn_script(&["chat", "Second prompt in the resumed session."]);
+    let output = resumed.finish();
+    assert_clean_exit(&output);
+    let occurrences = output
+        .stdout
+        .windows(sequence.len())
+        .filter(|window| window == sequence)
+        .count();
+    assert_eq!(
+        occurrences,
+        0,
+        "a resumed session must never re-copy; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rendered = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        rendered.contains("Copied 17 bytes to the clipboard"),
+        "the replayed session must re-render the committed line; {rendered}"
+    );
 }

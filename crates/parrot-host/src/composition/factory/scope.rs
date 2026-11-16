@@ -92,8 +92,9 @@ use parrot_storage::{
 };
 use parrot_tools::{
     catalog::{
-        self, AgentFactories, AgentServices, FileFactories, ProcessFactories, SessionBindings,
-        SessionFactories, TaskQueueFactories, TaskQueueServices, WebFetchFactory,
+        self, AgentFactories, AgentServices, ClipboardFactories, ClipboardServices, FileFactories,
+        ProcessFactories, SessionBindings, SessionFactories, TaskQueueFactories, TaskQueueServices,
+        WebFetchFactory,
     },
     files::WorkspacePaths,
     process::{
@@ -1596,6 +1597,7 @@ where
                 let catalog_tasks = tasks.clone();
                 let catalog_services = invocation_services.clone();
                 let catalog_environment = environment.clone();
+                let catalog_history = prepared.history.clone();
                 let binding = Arc::new(ScopeBindings {
                     link: link.clone(),
                     agents: agents.clone(),
@@ -1659,9 +1661,19 @@ where
                         .map_err(child)?;
                         let web = WebFetchFactory::new(config.web_fetcher.clone(), &definitions)
                             .map_err(child)?;
+                        let clipboard = ClipboardFactories::new(
+                            ClipboardServices {
+                                history: catalog_history.clone(),
+                                publisher: user.broker.clone(),
+                                interactive,
+                                agent_depth: scope.identity().session.depth,
+                            },
+                            &definitions,
+                        )
+                        .map_err(child)?;
                         catalog_cells.bind(
                             CatalogAdapter::new(catalog::Catalog::new(
-                                process, agents, files, services, tasks, web,
+                                process, agents, files, services, tasks, web, clipboard,
                             ))
                             .map_err(child)?,
                         )

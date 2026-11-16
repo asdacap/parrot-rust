@@ -7,7 +7,7 @@ async fn retained_progress_catalog_handle_replaces_closes_and_reopens_one_report
     let progress = fixture.find("progress").unwrap();
     assert_eq!(
         fixture.catalog.factories().last().unwrap().name(),
-        "progress"
+        "clipboard_copy"
     );
     assert_eq!(
         progress.create().parallel_safety(&Invocation::new(

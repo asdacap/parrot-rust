@@ -6,6 +6,7 @@ pub mod agent_status;
 pub mod answer;
 pub mod ask;
 pub mod clear_exit_reminder;
+pub mod clipboard;
 pub mod exec_command;
 pub mod file_mutation;
 pub mod generic;

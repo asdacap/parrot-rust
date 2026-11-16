@@ -173,7 +173,7 @@ fn frame_view(
         false,
     );
     let frame = FrameView {
-        renderer: TerminalFrameRenderer::new(terminal.output, false, 1, 1, true),
+        renderer: TerminalFrameRenderer::new(terminal.output.clone(), false, 1, 1, true),
         state: Mutex::new(FrameState {
             body: Vec::new(),
             pending: VecDeque::new(),
@@ -181,6 +181,7 @@ fn frame_view(
         }),
         dimensions: terminal.dimensions,
         error: terminal.error,
+        output: terminal.output,
     };
     (frame, capture, reads)
 }

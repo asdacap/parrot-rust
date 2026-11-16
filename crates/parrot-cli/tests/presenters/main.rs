@@ -19,6 +19,7 @@ mod tools {
     mod answer;
     mod ask;
     mod clear_exit_reminder;
+    mod clipboard;
     mod exec_command;
     mod file_mutation;
     mod generic;

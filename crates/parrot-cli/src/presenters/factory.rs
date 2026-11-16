@@ -19,6 +19,7 @@ impl ToolPresenterRegistry {
             Arc::new(agent_spawn::AgentSpawnToolPresenter),
             Arc::new(agent_status::AgentStatusToolPresenter),
             Arc::new(clear_exit_reminder::ClearExitReminderToolPresenter),
+            Arc::new(clipboard::ClipboardToolPresenter),
             Arc::new(file_mutation::FileMutationToolPresenter::new("edit")),
             Arc::new(exec_command::ExecCommandToolPresenter::new(
                 read_only_command_prefixes,
