@@ -189,14 +189,20 @@ async fn completed_checkpoint_call_is_available_without_separate_registration() 
     });
     let owner = append(&repo, "agent", value).await;
     assert!(
-        repo.latest_usable_checkpoint("agent".into(), "handoff".into(), i64::MAX)
+        repo.events()
+            .transact(move |tx| {
+                forks::read_latest_usable_checkpoint(tx, "agent", "handoff", i64::MAX)
+            })
             .await
             .unwrap()
             .is_none()
     );
     settle(&repo, "agent", owner, "checkpoint").await;
     assert_eq!(
-        repo.latest_usable_checkpoint("agent".into(), "handoff".into(), i64::MAX)
+        repo.events()
+            .transact(move |tx| {
+                forks::read_latest_usable_checkpoint(tx, "agent", "handoff", i64::MAX)
+            })
             .await
             .unwrap()
             .unwrap()
@@ -303,11 +309,15 @@ async fn checkpoint_reads_validate_arguments_and_require_successful_owned_result
             "{arguments}"
         );
         let checkpoint = repo
-            .latest_usable_checkpoint(
-                "agent".into(),
-                expected.unwrap_or("handoff").into(),
-                i64::MAX,
-            )
+            .events()
+            .transact(move |tx| {
+                forks::read_latest_usable_checkpoint(
+                    tx,
+                    "agent",
+                    expected.unwrap_or("handoff"),
+                    i64::MAX,
+                )
+            })
             .await
             .unwrap();
         assert_eq!(
@@ -405,7 +415,8 @@ async fn noncontiguous_members_survive_reopen_forks_and_owner_deletion() {
     let repo = fixture.repository();
     assert_eq!(conversation_state(&repo, "agent").await.unwrap(), state);
     let groups = repo
-        .effective_conversation_groups("agent".into())
+        .events()
+        .transact(move |tx| forks::read_effective_conversation_groups(tx, "agent"))
         .await
         .unwrap();
     assert_eq!(groups.groups[0].items.len(), 3);
@@ -561,19 +572,28 @@ async fn completed_checkpoints_keep_latest_before_and_active_compaction_boundary
     let second = assistant(&repo, "agent", "second", "set_checkpoint").await;
     settle(&repo, "agent", second, "second").await;
     assert!(
-        repo.latest_usable_checkpoint("other-agent".into(), "handoff".into(), i64::MAX)
+        repo.events()
+            .transact(move |tx| {
+                forks::read_latest_usable_checkpoint(tx, "other-agent", "handoff", i64::MAX)
+            })
             .await
             .unwrap()
             .is_none()
     );
     assert!(
-        repo.latest_usable_checkpoint("agent".into(), "handoff".into(), second)
+        repo.events()
+            .transact(move |tx| {
+                forks::read_latest_usable_checkpoint(tx, "agent", "handoff", second)
+            })
             .await
             .unwrap()
             .is_none()
     );
     assert_eq!(
-        repo.latest_usable_checkpoint("agent".into(), "handoff".into(), second + 1)
+        repo.events()
+            .transact(move |tx| {
+                forks::read_latest_usable_checkpoint(tx, "agent", "handoff", second + 1)
+            })
             .await
             .unwrap()
             .unwrap()
@@ -581,7 +601,8 @@ async fn completed_checkpoints_keep_latest_before_and_active_compaction_boundary
         second
     );
     assert_eq!(
-        repo.active_checkpoint_assistant_sequences("agent".into())
+        repo.events()
+            .transact(move |tx| { forks::read_active_checkpoint_assistant_sequences(tx, "agent") })
             .await
             .unwrap(),
         [second].into_iter().collect()
@@ -599,7 +620,8 @@ async fn completed_checkpoints_keep_latest_before_and_active_compaction_boundary
     .await
     .unwrap();
     assert!(
-        repo.active_checkpoint_assistant_sequences("agent".into())
+        repo.events()
+            .transact(move |tx| { forks::read_active_checkpoint_assistant_sequences(tx, "agent") })
             .await
             .unwrap()
             .is_empty()
@@ -617,7 +639,8 @@ async fn completed_checkpoints_keep_latest_before_and_active_compaction_boundary
     .await
     .unwrap();
     assert_eq!(
-        repo.active_checkpoint_assistant_sequences("agent".into())
+        repo.events()
+            .transact(move |tx| { forks::read_active_checkpoint_assistant_sequences(tx, "agent") })
             .await
             .unwrap(),
         [second].into_iter().collect()
@@ -650,7 +673,8 @@ async fn named_fork_clones_complete_group_parts_provider_terminals_synthetic_and
     .await;
     let launch = assistant(&repo, "agent", "spawn", "spawn_agent").await;
     let parent_groups = repo
-        .effective_conversation_groups("agent".into())
+        .events()
+        .transact(move |tx| forks::read_effective_conversation_groups(tx, "agent"))
         .await
         .unwrap();
     assert_eq!(parent_groups.groups[1].items.len(), 3);
@@ -674,7 +698,8 @@ async fn named_fork_clones_complete_group_parts_provider_terminals_synthetic_and
     assert_eq!(cloned[2].message, parent_groups.groups[1].items[2].message);
     assert!(cloned[0].sequence > launch);
     let remapped = repo
-        .latest_usable_checkpoint("child".into(), "handoff".into(), i64::MAX)
+        .events()
+        .transact(move |tx| forks::read_latest_usable_checkpoint(tx, "child", "handoff", i64::MAX))
         .await
         .unwrap()
         .unwrap();
@@ -693,7 +718,8 @@ async fn named_fork_clones_complete_group_parts_provider_terminals_synthetic_and
         ]
     );
     assert!(
-        repo.effective_conversation_groups("child".into())
+        repo.events()
+            .transact(move |tx| { forks::read_effective_conversation_groups(tx, "child") })
             .await
             .unwrap()
             .groups
@@ -716,7 +742,8 @@ async fn completed_fork_rejects_incomplete_and_safe_prefix_excludes_crossing_com
     let incomplete = assistant(&repo, "agent", "pending", "read").await;
     settle(&repo, "agent", crossing, "crossing").await;
     let groups = repo
-        .effective_conversation_groups("agent".into())
+        .events()
+        .transact(move |tx| forks::read_effective_conversation_groups(tx, "agent"))
         .await
         .unwrap()
         .groups;
@@ -820,7 +847,8 @@ async fn fallback_only_for_absent_effective_history_and_empty_selection_is_noop(
     .await
     .unwrap();
     let effective = repo
-        .effective_conversation_groups("compact-child".into())
+        .events()
+        .transact(move |tx| forks::read_effective_conversation_groups(tx, "compact-child"))
         .await
         .unwrap();
     assert!(effective.groups.is_empty());
@@ -892,7 +920,8 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
             .await
             .unwrap();
         let effective = repo
-            .effective_conversation_groups(destination.into())
+            .events()
+            .transact(move |tx| forks::read_effective_conversation_groups(tx, destination))
             .await
             .unwrap();
         assert_eq!(
@@ -924,7 +953,8 @@ async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_
     let reopened = fixture.repository();
     for destination in ["completed", "safe"] {
         let effective = reopened
-            .effective_conversation_groups(destination.into())
+            .events()
+            .transact(move |tx| forks::read_effective_conversation_groups(tx, destination))
             .await
             .unwrap();
         assert!(effective.status.unwrap().final_phase);
@@ -1103,7 +1133,10 @@ async fn original_full_fork_copies_settled_batches_and_checkpoints_both_paramete
             1
         );
         assert!(
-            repo.latest_usable_checkpoint("child".into(), "handoff".into(), i64::MAX)
+            repo.events()
+                .transact(move |tx| {
+                    forks::read_latest_usable_checkpoint(tx, "child", "handoff", i64::MAX)
+                })
                 .await
                 .unwrap()
                 .is_some()
@@ -1148,7 +1181,8 @@ async fn opaque_compaction_replacement_survives_reopen_effective_history_and_for
     assert_eq!(snapshot.message, replacement);
     assert_eq!(snapshot.watermark, covered);
     let effective = reopened
-        .effective_conversation_groups("agent".into())
+        .events()
+        .transact(move |tx| forks::read_effective_conversation_groups(tx, "agent"))
         .await
         .unwrap();
     assert_eq!(effective.snapshot.unwrap(), snapshot);

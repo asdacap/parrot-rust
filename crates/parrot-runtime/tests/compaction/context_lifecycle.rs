@@ -188,7 +188,6 @@ async fn image_artifacts_are_materialized_loaded_by_summary_provider_and_retaine
             Some(70),
             &NeverCancelled,
         )
-        .await
         .unwrap();
     assert_eq!(
         artifact.sha256,

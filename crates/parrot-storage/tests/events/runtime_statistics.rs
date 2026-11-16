@@ -50,7 +50,10 @@ async fn runtime_statistics_progress_observes_loading_only_during_initialization
         .append_usage_fact(request("usage"))
         .await
         .unwrap();
-    let expected = repository.replay_statistics().await.unwrap();
+    let expected = repository
+        .replay_statistics_with_progress(None)
+        .await
+        .unwrap();
     let counts = Arc::new(Mutex::new(Vec::new()));
     let observed = counts.clone();
     let statistics = repository
@@ -157,7 +160,10 @@ async fn one_cached_t23_coordinator_real_commit_before_apply_and_publish_reopens
     drop(statistics);
     drop(repository);
     let reopened = fixture.repository();
-    let replay = reopened.replay_statistics().await.unwrap();
+    let replay = reopened
+        .replay_statistics_with_progress(None)
+        .await
+        .unwrap();
     assert_eq!(replay.agents["root"].own.totals.input_tokens, 17);
     let fresh = reopened.get_runtime_statistics().await.unwrap();
     assert_eq!(
@@ -290,9 +296,11 @@ async fn runtime_restoration_accepts_descendant_usage_before_any_root_facts() {
     fact.agent_session_id = "child".into();
     fact.mut_request_usage_recorded().parent_agent_session_id = "root".into();
     repository.append_usage_fact(fact.clone()).await.unwrap();
-    assert!(matches!(repository.replay_statistics().await,
-        Err(parrot_storage::events::EventError::Invalid(message)) if message == "Historical ancestor root has no parent lineage."
-    ));
+    assert!(
+        matches!(repository.replay_statistics_with_progress(None).await,
+            Err(parrot_storage::events::EventError::Invalid(message)) if message == "Historical ancestor root has no parent lineage."
+        )
+    );
     assert!(matches!(repository.get_runtime_statistics().await,
         Err(parrot_storage::events::EventError::Invalid(message)) if message == "Historical ancestor root has no parent lineage."
     ));
@@ -363,9 +371,11 @@ async fn runtime_restoration_accepts_descendant_usage_before_any_root_facts() {
     assert_eq!(root.own.totals.input_tokens, 0);
     assert_eq!(root.cumulative.totals.input_tokens, 34);
     assert_eq!(reopened.replay().await.unwrap().len(), 2);
-    assert!(matches!(reopened.replay_statistics().await,
-        Err(parrot_storage::events::EventError::Invalid(message)) if message == "Historical ancestor root has no parent lineage."
-    ));
+    assert!(
+        matches!(reopened.replay_statistics_with_progress(None).await,
+            Err(parrot_storage::events::EventError::Invalid(message)) if message == "Historical ancestor root has no parent lineage."
+        )
+    );
     reopened.database().close().await.unwrap();
 }
 

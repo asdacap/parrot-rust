@@ -4,6 +4,7 @@ use parrot_domain::contracts::{async_ops::OperationResult, filesystem::ReadConsu
 
 use super::{BINARY_PROBE_SIZE, FileToolError, Formatter, MAX_OUTPUT_BYTES};
 use crate::files::outline::MarkdownOutline;
+use crate::task_artifacts::Encoding;
 
 pub(super) struct FileRenderer {
     probe: Vec<u8>,
@@ -139,29 +140,16 @@ impl ReadConsumer for FileRenderer {
 }
 
 struct Decoder {
-    utf16: Option<bool>,
+    encoding: Encoding,
     pending: Vec<u8>,
 }
 
 impl Decoder {
     fn new(probe: &[u8]) -> (Self, usize) {
-        let (utf16, skip) = if probe.starts_with(&[0xff, 0xfe]) {
-            (Some(true), 2)
-        } else if probe.starts_with(&[0xfe, 0xff]) {
-            (Some(false), 2)
-        } else {
-            (
-                None,
-                if probe.starts_with(&[0xef, 0xbb, 0xbf]) {
-                    3
-                } else {
-                    0
-                },
-            )
-        };
+        let (encoding, skip) = crate::task_artifacts::probe_encoding(probe);
         (
             Self {
-                utf16,
+                encoding,
                 pending: Vec::new(),
             },
             skip,
@@ -171,27 +159,36 @@ impl Decoder {
     fn decode(&mut self, bytes: &[u8], eof: bool) -> String {
         self.pending.extend_from_slice(bytes);
         let mut end = self.pending.len();
-        let text = if let Some(little_endian) = self.utf16 {
-            if !eof {
-                end -= end % 2;
-                if end >= 2 {
-                    let last = [self.pending[end - 2], self.pending[end - 1]];
-                    let unit = if little_endian {
-                        u16::from_le_bytes(last)
-                    } else {
-                        u16::from_be_bytes(last)
-                    };
-                    if (0xd800..=0xdbff).contains(&unit) {
-                        end -= 2;
+        let text = match self.encoding {
+            Encoding::Utf16(little_endian) => {
+                if !eof {
+                    end -= end % 2;
+                    if end >= 2 {
+                        let last = [self.pending[end - 2], self.pending[end - 1]];
+                        let unit = if little_endian {
+                            u16::from_le_bytes(last)
+                        } else {
+                            u16::from_be_bytes(last)
+                        };
+                        if (0xd800..=0xdbff).contains(&unit) {
+                            end -= 2;
+                        }
                     }
                 }
+                crate::task_artifacts::decode_utf16(&self.pending[..end], little_endian)
             }
-            crate::task_artifacts::decode_utf16(&self.pending[..end], little_endian)
-        } else {
-            if !eof {
-                end = complete_utf8_prefix(&self.pending);
+            Encoding::Utf32(little_endian) => {
+                if !eof {
+                    end -= end % 4;
+                }
+                crate::task_artifacts::decode_utf32(&self.pending[..end], little_endian)
             }
-            String::from_utf8_lossy(&self.pending[..end]).into_owned()
+            Encoding::Utf8 => {
+                if !eof {
+                    end = complete_utf8_prefix(&self.pending);
+                }
+                String::from_utf8_lossy(&self.pending[..end]).into_owned()
+            }
         };
         self.pending.drain(..end);
         text

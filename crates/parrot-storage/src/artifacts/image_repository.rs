@@ -28,7 +28,7 @@ impl ImageArtifactRepository {
         &self.store
     }
 
-    pub async fn persist<R: Read + Send + 'static>(
+    pub fn persist<R: Read + Send + 'static>(
         &self,
         mut source: R,
         display_name: &str,
@@ -157,12 +157,6 @@ impl From<DatabaseError> for Error {
 
 impl From<rusqlite::Error> for Error {
     fn from(error: rusqlite::Error) -> Self {
-        Self::from_sqlite(error)
-    }
-}
-
-impl Error {
-    fn from_sqlite(error: rusqlite::Error) -> Self {
         Error::new(ErrorKind::Database, error.to_string()).with_source(error)
     }
 }

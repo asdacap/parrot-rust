@@ -168,11 +168,6 @@ impl EventRepository {
             .await
     }
 
-    pub async fn replay_statistics(
-        &self,
-    ) -> Result<crate::diagnostics::statistics::AgentStatisticsReplay, EventError> {
-        self.replay_statistics_with_progress(None).await
-    }
     pub async fn replay_statistics_with_progress(
         &self,
         progress: Option<EventLoadProgress>,

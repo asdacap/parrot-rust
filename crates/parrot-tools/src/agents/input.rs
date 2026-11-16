@@ -163,17 +163,7 @@ impl SendInput {
     }
 }
 
-pub fn parse_interrupt_name(arguments: &str) -> Result<String, InputError> {
-    let properties = object(arguments)?;
-    validate_string_fields(&properties, &["name"])?;
-    let name = required_string(&properties, "name")?.trim().to_owned();
-    if name.is_empty() {
-        return Err(InputError("no child agent given".into()));
-    }
-    Ok(name)
-}
-
-pub fn parse_status_name(arguments: &str) -> Result<String, InputError> {
+fn parse_agent_name(arguments: &str) -> Result<String, InputError> {
     let properties = object(arguments)?;
     validate_string_fields(&properties, &["name"])?;
     let name = required_string(&properties, "name")?;
@@ -181,6 +171,14 @@ pub fn parse_status_name(arguments: &str) -> Result<String, InputError> {
         return Err(InputError("no child agent given".into()));
     }
     Ok(name)
+}
+
+pub fn parse_interrupt_name(arguments: &str) -> Result<String, InputError> {
+    Ok(parse_agent_name(arguments)?.trim().to_owned())
+}
+
+pub fn parse_status_name(arguments: &str) -> Result<String, InputError> {
+    parse_agent_name(arguments)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

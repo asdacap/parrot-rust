@@ -130,12 +130,6 @@ fn validate_instance_id(value: &str) -> Result<(), InvalidDiagnosticInstanceId> 
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DiagnosticScope {
-    Global,
-    Session,
-}
-
 struct SinkState {
     stream: Option<File>,
     disabled: bool,
@@ -157,7 +151,7 @@ impl std::fmt::Debug for FileDiagnosticLog {
             .debug_struct("FileDiagnosticLog")
             .field("path", &self.path)
             .field("instance_id", &self.instance_id)
-            .field("scope", &self.scope())
+            .field("user_session_id", &self.user_session_id)
             .finish_non_exhaustive()
     }
 }
@@ -246,14 +240,6 @@ impl FileDiagnosticLog {
 
     pub fn path(&self) -> &Path {
         &self.path
-    }
-
-    pub fn scope(&self) -> DiagnosticScope {
-        if self.user_session_id.is_some() {
-            DiagnosticScope::Session
-        } else {
-            DiagnosticScope::Global
-        }
     }
 
     pub fn write(&self, entry: &DiagnosticEvent) {

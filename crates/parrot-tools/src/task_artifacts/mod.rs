@@ -245,29 +245,46 @@ where
     parse_artifact(&text).map_err(|error| OperationError::Failed(ArtifactReadError::Parse(error)))
 }
 
-pub(crate) fn decode_stream_reader_bytes(bytes: &[u8]) -> String {
+/// Byte-order mark families the artifact and stream readers share.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Encoding {
+    Utf8,
+    Utf16(bool),
+    Utf32(bool),
+}
+
+pub(crate) fn probe_encoding(bytes: &[u8]) -> (Encoding, usize) {
     const UTF32_LE: &[u8] = &[0xFF, 0xFE, 0x00, 0x00];
     const UTF32_BE: &[u8] = &[0x00, 0x00, 0xFE, 0xFF];
     const UTF8: &[u8] = &[0xEF, 0xBB, 0xBF];
     const UTF16_LE: &[u8] = &[0xFF, 0xFE];
     const UTF16_BE: &[u8] = &[0xFE, 0xFF];
 
-    if let Some(body) = bytes.strip_prefix(UTF32_LE) {
-        return decode_utf32(body, true);
+    if bytes.starts_with(UTF32_LE) {
+        return (Encoding::Utf32(true), UTF32_LE.len());
     }
-    if let Some(body) = bytes.strip_prefix(UTF32_BE) {
-        return decode_utf32(body, false);
+    if bytes.starts_with(UTF32_BE) {
+        return (Encoding::Utf32(false), UTF32_BE.len());
     }
-    if let Some(body) = bytes.strip_prefix(UTF8) {
-        return String::from_utf8_lossy(body).into_owned();
+    if bytes.starts_with(UTF8) {
+        return (Encoding::Utf8, UTF8.len());
     }
-    if let Some(body) = bytes.strip_prefix(UTF16_LE) {
-        return decode_utf16(body, true);
+    if bytes.starts_with(UTF16_LE) {
+        return (Encoding::Utf16(true), UTF16_LE.len());
     }
-    if let Some(body) = bytes.strip_prefix(UTF16_BE) {
-        return decode_utf16(body, false);
+    if bytes.starts_with(UTF16_BE) {
+        return (Encoding::Utf16(false), UTF16_BE.len());
     }
-    String::from_utf8_lossy(bytes).into_owned()
+    (Encoding::Utf8, 0)
+}
+
+pub(crate) fn decode_stream_reader_bytes(bytes: &[u8]) -> String {
+    let (encoding, skip) = probe_encoding(bytes);
+    match encoding {
+        Encoding::Utf8 => String::from_utf8_lossy(&bytes[skip..]).into_owned(),
+        Encoding::Utf16(little_endian) => decode_utf16(&bytes[skip..], little_endian),
+        Encoding::Utf32(little_endian) => decode_utf32(&bytes[skip..], little_endian),
+    }
 }
 
 pub(crate) fn decode_utf16(bytes: &[u8], little_endian: bool) -> String {
@@ -292,7 +309,7 @@ pub(crate) fn decode_utf16(bytes: &[u8], little_endian: bool) -> String {
     text
 }
 
-fn decode_utf32(bytes: &[u8], little_endian: bool) -> String {
+pub(crate) fn decode_utf32(bytes: &[u8], little_endian: bool) -> String {
     let mut text = bytes
         .as_chunks::<4>()
         .0

@@ -447,7 +447,11 @@ async fn request_round_trip(effort: Option<&str>, _parameter: &str) {
         .await
         .unwrap();
     repository.events().append_usage_fact(tool).await.unwrap();
-    repository.events().replay_statistics().await.unwrap();
+    repository
+        .events()
+        .replay_statistics_with_progress(None)
+        .await
+        .unwrap();
     let requests: Vec<_> = repository
         .agent_history("grandchild".into())
         .await

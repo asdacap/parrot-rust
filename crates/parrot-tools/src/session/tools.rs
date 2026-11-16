@@ -69,10 +69,6 @@ impl<S: SessionServices> SessionTool<S> {
         }
     }
 
-    pub fn name(&self) -> &'static str {
-        self.kind.name()
-    }
-
     async fn execute(
         &self,
         invocation: &Invocation,

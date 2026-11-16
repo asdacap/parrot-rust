@@ -496,7 +496,6 @@ async fn actual_runtime_delivers_matching_image_steers_only_after_all_tool_resul
             None,
             &NeverCancelled,
         )
-        .await
         .unwrap();
     let mut other_bytes = include_bytes!("fixtures/pixel.png").to_vec();
     other_bytes.push(0);
@@ -509,7 +508,6 @@ async fn actual_runtime_delivers_matching_image_steers_only_after_all_tool_resul
             None,
             &NeverCancelled,
         )
-        .await
         .unwrap();
     assert_ne!(image.artifact_id, other_image.artifact_id);
     let mut reader = RecordingTool::new(&fixture, "image", ParallelSafety::Sequential);

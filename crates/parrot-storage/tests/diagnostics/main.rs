@@ -1,6 +1,6 @@
 use parrot_storage::diagnostics::{
-    DiagnosticEvent, DiagnosticFailure, DiagnosticScope, DiagnosticSeverity, FailureKind,
-    FileDiagnosticLog, InvalidDiagnosticInstanceId,
+    DiagnosticEvent, DiagnosticFailure, DiagnosticSeverity, FailureKind, FileDiagnosticLog,
+    InvalidDiagnosticInstanceId,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -93,7 +93,6 @@ fn session_records_are_bounded_escaped_correlated_and_appended() {
     first.duration_milliseconds = Some(123);
     first.error_code = Some(DiagnosticEvent::classify_failure(&failure(FailureKind::Io)).into());
     log.write(&first);
-    assert_eq!(log.scope(), DiagnosticScope::Session);
     let visible_before_drop = fs::read_to_string(&path).unwrap();
     assert!(visible_before_drop.contains("event=\"finished\""));
     assert!(!visible_before_drop.contains("sk-parrot-fake-token-canary"));
@@ -168,7 +167,6 @@ fn concurrent_global_writers_have_distinct_files_intact_lines_and_collision_safe
         Arc::new(FileDiagnosticLog::open_global(directory.path(), &first_id, |_| {}).unwrap());
     let second =
         Arc::new(FileDiagnosticLog::open_global(directory.path(), &second_id, |_| {}).unwrap());
-    assert_eq!(first.scope(), DiagnosticScope::Global);
     thread::scope(|scope| {
         for _ in 0..4 {
             let first = Arc::clone(&first);

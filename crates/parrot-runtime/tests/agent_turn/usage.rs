@@ -421,7 +421,11 @@ async fn actual_parent_chain_receives_cumulative_not_own_or_context_usage_and_re
     let leaf_before = recorder.capture();
     repository.events().database().close().await.unwrap();
     let reopened = fixture.repository();
-    let replay = reopened.events().replay_statistics().await.unwrap();
+    let replay = reopened
+        .events()
+        .replay_statistics_with_progress(None)
+        .await
+        .unwrap();
     assert_eq!(replay.agents["root"], root_before);
     assert_eq!(replay.agents["parent"], parent_before);
     assert_eq!(replay.agents["leaf"], leaf_before);

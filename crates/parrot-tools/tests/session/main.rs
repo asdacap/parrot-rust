@@ -35,7 +35,6 @@ fn injected_definitions_are_unchanged_and_all_session_tools_default_to_sequentia
             ParallelSafety::Sequential
         );
         assert!(!Tool::enabled_after_interruption(&tool));
-        assert_eq!(tool.name(), kind.name());
     }
     assert!(fixture.calls().is_empty());
 }

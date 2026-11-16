@@ -263,7 +263,10 @@ async fn replay_progress_observes_each_decoded_row_without_changing_statistics()
         })
         .await
         .unwrap();
-    let expected = repository.replay_statistics().await.unwrap();
+    let expected = repository
+        .replay_statistics_with_progress(None)
+        .await
+        .unwrap();
     let counts = Arc::new(Mutex::new(Vec::new()));
     let observed = counts.clone();
     let progress: EventLoadProgress = Arc::new(move |count| observed.lock().unwrap().push(count));
@@ -332,7 +335,12 @@ async fn replay_progress_stops_before_malformed_row_without_reporting_empty_succ
                 .is_err()
         );
         assert_eq!(*counts.lock().unwrap(), (1..=malformed).collect::<Vec<_>>());
-        assert!(repository.replay_statistics().await.is_err());
+        assert!(
+            repository
+                .replay_statistics_with_progress(None)
+                .await
+                .is_err()
+        );
         repository.database().close().await.unwrap();
     }
 }
@@ -383,7 +391,7 @@ async fn replay_ignores_aggregate_publications_and_preserves_fact_dedup_tools_an
             for event in events {
                 record(tx, &event, AT)?;
             }
-            let replay = replay_statistics(tx)?;
+            let replay = replay_statistics_with_progress(tx, None)?;
             let agent = &replay.agents["agent"];
             assert_eq!(replay.revision, 9);
             assert_eq!(agent.own.totals.input_tokens, 103);
@@ -418,7 +426,7 @@ async fn replay_accumulates_each_descendant_own_models_once_in_source_agent_orde
             ] {
                 record(tx, &event, AT)?;
             }
-            let replay = replay_statistics(tx)?;
+            let replay = replay_statistics_with_progress(tx, None)?;
             assert_eq!(replay.agents["root"].own.totals.input_tokens, 2);
             assert_eq!(replay.agents["root"].cumulative.totals.input_tokens, 10);
             assert_eq!(replay.agents["middle"].own.totals.input_tokens, 3);
@@ -448,7 +456,7 @@ async fn replay_cumulative_cost_addition_keeps_source_first_seen_agent_order() {
                 record(tx, &event, AT)?;
             }
             assert_eq!(
-                replay_statistics(tx)?.agents["root"]
+                replay_statistics_with_progress(tx, None)?.agents["root"]
                     .cumulative
                     .totals
                     .input_cost,
@@ -495,7 +503,7 @@ async fn replay_legacy_finished_tools_count_once_unfinished_mark_only_original_a
             explicit_finish.mut_tool_finished().tool_call_id = "explicit".into();
             record(tx, &explicit_finish, AT)?;
             record(tx, &tool("explicit-fact", "child", "root", "explicit"), AT)?;
-            let replay = replay_statistics(tx)?;
+            let replay = replay_statistics_with_progress(tx, None)?;
             assert_eq!(replay.agents["child"].own.totals.tool_calls, 2);
             assert_eq!(replay.agents["root"].cumulative.totals.tool_calls, 2);
             assert_eq!(
@@ -531,7 +539,7 @@ async fn replay_rejects_conflicting_missing_ancestor_and_cyclic_lineage_exactly(
         let repository = fixture.repository();
         repository.transaction(move |tx| {
             for event in events { record(tx, &event, AT)?; }
-            assert!(matches!(replay_statistics(tx), Err(EventError::Invalid(message)) if message == expected));
+            assert!(matches!(replay_statistics_with_progress(tx, None), Err(EventError::Invalid(message)) if message == expected));
             Ok(())
         }).await.unwrap();
         repository.database().close().await.unwrap();
@@ -558,7 +566,7 @@ async fn replay_uses_current_fact_and_finished_failed_lineage_and_checks_fact_ov
             });
             record(tx, &failed, AT)?;
             record(tx, &request("leaf-fact", "leaf", "child", "leaf", 3), AT)?;
-            let replay = replay_statistics(tx)?;
+            let replay = replay_statistics_with_progress(tx, None)?;
             assert_eq!(replay.parents["root"], "");
             assert_eq!(replay.parents["leaf"], "child");
             assert_eq!(replay.agents["root"].cumulative.totals.input_tokens, 5);
@@ -568,7 +576,10 @@ async fn replay_uses_current_fact_and_finished_failed_lineage_and_checks_fact_ov
                 &request("overflow", "root", "", "overflow", i64::MAX),
                 AT,
             )?;
-            assert!(matches!(replay_statistics(tx), Err(EventError::Overflow)));
+            assert!(matches!(
+                replay_statistics_with_progress(tx, None),
+                Err(EventError::Overflow)
+            ));
             Ok(())
         })
         .await
@@ -685,7 +696,10 @@ async fn aggregate_publications_are_raw_events_not_accounting_baselines() {
         .append_usage_fact(request("after", "agent", "", "after", 3))
         .await
         .unwrap();
-    let before = repository.replay_statistics().await.unwrap();
+    let before = repository
+        .replay_statistics_with_progress(None)
+        .await
+        .unwrap();
     assert_eq!(before.agents["agent"].own.totals.input_tokens, 5);
     assert_eq!(before.agents["agent"].own.totals.input_cost, 2.5);
     assert_eq!(
@@ -697,7 +711,10 @@ async fn aggregate_publications_are_raw_events_not_accounting_baselines() {
     );
     repository.database().close().await.unwrap();
     let reopened = fixture.repository();
-    let after = reopened.replay_statistics().await.unwrap();
+    let after = reopened
+        .replay_statistics_with_progress(None)
+        .await
+        .unwrap();
     assert_eq!(after.agents, before.agents);
     assert_eq!(after.revision, before.revision);
     assert_eq!(reopened.replay_raw().await.unwrap()[1].raw, bytes);

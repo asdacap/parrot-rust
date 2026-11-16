@@ -3,7 +3,7 @@ use parrot_domain::protocol::messages::parrot::Event;
 use parrot_runtime::children::*;
 use parrot_storage::{
     conversation::{
-        AgentHistoryView, ConversationMessage, HistoryForkSelection, MessageRole, ToolCall,
+        AgentHistoryView, ConversationMessage, HistoryForkSelection, MessageRole, ToolCall, forks,
     },
     events::{ConversationPart, ToolExecutionStatus, ToolExecutionTerminal},
 };
@@ -102,14 +102,14 @@ async fn child_launch_uses_actual_empty_full_and_named_checkpoint_sqlite_forks()
                 "after checkpoint"
             ]
         );
+        let agent = named.history().agent_session_id().to_owned();
         let remapped = named
             .history()
             .repository()
-            .latest_usable_checkpoint(
-                named.history().agent_session_id().into(),
-                "handoff".into(),
-                i64::MAX,
-            )
+            .events()
+            .transact(move |tx| {
+                forks::read_latest_usable_checkpoint(tx, &agent, "handoff", i64::MAX)
+            })
             .await
             .unwrap()
             .unwrap();

@@ -511,7 +511,10 @@ async fn original_named_checkpoint_fork_remaps_settlement() {
     );
     // source-line:272
     assert!(
-        repo.latest_usable_checkpoint("child".into(), "handoff".into(), i64::MAX)
+        repo.events()
+            .transact(move |tx| {
+                forks::read_latest_usable_checkpoint(tx, "child", "handoff", i64::MAX)
+            })
             .await
             .unwrap()
             .is_some()
@@ -596,7 +599,8 @@ async fn original_compaction_only_history_is_present() {
     .unwrap();
     // source-line:615
     assert!(
-        repo.effective_conversation_groups("source".into())
+        repo.events()
+            .transact(move |tx| { forks::read_effective_conversation_groups(tx, "source") })
             .await
             .unwrap()
             .groups
@@ -636,7 +640,8 @@ async fn original_compaction_only_history_is_present() {
     );
     // source-line:627
     assert!(
-        repo.effective_conversation_groups("child".into())
+        repo.events()
+            .transact(move |tx| { forks::read_effective_conversation_groups(tx, "child") })
             .await
             .unwrap()
             .groups
@@ -736,7 +741,8 @@ async fn original_safe_prefix_excludes_crossing_complete_batches() {
     );
     // source-line:537
     assert!(
-        repo.effective_conversation_groups("child".into())
+        repo.events()
+            .transact(move |tx| { forks::read_effective_conversation_groups(tx, "child") })
             .await
             .unwrap()
             .groups
@@ -744,7 +750,8 @@ async fn original_safe_prefix_excludes_crossing_complete_batches() {
             .all(|group| group.is_complete)
     );
     let remapped = repo
-        .latest_usable_checkpoint("child".into(), "handoff".into(), i64::MAX)
+        .events()
+        .transact(move |tx| forks::read_latest_usable_checkpoint(tx, "child", "handoff", i64::MAX))
         .await
         .unwrap();
     // source-line:539
@@ -777,7 +784,6 @@ async fn original_materialize_durable_image_at_provider_boundary() {
             None,
             &NeverCancelled,
         )
-        .await
         .unwrap();
     let contents = repo
         .materialize(vec![
