@@ -1,6 +1,8 @@
 // Exact source assertion translations; see assertion-map/ for runtime row identities.
 #[path = "cases/agent_send_to_parent_defaults_to_false_and_rejects_non_boolean_values.rs"]
 mod agent_send_to_parent_defaults_to_false_and_rejects_non_boolean_values;
+#[path = "cases/agent_spawn_model_whitelist_parses_sequence_and_defaults_to_empty.rs"]
+mod agent_spawn_model_whitelist_parses_sequence_and_defaults_to_empty;
 #[path = "cases/agent_task_configuration_must_be_a_mapping.rs"]
 mod agent_task_configuration_must_be_a_mapping;
 #[path = "cases/agent_task_configuration_overrides_maximum_attempts.rs"]

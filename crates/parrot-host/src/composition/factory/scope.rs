@@ -1248,6 +1248,11 @@ where
                 self.config.router.clone(),
                 self.user.questions.clone(),
                 self.user.templates.clone(),
+                self.config
+                    .configuration
+                    .runtime
+                    .agent_spawn_model_whitelist
+                    .clone(),
             ));
             let asks = Arc::new(
                 self.user

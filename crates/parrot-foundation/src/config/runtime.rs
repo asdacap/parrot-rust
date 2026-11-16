@@ -179,6 +179,7 @@ pub struct RuntimeSettings {
     pub compaction: CompactionConfig,
     pub agent_tasks: AgentTaskConfig,
     pub agent_send_to_parent: bool,
+    pub agent_spawn_model_whitelist: Vec<String>,
     pub agent_limits: AgentLimitsConfig,
     pub tools: BTreeMap<String, ConfiguredToolDefinition>,
     pub live_buffer_rows: i32,
@@ -240,6 +241,7 @@ impl RuntimeSettings {
         let agent_tasks = read_agent_tasks(root)?;
         let agent_send_to_parent =
             boolean(root.get("agent_send_to_parent"), "agent_send_to_parent")?;
+        let agent_spawn_model_whitelist = read_agent_spawn_model_whitelist(root)?;
         let agent_limits = AgentLimitsConfig {
             disable_recursion_limit: boolean(
                 root.get("disable_recursion_limit"),
@@ -263,6 +265,7 @@ impl RuntimeSettings {
             compaction,
             agent_tasks,
             agent_send_to_parent,
+            agent_spawn_model_whitelist,
             agent_limits,
             tools,
             live_buffer_rows,
@@ -308,7 +311,7 @@ impl RuntimeSettings {
             "sandboxRules":rules(&self.sandbox_rules),"sandboxEnabled":self.sandbox_enabled,"sandboxDevBind":self.sandbox_dev_bind.as_slice(),
             "inlineDiff":self.inline_diff,"compaction":{"triggerPercent":self.compaction.trigger_percent,"targetPercent":self.compaction.target_percent,"maximumInputTokens":self.compaction.maximum_input_tokens,"maximumOutputTokens":self.compaction.maximum_output_tokens,"summaryOutputTokens":self.compaction.summary_output_tokens},
             "agentTasks":{"maximumAttempts":self.agent_tasks.maximum_attempts,"maximumResponseRepairs":self.agent_tasks.maximum_response_repairs,"forkHistoryMode":format!("{:?}",self.agent_tasks.fork_history_mode)},
-            "agentSend":{"toParent":self.agent_send_to_parent},"toolDefinitions":tools,
+            "agentSend":{"toParent":self.agent_send_to_parent,"spawnModelWhitelist":self.agent_spawn_model_whitelist},"toolDefinitions":tools,
             "agentLimits":{"disableRecursionLimit":self.agent_limits.disable_recursion_limit},
             "liveBufferRows":self.live_buffer_rows,"userInputTimeoutMs":self.user_input_timeout_ms,
             "execCommandYieldAfterMs":self.exec_command_yield_after_ms,
@@ -520,6 +523,34 @@ fn read_disabled_tools(root: &Node) -> Result<BTreeSet<String>> {
         }
     }
     Ok(result)
+}
+
+fn read_agent_spawn_model_whitelist(root: &Node) -> Result<Vec<String>> {
+    let Some(node) = root.get("agent_spawn_model_whitelist") else {
+        return Ok(Vec::new());
+    };
+    if plain_null(node) {
+        return Ok(Vec::new());
+    }
+    let mut whitelist = Vec::new();
+    for (index, item) in sequence(
+        Some(node),
+        "agent_spawn_model_whitelist must be a sequence of model selectors",
+    )?
+    .iter()
+    .enumerate()
+    {
+        let value = item
+            .as_str()
+            .filter(|value| !value.trim().is_empty() && value.trim() == *value)
+            .ok_or_else(|| {
+                error(format!(
+                    "agent_spawn_model_whitelist[{index}] must be a nonblank trimmed model selector"
+                ))
+            })?;
+        whitelist.push(value.to_owned());
+    }
+    Ok(whitelist)
 }
 
 fn read_sandbox_rules(

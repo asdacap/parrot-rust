@@ -7,6 +7,11 @@ skills:
 # Default model selected as provider/model, optionally followed by /variant.
 model: ""
 
+# When nonempty, agent spawn may only launch these canonical models
+# (provider/model, optionally followed by /variant). Model aliases pass when
+# their target model is listed.
+agent_spawn_model_whitelist: []
+
 disable_recursion_limit: true
 
 # Named snapshots of the selected model and model alias targets.

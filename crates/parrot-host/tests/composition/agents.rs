@@ -39,7 +39,10 @@ mod fixture {
         catalogs::Model,
         compaction::{CompactionSettings, Compactor},
         routing::{
-            aliases::{ModelAliasCatalog, ModelRouter, ModelRouting, ResolvedModelSelection},
+            aliases::{
+                ModelAliasCatalog, ModelAliasDefinition, ModelRouter, ModelRouting,
+                ResolvedModelSelection,
+            },
             registry::ProviderRegistry,
         },
         sessions::{self, Completion, Error, EventStream, Provider, Request, Session},
@@ -128,8 +131,16 @@ mod fixture {
     pub(super) struct Scripted {
         pub(super) requests: Arc<Mutex<Vec<Request>>>,
         steps: Arc<Mutex<VecDeque<ScriptStep>>>,
+        pub(super) aliases: Vec<ModelAliasDefinition>,
     }
     impl Scripted {
+        pub(super) fn with_aliases(aliases: Vec<ModelAliasDefinition>) -> Self {
+            Self {
+                requests: Arc::default(),
+                steps: Arc::default(),
+                aliases,
+            }
+        }
         pub(super) fn step(&self, completion: Completion) -> Arc<Gate> {
             let gate = Gate::new();
             self.steps
@@ -148,7 +159,9 @@ mod fixture {
                 )
                 .unwrap(),
             );
-            let aliases = Arc::new(ModelAliasCatalog::new(registry.clone(), vec![]).unwrap());
+            let aliases = Arc::new(
+                ModelAliasCatalog::new(registry.clone(), self.aliases.iter().cloned()).unwrap(),
+            );
             Arc::new(ModelRouter::new(
                 registry,
                 Arc::new(ModelRouting::new(aliases, "scripted/model")),
@@ -611,6 +624,7 @@ mod fixture {
         providers: Mutex<BTreeMap<String, Scripted>>,
         user_questions: Arc<parrot_runtime::interactions::QuestionBroker>,
         asks: Arc<parrot_runtime::interactions::AgentAskBroker>,
+        spawn_model_whitelist: Vec<String>,
     }
     impl Factory {
         async fn build(
@@ -640,6 +654,7 @@ mod fixture {
                 provider.router(),
                 self.user_questions.clone(),
                 templates.clone(),
+                self.spawn_model_whitelist.clone(),
             ));
             let asks = Arc::new(
                 self.asks
@@ -808,6 +823,9 @@ mod fixture {
     }
     impl Harness {
         pub(super) async fn new() -> Self {
+            Self::configured(Scripted::default(), Vec::new()).await
+        }
+        pub(super) async fn configured(scripted: Scripted, whitelist: Vec<String>) -> Self {
             // This module and the queue cases reuse the runtime helpers, whose
             // module-local counters would otherwise select the same directory.
             let path =
@@ -850,6 +868,7 @@ mod fixture {
                     std::time::Duration::from_secs(300),
                     Arc::new(parrot_foundation::clock::SystemClock),
                 )),
+                spawn_model_whitelist: whitelist,
                 user_questions: Arc::new(
                     parrot_runtime::interactions::QuestionBroker::new(
                         None,
@@ -858,7 +877,7 @@ mod fixture {
                     .unwrap(),
                 ),
             });
-            let model = Scripted::default();
+            let model = scripted;
             let registry = AgentRegistry::new(RegistryConfig {
                 agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig {
                     disable_recursion_limit: false,
@@ -1053,19 +1072,20 @@ mod fixture {
     }
 }
 
-use fixture::{Harness, bounded, done_completion, templates, wait_completion};
+use fixture::{Harness, Scripted, bounded, done_completion, templates, wait_completion};
 use parrot_domain::contracts::{
     async_ops::OperationError,
     interactions::{AgentAskReply, AgentCommunication, QuestionRequester},
     runtime::AgentRuntime,
 };
+use parrot_provider::routing::aliases::ModelAliasDefinition;
 use parrot_provider::sessions;
 use parrot_runtime::{
     agent_turn::lifecycle::{DrainState, Signal},
     interactions::QuestionDefinition,
 };
 use parrot_storage::events::{ConversationPart, NeverCancelled};
-use parrot_tools::agents::{NamedRequest, SendRequest, input::SendInput};
+use parrot_tools::agents::{AgentToolError, NamedRequest, SendRequest, input::SendInput};
 use std::{sync::Arc, time::Duration};
 
 fn assert_waking_request(h: &Harness, text: &str) {
@@ -1355,6 +1375,95 @@ async fn host_spawn_uses_actual_spawner_and_admits_prompt_before_returning() {
         }
     })
     .await;
+    h.close().await;
+}
+
+#[tokio::test]
+async fn host_spawn_enforces_model_whitelist_and_admits_alias_targets() {
+    use parrot_runtime::tool_settlement::SharedSecurity;
+    use parrot_tools::agents::{
+        SpawnRequest,
+        input::{ForkSelection, SpawnInput},
+    };
+    async fn spawn(
+        h: &Harness,
+        model: &str,
+        name: &str,
+    ) -> Result<parrot_tools::agents::SpawnResult, OperationError<AgentToolError>> {
+        h.built
+            .bridge
+            .spawn(
+                SpawnRequest {
+                    input: SpawnInput {
+                        prompt: "do concrete work".into(),
+                        agent: "worker".into(),
+                        model: model.into(),
+                        name: name.into(),
+                        scope: "src".into(),
+                        fork: ForkSelection::Empty,
+                    },
+                    assistant_sequence: 0,
+                    call_id: "spawn-call".into(),
+                },
+                SharedSecurity(support::Security::new(255)),
+                &NeverCancelled,
+            )
+            .await
+    }
+    let alias_harness = || {
+        Harness::configured(
+            Scripted::with_aliases(vec![ModelAliasDefinition::new(
+                "fast",
+                "scripted/model",
+                "quick",
+            )]),
+            vec!["scripted/model".into()],
+        )
+    };
+    let h = alias_harness().await;
+    let child_gate = h.built.provider.step(done_completion());
+    let parent_gate = h.built.provider.step(done_completion());
+    let spawned = bounded(spawn(&h, "fast", "Alias Work")).await.unwrap();
+    assert_eq!(spawned.name, "alias-work");
+    child_gate.entered().await;
+    child_gate.open();
+    parent_gate.entered().await;
+    parent_gate.open();
+    bounded(async {
+        while h.built.session.is_active() || h.built("alias-work").session.is_active() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    h.close().await;
+
+    let h = alias_harness().await;
+    let child_gate = h.built.provider.step(done_completion());
+    let parent_gate = h.built.provider.step(done_completion());
+    let spawned = bounded(spawn(&h, "scripted/model", "Direct Work"))
+        .await
+        .unwrap();
+    assert_eq!(spawned.name, "direct-work");
+    child_gate.entered().await;
+    child_gate.open();
+    parent_gate.entered().await;
+    parent_gate.open();
+    bounded(async {
+        while h.built.session.is_active() || h.built("direct-work").session.is_active() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    h.close().await;
+
+    let h = Harness::configured(Scripted::default(), vec!["scripted/other".into()]).await;
+    assert!(
+        matches!(bounded(spawn(&h, "scripted/model", "Blocked")).await,
+        Err(OperationError::Failed(AgentToolError::Provider(message)))
+            if message.contains("not in the agent spawn model whitelist")),
+        "non-whitelisted model must be rejected"
+    );
+    assert!(h.root.children().resolve("blocked").is_err());
     h.close().await;
 }
 

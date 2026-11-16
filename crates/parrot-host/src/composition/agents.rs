@@ -65,6 +65,7 @@ pub struct ScopedAgentRuntime<S: RestrictableAccessSnapshot + 'static> {
     models: Arc<ModelRouter>,
     user_questions: Arc<QuestionBroker>,
     templates: Arc<PromptTemplateCatalog>,
+    spawn_model_whitelist: Vec<String>,
 }
 
 impl<S: RestrictableAccessSnapshot + 'static> ScopedAgentRuntime<S> {
@@ -73,6 +74,7 @@ impl<S: RestrictableAccessSnapshot + 'static> ScopedAgentRuntime<S> {
         models: Arc<ModelRouter>,
         user_questions: Arc<QuestionBroker>,
         templates: Arc<PromptTemplateCatalog>,
+        spawn_model_whitelist: Vec<String>,
     ) -> Self {
         Self {
             owner: OnceLock::new(),
@@ -80,6 +82,7 @@ impl<S: RestrictableAccessSnapshot + 'static> ScopedAgentRuntime<S> {
             models,
             user_questions,
             templates,
+            spawn_model_whitelist,
         }
     }
 
@@ -146,6 +149,16 @@ impl<S: RestrictableAccessSnapshot + 'static> AgentRuntime for ScopedAgentRuntim
             let model = self.models.resolve(&request.input.model).map_err(|error| {
                 OperationError::Failed(AgentToolError::Provider(error.to_string()))
             })?;
+            if !self.spawn_model_whitelist.is_empty()
+                && !self
+                    .spawn_model_whitelist
+                    .contains(&model.canonical_model.selector())
+            {
+                return Err(OperationError::Failed(AgentToolError::Provider(format!(
+                    "model \"{}\" is not in the agent spawn model whitelist",
+                    model.canonical_model.selector()
+                ))));
+            }
             let fork = match &request.input.fork {
                 ForkSelection::Empty => "empty",
                 ForkSelection::Full => "full",
