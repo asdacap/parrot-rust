@@ -80,9 +80,6 @@ where
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Option<TaskSetResponse>, OperationError<ToolFailure>>> {
         Box::pin(async move {
-            if cancellation.is_cancelled() {
-                return Err(OperationError::Cancelled);
-            }
             tokio::select! { biased; _ = cancellation.cancelled() => Err(OperationError::Cancelled), receipt = self.scheduler.lookup_accepted(identity) => receipt.map_err(operation_error) }
         })
     }

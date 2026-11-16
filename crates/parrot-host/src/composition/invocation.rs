@@ -3,9 +3,8 @@ use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
         security::{AccessSnapshot, InvocationScope},
-        tools::Tool,
     },
-    values::{context::ContextSnapshot, progress::ProgressUpdate},
+    values::context::ContextSnapshot,
 };
 use parrot_runtime::{
     agent_turn::services::{TurnError, TurnSelection},
@@ -16,7 +15,7 @@ use parrot_runtime::{
 };
 use parrot_tools::{
     catalog,
-    session::{Failure, FailureKind, SessionServices},
+    session::{Failure, FailureKind},
 };
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -32,20 +31,20 @@ fn turn_failure(error: TurnError) -> OperationError<Failure> {
     }
 }
 
-enum InlineRequest {
+pub enum InlineRequest {
     Estimate {
         reply: oneshot::Sender<OperationResult<ContextSnapshot, Failure>>,
     },
 }
 #[derive(Clone)]
-struct InlineRoute {
-    sender: mpsc::Sender<InlineRequest>,
+pub struct InlineRoute {
+    pub sender: mpsc::Sender<InlineRequest>,
 }
 
 /// Owned selection handed to the retained tool. Borrowed resources stay in its invocation.
 pub struct InvocationSelection<S: AccessSnapshot> {
     pub turn: TurnSelection<S>,
-    route: Option<InlineRoute>,
+    pub route: Option<InlineRoute>,
 }
 impl<S: AccessSnapshot> Clone for InvocationSelection<S> {
     fn clone(&self) -> Self {
@@ -88,82 +87,8 @@ impl<S: AccessSnapshot> InvocationSelection<S> {
     }
 }
 
-/// Delegates retained session operations while status uses the invocation's borrowed resources.
-pub struct InvocationServices<S: AccessSnapshot, O: SessionServices> {
-    ancillary: Arc<O>,
-    marker: std::marker::PhantomData<fn() -> S>,
-}
-impl<S: AccessSnapshot, O: SessionServices> InvocationServices<S, O> {
-    pub fn new(ancillary: Arc<O>) -> Self {
-        Self {
-            ancillary,
-            marker: std::marker::PhantomData,
-        }
-    }
-}
-impl<S, O> SessionServices for InvocationServices<S, O>
-where
-    S: AccessSnapshot + 'static,
-    O: SessionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>,
-{
-    type Security = SharedSecurity<S>;
-    type Selection = InvocationSelection<S>;
-    fn set_reminder<'a>(
-        &'a self,
-        title: &'a str,
-        description: &'a str,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<(), Failure>> {
-        self.ancillary
-            .set_reminder(title, description, cancellation)
-    }
-    fn clear_reminder<'a>(
-        &'a self,
-        title: &'a str,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<bool, Failure>> {
-        self.ancillary.clear_reminder(title, cancellation)
-    }
-    fn reminder_titles(&self) -> BoxFuture<'_, Vec<String>> {
-        self.ancillary.reminder_titles()
-    }
-    fn update_progress<'a>(
-        &'a self,
-        update: ProgressUpdate,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<bool, Failure>> {
-        self.ancillary.update_progress(update, cancellation)
-    }
-    fn runtime_status<'a>(
-        &'a self,
-        selection: &'a InvocationSelection<S>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<String, Failure>> {
-        self.ancillary.runtime_status(selection, cancellation)
-    }
-    fn statistics_status<'a>(
-        &'a self,
-        selection: &'a InvocationSelection<S>,
-        cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<String, Failure>> {
-        self.ancillary.statistics_status(selection, cancellation)
-    }
-}
-
-type RetainedSessionTool<S> = dyn Tool<
-        Definition = parrot_domain::values::tools::ConfiguredToolDefinition,
-        Invocation = parrot_tools::session::Invocation,
-        Selection = InvocationSelection<S>,
-        Security = SharedSecurity<S>,
-        Output = parrot_tools::session::Output,
-        Error = Failure,
-    >;
-enum CompactToolHandle<S: AccessSnapshot + 'static> {
-    Catalog(Arc<catalog::RetainedTool<SharedSecurity<S>, InvocationSelection<S>>>),
-    Session(Arc<RetainedSessionTool<S>>),
-}
 pub struct RetainedCompactTool<S: AccessSnapshot + 'static> {
-    tool: CompactToolHandle<S>,
+    tool: Arc<catalog::RetainedTool<SharedSecurity<S>, InvocationSelection<S>>>,
     metadata: ToolMetadata,
 }
 impl<S: AccessSnapshot + 'static> RetainedCompactTool<S> {
@@ -187,7 +112,7 @@ impl<S: AccessSnapshot + 'static> RetainedCompactTool<S> {
             )));
         }
         Ok(Self {
-            tool: CompactToolHandle::Catalog(factory.create()),
+            tool: factory.create(),
             metadata: ToolMetadata {
                 name: factory.name().into(),
                 aliases: factory
@@ -198,55 +123,13 @@ impl<S: AccessSnapshot + 'static> RetainedCompactTool<S> {
             },
         })
     }
-    pub fn from_session<O>(
-        tool: Arc<parrot_tools::session::SessionTool<O>>,
-    ) -> Result<Self, Failure>
-    where
-        O: SessionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>
-            + 'static,
-    {
-        Self::from_session_kind(tool, "compact_context")
-    }
-    pub fn from_status_session<O>(
-        tool: Arc<parrot_tools::session::SessionTool<O>>,
-    ) -> Result<Self, Failure>
-    where
-        O: SessionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>
-            + 'static,
-    {
-        Self::from_session_kind(tool, "status")
-    }
-    fn from_session_kind<O>(
-        tool: Arc<parrot_tools::session::SessionTool<O>>,
-        name: &str,
-    ) -> Result<Self, Failure>
-    where
-        O: SessionServices<Security = SharedSecurity<S>, Selection = InvocationSelection<S>>
-            + 'static,
-    {
-        if tool.name() != name {
-            return Err(failure(format!(
-                "The borrowed invocation adapter requires the {name} tool."
-            )));
-        }
-        Ok(Self {
-            tool: CompactToolHandle::Session(tool),
-            metadata: ToolMetadata {
-                name: name.into(),
-                aliases: vec![],
-            },
-        })
-    }
 }
 impl<S: AccessSnapshot + 'static> BorrowedTool<S> for RetainedCompactTool<S> {
     fn definition(&self) -> &ToolMetadata {
         &self.metadata
     }
     fn enabled_after_interruption(&self) -> bool {
-        match &self.tool {
-            CompactToolHandle::Catalog(tool) => tool.enabled_after_interruption(),
-            CompactToolHandle::Session(tool) => tool.enabled_after_interruption(),
-        }
+        self.tool.enabled_after_interruption()
     }
     fn invoke<'a>(
         &'a self,
@@ -278,26 +161,9 @@ impl<S: AccessSnapshot + 'static> BorrowedTool<S> for RetainedCompactTool<S> {
                 prompt_templates: invocation.prompt_templates,
                 image_budget: None,
             };
-            let invoke: BoxFuture<'_, OperationResult<catalog::Output, catalog::Error>> =
-                match &self.tool {
-                    CompactToolHandle::Catalog(tool) => {
-                        tool.invoke(call, InvocationScope::new(security, selected, cancellation))
-                    }
-                    CompactToolHandle::Session(tool) => Box::pin(async move {
-                        tool.invoke(
-                            call.into(),
-                            InvocationScope::new(security, selected.scoped, cancellation),
-                        )
-                        .await
-                        .map(Into::into)
-                        .map_err(|error| match error {
-                            OperationError::Cancelled => OperationError::Cancelled,
-                            OperationError::Failed(error) => {
-                                OperationError::Failed(catalog::Error::Session(error))
-                            }
-                        })
-                    }),
-                };
+            let invoke: BoxFuture<'_, OperationResult<catalog::Output, catalog::Error>> = self
+                .tool
+                .invoke(call, InvocationScope::new(security, selected, cancellation));
             tokio::pin!(invoke);
             loop {
                 tokio::select! {

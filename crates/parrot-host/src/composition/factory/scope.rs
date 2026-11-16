@@ -7,7 +7,7 @@ use super::{
 };
 use crate::composition::{
     agents::{AgentSessionServices, ScopedAgentRuntime},
-    invocation::{InvocationSelection, InvocationServices},
+    invocation::InvocationSelection,
     processes::{ScopedProcessStatus, production_filename_generator},
     protocol,
 };
@@ -1387,13 +1387,12 @@ where
                     .await
                     .map_err(child)?,
                 );
-                let ancillary = Arc::new(ScopedSessionServices {
+                let services = Arc::new(ScopedSessionServices {
                     link: link.clone(),
                     reminders: reminders.clone(),
                     progress: progress.clone(),
                     status: status.clone(),
                 });
-                let invocation_services = Arc::new(InvocationServices::<S, _>::new(ancillary));
                 let activity = Arc::new(AgentSessionActivity::new(self.config.clock.clone()));
                 let bound_catalog = Arc::new(BoundCatalog::new());
                 let tool_execution = ToolExecutionConfig {
@@ -1594,7 +1593,7 @@ where
                 let catalog_cells = bound_catalog.clone();
                 let catalog_agents = agents.clone();
                 let catalog_tasks = tasks.clone();
-                let catalog_services = invocation_services.clone();
+                let catalog_services = services.clone();
                 let catalog_environment = environment.clone();
                 let binding = Arc::new(ScopeBindings {
                     link: link.clone(),
@@ -1692,7 +1691,7 @@ where
                         ServiceRegistration::new(asks.clone()),
                         ServiceRegistration::new(status_factory),
                         ServiceRegistration::new(status),
-                        ServiceRegistration::new(invocation_services),
+                        ServiceRegistration::new(services),
                         ServiceRegistration::new(binding),
                     ],
                     publishers: vec![

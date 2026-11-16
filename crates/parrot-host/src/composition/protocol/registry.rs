@@ -89,10 +89,6 @@ impl UserSessionRegistry {
             .map(|entry| entry.session.clone())
             .ok_or_else(|| RpcError::new(RpcCode::NotFound, format!("no user session {id}")))
     }
-    pub fn contains(&self, id: &str) -> bool {
-        let state = self.state.lock().expect("session registry poisoned");
-        self.failure.get().is_none() && state.accepting && state.sessions.contains_key(id)
-    }
     pub async fn host(
         self: &Arc<Self>,
         open: BoxFuture<'static, Result<Arc<dyn HostedSession>>>,

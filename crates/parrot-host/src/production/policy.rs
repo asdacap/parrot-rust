@@ -37,11 +37,7 @@ fn normalize(path: &Path) -> Result<PathBuf, FileReadError> {
     let text = path
         .to_str()
         .ok_or_else(|| invalid("Security policy paths must be valid Unicode."))?;
-    let platform = if cfg!(target_os = "macos") {
-        PathPlatform::MacOs
-    } else {
-        PathPlatform::Unix
-    };
+    let platform = PathPlatform::current();
     let normalized =
         PlatformPath::normalize(text, "/", platform).map_err(|error| invalid(error.to_string()))?;
     Ok(PathBuf::from(normalized))

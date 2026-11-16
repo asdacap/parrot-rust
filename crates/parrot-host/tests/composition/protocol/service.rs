@@ -1932,7 +1932,7 @@ async fn registry_failed_host_releases_actual_lease_and_close_attempts_listener_
         RpcCode::Internal,
     );
     assert!(failed.closed.load(Ordering::SeqCst));
-    assert!(!f.service.sessions().contains(&failed.id()));
+    assert!(f.service.sessions().find(&failed.id()).is_err());
     assert!(
         !f.claim
             .is_active(
