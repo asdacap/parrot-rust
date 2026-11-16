@@ -1,11 +1,12 @@
 //! Turn engine: drains ready turns and drives one turn from input to settlement.
 
 use crate::{
-    AgentState, CancellationToken, CompletionBlockerFeedback, ConfigKey, ConversationAddition,
-    ConversationEvent, ConversationOrigin, ConversationPersistence, ConversationTurn, Error,
-    ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome, PromotedInput,
-    Provider, Role, SkillProvider, States, ToolCallReceipt, Tools, TurnEngine, TurnHooks,
-    TurnLifecycle, TurnServices, context, rendering, skills, status::steer_status,
+    AgentState, CancellationToken, CompactionRequest, CompletionBlockerFeedback, ConfigKey,
+    ContextCompaction, ContextSnapshot, ConversationAddition, ConversationEvent,
+    ConversationOrigin, ConversationPersistence, ConversationTurn, Error, ErrorKind,
+    EventPublisher, FinishReason, InputAdmission, Message, Outcome, PromotedInput, Provider,
+    ProviderRequest, Role, SkillProvider, States, ToolCallReceipt, ToolDefinition, Tools,
+    TurnEngine, TurnHooks, TurnLifecycle, TurnOptions, rendering, skills, status::steer_status,
     tool_settlement::execute_tools,
 };
 
@@ -17,10 +18,16 @@ struct AgentTurn<'a> {
     hooks: &'a dyn TurnHooks,
     skill_provider: &'a dyn SkillProvider,
     provider: &'a dyn Provider,
-    publisher: &'a dyn EventPublisher,
-    state: AgentState,
-    compacted_oversized: bool,
+    event_publisher: &'a dyn EventPublisher,
+    agent_state: AgentState,
     skill_preparation: skills::SkillPreparation,
+}
+
+/// The provider request assembled for one step, with its estimate facts.
+struct PreparedRequest {
+    request: ProviderRequest,
+    estimated_input_tokens: i64,
+    model_selector: String,
 }
 
 impl AgentTurn<'_> {
@@ -30,30 +37,38 @@ impl AgentTurn<'_> {
         if cancellation.is_cancelled() {
             return Err(Error::cancelled());
         }
-        self.state.begin_turn();
-        if self.state.final_phase {
+
+        self.agent_state.begin_turn();
+
+        if self.agent_state.final_phase {
             let restored =
                 rendering::render_template(self.states, ConfigKey::RestoredToolsTemplate, &[])
                     .await?;
             self.add_phase_prompt(&restored, false).await?;
         }
+
+        let mut compacted_oversized = false;
+
         loop {
             if cancellation.is_cancelled() {
                 return Err(Error::cancelled());
             }
+
             self.hooks.begin_step().await?;
+
             let options = self.states.get_config(ConfigKey::Turn).await?.into_turn()?;
             let catalog = self.tools.capture_catalog().await?;
-            if cancellation.is_cancelled() {
-                return Err(Error::cancelled());
-            }
-            let turn = self.states.get_last_turn().await?;
-            let admission = if turn.as_ref().is_some_and(ConversationTurn::needs_response) {
+            let last_turn = self.states.get_last_turn().await?;
+            let admission = if last_turn
+                .as_ref()
+                .is_some_and(ConversationTurn::needs_response)
+            {
                 InputAdmission::SteersOnly
             } else {
                 InputAdmission::SteersOrNextQueued
             };
             let inputs = self.states.promote_pending_inputs(admission).await?;
+
             for input in &inputs {
                 self.states
                     .add_conversation_messages(ConversationAddition {
@@ -62,8 +77,10 @@ impl AgentTurn<'_> {
                     })
                     .await?;
             }
+
             self.add_skill_prompt(&inputs, cancellation).await?;
-            let Some(flags) = self.state.admit(options.maximum_requests) else {
+
+            let Some(flags) = self.agent_state.admit(options.maximum_requests) else {
                 return self.exhaust_budget().await;
             };
             let definitions = if flags.final_phase {
@@ -71,55 +88,54 @@ impl AgentTurn<'_> {
             } else {
                 &catalog.normal
             };
-            steer_status(self.states, &mut self.state, cancellation).await?;
+
+            steer_status(self.states, &mut self.agent_state, cancellation).await?;
+
             if flags.final_phase {
                 let content =
                     rendering::render_template(self.states, ConfigKey::FinalRequestTemplate, &[])
                         .await?;
                 self.add_phase_prompt(&content, true).await?;
             }
-            let prepared = context::prepare_request(
-                self.states,
-                &mut self.state,
-                self.provider,
-                definitions,
-                &options,
-                cancellation,
-            )
-            .await?;
-            let attempt = self.state.count_request();
-            self.states.set_agent_state(self.state.clone()).await?;
-            let invoked = self.provider.invoke(prepared.request, cancellation).await;
-            let input_tokens = match &invoked {
+
+            let prepared = self
+                .prepare_request(definitions, &options, cancellation)
+                .await?;
+
+            let attempt = self.agent_state.count_request();
+            self.states
+                .set_agent_state(self.agent_state.clone())
+                .await?;
+
+            let invocation = self.provider.invoke(prepared.request, cancellation).await;
+
+            let input_tokens = match &invocation {
                 Ok(response) => Some(response.input_tokens),
                 Err(error) => error.input_tokens,
             };
             if let Some(input_tokens) = input_tokens {
-                self.state.last_request_statistic.observe_usage(
+                self.agent_state.last_request_statistic.observe_usage(
                     &prepared.model_selector,
                     prepared.estimated_input_tokens,
                     input_tokens,
                 );
             }
-            let response = match invoked.map_err(|error| error.error) {
+
+            let response = match invocation.map_err(|error| error.error) {
                 Ok(response) => response,
-                Err(error)
-                    if error.kind == ErrorKind::RequestTooLarge && !self.compacted_oversized =>
-                {
-                    self.compacted_oversized = true;
-                    if !context::compact_context(
-                        self.states,
-                        &mut self.state,
-                        self.provider,
-                        definitions,
-                        crate::CompactionRequest {
-                            trigger: crate::CompactionTrigger::Automatic,
-                            ..Default::default()
-                        },
-                        cancellation,
-                    )
-                    .await?
-                    .reduced
+                Err(error) if error.kind == ErrorKind::RequestTooLarge && !compacted_oversized => {
+                    compacted_oversized = true;
+                    if !self
+                        .compact_context(
+                            definitions,
+                            CompactionRequest {
+                                trigger: crate::CompactionTrigger::Automatic,
+                                ..Default::default()
+                            },
+                            cancellation,
+                        )
+                        .await?
+                        .reduced
                     {
                         return Err(error);
                     }
@@ -127,7 +143,8 @@ impl AgentTurn<'_> {
                 }
                 Err(error) => return Err(error),
             };
-            self.compacted_oversized = false;
+            compacted_oversized = false;
+
             let retry_reason = if response.finish_reason == FinishReason::Length
                 && !response.tool_calls.is_empty()
             {
@@ -139,6 +156,7 @@ impl AgentTurn<'_> {
             } else {
                 None
             };
+
             if let Some(key) = retry_reason {
                 let content = rendering::render_template(self.states, key, &[]).await?;
                 self.states
@@ -155,8 +173,9 @@ impl AgentTurn<'_> {
                     .await?;
                 continue;
             }
+
             if !response.tool_calls.is_empty() {
-                let recorded = self
+                let message_receipt = self
                     .states
                     .add_conversation_messages(ConversationAddition {
                         messages: vec![Message::from_response(&response)],
@@ -166,7 +185,8 @@ impl AgentTurn<'_> {
                         },
                     })
                     .await?;
-                self.publisher
+
+                self.event_publisher
                     .publish(
                         ConversationEvent::ToolRequestReceived {
                             count: response.tool_calls.len() as i32,
@@ -174,10 +194,13 @@ impl AgentTurn<'_> {
                         cancellation,
                     )
                     .await?;
+
                 let receipt = ToolCallReceipt {
-                    assistant_sequence: recorded.sequence,
+                    assistant_sequence: message_receipt.sequence,
                 };
-                self.states.set_agent_state(self.state.clone()).await?;
+                self.states
+                    .set_agent_state(self.agent_state.clone())
+                    .await?;
                 let compaction_request = execute_tools(
                     self.states,
                     self.tools,
@@ -187,24 +210,22 @@ impl AgentTurn<'_> {
                     cancellation,
                 )
                 .await?;
-                self.state = self.states.get_agent_state().await?;
+                self.agent_state = self.states.get_agent_state().await?;
+
                 if let Some(request) = compaction_request {
-                    context::compact_context(
-                        self.states,
-                        &mut self.state,
-                        self.provider,
-                        definitions,
-                        request,
-                        cancellation,
-                    )
-                    .await?;
+                    self.compact_context(definitions, request, cancellation)
+                        .await?;
                 }
-                if flags.final_phase && !self.state.try_extend_settlement() {
+
+                if flags.final_phase && !self.agent_state.try_extend_settlement() {
                     return self.exhaust_budget().await;
                 }
+
                 continue;
             }
+
             let messages = self.states.collect_completion_blockers().await?;
+
             if !messages.is_empty() {
                 let mut additions = vec![Message::from_response(&response)];
                 additions.extend(
@@ -212,6 +233,7 @@ impl AgentTurn<'_> {
                         .iter()
                         .map(|message| Message::text(Role::System, message)),
                 );
+
                 self.states
                     .add_conversation_messages(ConversationAddition {
                         messages: additions,
@@ -223,10 +245,14 @@ impl AgentTurn<'_> {
                         ),
                     })
                     .await?;
-                self.state.restart();
+
+                self.agent_state.restart();
+
                 continue;
             }
+
             let usage = self.states.read_usage_totals().await?;
+
             self.states
                 .add_conversation_messages(ConversationAddition {
                     messages: vec![Message::from_response(&response)],
@@ -236,6 +262,7 @@ impl AgentTurn<'_> {
                     },
                 })
                 .await?;
+
             return Ok(Outcome::Completed(response.assistant_text));
         }
     }
@@ -251,9 +278,11 @@ impl AgentTurn<'_> {
             .skill_preparation
             .prepare(self.states, self.skill_provider, inputs, cancellation)
             .await?;
+
         if skill_prompt.content.is_empty() {
             return Ok(());
         }
+
         self.states
             .add_conversation_messages(ConversationAddition {
                 messages: vec![Message::text(Role::User, skill_prompt.content)],
@@ -266,11 +295,13 @@ impl AgentTurn<'_> {
                 },
             })
             .await?;
+
         for path in skill_prompt.loaded_paths {
-            self.publisher
+            self.event_publisher
                 .publish(ConversationEvent::SkillLoaded { path }, cancellation)
                 .await?;
         }
+
         Ok(())
     }
 
@@ -278,9 +309,10 @@ impl AgentTurn<'_> {
     /// the final-provider-request prompt is recorded once, and the tool-availability
     /// restore is recorded only while the marker stands. A repeat records nothing.
     async fn add_phase_prompt(&mut self, content: &str, final_phase: bool) -> Result<(), Error> {
-        if self.state.final_phase == final_phase {
+        if self.agent_state.final_phase == final_phase {
             return Ok(());
         }
+
         let (kind, notice) = if final_phase {
             (
                 "final_provider_request_prompt",
@@ -292,6 +324,7 @@ impl AgentTurn<'_> {
                 "Tool availability restored prompt injected",
             )
         };
+
         self.states
             .add_conversation_messages(ConversationAddition {
                 messages: vec![Message::text(Role::System, content)],
@@ -304,8 +337,140 @@ impl AgentTurn<'_> {
                 },
             })
             .await?;
-        self.state.final_phase = final_phase;
+
+        self.agent_state.final_phase = final_phase;
+
         Ok(())
+    }
+
+    /// Prepares the next provider request against the current conversation state,
+    /// compacting first when the estimated input exceeds its trigger.
+    async fn prepare_request(
+        &mut self,
+        definitions: &[ToolDefinition],
+        options: &TurnOptions,
+        cancellation: CancellationToken<'_>,
+    ) -> Result<PreparedRequest, Error> {
+        let instructions = self
+            .prepare_context_epoch(definitions, cancellation)
+            .await?;
+
+        let messages = self
+            .states
+            .read_conversation_state()
+            .await?
+            .assemble_messages();
+        let context_configuration = self
+            .states
+            .get_config(ConfigKey::Context)
+            .await?
+            .into_context()?;
+        let estimate =
+            self.provider
+                .estimate_input_tokens(&instructions, definitions, &messages)?;
+        let max_output_tokens = self
+            .agent_state
+            .last_request_statistic
+            .calculate_maximum_output_tokens(&context_configuration, estimate)?;
+
+        Ok(PreparedRequest {
+            estimated_input_tokens: estimate,
+            model_selector: context_configuration.canonical_model,
+            request: ProviderRequest {
+                model: options.model.clone(),
+                instructions,
+                messages,
+                tools: definitions.to_vec(),
+                max_output_tokens,
+                reasoning: options.reasoning.clone(),
+                provider_preferences: options.provider_preferences.clone(),
+                include_router_metadata: options.include_router_metadata,
+            },
+        })
+    }
+
+    /// Estimates the current context, compacts once when it exceeds its trigger,
+    /// and returns the instructions the request must use.
+    async fn prepare_context_epoch(
+        &mut self,
+        definitions: &[ToolDefinition],
+        cancellation: CancellationToken<'_>,
+    ) -> Result<String, Error> {
+        if cancellation.is_cancelled() {
+            return Err(Error::cancelled());
+        }
+
+        let mut instructions = self.states.capture_system_prompt().await?;
+        let mut messages = self
+            .states
+            .read_conversation_state()
+            .await?
+            .assemble_messages();
+        let mut context_configuration = self
+            .states
+            .get_config(ConfigKey::Context)
+            .await?
+            .into_context()?;
+        let estimate =
+            self.provider
+                .estimate_input_tokens(&instructions, definitions, &messages)?;
+        let mut snapshot = ContextSnapshot::estimate(estimate, &context_configuration);
+
+        if snapshot.requires_compaction(
+            &self.agent_state.last_request_statistic,
+            &context_configuration.canonical_model,
+        ) {
+            let compacted = self
+                .compact_context(
+                    definitions,
+                    CompactionRequest {
+                        trigger: crate::CompactionTrigger::Automatic,
+                        ..Default::default()
+                    },
+                    cancellation,
+                )
+                .await?;
+
+            instructions = compacted.instructions;
+            messages = self
+                .states
+                .read_conversation_state()
+                .await?
+                .assemble_messages();
+            context_configuration = self
+                .states
+                .get_config(ConfigKey::Context)
+                .await?
+                .into_context()?;
+            let estimate =
+                self.provider
+                    .estimate_input_tokens(&instructions, definitions, &messages)?;
+            snapshot = ContextSnapshot::estimate(estimate, &context_configuration);
+            snapshot.ensure_input_fits()?;
+        }
+
+        Ok(instructions)
+    }
+
+    /// Requests provider-owned compaction and reloads its state effects before
+    /// returning.
+    async fn compact_context(
+        &mut self,
+        definitions: &[ToolDefinition],
+        mut request: CompactionRequest,
+        cancellation: CancellationToken<'_>,
+    ) -> Result<ContextCompaction, Error> {
+        request.tools = definitions.to_vec();
+        self.states
+            .set_agent_state(self.agent_state.clone())
+            .await?;
+        let compacted = self.provider.compact(request, cancellation).await;
+        self.agent_state = self.states.get_agent_state().await?;
+        let reduced = compacted?.is_some();
+        Ok(ContextCompaction {
+            instructions: self.states.capture_system_prompt().await?,
+            reduced,
+        })
     }
 
     /// Renders the terminal notice core records when the invocation budget runs out.
@@ -317,7 +482,7 @@ impl AgentTurn<'_> {
 
     /// Persists the agent state after execution, including failures.
     async fn record_state(self) -> Result<(), Error> {
-        self.states.set_agent_state(self.state).await
+        self.states.set_agent_state(self.agent_state).await
     }
 }
 
@@ -340,7 +505,25 @@ impl TurnEngine {
                 return Ok(Outcome::Completed(answer));
             }
             let mut turn = lifecycle.open_turn(token).await?;
-            let result = run_opened_turn(turn.borrow_services(), token).await;
+            let result = async {
+                let services = turn.borrow_services();
+                services.hooks.activate_conversation_turn().await?;
+                let agent_state = services.states.get_agent_state().await?;
+                let mut agent_turn = AgentTurn {
+                    states: services.states,
+                    tools: services.tools,
+                    hooks: services.hooks,
+                    skill_provider: services.skills,
+                    provider: services.provider,
+                    event_publisher: services.event_publisher,
+                    agent_state,
+                    skill_preparation: skills::SkillPreparation::default(),
+                };
+                let outcome = agent_turn.run(token).await;
+                agent_turn.record_state().await?;
+                outcome
+            }
+            .await;
             turn.dispose(&result).await?;
             match result? {
                 Outcome::Completed(completed) => answer = completed,
@@ -350,42 +533,21 @@ impl TurnEngine {
     }
 }
 
-async fn run_opened_turn(
-    turn: TurnServices<'_>,
-    cancellation: CancellationToken<'_>,
-) -> Result<Outcome, Error> {
-    turn.hooks.activate_conversation_turn().await?;
-    let state = turn.states.get_agent_state().await?;
-    let mut agent = AgentTurn {
-        states: turn.states,
-        tools: turn.tools,
-        hooks: turn.hooks,
-        skill_provider: turn.skills,
-        provider: turn.provider,
-        publisher: turn.publisher,
-        state,
-        compacted_oversized: false,
-        skill_preparation: skills::SkillPreparation::default(),
-    };
-    let result = agent.run(cancellation).await;
-    agent.record_state().await?;
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
-        AgentState, BoxFuture, CancellationToken, Content, ConversationAddition,
-        ConversationPersistence, ConversationReceipt, Error, EventPublisher, Provider,
-        SkillProvider, States, ToolCatalog, ToolExecutionRequest, ToolResult, Tools, TurnHooks,
+        AgentState, BoxFuture, CancellationToken, CompactionRequest, Content, ConversationAddition,
+        ConversationPersistence, ConversationReceipt, Error, EventPublisher, Message, Provider,
+        SkillProvider, States, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult,
+        Tools, TurnHooks,
     };
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll, Waker};
 
     fn finish<F: std::future::Future>(future: F) -> F::Output {
-        let mut context = Context::from_waker(Waker::noop());
+        let mut cx = Context::from_waker(Waker::noop());
         let mut future = std::pin::pin!(future);
-        match future.as_mut().poll(&mut context) {
+        match future.as_mut().poll(&mut cx) {
             Poll::Ready(result) => result,
             Poll::Pending => panic!("phase effects resolve immediately"),
         }
@@ -424,24 +586,23 @@ mod tests {
     #[test]
     fn a_phase_prompt_records_only_when_it_flips_the_durable_marker() {
         let mut states = RecordingState::default();
-        let mut agent = super::AgentTurn {
+        let mut agent_turn = super::AgentTurn {
             states: &mut states,
             tools: &UnusedTools,
             hooks: &UnusedHooks,
             skill_provider: &UnusedSkills,
             provider: &UnusedProvider,
-            publisher: &UnusedPublisher,
-            state: AgentState::default(),
-            compacted_oversized: false,
+            event_publisher: &UnusedPublisher,
+            agent_state: AgentState::default(),
             skill_preparation: crate::skills::SkillPreparation::default(),
         };
-        finish(agent.add_phase_prompt("final", true)).unwrap();
-        finish(agent.add_phase_prompt("duplicate", true)).unwrap();
-        assert!(agent.state.final_phase);
-        finish(agent.add_phase_prompt("restored", false)).unwrap();
-        finish(agent.add_phase_prompt("duplicate restore", false)).unwrap();
-        assert!(!agent.state.final_phase);
-        drop(agent);
+        finish(agent_turn.add_phase_prompt("final", true)).unwrap();
+        finish(agent_turn.add_phase_prompt("duplicate", true)).unwrap();
+        assert!(agent_turn.agent_state.final_phase);
+        finish(agent_turn.add_phase_prompt("restored", false)).unwrap();
+        finish(agent_turn.add_phase_prompt("duplicate restore", false)).unwrap();
+        assert!(!agent_turn.agent_state.final_phase);
+        drop(agent_turn);
         assert_eq!(
             *states.additions.lock().unwrap(),
             ["final".to_owned(), "restored".to_owned()]
@@ -483,4 +644,167 @@ mod tests {
 
     struct UnusedPublisher;
     impl EventPublisher for UnusedPublisher {}
+
+    #[derive(Default)]
+    struct CompactionCall {
+        requests: Vec<CompactionRequest>,
+        reply: Option<Result<Option<Message>, Error>>,
+        effect: Option<AgentState>,
+    }
+
+    #[derive(Default)]
+    struct Fixture {
+        saved: AgentState,
+        instructions: String,
+        call: Arc<Mutex<CompactionCall>>,
+    }
+
+    impl States for Fixture {
+        fn get_config(
+            &self,
+            _: crate::ConfigKey,
+        ) -> BoxFuture<'_, Result<crate::ConfigValue, Error>> {
+            Box::pin(async { Err(Error::unsupported("compaction fixture configuration")) })
+        }
+
+        fn get_agent_state(&self) -> BoxFuture<'_, Result<AgentState, Error>> {
+            Box::pin(async move {
+                Ok(self
+                    .call
+                    .lock()
+                    .unwrap()
+                    .effect
+                    .clone()
+                    .unwrap_or_else(|| self.saved.clone()))
+            })
+        }
+
+        fn set_agent_state(&mut self, state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
+            Box::pin(async move {
+                self.saved = state;
+                Ok(())
+            })
+        }
+
+        fn capture_system_prompt(&mut self) -> BoxFuture<'_, Result<String, Error>> {
+            Box::pin(async move { Ok(self.instructions.clone()) })
+        }
+    }
+
+    struct Compactor(Arc<Mutex<CompactionCall>>);
+
+    impl Provider for Compactor {
+        fn compact<'a, 'c>(
+            &'a self,
+            request: CompactionRequest,
+            _cancellation: CancellationToken<'c>,
+        ) -> BoxFuture<'a, Result<Option<Message>, Error>>
+        where
+            'c: 'a,
+        {
+            Box::pin(async move {
+                let mut call = self.0.lock().unwrap();
+                call.requests.push(request);
+                call.reply.take().unwrap_or(Ok(None))
+            })
+        }
+    }
+
+    fn read_tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "read".into(),
+            ..ToolDefinition::default()
+        }
+    }
+
+    #[test]
+    fn reloads_provider_state_on_success_and_post_commit_error() {
+        for fail in [false, true] {
+            let error = Error::failed("terminal publication failed after commit");
+            let mut finalized = AgentState {
+                final_phase: true,
+                ..AgentState::default()
+            };
+            finalized
+                .last_request_statistic
+                .observe_usage("after/model", 30, 45);
+            let mut fixture = Fixture {
+                instructions: "fitted instructions".into(),
+                ..Fixture::default()
+            };
+            {
+                let mut call = fixture.call.lock().unwrap();
+                call.effect = Some(finalized.clone());
+                call.reply = Some(if fail {
+                    Err(error.clone())
+                } else {
+                    Ok(Some(Message::default()))
+                });
+            }
+            let mut agent_state = AgentState::default();
+            agent_state
+                .last_request_statistic
+                .observe_usage("before/model", 10, 20);
+            let compactor = Compactor(fixture.call.clone());
+            let definitions = [read_tool()];
+            let mut agent_turn = super::AgentTurn {
+                states: &mut fixture,
+                tools: &UnusedTools,
+                hooks: &UnusedHooks,
+                skill_provider: &UnusedSkills,
+                provider: &compactor,
+                event_publisher: &UnusedPublisher,
+                agent_state,
+                skill_preparation: crate::skills::SkillPreparation::default(),
+            };
+            let outcome = finish(agent_turn.compact_context(
+                &definitions,
+                CompactionRequest::default(),
+                CancellationToken::uncancelled(),
+            ));
+            if fail {
+                assert_eq!(outcome, Err(error));
+            } else {
+                assert!(outcome.unwrap().reduced);
+            }
+            assert_eq!(agent_turn.agent_state, finalized);
+            drop(agent_turn);
+            let call = fixture.call.lock().unwrap();
+            assert_eq!(call.requests.len(), 1);
+            assert_eq!(call.requests[0].tools, definitions);
+        }
+    }
+
+    #[test]
+    fn noop_keeps_calibration_and_returns_current_instructions() {
+        let mut fixture = Fixture {
+            instructions: "fresh instructions".into(),
+            ..Fixture::default()
+        };
+        let mut agent_state = AgentState::default();
+        agent_state
+            .last_request_statistic
+            .observe_usage("provider/model", 10, 40);
+        let before = agent_state.clone();
+        let compactor = Compactor(fixture.call.clone());
+        let mut agent_turn = super::AgentTurn {
+            states: &mut fixture,
+            tools: &UnusedTools,
+            hooks: &UnusedHooks,
+            skill_provider: &UnusedSkills,
+            provider: &compactor,
+            event_publisher: &UnusedPublisher,
+            agent_state,
+            skill_preparation: crate::skills::SkillPreparation::default(),
+        };
+        let outcome = finish(agent_turn.compact_context(
+            &[],
+            CompactionRequest::default(),
+            CancellationToken::uncancelled(),
+        ))
+        .unwrap();
+        assert!(!outcome.reduced);
+        assert_eq!(outcome.instructions, "fresh instructions");
+        assert_eq!(agent_turn.agent_state, before);
+    }
 }

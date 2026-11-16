@@ -176,7 +176,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                 binding: binding.clone(),
                 cancellation: self.cancellation,
             };
-            let publisher = RuntimeEventPublisher {
+            let event_publisher = RuntimeEventPublisher {
                 events: ContextEmitter::new(
                     &backend.history,
                     backend.publisher.as_ref(),
@@ -186,7 +186,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
             };
             let model = parrot_core::TurnHooks::begin_conversation_turn(&hooks).await?;
             parrot_core::EventPublisher::report_turn_started(
-                &publisher,
+                &event_publisher,
                 &model,
                 parrot_core::CancellationToken::new(cancellation),
             )
@@ -221,7 +221,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                 states,
                 tools,
                 hooks,
-                publisher,
+                event_publisher,
                 provider,
                 skills,
             }) as Box<dyn parrot_core::Turn>)
@@ -235,7 +235,7 @@ struct RuntimeTurn<'a, S: AccessSnapshot + 'static> {
     states: RuntimeStates<'a, S>,
     tools: RuntimeTools<'a, S>,
     hooks: RuntimeTurnHooks<'a, S>,
-    publisher: RuntimeEventPublisher<'a>,
+    event_publisher: RuntimeEventPublisher<'a>,
     provider: RuntimeProvider<'a, S>,
     skills: RuntimeSkillProvider<'a>,
 }
@@ -247,7 +247,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::Turn for RuntimeTurn<'_, S> {
             skills: &self.skills,
             tools: &self.tools,
             provider: &self.provider,
-            publisher: &self.publisher,
+            event_publisher: &self.event_publisher,
             hooks: &self.hooks,
         }
     }

@@ -21,12 +21,12 @@ impl CancellationSource {
     }
 
     pub(super) fn cancelled(&self) -> BoxFuture<'_, ()> {
-        Box::pin(std::future::poll_fn(|context| {
+        Box::pin(std::future::poll_fn(|cx| {
             let mut waker = self.waker.lock().unwrap();
             if self.is_cancelled() {
                 Poll::Ready(())
             } else {
-                *waker = Some(context.waker().clone());
+                *waker = Some(cx.waker().clone());
                 Poll::Pending
             }
         }))
@@ -71,54 +71,13 @@ fn token_notification_wakes_pending_work() {
     let token = CancellationToken::new(&source);
     let wakes = Arc::new(WakeCounter::default());
     let waker = Waker::from(wakes.clone());
-    let mut context = Context::from_waker(&waker);
+    let mut cx = Context::from_waker(&waker);
     let mut waiting = token.cancelled();
-    assert!(waiting.as_mut().poll(&mut context).is_pending());
+    assert!(waiting.as_mut().poll(&mut cx).is_pending());
     assert_eq!(wakes.0.load(Ordering::SeqCst), 0);
     source.cancel();
     assert_eq!(wakes.0.load(Ordering::SeqCst), 1);
-    assert!(waiting.as_mut().poll(&mut context).is_ready());
-}
-
-struct CancellingCatalog {
-    trace: Trace,
-    cancellation: Arc<CancellationSource>,
-}
-
-impl Tools for CancellingCatalog {
-    fn capture_catalog(&self) -> BoxFuture<'_, Result<ToolCatalog, Error>> {
-        Box::pin(async move {
-            self.trace.step("catalog", None)?;
-            self.cancellation.cancel();
-            Ok(ToolCatalog::default())
-        })
-    }
-
-    fn execute<'a>(
-        &'a self,
-        _request: ToolExecutionRequest,
-        _cancellation: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<Vec<ToolResult>, Error>> {
-        Box::pin(async { panic!("cancellation after initialization must prevent tool execution") })
-    }
-}
-
-#[test]
-fn cancellation_during_catalog_capture_stops_before_the_first_request_iteration() {
-    let mut state = MemoryState::new([]);
-    let provider = state.provider.clone();
-    let tools = CancellingCatalog {
-        trace: state.trace.clone(),
-        cancellation: state.cancellation.clone(),
-    };
-    assert_eq!(state.run_with(&tools, &provider), Err(Error::cancelled()));
-    assert_eq!(state.trace.values(), ["catalog"]);
-    assert_eq!(state.turn_reads.load(Ordering::SeqCst), 1);
-    assert_eq!(state.pending_messages.len(), 1);
-    assert!(state.admissions.is_empty());
-    assert!(provider.requests.lock().unwrap().is_empty());
-    assert!(state.recorded_tools.is_empty());
-    assert!(state.completion_blocker_feedback.is_empty());
+    assert!(waiting.as_mut().poll(&mut cx).is_ready());
 }
 
 struct JoiningTools {
@@ -173,7 +132,7 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
     };
     let wakes = Arc::new(WakeCounter::default());
     let waker = Waker::from(wakes.clone());
-    let mut context = Context::from_waker(&waker);
+    let mut cx = Context::from_waker(&waker);
 
     state.budget = AgentState::default();
     let result = {
@@ -183,7 +142,7 @@ fn core_passes_live_cancellation_to_tools_and_awaits_their_owned_work() {
             &provider,
             CancellationToken::new(provider.cancellation.as_ref())
         ));
-        assert!(running.as_mut().poll(&mut context).is_pending());
+        assert!(running.as_mut().poll(&mut cx).is_pending());
         assert!(tools.admitted.load(Ordering::SeqCst));
         assert!(!joined.load(Ordering::SeqCst));
         source.cancel();

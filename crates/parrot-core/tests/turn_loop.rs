@@ -115,7 +115,7 @@ struct MemoryTurnLifecycle<'a> {
     states: &'a mut MemoryState,
     tools: &'a dyn Tools,
     provider: &'a dyn Provider,
-    publisher: &'a MemoryEventPublisher,
+    event_publisher: &'a MemoryEventPublisher,
     single_turn: bool,
     opened: bool,
 }
@@ -146,7 +146,7 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
                 fail_at: self.states.fail_at,
             };
             let model = parrot_core::TurnHooks::begin_conversation_turn(&hooks).await?;
-            self.publisher
+            self.event_publisher
                 .report_turn_started(&model, cancellation)
                 .await?;
             let skills = MemorySkills::new(self.states);
@@ -155,7 +155,7 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
                 states: self.states,
                 tools: self.tools,
                 provider: self.provider,
-                publisher: self.publisher,
+                event_publisher: self.event_publisher,
                 hooks,
                 skills,
             }) as Box<dyn parrot_core::Turn>)
@@ -167,7 +167,7 @@ struct MemoryTurn<'a> {
     states: &'a mut MemoryState,
     tools: &'a dyn Tools,
     provider: &'a dyn Provider,
-    publisher: &'a MemoryEventPublisher,
+    event_publisher: &'a MemoryEventPublisher,
     hooks: MemoryTurnHooks,
     skills: MemorySkills,
 }
@@ -179,7 +179,7 @@ impl parrot_core::Turn for MemoryTurn<'_> {
             skills: &self.skills,
             tools: self.tools,
             provider: self.provider,
-            publisher: self.publisher,
+            event_publisher: self.event_publisher,
             hooks: &self.hooks,
         }
     }
@@ -217,7 +217,7 @@ async fn run(
     provider: &dyn Provider,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
-    let publisher = MemoryEventPublisher {
+    let event_publisher = MemoryEventPublisher {
         events: states.events.clone(),
         started_turns: states.started_turns.clone(),
     };
@@ -225,7 +225,7 @@ async fn run(
         states,
         tools,
         provider,
-        publisher: &publisher,
+        event_publisher: &event_publisher,
         single_turn: false,
         opened: false,
     };
@@ -238,7 +238,7 @@ async fn run_turn(
     provider: &dyn Provider,
     cancellation: CancellationToken<'_>,
 ) -> Result<Outcome, Error> {
-    let publisher = MemoryEventPublisher {
+    let event_publisher = MemoryEventPublisher {
         events: states.events.clone(),
         started_turns: states.started_turns.clone(),
     };
@@ -246,7 +246,7 @@ async fn run_turn(
         states,
         tools,
         provider,
-        publisher: &publisher,
+        event_publisher: &event_publisher,
         single_turn: true,
         opened: false,
     };
@@ -271,10 +271,10 @@ fn request_too_large(message: &str) -> Error {
 
 fn finish<F: Future>(future: F) -> F::Output {
     let waker = Waker::from(Arc::new(ThreadWake(thread::current())));
-    let mut context = Context::from_waker(&waker);
+    let mut cx = Context::from_waker(&waker);
     let mut future = std::pin::pin!(future);
     loop {
-        match future.as_mut().poll(&mut context) {
+        match future.as_mut().poll(&mut cx) {
             Poll::Ready(output) => return output,
             Poll::Pending => thread::park(),
         }
