@@ -28,16 +28,34 @@ cross-version locking or simultaneous same-workspace safety guarantee**.
 
 ## Benchmark results
 
-| Full 113-task run | Reasoning effort | Passed | Unsuccessful | Pass rate | Run cost |
-|---|---|---:|---:|---:|---:|
-| DeepSeek V4.1 Flash 1017 through DeepInfra FP8 | High | 69 | 44 | 61.1% | $9.77 captured provider charges |
+| Full 113-task run | Reasoning effort | Passed | Failed tests | Errors | Pass rate | Input tokens including cached | Cached input tokens | Output tokens | Advertised prices per million, input / cache / output | Estimated cost |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| DeepSeek V4.1 Flash 1017 through DeepInfra FP8 | High | 69 | 41 | 3 | 61.1% | 1,078,262,923 | 1,048,038,016 | 12,672,433 | $0.20 / $0.006 / $0.60 | $19.94 |
+| GLM-5.3-Flash through CoreWeave NVFP4 | High | 70 | 40 | 3 | 61.9% | 1,408,835,276 | 1,369,923,904 | 8,769,033 | $0.12 / $0.02 / $0.38 | $35.40 |
+| MiMo V2.6 Flash through Cohere FP8 | High requested, semantics unverified | 60 | 49 | 4 | 53.1% | 1,932,926,436 | 1,774,678,240 | 15,817,603 | $0.14 / $0.003 / $0.28 | $31.91 |
 
-The original GLM run's 48 unsuccessful tasks include two startup errors.
-Its recorded client cost estimate was **$49.78**, including $45.64 for input
-and $4.14 for output. This uses the original pricing, not DeepInfra's rates.
-See the [original usage and cost audit](/mnt/workspace/parrot-benchmark-reports/first-run-input-charge-attribution/README.md).
-These runs used different client revisions and prompts, so the comparison
-does not isolate model performance.
+Costs use captured provider token counts and advertised prices before OpenRouter
+discounts. Input includes cache reads and repeated history transmissions.
+Root and child agents are included. These are calculated estimates, not invoices.
+
+Cost equals uncached input times its rate, plus cached input times its rate,
+plus output times its rate. DeepInfra's recorded 51% discount is excluded.
+Cohere and CoreWeave advertised no discount in the retained endpoint metadata.
+DeepSeek's provider capture has more generations than its client ledger, so
+its counts are not assumed to be a reconciled invoice.
+
+MiMo resumed after credit exhaustion. Its score preserves the 60 earlier completed
+outcomes and uses continuation results for 53 eligible tasks, without best-of selection.
+The $31.91 estimate excludes archived credit-blocked attempts. Including that work,
+MiMo used **2,074,207,476 input tokens**, including **1,907,096,032 cached tokens**,
+and **17,412,852 output tokens**, for an advertised-rate estimate of **$33.99**.
+Two tiny preflights are excluded. The endpoint accepted a high-effort request and
+returned reasoning, but does not advertise effort-level control.
+
+See the [MiMo continuation report](/mnt/workspace/parrot-benchmark-reports/deepswe-cohere-mimo-resume-2026-11-16/README.md)
+and [CoreWeave GLM report](/mnt/workspace/parrot-benchmark-reports/deepswe-coreweave-glm-full-2026-11-15/README.md)
+for outcome evidence and usage reconciliation. These runs do not isolate model
+performance from serving-provider differences.
 
 ### DeepSeek through DeepInfra FP8
 
@@ -45,20 +63,12 @@ The November 15, 2026 DeepSWE run used DeepSeek V4.1 Flash 1017 through
 OpenRouter's DeepInfra FP8 endpoint. Reasoning effort was `high`, concurrency
 was 16, and benchmark retries were disabled.
 
-| Outcome | Tasks |
-|---|---:|
-| Passed | 69 |
-| Failed tests | 41 |
-| Execution errors | 3 |
-| Total | 113 |
-
 The full-suite pass rate was **61.1%**. Two execution errors occurred during
 startup attachment parsing. The third was a verifier timeout.
 
-Captured provider-reported charges totaled **$9.77**, approximately **$0.086 per
-scheduled task**. This is not a reconciled invoice. Repricing the client usage
-ledger at endpoint rates gives $8.25. The provider capture contains more
-generations than the client ledger, so these totals are not interchangeable.
+The advertised-rate estimate is **$19.94**, approximately **$0.176 per scheduled
+task**, using the provider token counts above. This excludes DeepInfra's 51%
+OpenRouter discount. It is not a reconciled invoice.
 
 See the [full run report](/mnt/workspace/parrot-benchmark-reports/deepswe-deepinfra-deepseek-full-2026-11-15/README.md)
 for task results, usage reconciliation, immutable client provenance, and
