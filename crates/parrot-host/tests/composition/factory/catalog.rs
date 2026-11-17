@@ -936,6 +936,7 @@ mod fixture_binding {
     use std::sync::atomic::AtomicU64;
 
     use super::fixture_support::{Artifacts, Selection, Services, Snapshot};
+    use crate::composition::catalog::{self, Catalog};
     use parrot_domain::contracts::async_ops::BoxFuture;
     use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
     use parrot_domain::values::identifiers::UserSessionId;
@@ -946,7 +947,6 @@ mod fixture_binding {
     use parrot_storage::events::EventRepository;
     use parrot_storage::history_files::{AgentHistoryFile, SessionIndex, SessionMeta};
     use parrot_tools::{
-        catalog::{self, Catalog},
         files::WorkspacePaths,
         process::ownership::owner::ShellProcessOwner,
         web_fetch::{

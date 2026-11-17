@@ -5,6 +5,11 @@ use super::{
     tasks::ScopedTaskController,
     user::{AgentFactoryParts, AgentFactorySource, RuntimeSession, UserServices},
 };
+use crate::composition::catalog::{
+    self, AgentFactories, AgentServices, ClipboardFactories, ClipboardServices, FileFactories,
+    ProcessFactories, SessionBindings, SessionFactories, TaskQueueFactories, TaskQueueServices,
+    WebFetchFactory,
+};
 use crate::composition::{
     agents::{AgentSessionServices, ScopedAgentRuntime},
     invocation::InvocationSelection,
@@ -31,7 +36,7 @@ use parrot_foundation::{
     config::{Configuration, runtime::AgentTaskForkHistoryMode},
     template_catalog::PromptTemplateCatalog,
 };
-use parrot_mcp::McpFactories;
+use parrot_mcp::{McpFactories, McpTool};
 use parrot_provider::compaction::{CompactionSettings, Compactor};
 use parrot_provider::{
     http_stream::HttpError,
@@ -92,11 +97,6 @@ use parrot_storage::{
     progress::FileProgressStore,
 };
 use parrot_tools::{
-    catalog::{
-        self, AgentFactories, AgentServices, ClipboardFactories, ClipboardServices, FileFactories,
-        ProcessFactories, SessionBindings, SessionFactories, TaskQueueFactories, TaskQueueServices,
-        WebFetchFactory,
-    },
     files::WorkspacePaths,
     process::{
         ownership::{
@@ -1609,7 +1609,18 @@ where
                         for tools in mcp_tools.values() {
                             definitions.merge(tools.clone());
                         }
-                        let mcp = McpFactories::new(user.mcp.clone(), &mcp_tools);
+                        let mcp =
+                            McpFactories::<SharedSecurity<S>>::tools(user.mcp.clone(), &mcp_tools)
+                                .into_iter()
+                                .map(|entry| {
+                                    catalog::extension::<
+                                        McpTool<SharedSecurity<S>>,
+                                        InvocationSelection<S>,
+                                    >(
+                                        entry.name, &[], true, entry.tool, catalog::unit
+                                    )
+                                })
+                                .collect::<Vec<_>>();
                         let files = FileFactories::new(
                             config.filesystem.clone(),
                             WorkspacePaths::new(catalog_environment.materialize()),
@@ -1682,7 +1693,7 @@ where
                                 catalog::Catalog::new(
                                     process, agents, files, services, tasks, web, clipboard,
                                 )
-                                .with_factories(mcp.into_factories()),
+                                .with_factories(mcp),
                             )
                             .map_err(child)?,
                         )

@@ -1,5 +1,6 @@
-//! MCP tool family value types shared by the catalog and the `parrot-mcp`
-//! feature crate.
+//! MCP tool family value types. The outcome is the caller-visible text of one
+//! call; the error carries the failure category the composition host maps onto
+//! settlement failure kinds.
 
 use std::fmt;
 

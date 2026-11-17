@@ -42,15 +42,24 @@ through them unchanged.
    coordination.
 8. The whole MCP feature is self-contained in `parrot-mcp`: the protocol client
    and transports, the user-session server manager, and the tool adapter that
-   implements the domain `Tool` contract. A tool family is one isolatable unit,
-   so `parrot-host` only composes: it maps `mcp:` config into the manager,
-   connects at session start, writes connect-failure diagnostics, and passes
-   the manager into the scope factory. `parrot-tools` stays a collection of
-   tools plus the shared tool contract and catalog machinery; it keeps the MCP
-   family outcome and error types because the catalog `Error` enum owns family
-   errors. The `McpToolCaller` contract initially placed in `parrot-domain` was
-   removed once tool and manager shared one crate; the trait with a single
-   production implementor earned nothing that the direct handle does not give.
+   implements the domain `Tool` contract with its own invocation, outcome, and
+   error types. A tool family is one isolatable unit, so `parrot-host` only
+   composes: it maps `mcp:` config into the manager, connects at session start,
+   writes connect-failure diagnostics, and binds each live MCP tool into the
+   scope catalog at the merge point. The `McpToolCaller` contract initially
+   placed in `parrot-domain` was removed once tool and manager shared one
+   crate; the trait with a single production implementor earned nothing that
+   the direct handle does not give.
+9. The catalog machinery moved to `parrot-host`, the only production assembler
+   of built-in tool families. `parrot-tools` holds pure tool implementations
+   with no catalog knowledge. `parrot-mcp` satisfies only the domain `Tool`
+   contract and holds its own family types, so it depends on no catalog crate;
+   the host provides the conversion seam (invocation, outcome, and error
+   mappings) in one place inside its catalog module. The family `Error` enum
+   lives with the machinery that raises it, so it owns the `Mcp` variant
+   referencing `parrot_mcp` types directly. No dependency cycle exists:
+   `parrot-host` depends on `parrot-mcp` and `parrot-tools`, `parrot-mcp`
+   depends on `parrot-domain` only.
 
 ## Consequences
 

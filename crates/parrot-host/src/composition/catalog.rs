@@ -1,5 +1,6 @@
-//! Agent-session-local built-ins. Only family DTOs are adapted here; services,
-//! security capture and production lifetime routing remain supplied by the host.
+//! Agent-session tool catalog machinery owned by the composition host. Family
+//! tool implementations stay in parrot-tools and parrot-mcp; this module only
+//! binds them into the session catalog and adapts family DTOs.
 
 use std::{fmt, marker::PhantomData, sync::Arc};
 
@@ -20,7 +21,8 @@ use parrot_foundation::{config::Configuration, template_catalog::PromptTemplateC
 use parrot_storage::artifacts::{ImageArtifactMetadata, ImageArtifactRepository};
 use parrot_storage::conversation::AgentHistoryView;
 
-use crate::{
+use parrot_mcp::McpToolOutcome;
+use parrot_tools::{
     agents::{
         self, AgentSelection, AgentTool, AgentToolError, AgentToolKind, ModelSelector,
         questions::{AskTool, QuestionTool, ReplyTool},
@@ -122,8 +124,8 @@ impl From<files::FileToolResult> for Output {
         }
     }
 }
-impl From<crate::process::tools::ProcessToolResult> for Output {
-    fn from(result: crate::process::tools::ProcessToolResult) -> Self {
+impl From<parrot_tools::process::tools::ProcessToolResult> for Output {
+    fn from(result: parrot_tools::process::tools::ProcessToolResult) -> Self {
         Self {
             yielded_process: result.yielded_process,
             ..result.text.into()
@@ -148,9 +150,9 @@ pub enum Error {
     Agent(AgentToolError),
     Session(session::Failure),
     TaskQueue(ToolFailure),
-    WebFetch(crate::web_fetch::FetchError),
+    WebFetch(parrot_tools::web_fetch::FetchError),
     Definition(MissingToolDefinition),
-    Mcp(crate::mcp::McpToolError),
+    Mcp(parrot_mcp::McpToolError),
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -181,11 +183,33 @@ family_error!(Process, std::io::Error);
 family_error!(Agent, AgentToolError);
 family_error!(Session, session::Failure);
 family_error!(TaskQueue, ToolFailure);
-family_error!(WebFetch, crate::web_fetch::FetchError);
+family_error!(WebFetch, parrot_tools::web_fetch::FetchError);
 family_error!(Definition, MissingToolDefinition);
-family_error!(Mcp, crate::mcp::McpToolError);
+family_error!(Mcp, parrot_mcp::McpToolError);
 
-impl From<Invocation> for crate::web_fetch::Invocation {
+// MCP family seam. The feature crate stays catalog-free, so the host provides
+// the conversions its adapter needs, in this one place.
+impl From<Invocation> for parrot_mcp::McpInvocation {
+    fn from(invocation: Invocation) -> Self {
+        Self::new(
+            invocation.call_id,
+            invocation.arguments_json,
+            invocation.prompt_templates,
+        )
+    }
+}
+impl From<McpToolOutcome> for Output {
+    fn from(outcome: McpToolOutcome) -> Self {
+        Self {
+            text: outcome.text,
+            image_artifacts: Vec::new(),
+            outcome: FileToolOutcome::Finished,
+            yielded_process: None,
+        }
+    }
+}
+
+impl From<Invocation> for parrot_tools::web_fetch::Invocation {
     fn from(i: Invocation) -> Self {
         Self {
             arguments_json: i.arguments_json,
@@ -193,8 +217,8 @@ impl From<Invocation> for crate::web_fetch::Invocation {
         }
     }
 }
-impl From<crate::web_fetch::Output> for Output {
-    fn from(result: crate::web_fetch::Output) -> Self {
+impl From<parrot_tools::web_fetch::Output> for Output {
+    fn from(result: parrot_tools::web_fetch::Output) -> Self {
         result.text.into()
     }
 }
@@ -209,7 +233,7 @@ impl From<Invocation> for files::FileToolInvocation {
         }
     }
 }
-impl From<Invocation> for crate::process::tools::ProcessInvocation {
+impl From<Invocation> for parrot_tools::process::tools::ProcessInvocation {
     fn from(i: Invocation) -> Self {
         Self {
             call_id: i.call_id,
@@ -236,7 +260,7 @@ impl From<Invocation> for tasks_queues::ToolInvocation {
         }
     }
 }
-impl From<Invocation> for crate::clipboard::Invocation {
+impl From<Invocation> for parrot_tools::clipboard::Invocation {
     fn from(i: Invocation) -> Self {
         Self {
             call_id: i.call_id,
@@ -394,7 +418,7 @@ where
 {
     bind(name.into(), aliases, supported, tool, selection)
 }
-fn unit<T>(_: &Selection<T>) {}
+pub fn unit<T>(_: &Selection<T>) {}
 pub fn scoped<T: Clone>(selection: &Selection<T>) -> T {
     selection.scoped.clone()
 }
@@ -790,14 +814,14 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static>
 pub struct WebFetchFactory<S, T>(Factory<S, T>);
 impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> WebFetchFactory<S, T> {
     pub fn new(
-        fetcher: Arc<crate::web_fetch::WebFetcher>,
+        fetcher: Arc<parrot_tools::web_fetch::WebFetcher>,
         definitions: &ToolDefinitionCatalog,
     ) -> Result<Self, MissingToolDefinition> {
         Ok(Self(bind(
             "web_fetch".to_owned(),
             &[],
             true,
-            crate::web_fetch::WebFetchTool::<S, T>::new(
+            parrot_tools::web_fetch::WebFetchTool::<S, T>::new(
                 fetcher,
                 definitions.describe("web_fetch")?.clone(),
             ),

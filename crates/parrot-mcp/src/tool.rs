@@ -1,4 +1,6 @@
-//! The MCP tool family as it appears in the agent-session tool catalog.
+//! The MCP tool family as it appears in the agent-session tool catalog. The
+//! tool satisfies the domain `Tool` contract with its own types; composition
+//! binds it into the host catalog.
 
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
@@ -8,27 +10,47 @@ use parrot_domain::contracts::async_ops::{BoxFuture, OperationError};
 use parrot_domain::contracts::security::{AccessSnapshot, InvocationScope};
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
-use parrot_tools::catalog;
-use parrot_tools::mcp::{McpToolError, McpToolFailureKind};
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
 
+use crate::family::{McpToolError, McpToolFailureKind, McpToolOutcome};
 use crate::manager::McpServerManager;
 
-pub struct McpTool<Security, Selection> {
+/// What one MCP tool invocation consumes. The host catalog hands these fields
+/// over; the tool forwards `arguments_json` verbatim.
+pub struct McpInvocation {
+    pub call_id: String,
+    pub arguments_json: String,
+    pub prompt_templates: Arc<PromptTemplateCatalog>,
+}
+
+impl McpInvocation {
+    pub fn new(
+        call_id: impl Into<String>,
+        arguments_json: impl Into<String>,
+        prompt_templates: Arc<PromptTemplateCatalog>,
+    ) -> Self {
+        Self {
+            call_id: call_id.into(),
+            arguments_json: arguments_json.into(),
+            prompt_templates,
+        }
+    }
+}
+
+pub struct McpTool<S> {
     manager: Arc<McpServerManager>,
     server: String,
     tool: String,
     definition: ConfiguredToolDefinition,
-    marker: PhantomData<fn() -> (Security, Selection)>,
+    marker: PhantomData<fn() -> S>,
 }
 
-impl<Security: AccessSnapshot + 'static, Selection: Send + 'static> Tool
-    for McpTool<Security, Selection>
-{
+impl<S: AccessSnapshot + Clone + 'static> Tool for McpTool<S> {
     type Definition = ConfiguredToolDefinition;
-    type Invocation = catalog::Invocation;
-    type Selection = Selection;
-    type Security = Security;
-    type Output = catalog::Output;
+    type Invocation = McpInvocation;
+    type Selection = ();
+    type Security = S;
+    type Output = McpToolOutcome;
     type Error = McpToolError;
 
     fn definition(&self) -> &Self::Definition {
@@ -45,59 +67,66 @@ impl<Security: AccessSnapshot + 'static, Selection: Send + 'static> Tool
 
     fn invoke<'a>(
         &'a self,
-        invocation: catalog::Invocation,
-        scope: InvocationScope<'a, Security, Selection>,
-    ) -> BoxFuture<'a, Result<catalog::Output, OperationError<McpToolError>>> {
+        invocation: McpInvocation,
+        scope: InvocationScope<'a, S, ()>,
+    ) -> BoxFuture<'a, Result<McpToolOutcome, OperationError<McpToolError>>> {
         Box::pin(async move {
             let outcome = self
                 .manager
                 .call_tool(&self.server, &self.tool, &invocation.arguments_json)
                 .await;
-            let text = match outcome {
-                Ok(outcome) if !outcome.is_error => outcome.text,
-                Ok(outcome) => invocation
-                    .prompt_templates
-                    .render(
-                        "tool-result.error",
-                        &[(
-                            "message".to_owned(),
-                            serde_json::Value::String(outcome.text),
-                        )],
-                        scope.cancellation(),
-                    )
-                    .map_err(|error| match error {
-                        OperationError::Cancelled => OperationError::Cancelled,
-                        OperationError::Failed(error) => OperationError::Failed(McpToolError::new(
-                            &self.server,
-                            McpToolFailureKind::Transport,
-                            error.to_string(),
-                        )),
-                    })?,
-                Err(error) => return Err(OperationError::Failed(error)),
-            };
-            Ok(text.into())
+            match outcome {
+                Ok(outcome) if !outcome.is_error => Ok(outcome),
+                Ok(outcome) => {
+                    let text = invocation
+                        .prompt_templates
+                        .render(
+                            "tool-result.error",
+                            &[(
+                                "message".to_owned(),
+                                serde_json::Value::String(outcome.text),
+                            )],
+                            scope.cancellation(),
+                        )
+                        .map_err(|error| match error {
+                            OperationError::Cancelled => OperationError::Cancelled,
+                            OperationError::Failed(error) => {
+                                OperationError::Failed(McpToolError::new(
+                                    &self.server,
+                                    McpToolFailureKind::Transport,
+                                    error.to_string(),
+                                ))
+                            }
+                        })?;
+                    Ok(McpToolOutcome {
+                        text,
+                        is_error: true,
+                    })
+                }
+                Err(error) => Err(OperationError::Failed(error)),
+            }
         })
     }
 }
 
-/// One factory per live MCP tool, named `mcp__<server>__<tool>`. Definitions
-/// come from the manager's `tools/list` snapshot, not from the config catalog.
-pub struct McpFactories<S, T> {
-    factories: Vec<catalog::Factory<S, T>>,
+/// One live MCP tool as composition receives it: the namespaced catalog name
+/// plus the ready tool instance.
+pub struct McpToolEntry<S> {
+    pub name: String,
+    pub tool: McpTool<S>,
 }
 
-impl<S, T> McpFactories<S, T> {
-    pub fn into_factories(self) -> Vec<catalog::Factory<S, T>> {
-        self.factories
-    }
-}
+/// Per-tool factory inputs for the host catalog merge point.
+pub struct McpFactories<S>(PhantomData<fn() -> S>);
 
-impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + Clone + 'static> McpFactories<S, T> {
-    pub fn new(
+impl<S: AccessSnapshot + Clone + 'static> McpFactories<S> {
+    /// One entry per live tool, named `mcp__<server>__<tool>`. Definitions come
+    /// from the manager's `tools/list` snapshot, not from the config catalog.
+    pub fn tools(
         manager: Arc<McpServerManager>,
-        tools: &BTreeMap<String, BTreeMap<String, ConfiguredToolDefinition>>,
-    ) -> Self {
-        let factories = tools
+        connected: &BTreeMap<String, BTreeMap<String, ConfiguredToolDefinition>>,
+    ) -> Vec<McpToolEntry<S>> {
+        connected
             .iter()
             .flat_map(|(server, tools)| {
                 let manager = manager.clone();
@@ -109,17 +138,13 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + Clone + 'static> McpF
                         definition: definition.clone(),
                         marker: PhantomData,
                     };
-                    catalog::extension(
-                        format!("mcp__{server}__{tool_name}"),
-                        &[],
-                        true,
+                    McpToolEntry {
+                        name: format!("mcp__{server}__{tool_name}"),
                         tool,
-                        catalog::scoped,
-                    )
+                    }
                 })
             })
-            .collect();
-        Self { factories }
+            .collect()
     }
 }
 
@@ -129,7 +154,6 @@ mod tests {
     use crate::manager::testing::stdio_server;
     use parrot_domain::contracts::async_ops::Cancellation;
     use parrot_domain::contracts::paths::ResolvedRead;
-    use parrot_foundation::template_catalog::PromptTemplateCatalog;
     use std::future::pending;
 
     struct NoCancel;
@@ -165,36 +189,29 @@ mod tests {
         )
     }
 
-    async fn fixture_manager() -> Arc<McpServerManager> {
-        McpServerManager::connect(&BTreeMap::from([(
+    async fn fixture_entry() -> (Arc<McpServerManager>, McpToolEntry<TestSecurity>) {
+        let manager = McpServerManager::connect(&BTreeMap::from([(
             "fixture".to_owned(),
             stdio_server("sh", true),
         )]))
-        .await
-    }
-
-    fn selection() -> catalog::Selection<()> {
-        catalog::Selection {
-            requested_model: String::new(),
-            scoped: (),
-        }
+        .await;
+        let entry =
+            McpFactories::<TestSecurity>::tools(manager.clone(), &manager.connected_tools())
+                .remove(0);
+        (manager, entry)
     }
 
     #[tokio::test]
-    async fn factories_carry_namespaced_names_and_server_schemas() {
-        let manager = fixture_manager().await;
-        let tools = manager.connected_tools();
-        let factory =
-            &McpFactories::<TestSecurity, ()>::new(manager.clone(), &tools).into_factories()[0];
-        assert_eq!(factory.name(), "mcp__fixture__echo");
-        assert_eq!(factory.aliases(), &[] as &[&str]);
-        let definition = factory.definition();
+    async fn entries_carry_namespaced_names_and_server_schemas() {
+        let (manager, entry) = fixture_entry().await;
+        assert_eq!(entry.name, "mcp__fixture__echo");
+        let definition = entry.tool.definition();
         assert_eq!(definition.description, "Echo tool");
         assert_eq!(definition.parameters_json, "{\"type\":\"object\"}");
         assert_eq!(
-            factory
-                .create()
-                .parallel_safety(&catalog::Invocation::new("call", "{}", templates())),
+            entry
+                .tool
+                .parallel_safety(&McpInvocation::new("call", "{}", templates())),
             ParallelSafety::Sequential
         );
         manager.close().await;
@@ -202,36 +219,32 @@ mod tests {
 
     #[tokio::test]
     async fn invocation_forwards_arguments_verbatim_and_returns_text() {
-        let manager = fixture_manager().await;
-        let tools = manager.connected_tools();
-        let factory =
-            &McpFactories::<TestSecurity, ()>::new(manager.clone(), &tools).into_factories()[0];
-        let outcome = factory
-            .create()
+        let (manager, entry) = fixture_entry().await;
+        let outcome = entry
+            .tool
             .invoke(
-                catalog::Invocation::new("call-1", r#"{"text":"hi"}"#, templates()),
-                InvocationScope::new(TestSecurity, selection(), &NoCancel),
+                McpInvocation::new("call-1", r#"{"text":"hi"}"#, templates()),
+                InvocationScope::new(TestSecurity, (), &NoCancel),
             )
             .await
             .unwrap();
         assert_eq!(outcome.text, r#"echo: {"text":"hi"}"#);
+        assert!(!outcome.is_error);
         manager.close().await;
     }
 
     #[tokio::test]
     async fn server_error_results_render_through_the_error_template() {
-        let manager = fixture_manager().await;
-        let tools = manager.connected_tools();
-        let factory =
-            &McpFactories::<TestSecurity, ()>::new(manager.clone(), &tools).into_factories()[0];
-        let outcome = factory
-            .create()
+        let (manager, entry) = fixture_entry().await;
+        let outcome = entry
+            .tool
             .invoke(
-                catalog::Invocation::new("call-2", r#"{"text":"boom"}"#, templates()),
-                InvocationScope::new(TestSecurity, selection(), &NoCancel),
+                McpInvocation::new("call-2", r#"{"text":"boom"}"#, templates()),
+                InvocationScope::new(TestSecurity, (), &NoCancel),
             )
             .await
             .unwrap();
+        assert!(outcome.is_error);
         assert!(outcome.text.contains("boom"));
         manager.close().await;
     }

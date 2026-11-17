@@ -68,9 +68,5 @@ path = "tests/files/main.rs"
 name = "web_fetch"
 path = "tests/web_fetch/main.rs"
 
-[[test]]
-name = "catalog"
-path = "tests/catalog/main.rs"
-
 [lints]
 workspace = true

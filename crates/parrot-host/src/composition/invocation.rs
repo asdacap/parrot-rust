@@ -1,4 +1,5 @@
 //! Retained invocation-tool routing. Status observes the already-borrowed drain.
+use crate::composition::catalog;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
@@ -13,10 +14,7 @@ use parrot_runtime::{
         ToolOutput,
     },
 };
-use parrot_tools::{
-    catalog,
-    session::{Failure, FailureKind},
-};
+use parrot_tools::session::{Failure, FailureKind};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 

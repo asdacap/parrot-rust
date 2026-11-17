@@ -13,6 +13,7 @@ use parrot_domain::contracts::{async_ops::BoxFuture, security::InvocationScope};
 use parrot_domain::values::identifiers::UserSessionId;
 use parrot_domain::{contracts::paths::RootOrigin, contracts::paths::SelectedSessionRoot};
 use parrot_foundation::{config::Configuration, template_catalog::PromptTemplateCatalog};
+use parrot_host::composition::catalog::{self, Catalog, Factory, Invocation};
 use parrot_provider::sessions::model::Tool;
 use parrot_runtime::event_broker::EventBroker;
 use parrot_storage::{
@@ -22,7 +23,6 @@ use parrot_storage::{
     history_files::{AgentHistoryFile, SessionIndex, SessionMeta},
 };
 use parrot_tools::{
-    catalog::{self, Catalog, Factory, Invocation},
     files::WorkspacePaths,
     process::ownership::owner::ShellProcessOwner,
     web_fetch::{
@@ -39,7 +39,7 @@ pub struct WebState {
 
 static CLIPBOARD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-fn clipboard_history() -> AgentHistoryView {
+pub(crate) fn clipboard_history() -> AgentHistoryView {
     let sequence = CLIPBOARD_SEQUENCE.fetch_add(1, Ordering::SeqCst);
     let directory = std::env::temp_dir().join(format!(
         "catalog-clipboard-{}-{sequence}",

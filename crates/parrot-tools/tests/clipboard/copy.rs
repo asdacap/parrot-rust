@@ -122,10 +122,6 @@ impl Fixture {
         ClipboardCopyTool::new(definition(), self.history.clone(), self.publisher.clone())
     }
 
-    pub fn services(&self) -> (AgentHistoryView, Arc<EventBroker>) {
-        (self.history.clone(), self.publisher.clone())
-    }
-
     pub fn invocation(&self, text: &str) -> Invocation {
         Invocation {
             call_id: format!("{}/0", id()),

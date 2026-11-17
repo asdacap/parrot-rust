@@ -33,6 +33,7 @@ use parrot_domain::{
 use parrot_foundation::{
     config::Configuration, paths::AgentScratchDirectory, template_catalog::PromptTemplateCatalog,
 };
+use parrot_host::composition::catalog;
 use parrot_host::composition::{
     agents::AgentSessionServices,
     factory::{
@@ -91,7 +92,6 @@ use parrot_storage::{
     },
 };
 use parrot_tools::{
-    catalog,
     process::{
         ownership::{
             domain::CapturedProcessLauncher,

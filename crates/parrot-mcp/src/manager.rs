@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
+use crate::family::{McpToolError, McpToolFailureKind, McpToolOutcome};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
 use parrot_foundation::config::runtime::{McpServerConfig, McpTransport};
-use parrot_tools::mcp::{McpToolError, McpToolFailureKind, McpToolOutcome};
 
 use crate::client::McpClient;
 use crate::protocol::{CallToolResult, ClientInfo, ContentBlock, McpError};
@@ -287,8 +287,8 @@ done
 mod tests {
     use super::testing::stdio_server;
     use super::*;
+    use crate::family::McpToolFailureKind;
     use parrot_foundation::config::runtime::{McpServerConfig, McpTransport};
-    use parrot_tools::mcp::McpToolFailureKind;
 
     fn http_server(url: &str, enabled: bool) -> McpServerConfig {
         McpServerConfig {
