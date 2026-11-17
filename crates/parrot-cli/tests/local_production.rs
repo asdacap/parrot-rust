@@ -1138,3 +1138,103 @@ async fn enhanced_clipboard_resume_replays_the_line_without_recopying() {
         "the replayed session must re-render the committed line; {rendered}"
     );
 }
+
+const MCP_ECHO_TOOL_CALL_BODY: &str = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-mcp\",\"type\":\"function\",\"function\":{\"name\":\"mcp__fixture__echo\",\"arguments\":\"{\\\"text\\\":\\\"Hello MCP\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":3}}\n\ndata: [DONE]\n\n";
+
+const MCP_ECHO_SERVER_SCRIPT: &str = r#"#!/bin/sh
+while IFS= read -r line; do
+  echo "$line" >> "$MCP_CALL_LOG"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"echo","version":"1"}}}\n' "$id" ;;
+    *'"tools/list"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"Echo the text back","inputSchema":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}]}}\n' "$id" ;;
+    *'"tools/call"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"mcp echo: Hello MCP"}],"isError":false}}\n' "$id" ;;
+  esac
+done
+"#;
+
+fn mcp_echo_fixture(responses: Vec<&'static str>, disabled_tools: bool) -> Fixture {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::with_chat_responses(false, responses);
+    let script = fixture.root.join("echo-mcp-server.sh");
+    std::fs::write(&script, MCP_ECHO_SERVER_SCRIPT).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mcp = format!(
+        "mcp:\n  fixture:\n    transport: stdio\n    command: {}\n    enabled: true\n    env:\n      MCP_CALL_LOG: {}\n",
+        script.display(),
+        fixture.root.join("mcp-calls.log").display()
+    );
+    let disabled = if disabled_tools {
+        "disabled_tools:\n  mcp__fixture__echo: true\n".to_owned()
+    } else {
+        String::new()
+    };
+    let config = format!(
+        "model: fixture/test\nproviders:\n  fixture:\n    type: compatible\n    base_url: http://{}/v1\n    api_key_env: PARROT_FIXTURE_KEY\n    allow_insecure_localhost: true\n    header_timeout_max_retries: 0\n    models:\n      test:\n        context: 32768\n        max_output_tokens: 1024\n        tools: true\nskills:\n  enabled: false\n{mcp}{disabled}",
+        fixture.address
+    );
+    std::fs::write(fixture.root.join("config/parrotrust/config.yaml"), config).unwrap();
+    fixture
+}
+
+#[test]
+fn executable_chat_offers_and_executes_configured_mcp_tools() {
+    let fixture = mcp_echo_fixture(
+        vec![
+            MCP_ECHO_TOOL_CALL_BODY,
+            PROVIDER_SUCCESS_BODY,
+            PROVIDER_SUCCESS_BODY,
+        ],
+        false,
+    );
+    let output = fixture
+        .spawn(&[
+            "chat",
+            "--basic",
+            "Echo Hello MCP with the mcp__fixture__echo tool.",
+        ])
+        .finish();
+    assert_clean_exit(&output);
+    let requests = fixture.chat_requests();
+    assert_eq!(requests.len(), 2, "{}", describe(&output));
+    assert!(
+        requests[0].contains("\"mcp__fixture__echo\""),
+        "the provider request must offer the namespaced MCP tool; {}",
+        requests[0]
+    );
+    assert!(requests[0].contains("Echo the text back"));
+    assert!(requests[0].contains("\"required\":[\"text\"]"));
+    let call_log = std::fs::read_to_string(fixture.root.join("mcp-calls.log")).unwrap();
+    assert!(call_log.contains("\"tools/call\""));
+    assert!(
+        call_log.contains("Hello MCP"),
+        "the fake server must receive the arguments the LLM sent; {call_log}"
+    );
+    assert!(
+        requests[1].contains("mcp echo: Hello MCP"),
+        "the settled tool result must reach the next provider request; {}",
+        requests[1]
+    );
+}
+
+#[test]
+fn executable_chat_hides_disabled_mcp_tools_from_the_provider() {
+    let fixture = mcp_echo_fixture(vec![PROVIDER_SUCCESS_BODY, PROVIDER_SUCCESS_BODY], true);
+    let output = fixture
+        .spawn(&["chat", "--basic", "Plain prompt with MCP disabled."])
+        .finish();
+    assert_clean_exit(&output);
+    let requests = fixture.chat_requests();
+    assert_eq!(requests.len(), 1, "{}", describe(&output));
+    assert!(
+        !requests[0].contains("mcp__fixture__echo"),
+        "the disabled MCP tool must be absent from the provider request; {}",
+        requests[0]
+    );
+    assert!(
+        std::fs::read_to_string(fixture.root.join("mcp-calls.log"))
+            .map(|log| !log.contains("tools/call"))
+            .unwrap_or(true),
+        "the disabled tool must not be called"
+    );
+}

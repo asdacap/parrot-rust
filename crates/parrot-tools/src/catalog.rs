@@ -150,6 +150,7 @@ pub enum Error {
     TaskQueue(ToolFailure),
     WebFetch(crate::web_fetch::FetchError),
     Definition(MissingToolDefinition),
+    Mcp(parrot_domain::contracts::tools::McpToolError),
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -161,6 +162,7 @@ impl fmt::Display for Error {
             Self::TaskQueue(e) => e.fmt(f),
             Self::WebFetch(e) => e.fmt(f),
             Self::Definition(e) => e.fmt(f),
+            Self::Mcp(e) => e.fmt(f),
         }
     }
 }
@@ -181,6 +183,7 @@ family_error!(Session, session::Failure);
 family_error!(TaskQueue, ToolFailure);
 family_error!(WebFetch, crate::web_fetch::FetchError);
 family_error!(Definition, MissingToolDefinition);
+family_error!(Mcp, parrot_domain::contracts::tools::McpToolError);
 
 impl From<Invocation> for crate::web_fetch::Invocation {
     fn from(i: Invocation) -> Self {
@@ -264,7 +267,7 @@ pub type RetainedTool<S, T> = dyn Tool<
 /// A factory slot retains the one tool created for this agent session. Cloning
 /// its handle never creates a new tool or resets invocation-local observers.
 pub struct Factory<S, T> {
-    name: &'static str,
+    name: String,
     aliases: &'static [&'static str],
     supported: bool,
     tool: Arc<RetainedTool<S, T>>,
@@ -272,7 +275,7 @@ pub struct Factory<S, T> {
 impl<S, T> Clone for Factory<S, T> {
     fn clone(&self) -> Self {
         Self {
-            name: self.name,
+            name: self.name.clone(),
             aliases: self.aliases,
             supported: self.supported,
             tool: Arc::clone(&self.tool),
@@ -280,8 +283,8 @@ impl<S, T> Clone for Factory<S, T> {
     }
 }
 impl<S: AccessSnapshot + 'static, T: Send + 'static> Factory<S, T> {
-    pub fn name(&self) -> &'static str {
-        self.name
+    pub fn name(&self) -> &str {
+        &self.name
     }
     pub fn aliases(&self) -> &'static [&'static str] {
         self.aliases
@@ -345,8 +348,8 @@ where
         })
     }
 }
-fn bind<U, T>(
-    name: &'static str,
+pub(crate) fn bind<U, T>(
+    name: String,
     aliases: &'static [&'static str],
     supported: bool,
     tool: U,
@@ -372,7 +375,7 @@ where
     }
 }
 fn unit<T>(_: &Selection<T>) {}
-fn scoped<T: Clone>(selection: &Selection<T>) -> T {
+pub(crate) fn scoped<T: Clone>(selection: &Selection<T>) -> T {
     selection.scoped.clone()
 }
 fn agent<T>(selection: &Selection<T>) -> AgentSelection {
@@ -404,7 +407,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
     {
         Ok(Self {
             read: bind(
-                "read",
+                "read".to_owned(),
                 &[],
                 true,
                 ReadTool::new(
@@ -415,7 +418,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
                 unit,
             ),
             image: bind(
-                "read_image",
+                "read_image".to_owned(),
                 &[],
                 true,
                 ReadImageTool::new(
@@ -427,14 +430,14 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
                 unit,
             ),
             glob: bind(
-                "glob",
+                "glob".to_owned(),
                 &[],
                 true,
                 GlobTool::new(filesystem.clone(), definitions.describe("glob")?.clone()),
                 unit,
             ),
             write: bind(
-                "write",
+                "write".to_owned(),
                 &[],
                 true,
                 WriteTool::new(
@@ -445,7 +448,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
                 unit,
             ),
             edit: bind(
-                "edit",
+                "edit".to_owned(),
                 &[],
                 true,
                 EditTool::new(filesystem, paths, definitions.describe("edit")?.clone()),
@@ -466,7 +469,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> ProcessFacto
     {
         let create = |kind: ProcessToolKind| {
             Ok(bind(
-                kind.name(),
+                kind.name().to_owned(),
                 kind.aliases(),
                 true,
                 ProcessToolFactory::new(kind, services.clone(), definitions)?.create(),
@@ -544,7 +547,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
                 )?;
             }
             Ok(bind(
-                kind.name(),
+                kind.name().to_owned(),
                 &[],
                 true,
                 AgentTool::new(
@@ -560,7 +563,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
         };
         Ok(Self {
             question: bind(
-                "question",
+                "question".to_owned(),
                 &[],
                 services.interactive && services.agent_depth == 0,
                 QuestionTool::<_, S>::new(
@@ -571,7 +574,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
                 agent,
             ),
             ask: bind(
-                "ask",
+                "ask".to_owned(),
                 &[],
                 true,
                 AskTool::<_, S>::new(
@@ -582,7 +585,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
                 agent,
             ),
             reply: bind(
-                "reply",
+                "reply".to_owned(),
                 &[],
                 true,
                 ReplyTool::<_, S>::new(
@@ -634,7 +637,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> Sess
     {
         let create = |kind: session::Kind| {
             Ok(bind(
-                kind.name(),
+                kind.name().to_owned(),
                 &[],
                 true,
                 SessionTool::new(
@@ -647,7 +650,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> Sess
         };
         Ok(Self {
             image: bind(
-                "imagegen",
+                "imagegen".to_owned(),
                 &[],
                 true,
                 ImageGenerationTool::new(
@@ -664,7 +667,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> Sess
             compact: create(session::Kind::CompactContext)?,
             progress: create(session::Kind::Progress)?,
             permission: bind(
-                "request_write_permission",
+                "request_write_permission".to_owned(),
                 &[],
                 services.interactive && services.agent_depth == 0,
                 RequestWritePermissionTool::new(
@@ -701,7 +704,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static>
     {
         Ok(Self {
             clipboard: bind(
-                "clipboard_copy",
+                "clipboard_copy".to_owned(),
                 &[],
                 services.interactive && services.agent_depth == 0,
                 ClipboardCopyTool::new(
@@ -745,7 +748,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static>
     {
         let task = |kind| {
             Ok(bind(
-                TaskToolKind::name(kind),
+                TaskToolKind::name(kind).to_owned(),
                 &[],
                 true,
                 TaskTool::<_, _, T>::new(
@@ -771,7 +774,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> WebF
         definitions: &ToolDefinitionCatalog,
     ) -> Result<Self, MissingToolDefinition> {
         Ok(Self(bind(
-            "web_fetch",
+            "web_fetch".to_owned(),
             &[],
             true,
             crate::web_fetch::WebFetchTool::<S, T>::new(
@@ -797,39 +800,44 @@ impl<S: AccessSnapshot + 'static, T: Send + 'static> Catalog<S, T> {
         clipboard: ClipboardFactories<S, T>,
     ) -> Self {
         let [exec, stdin, interrupt_process, monitor] = process.0;
-        Self {
-            factories: vec![
-                exec,
-                stdin,
-                interrupt_process,
-                monitor,
-                agents.question,
-                agents.ask,
-                agents.reply,
-                files.read,
-                files.image,
-                session.image,
-                files.glob,
-                files.write,
-                files.edit,
-                web.0,
-                agents.spawn,
-                tasks.set,
-                tasks.get,
-                session.checkpoint,
-                session.set_reminder,
-                session.clear_reminder,
-                agents.send,
-                agents.interrupt,
-                agents.status,
-                agents.wait,
-                session.status,
-                session.compact,
-                session.permission,
-                session.progress,
-                clipboard.clipboard,
-            ],
-        }
+        let factories = vec![
+            exec,
+            stdin,
+            interrupt_process,
+            monitor,
+            agents.question,
+            agents.ask,
+            agents.reply,
+            files.read,
+            files.image,
+            session.image,
+            files.glob,
+            files.write,
+            files.edit,
+            web.0,
+            agents.spawn,
+            tasks.set,
+            tasks.get,
+            session.checkpoint,
+            session.set_reminder,
+            session.clear_reminder,
+            agents.send,
+            agents.interrupt,
+            agents.status,
+            agents.wait,
+            session.status,
+            session.compact,
+            session.permission,
+            session.progress,
+            clipboard.clipboard,
+        ];
+        Self { factories }
+    }
+    /// Appends factories beyond the built-in families, keeping their provider
+    /// order after the built-ins.
+    pub fn with_factories(mut self, factories: impl IntoIterator<Item = Factory<S, T>>) -> Self {
+        self.factories.extend(factories);
+        self
     }
     pub fn factories(&self) -> &[Factory<S, T>] {
         &self.factories

@@ -775,6 +775,9 @@ tools:
 # higher-precedence layer re-enables an inherited disabled entry.
 disabled_tools: {}
 
+# Model Context Protocol servers to start at user-session startup.
+mcp: {}
+
 # Child-agent concurrency and nesting limits.
 subagents:
   # Maximum child-agent turns running across the process.

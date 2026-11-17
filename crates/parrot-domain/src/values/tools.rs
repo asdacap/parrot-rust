@@ -38,6 +38,15 @@ impl ToolDefinitionCatalog {
             .get(name)
             .ok_or_else(|| MissingToolDefinition(name.to_owned()))
     }
+
+    /// Adds or replaces definitions by name, for tool families whose tools
+    /// arrive at runtime instead of from the configuration.
+    pub fn merge(
+        &mut self,
+        definitions: impl IntoIterator<Item = (String, ConfiguredToolDefinition)>,
+    ) {
+        self.definitions.extend(definitions);
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

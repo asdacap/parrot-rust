@@ -165,6 +165,36 @@ impl Default for AgentLimitsConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum McpTransport {
+    Stdio,
+    Http,
+}
+
+impl McpTransport {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stdio => "stdio",
+            Self::Http => "http",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct McpServerConfig {
+    pub transport: McpTransport,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub cwd: Option<String>,
+    pub url: Option<String>,
+    pub headers: BTreeMap<String, String>,
+    pub enabled: bool,
+    pub allow_insecure_localhost: bool,
+    pub startup_timeout_ms: i32,
+    pub call_timeout_ms: i32,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeSettings {
     pub profiles: BTreeMap<String, ProfileConfig>,
@@ -181,6 +211,7 @@ pub struct RuntimeSettings {
     pub agent_send_to_parent: bool,
     pub agent_limits: AgentLimitsConfig,
     pub tools: BTreeMap<String, ConfiguredToolDefinition>,
+    pub mcp: BTreeMap<String, McpServerConfig>,
     pub live_buffer_rows: i32,
     /// -1 denotes the source's infinite timeout; all other values are positive milliseconds.
     pub user_input_timeout_ms: i32,
@@ -247,6 +278,7 @@ impl RuntimeSettings {
             )?,
         };
         let tools = read_tool_definitions(root)?;
+        let mcp = read_mcp_servers(root)?;
         let skills = read_skills(root)?;
         Ok(Self {
             profiles,
@@ -265,6 +297,7 @@ impl RuntimeSettings {
             agent_send_to_parent,
             agent_limits,
             tools,
+            mcp,
             live_buffer_rows,
             user_input_timeout_ms,
             agent_ask_timeout_ms,
@@ -301,6 +334,28 @@ impl RuntimeSettings {
             })
             .collect();
         let upload=self.image_upload.as_ref().map(|u|json!({"endpoint":u.endpoint,"bucket":u.bucket,"region":u.region,"keyPrefix":u.key_prefix,"publicBaseUrl":u.public_base_url,"accessKeyEnv":u.access_key_env,"secretKeyEnv":u.secret_key_env}));
+        let mcp: serde_json::Map<String, serde_json::Value> = self
+            .mcp
+            .iter()
+            .map(|(name, server)| {
+                (
+                    name.clone(),
+                    json!({
+                        "transport":server.transport.as_str(),
+                        "command":server.command,
+                        "args":server.args,
+                        "env":server.env,
+                        "cwd":server.cwd,
+                        "url":server.url,
+                        "headers":server.headers,
+                        "enabled":server.enabled,
+                        "allowInsecureLocalhost":server.allow_insecure_localhost,
+                        "startupTimeoutMs":server.startup_timeout_ms,
+                        "callTimeoutMs":server.call_timeout_ms
+                    }),
+                )
+            })
+            .collect();
         json!({
             "profiles":profiles,"defaultProfile":self.default_profile,
             "cliUtilities":{"expected":self.cli_utilities.expected,"optional":self.cli_utilities.optional},
@@ -314,6 +369,7 @@ impl RuntimeSettings {
             "execCommandYieldAfterMs":self.exec_command_yield_after_ms,
             "requestLimits":{"imageBytesPerToolCycle":self.request_limits.image_bytes_per_tool_cycle,"imageBytesPerRead":self.request_limits.image_bytes_per_read,"providerRequestBytes":self.request_limits.provider_request_bytes},
             "webFetch":{"allowPrivate":self.web_fetch_allow_private},"imageUpload":upload,
+            "mcp":mcp,
             "skills":{"enabled":self.skills.enabled,"entries":self.skills.entries.iter().map(|entry|json!({"path":entry.path,"enabled":entry.enabled})).collect::<Vec<_>>()}
         })
     }
@@ -912,6 +968,188 @@ pub fn read_skills(root: &Node) -> Result<SkillConfiguration> {
         }
     }
     Ok(SkillConfiguration::new(enabled, entries))
+}
+
+fn read_mcp_string_map(node: &Node, path: &str) -> Result<BTreeMap<String, String>> {
+    let mut result = BTreeMap::new();
+    for (key, value) in mapping(node, path)? {
+        let key = key
+            .as_str()
+            .filter(|key| !key.is_empty() && key.trim() == *key)
+            .ok_or_else(|| error(format!("{path} keys must be nonblank trimmed names")))?;
+        let value = value
+            .as_str()
+            .filter(|value| !value.trim().is_empty() && value.trim() == *value)
+            .ok_or_else(|| {
+                error(format!(
+                    "{path}.{key} must be a nonblank string without leading or trailing whitespace"
+                ))
+            })?;
+        result.insert(key.to_owned(), value.to_owned());
+    }
+    Ok(result)
+}
+
+fn read_mcp_string_list(node: &Node, path: &str) -> Result<Vec<String>> {
+    let mut result = Vec::new();
+    for (index, item) in sequence(Some(node), &format!("{path} must be a string sequence"))?
+        .iter()
+        .enumerate()
+    {
+        let value = item
+            .as_str()
+            .filter(|value| !value.trim().is_empty() && value.trim() == *value)
+            .ok_or_else(|| {
+                error(format!(
+                    "{path}[{index}] must be a nonblank string without leading or trailing whitespace"
+                ))
+            })?;
+        result.push(value.to_owned());
+    }
+    Ok(result)
+}
+
+fn read_mcp_servers(root: &Node) -> Result<BTreeMap<String, McpServerConfig>> {
+    let mut result = BTreeMap::new();
+    let Some(node) = root.get("mcp") else {
+        return Ok(result);
+    };
+    for (name, server) in mapping(node, "mcp")? {
+        let name = name
+            .as_str()
+            .filter(|name| !name.is_empty() && name.trim() == *name)
+            .ok_or_else(|| error("mcp keys must be nonblank trimmed server names"))?;
+        if server.as_mapping().is_none() {
+            return Err(error(format!("mcp.{name} must be a mapping")));
+        }
+        let path = format!("mcp.{name}");
+        validate_keys(
+            server,
+            &path,
+            &[
+                "transport",
+                "command",
+                "args",
+                "env",
+                "cwd",
+                "url",
+                "headers",
+                "enabled",
+                "allow_insecure_localhost",
+                "startup_timeout_ms",
+                "call_timeout_ms",
+            ],
+        )?;
+        let transport = match server.get("transport").and_then(Node::as_str) {
+            Some("stdio") => McpTransport::Stdio,
+            Some("http") => McpTransport::Http,
+            _ => return Err(error(format!("{path}.transport must be 'stdio' or 'http'"))),
+        };
+        let stdio_only = ["command", "args", "env", "cwd"];
+        let http_only = ["url", "headers"];
+        let applied = match transport {
+            McpTransport::Stdio => http_only.as_slice(),
+            McpTransport::Http => stdio_only.as_slice(),
+        };
+        for key in applied {
+            if server.get(key).is_some() {
+                return Err(error(format!(
+                    "{path}.{key} does not apply to the {} transport",
+                    transport.as_str()
+                )));
+            }
+        }
+        let command = if transport == McpTransport::Stdio {
+            Some(
+                server
+                    .get("command")
+                    .and_then(Node::as_str)
+                    .filter(|value| !value.trim().is_empty() && value.trim() == *value)
+                    .map(str::to_owned)
+                    .ok_or_else(|| {
+                        error(format!("{path}.command must be a nonblank executable path"))
+                    })?,
+            )
+        } else {
+            None
+        };
+        let url = if transport == McpTransport::Http {
+            Some(
+                server
+                    .get("url")
+                    .and_then(Node::as_str)
+                    .filter(|value| !value.trim().is_empty() && value.trim() == *value)
+                    .map(str::to_owned)
+                    .ok_or_else(|| error(format!("{path}.url must be a nonblank endpoint URL")))?,
+            )
+        } else {
+            None
+        };
+        let args = match server.get("args") {
+            Some(args) => read_mcp_string_list(args, &format!("{path}.args"))?,
+            None => Vec::new(),
+        };
+        let env = match server.get("env") {
+            Some(env) => read_mcp_string_map(env, &format!("{path}.env"))?,
+            None => BTreeMap::new(),
+        };
+        let cwd = match server.get("cwd") {
+            Some(cwd) => Some(
+                cwd.as_str()
+                    .filter(|value| !value.trim().is_empty() && value.trim() == *value)
+                    .map(str::to_owned)
+                    .ok_or_else(|| {
+                        error(format!("{path}.cwd must be a nonblank working directory"))
+                    })?,
+            ),
+            None => None,
+        };
+        let headers = match server.get("headers") {
+            Some(headers) => read_mcp_string_map(headers, &format!("{path}.headers"))?,
+            None => BTreeMap::new(),
+        };
+        let enabled = match server.get("enabled") {
+            Some(node) => boolean(Some(node), &format!("{path}.enabled"))?,
+            None => false,
+        };
+        let allow_insecure_localhost = match server.get("allow_insecure_localhost") {
+            Some(node) => boolean(Some(node), &format!("{path}.allow_insecure_localhost"))?,
+            None => false,
+        };
+        let startup_timeout_ms = match server.get("startup_timeout_ms") {
+            Some(_) => nonnegative_integer(
+                server,
+                "startup_timeout_ms",
+                &format!("{path}.startup_timeout_ms"),
+            )?,
+            None => 15000,
+        };
+        let call_timeout_ms = match server.get("call_timeout_ms") {
+            Some(_) => nonnegative_integer(
+                server,
+                "call_timeout_ms",
+                &format!("{path}.call_timeout_ms"),
+            )?,
+            None => 30000,
+        };
+        result.insert(
+            name.to_owned(),
+            McpServerConfig {
+                transport,
+                command,
+                args,
+                env,
+                cwd,
+                url,
+                headers,
+                enabled,
+                allow_insecure_localhost,
+                startup_timeout_ms,
+                call_timeout_ms,
+            },
+        );
+    }
+    Ok(result)
 }
 
 pub fn read_tool_definitions(root: &Node) -> Result<BTreeMap<String, ConfiguredToolDefinition>> {

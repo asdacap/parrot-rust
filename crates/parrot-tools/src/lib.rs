@@ -4,6 +4,7 @@ pub mod agents;
 pub mod catalog;
 pub mod clipboard;
 pub mod files;
+pub mod mcp;
 pub mod process;
 pub mod sandbox;
 pub mod session;

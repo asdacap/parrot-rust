@@ -935,6 +935,7 @@ mod fixture_binding {
 
     use std::sync::atomic::AtomicU64;
 
+    use super::NoMcpCaller;
     use super::fixture_support::{Artifacts, Selection, Services, Snapshot};
     use parrot_domain::contracts::async_ops::BoxFuture;
     use parrot_domain::contracts::paths::{RootOrigin, SelectedSessionRoot};
@@ -948,6 +949,7 @@ mod fixture_binding {
     use parrot_tools::{
         catalog::{self, Catalog},
         files::WorkspacePaths,
+        mcp::McpFactories,
         process::ownership::owner::ShellProcessOwner,
         web_fetch::{
             self, FetchError, Options, Request, Resolver, Response, ResponseBody, Transport,
@@ -1176,6 +1178,9 @@ mod fixture_binding {
                 tasks,
                 web_factory,
                 clipboard,
+            )
+            .with_factories(
+                McpFactories::new(Arc::new(NoMcpCaller), &BTreeMap::new()).into_factories(),
             );
             Self {
                 catalog,
@@ -1657,4 +1662,29 @@ async fn retained_operation_cancellation_is_not_rendered_as_success() {
     assert!(services.calls().is_empty());
     owner.dispose().await.unwrap();
     artifacts.close().await;
+}
+
+struct NoMcpCaller;
+
+impl parrot_domain::contracts::tools::McpToolCaller for NoMcpCaller {
+    fn call_mcp_tool<'a>(
+        &'a self,
+        server: String,
+        _tool: String,
+        _arguments_json: String,
+    ) -> parrot_domain::contracts::async_ops::BoxFuture<
+        'a,
+        Result<
+            parrot_domain::contracts::tools::McpToolOutcome,
+            parrot_domain::contracts::tools::McpToolError,
+        >,
+    > {
+        Box::pin(async move {
+            Err(parrot_domain::contracts::tools::McpToolError::new(
+                server,
+                parrot_domain::contracts::tools::McpToolFailureKind::Unavailable,
+                "no MCP caller in this fixture",
+            ))
+        })
+    }
 }

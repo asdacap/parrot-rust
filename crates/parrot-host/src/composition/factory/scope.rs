@@ -97,6 +97,7 @@ use parrot_tools::{
         WebFetchFactory,
     },
     files::WorkspacePaths,
+    mcp::McpFactories,
     process::{
         ownership::{
             domain::CapturedProcessLauncher,
@@ -1602,7 +1603,13 @@ where
                     agents: agents.clone(),
                     child_work,
                     catalog: Box::new(move |scope: &Arc<Scope<S>>| {
-                        let definitions = catalog::configured_definitions(&config.configuration);
+                        let mut definitions =
+                            catalog::configured_definitions(&config.configuration);
+                        let mcp_tools = user.mcp.connected_tools();
+                        for tools in mcp_tools.values() {
+                            definitions.merge(tools.clone());
+                        }
+                        let mcp = McpFactories::new(user.mcp.clone(), &mcp_tools);
                         let files = FileFactories::new(
                             config.filesystem.clone(),
                             WorkspacePaths::new(catalog_environment.materialize()),
@@ -1671,9 +1678,12 @@ where
                         )
                         .map_err(child)?;
                         catalog_cells.bind(
-                            CatalogAdapter::new(catalog::Catalog::new(
-                                process, agents, files, services, tasks, web, clipboard,
-                            ))
+                            CatalogAdapter::new(
+                                catalog::Catalog::new(
+                                    process, agents, files, services, tasks, web, clipboard,
+                                )
+                                .with_factories(mcp.into_factories()),
+                            )
                             .map_err(child)?,
                         )
                     }),

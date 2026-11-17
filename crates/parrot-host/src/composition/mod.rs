@@ -3,5 +3,6 @@
 pub mod agents;
 pub mod factory;
 pub mod invocation;
+pub mod mcp;
 pub mod processes;
 pub mod protocol;

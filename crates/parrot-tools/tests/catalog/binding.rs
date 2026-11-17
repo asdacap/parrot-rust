@@ -24,6 +24,7 @@ use parrot_storage::{
 use parrot_tools::{
     catalog::{self, Catalog, Factory, Invocation},
     files::WorkspacePaths,
+    mcp::McpFactories,
     process::ownership::owner::ShellProcessOwner,
     web_fetch::{
         self, FetchError, Options, Request, Resolver, Response, ResponseBody, Transport,
@@ -249,6 +250,9 @@ impl Fixture {
             tasks,
             web_factory,
             clipboard,
+        )
+        .with_factories(
+            McpFactories::new(Arc::new(NoMcpCaller), &BTreeMap::new()).into_factories(),
         );
         Self {
             catalog,
@@ -308,5 +312,30 @@ impl Fixture {
         self.owner.dispose().await.unwrap();
         drop(self.catalog);
         self.artifacts.close().await;
+    }
+}
+
+struct NoMcpCaller;
+
+impl parrot_domain::contracts::tools::McpToolCaller for NoMcpCaller {
+    fn call_mcp_tool<'a>(
+        &'a self,
+        server: String,
+        _tool: String,
+        _arguments_json: String,
+    ) -> BoxFuture<
+        'a,
+        Result<
+            parrot_domain::contracts::tools::McpToolOutcome,
+            parrot_domain::contracts::tools::McpToolError,
+        >,
+    > {
+        Box::pin(async move {
+            Err(parrot_domain::contracts::tools::McpToolError::new(
+                server,
+                parrot_domain::contracts::tools::McpToolFailureKind::Unavailable,
+                "no MCP caller in this fixture",
+            ))
+        })
     }
 }

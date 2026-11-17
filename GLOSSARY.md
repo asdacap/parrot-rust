@@ -8,6 +8,18 @@ Workspace identity and conversation terminology used by Parrot.
 A project's launch location together with its resolved identity, repository information and candidate write-scope roots. The project workspace does not itself confer permission.
 _Avoid_: Session root, current directory
 
+## MCP
+
+**MCP server**:
+An external Model Context Protocol server configured in the `mcp:` config key. Parrot connects to it as a client and trusts its tool calls without per-call checks. See ADR 0002.
+_Avoid_: MCP integration, MCP plugin
+
+**MCP tool**:
+A tool an MCP server lists and serves. Parrot routes the LLM's call to the server through the existing settlement path and maps text output to the usual tool result.
+
+**Tool namespace**:
+The `mcp__<server>__<tool>` name pattern that keeps MCP tool names distinct from built-in tools and from other servers' tools. Permission filters and name-uniqueness checks see only the namespaced name.
+
 ## Conversation language
 
 **Context**:

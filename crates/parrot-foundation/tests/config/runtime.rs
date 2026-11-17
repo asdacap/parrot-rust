@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use parrot_foundation::config::environment;
 use parrot_foundation::config::node::{Node, Style};
 use parrot_foundation::config::runtime::{
-    AgentTaskForkHistoryMode, PROFILE_IDS, RuntimeSettings, SandboxRuleAction, read_skills,
-    read_tool_definitions, schema_json,
+    AgentTaskForkHistoryMode, McpTransport, PROFILE_IDS, RuntimeSettings, SandboxRuleAction,
+    read_skills, read_tool_definitions, schema_json,
 };
 
 fn map(entries: &[(&str, Node)]) -> Node {
@@ -669,5 +669,179 @@ fn tool_schema_scalars_preserve_quotes_json_numeric_lexemes_and_unknown_data() {
     assert_eq!(
         read_tool_definitions(&root).unwrap_err().to_string(),
         "tools.read.parameters.properties.offset.description must be a non-empty scalar"
+    );
+}
+
+#[test]
+fn mcp_servers_accept_valid_stdio_and_http_entries_with_defaults() {
+    let mut node = root();
+    node.set(
+        "mcp",
+        map(&[
+            (
+                "fs",
+                map(&[
+                    ("transport", scalar("stdio")),
+                    ("command", scalar("/usr/bin/mcp-fs")),
+                    ("args", strings(&["--stdio"])),
+                    ("env", map(&[("TOKEN", scalar("abc"))])),
+                    ("cwd", scalar("/work")),
+                    ("enabled", scalar("true")),
+                    ("startup_timeout_ms", scalar("0")),
+                ]),
+            ),
+            (
+                "remote",
+                map(&[
+                    ("transport", scalar("http")),
+                    ("url", scalar("https://mcp.example.test/rpc")),
+                    ("headers", map(&[("X-Tenant", scalar("t"))])),
+                    ("allow_insecure_localhost", scalar("true")),
+                    ("call_timeout_ms", scalar("1")),
+                ]),
+            ),
+        ]),
+    );
+    let mcp = read(&node).unwrap().mcp;
+    let fs = mcp.get("fs").unwrap();
+    assert_eq!(fs.transport, McpTransport::Stdio);
+    assert_eq!(fs.command.as_deref(), Some("/usr/bin/mcp-fs"));
+    assert_eq!(fs.args, vec!["--stdio"]);
+    assert_eq!(fs.env.get("TOKEN").map(String::as_str), Some("abc"));
+    assert_eq!(fs.cwd.as_deref(), Some("/work"));
+    assert!(fs.enabled);
+    assert_eq!(fs.startup_timeout_ms, 0);
+    assert_eq!(fs.call_timeout_ms, 30000);
+    let remote = mcp.get("remote").unwrap();
+    assert_eq!(remote.transport, McpTransport::Http);
+    assert_eq!(remote.url.as_deref(), Some("https://mcp.example.test/rpc"));
+    assert_eq!(
+        remote.headers.get("X-Tenant").map(String::as_str),
+        Some("t")
+    );
+    assert!(remote.allow_insecure_localhost);
+    assert_eq!(remote.call_timeout_ms, 1);
+    assert_eq!(remote.startup_timeout_ms, 15000);
+    assert_eq!(
+        read(&node).unwrap().snapshot()["mcp"]["fs"]["transport"],
+        "stdio"
+    );
+    assert!(read(&root()).unwrap().mcp.is_empty());
+    let mut node = root();
+    node.set(
+        "mcp",
+        map(&[(
+            "fs",
+            map(&[
+                ("transport", scalar("stdio")),
+                ("command", scalar("/bin/true")),
+            ]),
+        )]),
+    );
+    assert!(!read(&node).unwrap().mcp["fs"].enabled);
+}
+
+#[test]
+fn mcp_servers_reject_unsupported_transport_inconsistent_and_invalid_entries() {
+    let mut node = root();
+    node.set(
+        "mcp",
+        map(&[(
+            "fs",
+            map(&[("transport", scalar("stdio")), ("bogus", scalar("true"))]),
+        )]),
+    );
+    assert_eq!(error(&node), "mcp.fs contains an unsupported key");
+    let mut node = root();
+    node.set("mcp", map(&[("fs", map(&[("transport", scalar("grpc"))]))]));
+    assert_eq!(error(&node), "mcp.fs.transport must be 'stdio' or 'http'");
+    let mut node = root();
+    node.set(
+        "mcp",
+        map(&[("fs", map(&[("transport", scalar("stdio"))]))]),
+    );
+    assert_eq!(
+        error(&node),
+        "mcp.fs.command must be a nonblank executable path"
+    );
+    let mut node = root();
+    node.set("mcp", map(&[("fs", map(&[("transport", scalar("http"))]))]));
+    assert_eq!(error(&node), "mcp.fs.url must be a nonblank endpoint URL");
+    let mut node = root();
+    node.set(
+        "mcp",
+        map(&[(
+            "fs",
+            map(&[
+                ("transport", scalar("stdio")),
+                ("command", scalar("/bin/true")),
+                ("url", scalar("https://x.test")),
+            ]),
+        )]),
+    );
+    assert_eq!(
+        error(&node),
+        "mcp.fs.url does not apply to the stdio transport"
+    );
+    let mut node = root();
+    node.set(
+        "mcp",
+        map(&[(
+            "fs",
+            map(&[
+                ("transport", scalar("http")),
+                ("url", scalar("https://x.test")),
+                ("args", strings(&["--stdio"])),
+            ]),
+        )]),
+    );
+    assert_eq!(
+        error(&node),
+        "mcp.fs.args does not apply to the http transport"
+    );
+    let mut node = root();
+    node.set(
+        "mcp",
+        map(&[(
+            "fs",
+            map(&[
+                ("transport", scalar("stdio")),
+                ("command", scalar("/bin/true")),
+                ("enabled", scalar("yes")),
+            ]),
+        )]),
+    );
+    assert_eq!(error(&node), "mcp.fs.enabled must be true or false");
+    let mut node = root();
+    node.set(
+        "mcp",
+        map(&[(
+            "fs",
+            map(&[
+                ("transport", scalar("stdio")),
+                ("command", scalar("/bin/true")),
+                ("startup_timeout_ms", scalar("-1")),
+            ]),
+        )]),
+    );
+    assert_eq!(
+        error(&node),
+        "mcp.fs.startup_timeout_ms must be a non-negative integer"
+    );
+    let mut node = root();
+    node.set(
+        "mcp",
+        map(&[(
+            "fs",
+            map(&[
+                ("transport", scalar("stdio")),
+                ("command", scalar("/bin/true")),
+                ("call_timeout_ms", scalar("-1")),
+            ]),
+        )]),
+    );
+    assert_eq!(
+        error(&node),
+        "mcp.fs.call_timeout_ms must be a non-negative integer"
     );
 }
