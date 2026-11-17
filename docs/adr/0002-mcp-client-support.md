@@ -40,6 +40,17 @@ through them unchanged.
    bounded by `startup_timeout_ms`. There is no auto-reconnect; a server that
    dies recovers on the next session start. There is no event-based lifecycle
    coordination.
+8. The whole MCP feature is self-contained in `parrot-mcp`: the protocol client
+   and transports, the user-session server manager, and the tool adapter that
+   implements the domain `Tool` contract. A tool family is one isolatable unit,
+   so `parrot-host` only composes: it maps `mcp:` config into the manager,
+   connects at session start, writes connect-failure diagnostics, and passes
+   the manager into the scope factory. `parrot-tools` stays a collection of
+   tools plus the shared tool contract and catalog machinery; it keeps the MCP
+   family outcome and error types because the catalog `Error` enum owns family
+   errors. The `McpToolCaller` contract initially placed in `parrot-domain` was
+   removed once tool and manager shared one crate; the trait with a single
+   production implementor earned nothing that the direct handle does not give.
 
 ## Consequences
 

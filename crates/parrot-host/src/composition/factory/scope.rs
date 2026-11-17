@@ -31,6 +31,7 @@ use parrot_foundation::{
     config::{Configuration, runtime::AgentTaskForkHistoryMode},
     template_catalog::PromptTemplateCatalog,
 };
+use parrot_mcp::McpFactories;
 use parrot_provider::compaction::{CompactionSettings, Compactor};
 use parrot_provider::{
     http_stream::HttpError,
@@ -97,7 +98,6 @@ use parrot_tools::{
         WebFetchFactory,
     },
     files::WorkspacePaths,
-    mcp::McpFactories,
     process::{
         ownership::{
             domain::CapturedProcessLauncher,

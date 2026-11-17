@@ -1,16 +1,15 @@
-//! User-session ownership over the configured MCP server connections.
+//! Ownership of the configured MCP server connections.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use parrot_domain::contracts::async_ops::BoxFuture;
-use parrot_domain::contracts::tools::{
-    McpToolCaller, McpToolError, McpToolFailureKind, McpToolOutcome,
-};
 use parrot_domain::values::tools::ConfiguredToolDefinition;
 use parrot_foundation::config::runtime::{McpServerConfig, McpTransport};
-use parrot_mcp::{CallToolResult, ClientInfo, ContentBlock, McpClient, McpError};
+use parrot_tools::mcp::{McpToolError, McpToolFailureKind, McpToolOutcome};
+
+use crate::client::McpClient;
+use crate::protocol::{CallToolResult, ClientInfo, ContentBlock, McpError};
 use tokio::sync::Mutex as AsyncMutex;
 
 const STARTUP_TIMEOUT_DEFAULT_MS: i32 = 15000;
@@ -50,9 +49,9 @@ impl McpServerState {
     }
 }
 
-/// One connection per enabled `mcp:` server, created at user-session startup.
-/// A server that fails to connect is recorded as failed; it holds no tools and
-/// its tool calls fail with the recorded reason.
+/// One connection per enabled `mcp:` server. A server that fails to connect is
+/// recorded as failed; it holds no tools and its tool calls fail with the
+/// recorded reason. The caller owns the connection lifetime.
 pub struct McpServerManager {
     servers: StdMutex<BTreeMap<String, McpServerState>>,
 }
@@ -82,13 +81,15 @@ impl McpServerManager {
     async fn open(server: &McpServerConfig) -> Result<McpServerState, McpError> {
         let startup = timeout(server.startup_timeout_ms, STARTUP_TIMEOUT_DEFAULT_MS);
         let mut client = match server.transport {
-            McpTransport::Stdio => McpClient::connect_stdio(&parrot_mcp::StdioServerParams {
-                command: server.command.clone().unwrap_or_default(),
-                args: server.args.clone(),
-                env: server.env.clone(),
-                cwd: server.cwd.clone(),
-            })?,
-            McpTransport::Http => McpClient::connect_http(&parrot_mcp::HttpServerParams {
+            McpTransport::Stdio => {
+                McpClient::connect_stdio(&crate::transport::StdioServerParams {
+                    command: server.command.clone().unwrap_or_default(),
+                    args: server.args.clone(),
+                    env: server.env.clone(),
+                    cwd: server.cwd.clone(),
+                })?
+            }
+            McpTransport::Http => McpClient::connect_http(&crate::transport::HttpServerParams {
                 url: server.url.clone().unwrap_or_default(),
                 headers: server.headers.clone(),
                 allow_insecure_localhost: server.allow_insecure_localhost,
@@ -143,7 +144,26 @@ impl McpServerManager {
     }
 
     /// Calls one tool on one server under the server's call timeout.
-    pub async fn call(
+    /// `arguments_json` is forwarded to the server verbatim as the
+    /// `tools/call` arguments object.
+    pub async fn call_tool(
+        &self,
+        server: &str,
+        tool: &str,
+        arguments_json: &str,
+    ) -> Result<McpToolOutcome, McpToolError> {
+        let arguments: serde_json::Value =
+            serde_json::from_str(arguments_json).map_err(|error| {
+                McpToolError::new(server, McpToolFailureKind::Arguments, error.to_string())
+            })?;
+        let result = self.call(server, tool, arguments).await?;
+        Ok(McpToolOutcome {
+            text: tool_text(&result),
+            is_error: result.is_error,
+        })
+    }
+
+    async fn call(
         &self,
         server: &str,
         tool: &str,
@@ -222,44 +242,31 @@ fn tool_text(result: &CallToolResult) -> String {
     text
 }
 
-impl McpToolCaller for McpServerManager {
-    fn call_mcp_tool<'a>(
-        &'a self,
-        server: String,
-        tool: String,
-        arguments_json: String,
-    ) -> BoxFuture<'a, Result<McpToolOutcome, McpToolError>> {
-        Box::pin(async move {
-            let arguments: serde_json::Value =
-                serde_json::from_str(&arguments_json).map_err(|error| {
-                    McpToolError::new(&server, McpToolFailureKind::Arguments, error.to_string())
-                })?;
-            let result = self.call(&server, &tool, arguments).await?;
-            Ok(McpToolOutcome {
-                text: tool_text(&result),
-                is_error: result.is_error,
-            })
-        })
-    }
-}
-
 #[cfg(test)]
-mod tests {
+pub(crate) mod testing {
     use super::*;
     use parrot_foundation::config::runtime::McpServerConfig;
 
-    const FAKE_SERVER_SCRIPT: &str = r#"
+    /// A fake stdio MCP server. `tools/call` arguments are echoed back as the
+    /// result text; the argument text "boom" answers with `isError: true`.
+    pub const FAKE_SERVER_SCRIPT: &str = r#"
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
     *'"tools/list"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"Echo tool","inputSchema":{"type":"object"}}]}}\n' "$id" ;;
-    *'"tools/call"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"hello from fake"}],"isError":false}}\n' "$id" ;;
+    *'"tools/call"'*)
+      args=$(printf '%s' "$line" | sed -n 's/.*"arguments":\(.*\)}}$/\1/p')
+      escaped=$(printf '%s' "$args" | sed 's/"/\\"/g')
+      case "$args" in
+        *'"boom"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"boom"}],"isError":true}}\n' "$id" ;;
+        *) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"echo: %s"}],"isError":false}}\n' "$id" "$escaped" ;;
+      esac ;;
   esac
 done
 "#;
 
-    fn stdio_server(command: &str, enabled: bool) -> McpServerConfig {
+    pub fn stdio_server(command: &str, enabled: bool) -> McpServerConfig {
         McpServerConfig {
             transport: McpTransport::Stdio,
             command: Some(command.to_owned()),
@@ -274,6 +281,14 @@ done
             call_timeout_ms: 10000,
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testing::stdio_server;
+    use super::*;
+    use parrot_foundation::config::runtime::{McpServerConfig, McpTransport};
+    use parrot_tools::mcp::McpToolFailureKind;
 
     fn http_server(url: &str, enabled: bool) -> McpServerConfig {
         McpServerConfig {
@@ -315,14 +330,26 @@ done
     }
 
     #[tokio::test]
-    async fn tool_call_reaches_the_server_and_settles() {
+    async fn tool_call_forwards_arguments_verbatim_and_returns_text() {
         let manager = connect(&[("fake", stdio_server("sh", true))]).await;
-        let result = manager
-            .call("fake", "echo", serde_json::json!({"text": "hi"}))
+        let outcome = manager
+            .call_tool("fake", "echo", r#"{"text":"hi"}"#)
             .await
             .expect("the fake server answers the call");
-        assert!(!result.is_error);
-        assert_eq!(result.text(), "hello from fake");
+        assert!(!outcome.is_error);
+        assert_eq!(outcome.text, r#"echo: {"text":"hi"}"#);
+        manager.close().await;
+    }
+
+    #[tokio::test]
+    async fn invalid_arguments_fail_without_reaching_the_server() {
+        let manager = connect(&[("fake", stdio_server("sh", true))]).await;
+        let error = manager
+            .call_tool("fake", "echo", "not json")
+            .await
+            .expect_err("invalid arguments fail locally");
+        assert_eq!(error.server, "fake");
+        assert_eq!(error.kind, McpToolFailureKind::Arguments);
         manager.close().await;
     }
 
@@ -334,7 +361,7 @@ done
         assert_eq!(failures[0].0, "bad");
         assert!(manager.connected_tools().is_empty());
         let error = manager
-            .call("bad", "echo", serde_json::json!({}))
+            .call_tool("bad", "echo", "{}")
             .await
             .expect_err("a failed server refuses calls");
         assert_eq!(error.server, "bad");
@@ -358,7 +385,7 @@ done
         );
         for name in ["off", "remote", "unknown"] {
             let error = manager
-                .call(name, "echo", serde_json::json!({}))
+                .call_tool(name, "echo", "{}")
                 .await
                 .expect_err("an unconnected server refuses calls");
             assert_eq!(error.server, name);

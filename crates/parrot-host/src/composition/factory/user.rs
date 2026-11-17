@@ -3,7 +3,6 @@ use super::super::{
     agents::CallerSignal,
     protocol::{self, HostedSession, HostedSessionFactory, RpcCode, RpcError, SessionEventStream},
 };
-use crate::composition::mcp::McpServerManager;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, Clock, OperationError},
@@ -22,6 +21,7 @@ use parrot_domain::{
     },
 };
 use parrot_foundation::{paths::UserSessionResources, template_catalog::PromptTemplateCatalog};
+use parrot_mcp::McpServerManager;
 use parrot_provider::routing::{
     aliases::{ModelRouter, ResolvedModelSelection},
     configuration::{CoordinatorError, Result as ConfigurationResult},

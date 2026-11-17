@@ -150,7 +150,7 @@ pub enum Error {
     TaskQueue(ToolFailure),
     WebFetch(crate::web_fetch::FetchError),
     Definition(MissingToolDefinition),
-    Mcp(parrot_domain::contracts::tools::McpToolError),
+    Mcp(crate::mcp::McpToolError),
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -183,7 +183,7 @@ family_error!(Session, session::Failure);
 family_error!(TaskQueue, ToolFailure);
 family_error!(WebFetch, crate::web_fetch::FetchError);
 family_error!(Definition, MissingToolDefinition);
-family_error!(Mcp, parrot_domain::contracts::tools::McpToolError);
+family_error!(Mcp, crate::mcp::McpToolError);
 
 impl From<Invocation> for crate::web_fetch::Invocation {
     fn from(i: Invocation) -> Self {
@@ -374,8 +374,28 @@ where
         }),
     }
 }
+
+/// Builds a factory for a tool family implemented outside this crate. Register
+/// the returned factories through `Catalog::with_factories`.
+pub fn extension<U, T>(
+    name: impl Into<String>,
+    aliases: &'static [&'static str],
+    supported: bool,
+    tool: U,
+    selection: fn(&Selection<T>) -> U::Selection,
+) -> Factory<U::Security, T>
+where
+    U: Tool<Definition = ConfiguredToolDefinition> + 'static,
+    U::Security: Clone,
+    U::Invocation: From<Invocation>,
+    U::Output: Into<Output>,
+    U::Error: Into<Error>,
+    T: Send + Sync + 'static,
+{
+    bind(name.into(), aliases, supported, tool, selection)
+}
 fn unit<T>(_: &Selection<T>) {}
-pub(crate) fn scoped<T: Clone>(selection: &Selection<T>) -> T {
+pub fn scoped<T: Clone>(selection: &Selection<T>) -> T {
     selection.scoped.clone()
 }
 fn agent<T>(selection: &Selection<T>) -> AgentSelection {
