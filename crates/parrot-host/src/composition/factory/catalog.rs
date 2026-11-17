@@ -1,4 +1,5 @@
 //! Retains the actual configured tool catalog at the runtime settlement boundary.
+use crate::composition::catalog;
 use crate::composition::invocation::{InvocationSelection, RetainedCompactTool};
 use parrot_domain::contracts::{
     async_ops::{BoxFuture, OperationError},
@@ -14,7 +15,7 @@ use parrot_runtime::{
     },
 };
 use parrot_storage::diagnostics::FailureKind;
-use parrot_tools::{catalog, files};
+use parrot_tools::files;
 use std::sync::Arc;
 
 type ScopedCatalog<S> = catalog::Catalog<SharedSecurity<S>, InvocationSelection<S>>;
@@ -241,6 +242,13 @@ fn error_to_runtime(error: catalog::Error) -> ToolFailure {
                 _ => FailureKind::Unexpected,
             },
             catalog::Error::WebFetch(_) => FailureKind::Argument,
+            catalog::Error::Mcp(error) => match error.kind {
+                parrot_mcp::McpToolFailureKind::Timeout => FailureKind::Timeout,
+                parrot_mcp::McpToolFailureKind::Unavailable => FailureKind::InvalidOperation,
+                parrot_mcp::McpToolFailureKind::Arguments => FailureKind::Argument,
+                parrot_mcp::McpToolFailureKind::Closed
+                | parrot_mcp::McpToolFailureKind::Transport => FailureKind::Http,
+            },
         };
     ToolFailure::new(error.to_string(), kind)
 }

@@ -21,6 +21,7 @@ use parrot_domain::{
     },
 };
 use parrot_foundation::{paths::UserSessionResources, template_catalog::PromptTemplateCatalog};
+use parrot_mcp::McpServerManager;
 use parrot_provider::routing::{
     aliases::{ModelRouter, ResolvedModelSelection},
     configuration::{CoordinatorError, Result as ConfigurationResult},
@@ -66,7 +67,7 @@ use parrot_storage::{
 };
 use parrot_tools::session::{WriteTarget, WriteTargetKind};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::Path,
     sync::{
         Arc, Mutex, OnceLock, Weak,
@@ -137,6 +138,7 @@ pub struct UserServices<S: RestrictableAccessSnapshot + 'static> {
     pub started_at: SystemTime,
     pub root_identity: Arc<AgentIdentity>,
     pub modes: Arc<UserSessionModes<S>>,
+    pub mcp: Arc<McpServerManager>,
     registry: OnceLock<Weak<AgentRegistry<S>>>,
 }
 impl<S: RestrictableAccessSnapshot + 'static> UserServices<S> {
@@ -287,6 +289,7 @@ pub struct UserSessionFactoryConfig<S: RestrictableAccessSnapshot + 'static> {
     pub permissions: UserPermissionFactory,
     pub user_input_timeout: Option<Duration>,
     pub agent_ask_timeout: Duration,
+    pub mcp_servers: BTreeMap<String, parrot_foundation::config::runtime::McpServerConfig>,
 }
 
 pub struct UserSessionFactory<S: RestrictableAccessSnapshot + 'static> {
@@ -637,6 +640,13 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             broker.clone(),
             initialization.interactive_permissions,
         )?;
+        let mcp = McpServerManager::connect(&config.mcp_servers).await;
+        for (name, _) in mcp.failures() {
+            lease.write_diagnostic(&DiagnosticEvent {
+                error_code: Some(name.clone()),
+                ..DiagnosticEvent::new("mcp", "server_connect_failed", DiagnosticSeverity::Warning)
+            });
+        }
         let services = Arc::new(UserServices {
             id: initialization.id.value().into(),
             lease: lease.clone(),
@@ -668,6 +678,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             started_at: question_clock.utc_now(),
             root_identity: identity.clone(),
             modes: modes.clone(),
+            mcp,
             registry: OnceLock::new(),
         });
         let mut cleanup_registry = None;
@@ -815,6 +826,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             services.questions.close();
             services.asks.close();
             services.permissions.close().await;
+            services.mcp.close().await;
             if let Some(registry) = cleanup_registry {
                 joined &= registry.shutdown().join().await.is_ok();
             }
@@ -1307,6 +1319,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         self.services.questions.close();
         self.services.asks.close();
         self.services.permissions.close().await;
+        self.services.mcp.close().await;
         let shutdown = self.registry.shutdown();
         if let Err(error) = shutdown.join().await {
             failure.get_or_insert_with(|| internal(error));

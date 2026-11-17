@@ -586,6 +586,7 @@ impl Rpc {
             permissions: durable_permission_factory(None, Arc::new(Diagnostics)),
             user_input_timeout: timeout,
             agent_ask_timeout: std::time::Duration::from_secs(300),
+            mcp_servers: BTreeMap::new(),
         };
         let factory = Arc::new(match question_clock {
             Some(clock) => UserSessionFactory::with_question_clock(factory_config, clock),

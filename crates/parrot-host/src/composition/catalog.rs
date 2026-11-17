@@ -1,5 +1,6 @@
-//! Agent-session-local built-ins. Only family DTOs are adapted here; services,
-//! security capture and production lifetime routing remain supplied by the host.
+//! Agent-session tool catalog machinery owned by the composition host. Family
+//! tool implementations stay in parrot-tools and parrot-mcp; this module only
+//! binds them into the session catalog and adapts family DTOs.
 
 use std::{fmt, marker::PhantomData, sync::Arc};
 
@@ -20,7 +21,8 @@ use parrot_foundation::{config::Configuration, template_catalog::PromptTemplateC
 use parrot_storage::artifacts::{ImageArtifactMetadata, ImageArtifactRepository};
 use parrot_storage::conversation::AgentHistoryView;
 
-use crate::{
+use parrot_mcp::McpToolOutcome;
+use parrot_tools::{
     agents::{
         self, AgentSelection, AgentTool, AgentToolError, AgentToolKind, ModelSelector,
         questions::{AskTool, QuestionTool, ReplyTool},
@@ -122,8 +124,8 @@ impl From<files::FileToolResult> for Output {
         }
     }
 }
-impl From<crate::process::tools::ProcessToolResult> for Output {
-    fn from(result: crate::process::tools::ProcessToolResult) -> Self {
+impl From<parrot_tools::process::tools::ProcessToolResult> for Output {
+    fn from(result: parrot_tools::process::tools::ProcessToolResult) -> Self {
         Self {
             yielded_process: result.yielded_process,
             ..result.text.into()
@@ -148,8 +150,9 @@ pub enum Error {
     Agent(AgentToolError),
     Session(session::Failure),
     TaskQueue(ToolFailure),
-    WebFetch(crate::web_fetch::FetchError),
+    WebFetch(parrot_tools::web_fetch::FetchError),
     Definition(MissingToolDefinition),
+    Mcp(parrot_mcp::McpToolError),
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -161,6 +164,7 @@ impl fmt::Display for Error {
             Self::TaskQueue(e) => e.fmt(f),
             Self::WebFetch(e) => e.fmt(f),
             Self::Definition(e) => e.fmt(f),
+            Self::Mcp(e) => e.fmt(f),
         }
     }
 }
@@ -179,10 +183,33 @@ family_error!(Process, std::io::Error);
 family_error!(Agent, AgentToolError);
 family_error!(Session, session::Failure);
 family_error!(TaskQueue, ToolFailure);
-family_error!(WebFetch, crate::web_fetch::FetchError);
+family_error!(WebFetch, parrot_tools::web_fetch::FetchError);
 family_error!(Definition, MissingToolDefinition);
+family_error!(Mcp, parrot_mcp::McpToolError);
 
-impl From<Invocation> for crate::web_fetch::Invocation {
+// MCP family seam. The feature crate stays catalog-free, so the host provides
+// the conversions its adapter needs, in this one place.
+impl From<Invocation> for parrot_mcp::McpInvocation {
+    fn from(invocation: Invocation) -> Self {
+        Self::new(
+            invocation.call_id,
+            invocation.arguments_json,
+            invocation.prompt_templates,
+        )
+    }
+}
+impl From<McpToolOutcome> for Output {
+    fn from(outcome: McpToolOutcome) -> Self {
+        Self {
+            text: outcome.text,
+            image_artifacts: Vec::new(),
+            outcome: FileToolOutcome::Finished,
+            yielded_process: None,
+        }
+    }
+}
+
+impl From<Invocation> for parrot_tools::web_fetch::Invocation {
     fn from(i: Invocation) -> Self {
         Self {
             arguments_json: i.arguments_json,
@@ -190,8 +217,8 @@ impl From<Invocation> for crate::web_fetch::Invocation {
         }
     }
 }
-impl From<crate::web_fetch::Output> for Output {
-    fn from(result: crate::web_fetch::Output) -> Self {
+impl From<parrot_tools::web_fetch::Output> for Output {
+    fn from(result: parrot_tools::web_fetch::Output) -> Self {
         result.text.into()
     }
 }
@@ -206,7 +233,7 @@ impl From<Invocation> for files::FileToolInvocation {
         }
     }
 }
-impl From<Invocation> for crate::process::tools::ProcessInvocation {
+impl From<Invocation> for parrot_tools::process::tools::ProcessInvocation {
     fn from(i: Invocation) -> Self {
         Self {
             call_id: i.call_id,
@@ -233,7 +260,7 @@ impl From<Invocation> for tasks_queues::ToolInvocation {
         }
     }
 }
-impl From<Invocation> for crate::clipboard::Invocation {
+impl From<Invocation> for parrot_tools::clipboard::Invocation {
     fn from(i: Invocation) -> Self {
         Self {
             call_id: i.call_id,
@@ -264,7 +291,7 @@ pub type RetainedTool<S, T> = dyn Tool<
 /// A factory slot retains the one tool created for this agent session. Cloning
 /// its handle never creates a new tool or resets invocation-local observers.
 pub struct Factory<S, T> {
-    name: &'static str,
+    name: String,
     aliases: &'static [&'static str],
     supported: bool,
     tool: Arc<RetainedTool<S, T>>,
@@ -272,7 +299,7 @@ pub struct Factory<S, T> {
 impl<S, T> Clone for Factory<S, T> {
     fn clone(&self) -> Self {
         Self {
-            name: self.name,
+            name: self.name.clone(),
             aliases: self.aliases,
             supported: self.supported,
             tool: Arc::clone(&self.tool),
@@ -280,8 +307,8 @@ impl<S, T> Clone for Factory<S, T> {
     }
 }
 impl<S: AccessSnapshot + 'static, T: Send + 'static> Factory<S, T> {
-    pub fn name(&self) -> &'static str {
-        self.name
+    pub fn name(&self) -> &str {
+        &self.name
     }
     pub fn aliases(&self) -> &'static [&'static str] {
         self.aliases
@@ -345,8 +372,8 @@ where
         })
     }
 }
-fn bind<U, T>(
-    name: &'static str,
+pub(crate) fn bind<U, T>(
+    name: String,
     aliases: &'static [&'static str],
     supported: bool,
     tool: U,
@@ -371,8 +398,28 @@ where
         }),
     }
 }
-fn unit<T>(_: &Selection<T>) {}
-fn scoped<T: Clone>(selection: &Selection<T>) -> T {
+
+/// Builds a factory for a tool family implemented outside this crate. Register
+/// the returned factories through `Catalog::with_factories`.
+pub fn extension<U, T>(
+    name: impl Into<String>,
+    aliases: &'static [&'static str],
+    supported: bool,
+    tool: U,
+    selection: fn(&Selection<T>) -> U::Selection,
+) -> Factory<U::Security, T>
+where
+    U: Tool<Definition = ConfiguredToolDefinition> + 'static,
+    U::Security: Clone,
+    U::Invocation: From<Invocation>,
+    U::Output: Into<Output>,
+    U::Error: Into<Error>,
+    T: Send + Sync + 'static,
+{
+    bind(name.into(), aliases, supported, tool, selection)
+}
+pub fn unit<T>(_: &Selection<T>) {}
+pub fn scoped<T: Clone>(selection: &Selection<T>) -> T {
     selection.scoped.clone()
 }
 fn agent<T>(selection: &Selection<T>) -> AgentSelection {
@@ -404,7 +451,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
     {
         Ok(Self {
             read: bind(
-                "read",
+                "read".to_owned(),
                 &[],
                 true,
                 ReadTool::new(
@@ -415,7 +462,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
                 unit,
             ),
             image: bind(
-                "read_image",
+                "read_image".to_owned(),
                 &[],
                 true,
                 ReadImageTool::new(
@@ -427,14 +474,14 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
                 unit,
             ),
             glob: bind(
-                "glob",
+                "glob".to_owned(),
                 &[],
                 true,
                 GlobTool::new(filesystem.clone(), definitions.describe("glob")?.clone()),
                 unit,
             ),
             write: bind(
-                "write",
+                "write".to_owned(),
                 &[],
                 true,
                 WriteTool::new(
@@ -445,7 +492,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
                 unit,
             ),
             edit: bind(
-                "edit",
+                "edit".to_owned(),
                 &[],
                 true,
                 EditTool::new(filesystem, paths, definitions.describe("edit")?.clone()),
@@ -466,7 +513,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> ProcessFacto
     {
         let create = |kind: ProcessToolKind| {
             Ok(bind(
-                kind.name(),
+                kind.name().to_owned(),
                 kind.aliases(),
                 true,
                 ProcessToolFactory::new(kind, services.clone(), definitions)?.create(),
@@ -544,7 +591,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
                 )?;
             }
             Ok(bind(
-                kind.name(),
+                kind.name().to_owned(),
                 &[],
                 true,
                 AgentTool::new(
@@ -560,7 +607,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
         };
         Ok(Self {
             question: bind(
-                "question",
+                "question".to_owned(),
                 &[],
                 services.interactive && services.agent_depth == 0,
                 QuestionTool::<_, S>::new(
@@ -571,7 +618,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
                 agent,
             ),
             ask: bind(
-                "ask",
+                "ask".to_owned(),
                 &[],
                 true,
                 AskTool::<_, S>::new(
@@ -582,7 +629,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> AgentFactori
                 agent,
             ),
             reply: bind(
-                "reply",
+                "reply".to_owned(),
                 &[],
                 true,
                 ReplyTool::<_, S>::new(
@@ -634,7 +681,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> Sess
     {
         let create = |kind: session::Kind| {
             Ok(bind(
-                kind.name(),
+                kind.name().to_owned(),
                 &[],
                 true,
                 SessionTool::new(
@@ -647,7 +694,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> Sess
         };
         Ok(Self {
             image: bind(
-                "imagegen",
+                "imagegen".to_owned(),
                 &[],
                 true,
                 ImageGenerationTool::new(
@@ -664,7 +711,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> Sess
             compact: create(session::Kind::CompactContext)?,
             progress: create(session::Kind::Progress)?,
             permission: bind(
-                "request_write_permission",
+                "request_write_permission".to_owned(),
                 &[],
                 services.interactive && services.agent_depth == 0,
                 RequestWritePermissionTool::new(
@@ -701,7 +748,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static>
     {
         Ok(Self {
             clipboard: bind(
-                "clipboard_copy",
+                "clipboard_copy".to_owned(),
                 &[],
                 services.interactive && services.agent_depth == 0,
                 ClipboardCopyTool::new(
@@ -745,7 +792,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static>
     {
         let task = |kind| {
             Ok(bind(
-                TaskToolKind::name(kind),
+                TaskToolKind::name(kind).to_owned(),
                 &[],
                 true,
                 TaskTool::<_, _, T>::new(
@@ -767,14 +814,14 @@ impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static>
 pub struct WebFetchFactory<S, T>(Factory<S, T>);
 impl<S: AccessSnapshot + Clone + 'static, T: Clone + Send + Sync + 'static> WebFetchFactory<S, T> {
     pub fn new(
-        fetcher: Arc<crate::web_fetch::WebFetcher>,
+        fetcher: Arc<parrot_tools::web_fetch::WebFetcher>,
         definitions: &ToolDefinitionCatalog,
     ) -> Result<Self, MissingToolDefinition> {
         Ok(Self(bind(
-            "web_fetch",
+            "web_fetch".to_owned(),
             &[],
             true,
-            crate::web_fetch::WebFetchTool::<S, T>::new(
+            parrot_tools::web_fetch::WebFetchTool::<S, T>::new(
                 fetcher,
                 definitions.describe("web_fetch")?.clone(),
             ),
@@ -797,39 +844,44 @@ impl<S: AccessSnapshot + 'static, T: Send + 'static> Catalog<S, T> {
         clipboard: ClipboardFactories<S, T>,
     ) -> Self {
         let [exec, stdin, interrupt_process, monitor] = process.0;
-        Self {
-            factories: vec![
-                exec,
-                stdin,
-                interrupt_process,
-                monitor,
-                agents.question,
-                agents.ask,
-                agents.reply,
-                files.read,
-                files.image,
-                session.image,
-                files.glob,
-                files.write,
-                files.edit,
-                web.0,
-                agents.spawn,
-                tasks.set,
-                tasks.get,
-                session.checkpoint,
-                session.set_reminder,
-                session.clear_reminder,
-                agents.send,
-                agents.interrupt,
-                agents.status,
-                agents.wait,
-                session.status,
-                session.compact,
-                session.permission,
-                session.progress,
-                clipboard.clipboard,
-            ],
-        }
+        let factories = vec![
+            exec,
+            stdin,
+            interrupt_process,
+            monitor,
+            agents.question,
+            agents.ask,
+            agents.reply,
+            files.read,
+            files.image,
+            session.image,
+            files.glob,
+            files.write,
+            files.edit,
+            web.0,
+            agents.spawn,
+            tasks.set,
+            tasks.get,
+            session.checkpoint,
+            session.set_reminder,
+            session.clear_reminder,
+            agents.send,
+            agents.interrupt,
+            agents.status,
+            agents.wait,
+            session.status,
+            session.compact,
+            session.permission,
+            session.progress,
+            clipboard.clipboard,
+        ];
+        Self { factories }
+    }
+    /// Appends factories beyond the built-in families, keeping their provider
+    /// order after the built-ins.
+    pub fn with_factories(mut self, factories: impl IntoIterator<Item = Factory<S, T>>) -> Self {
+        self.factories.extend(factories);
+        self
     }
     pub fn factories(&self) -> &[Factory<S, T>] {
         &self.factories

@@ -1498,6 +1498,7 @@ dependencies = [
  "parrot-core",
  "parrot-domain",
  "parrot-foundation",
+ "parrot-mcp",
  "parrot-provider",
  "parrot-runtime",
  "parrot-storage",
@@ -1511,6 +1512,18 @@ dependencies = [
  "tonic",
  "tower 0.4.13",
  "url",
+]
+
+[[package]]
+name = "parrot-mcp"
+version = "0.0.0-dev"
+dependencies = [
+ "parrot-domain",
+ "parrot-foundation",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2490,6 +2503,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2 0.5.10",
  "tokio-macros",
  "windows-sys 0.52.0",

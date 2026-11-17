@@ -1,14 +1,13 @@
 mod binding;
+mod clipboard_binding;
 mod progress;
 mod support;
 
 use binding::Fixture;
 use parrot_domain::contracts::{async_ops::OperationError, tools::ParallelSafety};
+use parrot_host::composition::catalog::{self, Invocation};
 use parrot_provider::{chat_completions, sessions::model::Request};
-use parrot_tools::{
-    catalog::{self, Invocation},
-    files::{FileToolOutcome, ImageBudget},
-};
+use parrot_tools::files::{FileToolOutcome, ImageBudget};
 use serde_json::{Value, json};
 use std::{
     fmt::Write,

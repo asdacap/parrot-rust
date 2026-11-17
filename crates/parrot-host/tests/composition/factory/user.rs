@@ -631,6 +631,7 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
             )
             .unwrap(),
         ),
+        mcp: McpServerManager::connect(&BTreeMap::new()).await,
         registry: OnceLock::new(),
     });
     Histories {
