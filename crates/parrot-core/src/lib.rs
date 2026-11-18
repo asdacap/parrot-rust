@@ -5,6 +5,7 @@ mod conversation;
 mod protocol;
 mod rendering;
 mod skills;
+mod stall;
 mod status;
 mod template;
 mod tool_settlement;

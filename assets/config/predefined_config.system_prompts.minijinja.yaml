@@ -245,6 +245,14 @@ prompt_templates:
     template: 'the turn exceeded its provider-request limit'
     allowed_arguments: []
     required_arguments: []
+  agent-session.stall:
+    template: >-
+      Your recent steps repeated the same response with no new user input; this
+      is stall {{stall}}. Do not repeat the same step again. If you are waiting
+      for something, use the wait tool or the monitor tool. Otherwise change
+      your approach or finish your turn.
+    allowed_arguments: [stall]
+    required_arguments: [stall]
   agent-session.truncated-tool-call:
     template: 'Your previous tool call was cut off by the output limit and was not executed. Reissue the complete tool call with shorter arguments.'
     allowed_arguments: []

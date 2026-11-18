@@ -19,7 +19,7 @@ pub struct ToolCall {
 pub struct ToolCallReceipt {
     pub assistant_sequence: i64,
 }
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum ToolStatus {
     #[default]
     Finished,

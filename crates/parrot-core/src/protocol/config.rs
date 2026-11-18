@@ -19,6 +19,7 @@ pub enum ConfigKey {
     InvalidToolCallTemplate,
     CrashedToolTemplate,
     ToolErrorTemplate,
+    StallTemplate,
 }
 
 pub enum ConfigValue {

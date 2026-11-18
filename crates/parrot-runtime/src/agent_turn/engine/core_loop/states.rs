@@ -5,6 +5,7 @@ use parrot_domain::values::agent_state::AgentStateUpdate;
 
 pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) history: &'a AgentHistoryView,
+    pub(super) stall_steps: i32,
     pub(super) agent_state: &'a dyn AgentStateStore,
     pub(super) activity: &'a dyn SessionActivity,
     pub(super) state: &'a Mutex<State>,
@@ -31,6 +32,7 @@ impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
     ) -> Self {
         Self {
             history: &backend.history,
+            stall_steps: backend.stall_steps,
             agent_state: backend.agent_state.as_ref(),
             activity: backend.activity.as_ref(),
             state: &backend.state,
@@ -271,6 +273,7 @@ where
                         reasoning: selection.model.canonical_model.reasoning(),
                         provider_preferences: String::new(),
                         include_router_metadata: false,
+                        stall_steps: self.stall_steps,
                     }))
                 }
                 ConfigKey::Context => {

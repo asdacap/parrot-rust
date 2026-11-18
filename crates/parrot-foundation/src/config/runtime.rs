@@ -218,6 +218,9 @@ pub struct RuntimeSettings {
     pub user_input_timeout_ms: i32,
     pub agent_ask_timeout_ms: i32,
     pub exec_command_yield_after_ms: i32,
+    /// Number of previous steps that must repeat exactly, with no user steer and
+    /// no wait or monitor tool call, before core steers a stall notice.
+    pub stall_steps: i32,
     pub request_limits: RequestLimitsConfig,
     pub web_fetch_allow_private: bool,
     pub image_upload: Option<ImageUploadConfig>,
@@ -267,6 +270,11 @@ impl RuntimeSettings {
             "exec_command_yield_after_ms",
             "exec_command_yield_after_ms",
         )?;
+        let stall_steps = if root.get("stall_steps").is_some() {
+            positive_integer(root, "stall_steps", "stall_steps")?
+        } else {
+            2
+        };
         let live_buffer_rows = positive_integer(root, "live_buffer_rows", "live_buffer_rows")?;
         let compaction = read_compaction(root)?;
         let agent_tasks = read_agent_tasks(root)?;
@@ -299,6 +307,7 @@ impl RuntimeSettings {
             agent_send_to_parent,
             agent_spawn_model_whitelist,
             agent_limits,
+            stall_steps,
             tools,
             mcp,
             live_buffer_rows,
