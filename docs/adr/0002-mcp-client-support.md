@@ -74,3 +74,11 @@ through them unchanged.
 - `Factory.name` becomes an owned `String` because MCP tool names are dynamic.
   Name uniqueness stays validated in `ToolSnapshot::document`, the single
   enforcement point.
+
+## Amendment 2026-11-18
+
+The workspace no longer pins every dependency exactly. Manifests use caret
+ranges and `Cargo.lock` holds the resolved versions, so a project that links
+Parrot's crates can resolve semver-compatible updates. Decision 5's rejection
+of a git dependency still stands on the offline Nix build: a git dependency
+would need `outputHashes` packaging changes regardless of the pin policy.
