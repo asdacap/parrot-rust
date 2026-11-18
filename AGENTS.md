@@ -137,6 +137,24 @@ The [CI workflow](.github/workflows/check.yml) also defines frontend, contract,
 native-platform and package-smoke gates. The workspace denies Rust warnings and
 Clippy's `all` lint group.
 
+### Environment-dependent tests
+
+`tests/environment` is a separate Cargo workspace. Root `cargo test --workspace`
+does not run its executable, Node Connect client, or process-crash tests.
+Before running these tests, follow [the setup commands](tests/environment/README.md)
+inside `nix develop`. They require:
+
+- Built web assets and installed `web/node_modules`, with Node available.
+- `PARROT_TEST_BINARY` pointing to a built `parrot` executable.
+- `PARROT_T64_BROWSER_MODULES` pointing to the installed `web/node_modules` directory.
+- The `t17-crash-probe` example built from `tests/environment/Cargo.toml`, with
+  `T17_CRASH_PROBE_BINARY` pointing to that executable.
+- A short local `TMPDIR`, such as `/mnt/workspace/tmp`, so Unix socket paths fit
+  the platform limit.
+
+Run the suite with `cargo test --manifest-path tests/environment/Cargo.toml --locked`.
+Missing fixtures are failures, not reasons to skip tests.
+
 ## The rules that get broken most often
 
 - **Do not deviate from the plan.** If the plan is wrong, stop and say so rather

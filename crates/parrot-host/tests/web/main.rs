@@ -3,6 +3,7 @@
 // Reuse immutable real composition capabilities, not any previous #[test].
 #[path = "../grpc/support/authoritative.rs"]
 pub mod authoritative;
+mod browser_service;
 mod io_failure;
 mod lifecycle;
 mod proxy;

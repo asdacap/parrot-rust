@@ -34,7 +34,6 @@ two-face = { version = "0.5.1", default-features = false, features = ["syntect-f
 
 [dev-dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
-openssl = { version = "0.10.81", features = ["vendored"] }
 
 [[test]]
 name = "presenters"

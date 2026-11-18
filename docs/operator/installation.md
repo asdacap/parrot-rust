@@ -52,7 +52,7 @@ installation must keep the complete `bin/` and `share/` trees together, includin
 `bin/parrot-pty-attach`, resource hashes and notices. Copying only `parrot` is not
 a supported package layout.
 
-Without `--artifact-only`, the required smoke also runs `parrot-cli`'s
+Without `--artifact-only`, the required smoke also runs the `tests/environment` crate's
 `local_production` tests against the packaged binary. These tests exercise local
 startup with isolated state and controlled provider responses. Artifact-only mode
 does not run these application checks and cannot replace the required smoke.

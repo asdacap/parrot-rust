@@ -142,18 +142,15 @@ debug information. The release profile is unchanged.
 
 ## Running tests
 
-Run from the repository root in `nix develop`. The native test harnesses require
-an installed browser dependency tree, the crash-probe executable and the shell
-from the Nix environment:
+Run from the repository root in `nix develop`. Build the web assets before Rust
+tests because the host embeds them. Environment-dependent tests run separately
+from the root workspace. See [environment tests](tests/environment/README.md).
 
 ```sh
-export CARGO_TARGET_DIR=/tmp/parrot-rust-test-target
+export CARGO_TARGET_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/../.tmp/cargo-target"
 npm --prefix web ci --no-audit --no-fund
 npm --prefix web run build
-cargo build --locked -p parrot-storage --example t17-crash-probe
-export T17_CRASH_PROBE_BINARY="$CARGO_TARGET_DIR/debug/examples/t17-crash-probe"
 export T57_TEST_SHELL="$(command -v bash)"
-export PARROT_T64_BROWSER_MODULES="$PWD/web/node_modules"
 cargo test --workspace --locked
 cargo test --manifest-path tests/contracts/Cargo.toml --locked
 npm --prefix web test

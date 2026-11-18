@@ -320,7 +320,7 @@ impl Fixture {
     ) -> BinaryChild {
         let binary = std::env::var_os("PARROT_TEST_BINARY")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_parrot")));
+            .expect("PARROT_TEST_BINARY must name the built parrot executable");
         let mut command = Command::new(binary);
         command
             .args(arguments)
@@ -361,7 +361,7 @@ impl Fixture {
     fn spawn_script(&self, arguments: &[&str]) -> BinaryChild {
         let binary = std::env::var_os("PARROT_TEST_BINARY")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_parrot")));
+            .expect("PARROT_TEST_BINARY must name the built parrot executable");
         let mut command_line = shell_quote(&binary.display().to_string());
         for argument in arguments {
             command_line.push(' ');
@@ -725,7 +725,7 @@ fn executable_refuses_incompatible_session_then_starts_fresh_without_changing_ol
         let fixture = Fixture::new(false);
         std::fs::write(
             fixture.root.join("workspace/retained.png"),
-            include_bytes!("../../parrot-storage/tests/artifacts/fixtures/pixel.png"),
+            include_bytes!("../../../crates/parrot-storage/tests/artifacts/fixtures/pixel.png"),
         )
         .unwrap();
         assert_success(&fixture.chat("retained old-session message @retained.png"));

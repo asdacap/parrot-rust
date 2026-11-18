@@ -17,6 +17,7 @@ members = [
 ]
 default-members = ["crates/parrot-cli"]
 exclude = [
+    "tests/environment",
     "vendor/rust-protobuf-a001/protobuf",
     "vendor/rust-protobuf-a001/protobuf-codegen",
 ]

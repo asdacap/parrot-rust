@@ -33,7 +33,7 @@ if Path(sys.argv[0]).name == "bash":
     sys.exit(0)
 if "--command" not in arguments:
     assert all((root / f"{name}.done").exists() for name in
-               ("python", "workspace", "contracts", "frontend")), "package started before tests finished"
+               ("python", "workspace", "contracts", "frontend", "environment")), "package started before tests finished"
     (root / "package").touch()
     print(root)
     sys.exit(0)
@@ -47,6 +47,11 @@ elif command[0] == "cargo" and "--example" in command:
     probe = Path(os.environ["CARGO_TARGET_DIR"]) / "debug/examples/t17-crash-probe"
     probe.parent.mkdir(parents=True, exist_ok=True)
     probe.touch()
+elif command[0] == "cargo" and "build" in command:
+    assert (root / "workspace.done").exists(), "CLI build follows workspace tests"
+    binary = Path(os.environ["CARGO_TARGET_DIR"]) / "debug/parrot"
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.touch()
 elif "build" in command:
     assert (root / "installed").exists(), "frontend build requires installed dependencies"
     (root / "assets").touch()
@@ -67,10 +72,15 @@ else:
     elif command[0] == "npm":
         name = "frontend"
     else:
-        name = "contracts" if "--manifest-path" in command else "workspace"
+        name = ("environment" if "tests/environment/Cargo.toml" in command else
+                "contracts" if "--manifest-path" in command else "workspace")
         assert (root / "assets").exists(), "Rust tests require frontend assets"
         if name == "workspace":
             assert os.environ.get("T57_TEST_SHELL") == str(root / "tools/bash"), "process tests require Nix Bash"
+        if name == "environment":
+            assert (root / "workspace.docs").exists(), "environment tests follow ordinary tests"
+            binary = Path(os.environ["PARROT_TEST_BINARY"])
+            assert binary.is_file(), "executable tests require a built CLI"
             probe = Path(os.environ["CARGO_TARGET_DIR"]) / "debug/examples/t17-crash-probe"
             assert os.environ.get("T17_CRASH_PROBE_BINARY") == str(probe) and probe.exists(), "crash tests require a built probe"
             assert os.environ.get("PARROT_T64_BROWSER_MODULES") == str(Path.cwd() / "web/node_modules"), "browser tests require installed modules"
@@ -129,20 +139,31 @@ class ParallelChecksTests(unittest.TestCase):
                 root, output = self.run_workflow(platform=platform)
                 self.assertEqual(output.returncode, 0, output.stdout + output.stderr)
                 for evidence in (
-                    "workspace.docs", "contracts.docs", "sandbox", "terminal", "smoke",
+                    "workspace.docs", "contracts.docs", "environment.done", "sandbox", "terminal", "smoke",
                 ):
                     self.assertTrue((root / evidence).exists(), evidence)
                 workspace = Path((root / "workspace.target").read_text())
                 contracts = Path((root / "contracts.target").read_text())
+                environment = Path((root / "environment.target").read_text())
                 self.assertNotEqual(workspace, contracts)
+                self.assertNotIn(environment, (workspace, contracts))
                 self.assertIn(platform.lower(), workspace.parts)
                 self.assertIn(platform.lower(), contracts.parts)
 
     def test_failed_suite_fails_ci_after_every_started_suite_finishes(self):
+        root, output = self.run_workflow("environment")
+        self.assertNotEqual(output.returncode, 0, output.stdout + output.stderr)
+        for name in ("python", "workspace", "contracts", "frontend"):
+            self.assertTrue((root / f"{name}.done").exists(), name)
+        self.assertFalse((root / "package").exists())
+        self.assertFalse((root / "smoke").exists())
+
+    def test_failed_workspace_does_not_start_environment_gate(self):
         root, output = self.run_workflow("workspace")
         self.assertNotEqual(output.returncode, 0, output.stdout + output.stderr)
         for name in ("python", "workspace", "contracts", "frontend"):
             self.assertTrue((root / f"{name}.done").exists(), name)
+        self.assertFalse((root / "environment.started").exists())
         self.assertFalse((root / "package").exists())
         self.assertFalse((root / "smoke").exists())
 

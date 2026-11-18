@@ -60,7 +60,7 @@ root. It also checks the architecture, and for musl it checks that both
 executables lack an ELF interpreter and NEEDED entries. It explicitly does not
 check local application startup and remains the Nix install-check mode.
 
-Without that flag, the script also runs the repository's `local_production`
+Without that flag, the script also runs the `tests/environment` crate's `local_production`
 integration fixture against the **absolute package binary**, using
 `PARROT_TEST_BINARY`. It exercises real local creation and resume,
 provider-failure cleanup, authorized image upload, UDS serve RPC, embedded web

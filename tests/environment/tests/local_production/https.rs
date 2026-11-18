@@ -6,9 +6,11 @@ use std::os::unix::fs::PermissionsExt;
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint};
 
 const TLS_CERTIFICATE: &[u8] =
-    include_bytes!("../../../parrot-host/tests/grpc/fixtures/server.pem");
-const TLS_KEY: &[u8] = include_bytes!("../../../parrot-host/tests/grpc/fixtures/server-key.pem");
-const TLS_ROOT: &[u8] = include_bytes!("../../../parrot-host/tests/grpc/fixtures/root.pem");
+    include_bytes!("../../../../crates/parrot-host/tests/grpc/fixtures/server.pem");
+const TLS_KEY: &[u8] =
+    include_bytes!("../../../../crates/parrot-host/tests/grpc/fixtures/server-key.pem");
+const TLS_ROOT: &[u8] =
+    include_bytes!("../../../../crates/parrot-host/tests/grpc/fixtures/root.pem");
 const TLS_PASSWORD: &str = "synthetic-certificate-password";
 
 fn tls_token(fixture: &Fixture) -> PathBuf {

@@ -46,7 +46,7 @@ jobs:
         working-directory: ${{ env.PARROT_CI_CHECKOUT }}
         shell: bash
         env:
-          PARROT_CI_CACHE_KEY: ${{ hashFiles(format('{0}/Cargo.lock', env.PARROT_CI_CHECKOUT), format('{0}/web/package-lock.json', env.PARROT_CI_CHECKOUT), format('{0}/flake.lock', env.PARROT_CI_CHECKOUT), format('{0}/rust-toolchain.toml', env.PARROT_CI_CHECKOUT)) }}
+          PARROT_CI_CACHE_KEY: ${{ hashFiles(format('{0}/Cargo.lock', env.PARROT_CI_CHECKOUT), format('{0}/tests/contracts/Cargo.lock', env.PARROT_CI_CHECKOUT), format('{0}/tests/environment/Cargo.lock', env.PARROT_CI_CHECKOUT), format('{0}/web/package-lock.json', env.PARROT_CI_CHECKOUT), format('{0}/flake.lock', env.PARROT_CI_CHECKOUT), format('{0}/rust-toolchain.toml', env.PARROT_CI_CHECKOUT)) }}
         run: |
           set -euo pipefail
           export CARGO_HOME="${PARROT_CI_CACHE_ROOT:?runner must supply its dependency cache}/$PARROT_CI_CACHE_KEY/cargo-home"
@@ -59,7 +59,6 @@ jobs:
           export CARGO_NET_OFFLINE=true npm_config_offline=true PYTHONDONTWRITEBYTECODE=1
           export HOME="$RUNNER_TEMP/parrot-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-${{ matrix.profile }}"
           mkdir -p "$HOME"
-          export PARROT_T64_BROWSER_MODULES="$PWD/web/node_modules"
           pids=()
           (
             nix develop --offline --no-write-lock-file --command npm --prefix web ci --offline --no-audit --no-fund
@@ -76,8 +75,6 @@ jobs:
           export T57_TEST_SHELL
           (
             nix develop --offline --no-write-lock-file --command cargo clippy --workspace --all-targets --locked -- -D warnings
-            nix develop --offline --no-write-lock-file --command cargo build --locked -p parrot-storage --example t17-crash-probe
-            export T17_CRASH_PROBE_BINARY="$CARGO_TARGET_DIR/debug/examples/t17-crash-probe"
             nix develop --offline --no-write-lock-file --command cargo nextest run --workspace --locked --test-threads "$RUST_TEST_THREADS" --no-fail-fast
             nix develop --offline --no-write-lock-file --command cargo test --workspace --doc --locked
             case "$(uname -s)" in
@@ -90,6 +87,15 @@ jobs:
                 nix develop --offline --no-write-lock-file --command bash crates/parrot-cli/tests/terminal_input/native_macos
                 ;;
             esac
+            nix develop --offline --no-write-lock-file --command cargo build --locked -p parrot-cli --bin parrot
+            export PARROT_TEST_BINARY="$CARGO_TARGET_DIR/debug/parrot"
+            export CARGO_TARGET_DIR="$target_root/environment"
+            export PARROT_T64_BROWSER_MODULES="$PWD/web/node_modules"
+            nix develop --offline --no-write-lock-file --command cargo fmt --manifest-path tests/environment/Cargo.toml --all -- --check
+            nix develop --offline --no-write-lock-file --command cargo clippy --manifest-path tests/environment/Cargo.toml --all-targets --locked -- -D warnings
+            nix develop --offline --no-write-lock-file --command cargo build --manifest-path tests/environment/Cargo.toml --locked --example t17-crash-probe
+            export T17_CRASH_PROBE_BINARY="$CARGO_TARGET_DIR/debug/examples/t17-crash-probe"
+            nix develop --offline --no-write-lock-file --command cargo nextest run --manifest-path tests/environment/Cargo.toml --locked --test-threads "$RUST_TEST_THREADS" --no-fail-fast
           ) &
           pids+=("$!")
           (

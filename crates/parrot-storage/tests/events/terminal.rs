@@ -11,9 +11,7 @@ use parrot_storage::events::{
     ConversationMessage, EventError, EventRepository, MessageRole, NeverCancelled,
 };
 use protobuf::Message;
-use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex, mpsc};
 
@@ -664,114 +662,4 @@ async fn a003_storage_schedule_retains_17_9_then_23_11_and_all_three_raw_usage_f
         .collect();
     assert_eq!(triples, ["10:3:4", "7:2:5", "6:1:2"]);
     repository.database().close().await.unwrap();
-}
-
-struct Probe(Child);
-impl Drop for Probe {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-fn killed_at_gate(mode: &str, root: &std::path::Path, expected: &str) {
-    let binary = std::env::var_os("T17_CRASH_PROBE_BINARY").expect("required crash gate missing T17_CRASH_PROBE_BINARY; build --example t17-crash-probe first; this test must not be skipped");
-    assert!(
-        std::path::Path::new(&binary).is_file(),
-        "crash probe binary does not exist"
-    );
-    let child = Command::new(binary)
-        .arg(mode)
-        .arg(root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut child = Probe(child);
-    let mut stdout = BufReader::new(child.0.stdout.take().unwrap());
-    let mut line = String::new();
-    stdout.read_line(&mut line).unwrap();
-    assert_eq!(
-        line.trim_end(),
-        expected,
-        "child did not reach requested controlled crash gate {mode}"
-    );
-    child.0.kill().unwrap();
-    let status = child.0.wait().unwrap();
-    assert!(!status.success());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt;
-        assert_eq!(status.signal(), Some(9));
-    }
-}
-
-#[tokio::test]
-async fn actual_process_kills_recover_before_admission_during_transaction_and_after_commit() {
-    for (mode, expected, committed) in [
-        ("before-admission", "before-admission open=true", false),
-        (
-            "during-transaction",
-            "during-transaction terminal=true projection=true committed=false",
-            false,
-        ),
-        (
-            "after-commit-before-observation",
-            "after-commit observed=false published=false",
-            true,
-        ),
-        (
-            "publisher-entry",
-            "publisher-entry committed=true closed=true",
-            true,
-        ),
-    ] {
-        let fixture = Fixture::new();
-        killed_at_gate(mode, &fixture.0, expected);
-        let repository = fixture.repository();
-        assert_eq!(
-            counts(&repository).await,
-            if committed { (2, 1, 1) } else { (1, 0, 0) },
-            "crash mode {mode}"
-        );
-        let before = repository.replay_raw().await.unwrap();
-        let retry = finish(
-            &repository,
-            "agent",
-            end("agent", "recovery-interrupted", "interrupted", 0, 0),
-            "losing recovery",
-        )
-        .await;
-        if committed {
-            assert_eq!(retry.closure, TurnClosure::AlreadyClosed);
-            assert_eq!(retry.terminal.event.id, "crash-terminal");
-            assert_eq!(
-                (
-                    retry.terminal.event.turn_ended().input_tokens,
-                    retry.terminal.event.turn_ended().output_tokens
-                ),
-                (17, 9)
-            );
-            let (_, expected_raw) = unknown(end("agent", "crash-terminal", "stop", 17, 9));
-            assert_eq!(retry.terminal.raw, expected_raw);
-            assert_eq!(repository.replay_raw().await.unwrap(), before);
-        } else {
-            assert_eq!(retry.closure, TurnClosure::NewlyClosed);
-            assert_eq!(retry.terminal.event.id, "recovery-interrupted");
-        }
-        repository
-            .transaction(|tx| {
-                let integrity: String =
-                    tx.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
-                assert_eq!(integrity, "ok");
-                let mut foreign = tx.prepare("PRAGMA foreign_key_check")?;
-                assert!(foreign.query([])?.next()?.is_none());
-                Ok(())
-            })
-            .await
-            .unwrap();
-        assert!(!fixture.0.join("session.db-wal").exists());
-        assert!(!fixture.0.join("session.db-shm").exists());
-        repository.database().close().await.unwrap();
-    }
 }
