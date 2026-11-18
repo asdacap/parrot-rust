@@ -1,11 +1,12 @@
 //! Production capability and service composition for local native/web clients.
 
-pub mod filesystem;
 pub mod launcher;
 pub mod permissions;
 pub mod policy;
 mod skills;
 
+#[cfg(test)]
+mod filesystem_tests;
 #[cfg(test)]
 mod tests;
 
@@ -31,7 +32,6 @@ use crate::{
     },
     web::router::WebClient,
 };
-use filesystem::ProductionFilesystem;
 use launcher::ProductionLauncher;
 use parrot_domain::{
     contracts::{
@@ -49,6 +49,7 @@ use parrot_foundation::{
     paths::{AgentScratchDirectory, ApplicationRoots, UserSessionResources},
     template_catalog::PromptTemplateCatalog,
 };
+use parrot_fs::ProductionFilesystem;
 use parrot_provider::routing::{
     aliases::{ModelAliasCatalog, ModelRouter, ModelRouting},
     configuration::{ModelConfigurationCoordinator, definitions_from_config},
@@ -123,7 +124,8 @@ impl ProductionReadAccess {
         let profiles = ProductionProfiles::new(configuration)?;
         Ok(Self {
             reader: Arc::new(ProductionReader(
-                ProductionFilesystem::new(workspace).map_err(internal)?,
+                ProductionFilesystem::<SharedSecurity<ProductionPolicy>>::new(workspace)
+                    .map_err(internal)?,
             )),
             modes: Arc::new(
                 ModeRegistry::new(profiles.modes()?, &configuration.runtime.default_profile)
@@ -244,7 +246,10 @@ impl ProductionHost {
             launch_directory: config.launch_directory.clone(),
             skills: Arc::new(move |workspace| {
                 let reader = Arc::new(ProductionReader(
-                    ProductionFilesystem::new(workspace.clone()).map_err(internal)?,
+                    ProductionFilesystem::<SharedSecurity<ProductionPolicy>>::new(
+                        workspace.clone(),
+                    )
+                    .map_err(internal)?,
                 ));
                 let capture = skills_configuration.clone();
                 let persist = skills_configuration.clone();
@@ -431,8 +436,10 @@ impl AgentFactorySource<ProductionPolicy> for ProductionSource {
                 services.resources.workspace().clone(),
             )
             .map_err(internal)?;
-        let filesystem =
-            ProductionFilesystem::new(services.resources.workspace().clone()).map_err(internal)?;
+        let filesystem = ProductionFilesystem::<SharedSecurity<ProductionPolicy>>::new(
+            services.resources.workspace().clone(),
+        )
+        .map_err(internal)?;
         let launcher = Arc::new(
             ProductionLauncher::with_device_paths(
                 self.gate.clone(),
@@ -852,7 +859,7 @@ impl IdGenerator for ProductionDiagnostics {
         Identifier::message_id().map_err(|e| ChildError::registry(e.to_string()))
     }
 }
-pub struct ProductionReader(ProductionFilesystem);
+pub struct ProductionReader(ProductionFilesystem<SharedSecurity<ProductionPolicy>>);
 impl AuthorizedReadService for ProductionReader {
     type Security = ProductionPolicy;
     fn inspect<'a>(
