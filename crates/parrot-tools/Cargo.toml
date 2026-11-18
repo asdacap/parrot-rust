@@ -20,13 +20,13 @@ reqwest = { version = "=0.12.12", default-features = false, features = ["rustls-
 serde = { version = "=1.0.229", default-features = false, features = ["std"] }
 serde_json = { version = "=1.0.138", features = ["raw_value"] }
 base64 = "=0.22.1"
-tokio = { version = "=1.43.0", default-features = false, features = ["time", "rt", "macros", "sync", "net", "io-util"] }
+tokio = { version = "1.43", default-features = false, features = ["time", "rt", "macros", "sync", "net", "io-util"] }
 url = { version = "=2.5.4", default-features = false }
 unicode-general-category = "=1.0.0"
 
 [dev-dependencies]
 parrot-runtime = { path = "../parrot-runtime" }
-tokio = { version = "=1.43.0", default-features = false, features = ["test-util"] }
+tokio = { version = "1.43", default-features = false, features = ["test-util"] }
 
 [[test]]
 name = "sandbox_linux"

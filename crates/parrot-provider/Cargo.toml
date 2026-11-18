@@ -14,7 +14,7 @@ parrot-domain = { path = "../parrot-domain" }
 parrot-foundation = { path = "../parrot-foundation" }
 chrono = { version = "=0.4.39", default-features = false, features = ["std"] }
 reqwest = { version = "=0.12.12", default-features = false, features = ["rustls-tls"] }
-tokio = { version = "=1.43.0", default-features = false, features = ["rt", "sync", "macros", "net", "io-util", "time"] }
+tokio = { version = "1.43", default-features = false, features = ["rt", "sync", "macros", "net", "io-util", "time"] }
 url = { version = "=2.5.4", default-features = false }
 serde_json = { version = "=1.0.138", features = ["preserve_order", "raw_value"] }
 
@@ -24,7 +24,7 @@ sha2 = "=0.10.8"
 hmac = "=0.12.1"
 
 [dev-dependencies]
-tokio = { version = "=1.43.0", default-features = false, features = ["test-util"] }
+tokio = { version = "1.43", default-features = false, features = ["test-util"] }
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
 rustls-pemfile = "=2.2.0"
 

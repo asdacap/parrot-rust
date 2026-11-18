@@ -10,7 +10,7 @@ parrot-domain = { path = "../parrot-domain" }
 parrot-media = { path = "../parrot-media" }
 rusqlite = { version = "=0.32.1", features = ["bundled"] }
 protobuf = "=3.7.2"
-tokio = { version = "=1.43.0", default-features = false, features = ["rt", "sync", "macros"] }
+tokio = { version = "1.43", default-features = false, features = ["rt", "sync", "macros"] }
 serde_json = { version = "=1.0.138", features = ["preserve_order", "raw_value"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 unicode-general-category = "=1.0.0"
