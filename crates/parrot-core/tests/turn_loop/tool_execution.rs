@@ -145,6 +145,7 @@ fn complete_fresh_tool_results_reach_state_unchanged() {
         status: ToolStatus::Finished,
         text: "raw result \n\ttext".into(),
         error_message: String::new(),
+        display_result: None,
     };
     state
         .tools

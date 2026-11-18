@@ -102,6 +102,7 @@ pub struct Output {
     pub image_artifacts: Vec<ImageArtifactMetadata>,
     pub outcome: FileToolOutcome,
     pub yielded_process: Option<YieldedShellProcess>,
+    pub display_result: Option<String>,
 }
 
 impl From<String> for Output {
@@ -111,6 +112,7 @@ impl From<String> for Output {
             image_artifacts: Vec::new(),
             outcome: FileToolOutcome::Finished,
             yielded_process: None,
+            display_result: None,
         }
     }
 }
@@ -121,6 +123,7 @@ impl From<files::FileToolResult> for Output {
             image_artifacts: result.image_artifacts,
             outcome: result.outcome,
             yielded_process: None,
+            display_result: result.display_result,
         }
     }
 }
@@ -205,6 +208,7 @@ impl From<McpToolOutcome> for Output {
             image_artifacts: Vec::new(),
             outcome: FileToolOutcome::Finished,
             yielded_process: None,
+            display_result: None,
         }
     }
 }

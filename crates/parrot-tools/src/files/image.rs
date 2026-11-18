@@ -149,6 +149,7 @@ impl<S: AuthorizedReadService> ReadImageTool<S> {
             text: artifact.artifact_id.clone(),
             image_artifacts: vec![artifact],
             outcome: FileToolOutcome::Finished,
+            display_result: None,
         })
     }
 }
@@ -158,6 +159,7 @@ fn exceeded(budget: &super::ImageBudget) -> OperationResult<FileToolResult, File
         text: budget.describe_failure()?,
         image_artifacts: Vec::new(),
         outcome: FileToolOutcome::ImageBudgetExceeded,
+        display_result: None,
     })
 }
 

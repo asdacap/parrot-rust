@@ -35,6 +35,7 @@ pub struct ToolResult {
     pub status: ToolStatus,
     pub text: String,
     pub error_message: String,
+    pub display_result: Option<String>,
 }
 
 impl ToolResult {

@@ -208,6 +208,7 @@ impl ToolBacking {
                     },
                     text,
                     error_message: String::new(),
+                    display_result: None,
                 }
             })
             .collect();
@@ -258,6 +259,7 @@ impl ToolBacking {
                             tool_call_id: result.call_id.clone(),
                             tool_name: result.tool_name.clone(),
                             result: Some(result.text.clone()),
+                            display_result: result.display_result.clone(),
                             yielded_process: self
                                 .yielded_processes
                                 .remove(&(*assistant_sequence, result.call_id.clone()))

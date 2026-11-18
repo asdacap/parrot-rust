@@ -183,6 +183,7 @@ fn output_to_runtime(output: catalog::Output) -> ToolOutput {
             files::FileToolOutcome::Finished => ToolOutcome::Completed,
             files::FileToolOutcome::ImageBudgetExceeded => ToolOutcome::ImageBudgetExceeded,
         },
+        display_result: output.display_result,
     }
 }
 fn io_kind(error: &std::io::Error) -> FailureKind {

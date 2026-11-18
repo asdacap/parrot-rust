@@ -22,4 +22,8 @@ describe("output helpers", () => {
   it("recognises a unified diff and keeps the last lines", () => {
     expect([isUnifiedDiff("--- a/x\n+++ b/x\n@@"), isUnifiedDiff("patched"), tailLines("1\n2\n3\n", 2)]).toEqual([true, false, "2\n3"])
   })
+
+  it("treats the ranges-only edit result as not a diff so the fallback keeps the raw text", () => {
+    expect(isUnifiedDiff("+++ b/x\n@@ -1 +1 @@\n")).toBe(false)
+  })
 })

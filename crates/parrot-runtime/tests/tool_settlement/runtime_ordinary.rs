@@ -2,6 +2,46 @@ use super::*;
 use parrot_runtime::agent_turn::lifecycle::ExecutionStatus;
 
 #[tokio::test]
+async fn actual_runtime_publishes_display_result_on_the_event_and_keeps_it_out_of_the_provider_message()
+ {
+    let fixture = Fixture::new();
+    let mut tool = RecordingTool::new(&fixture, "edit", ParallelSafety::Sequential);
+    tool.output.display_result =
+        Some("--- a/file.txt\n+++ b/file.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n".into());
+    let tool = Arc::new(tool);
+    let mut first = Step::complete("tool request");
+    first.completion.as_mut().unwrap().tool_calls = vec![call("edit-call", "edit")];
+    let provider = Scripted::new(vec![first, Step::complete("answer using result")]);
+    let (session, _) = runtime::runtime(&fixture, &provider, vec![tool.clone().handle()]).await;
+    let sent = runtime::send(&session).await;
+    assert_eq!(
+        bounded(sent.execution.join()).await.unwrap().status,
+        ExecutionStatus::Succeeded
+    );
+    let events = fixture.events().await;
+    let finished: Vec<_> = events
+        .iter()
+        .filter(|event| event.has_tool_finished())
+        .map(|event| event.tool_finished())
+        .collect();
+    assert_eq!(finished.len(), 1);
+    assert_eq!(
+        finished[0].display_result.as_deref(),
+        Some("--- a/file.txt\n+++ b/file.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n")
+    );
+    let requests = provider.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 2);
+    let tool_message = requests[1]
+        .messages
+        .iter()
+        .find(|message| message.tool_call_id == "edit-call")
+        .unwrap();
+    assert_eq!(tool_message.content(), "result:edit");
+    assert!(!tool_message.content().contains("-old"));
+    bounded(session.close()).await.unwrap();
+}
+
+#[tokio::test]
 async fn actual_runtime_preserves_native_yielded_process_metadata_and_records_core_result() {
     let fixture = Fixture::new();
     let mut tool = RecordingTool::new(&fixture, "process", ParallelSafety::Sequential);

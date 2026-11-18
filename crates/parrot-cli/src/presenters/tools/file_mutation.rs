@@ -44,6 +44,8 @@ impl ToolPresenter for FileMutationToolPresenter {
             || terminal.result == "No changes made."
         {
             ToolBlock::empty()
+        } else if let Some(display) = terminal.display_result.as_deref() {
+            ToolBlock::from_diff(display.to_owned())
         } else if terminal
             .result
             .split_once('\n')

@@ -156,6 +156,7 @@ fn terminal_redaction_suppresses_all_text_but_retains_process_and_artifacts() {
             ..Default::default()
         }],
         start_omitted: true,
+        display_result: None,
     };
     let metadata = ToolPresentationMetadata {
         suppress_terminal_details: true,

@@ -94,6 +94,7 @@ pub struct ToolTerminalPresentation {
     pub yielded_process: Option<YieldedShellProcess>,
     pub artifacts: Vec<ArtifactReference>,
     pub start_omitted: bool,
+    pub display_result: Option<String>,
 }
 impl ToolTerminalPresentation {
     pub fn resolve_status(&self) -> ToolTerminalStatus {

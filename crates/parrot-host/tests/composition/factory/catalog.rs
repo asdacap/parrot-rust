@@ -1533,6 +1533,7 @@ fn output_conversion_preserves_artifacts_opaque_ids_optional_paths_and_activity(
                 stderr_path: None,
                 activity_kind: kind,
             }),
+            display_result: None,
         });
         assert_eq!(output.text, "body");
         assert_eq!(output.image_artifacts, vec![artifact.clone()]);

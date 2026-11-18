@@ -78,6 +78,7 @@ pub struct ToolOutput {
     pub image_artifacts: Vec<ImageArtifactMetadata>,
     pub yielded_process: Option<YieldedShellProcess>,
     pub outcome: ToolOutcome,
+    pub display_result: Option<String>,
 }
 impl ToolOutput {
     pub fn text(text: impl Into<String>) -> Self {
@@ -86,6 +87,7 @@ impl ToolOutput {
             image_artifacts: Vec::new(),
             yielded_process: None,
             outcome: ToolOutcome::Completed,
+            display_result: None,
         }
     }
 }

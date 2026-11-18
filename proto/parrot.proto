@@ -874,6 +874,7 @@ message ToolFinished {
   optional string result          = 3;
   YieldedShellProcess yielded_process = 4;
   repeated ArtifactReference artifacts = 5;
+  optional string display_result  = 6;
 }
 
 message YieldedShellProcess {

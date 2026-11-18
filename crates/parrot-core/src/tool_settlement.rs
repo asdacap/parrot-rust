@@ -61,6 +61,7 @@ impl ToolSettlement {
                         status: ToolStatus::Error,
                         text: result_text,
                         error_message,
+                        display_result: None,
                     },
                     false,
                 )
