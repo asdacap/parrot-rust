@@ -4,10 +4,10 @@ use parrot_core::{
     ConversationOrigin, ConversationPersistence, ConversationReceipt, ConversationTurn, Error,
     ErrorCode, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome,
     PreparedSkillPrompt, PromotedInput, PromptTemplate, Provider, ProviderRequest,
-    ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention, SkillProvider,
-    SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding, StepOptions,
-    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult,
-    ToolStatus, Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
+    ProviderResponse, Role, Skill, SkillContent, SkillMention, SkillProvider, SkillReference,
+    States, StatusKey, StatusOffer, StatusOffering, StatusStanding, ToolCall, ToolCallReceipt,
+    ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult, ToolStatus, Tools, TurnFlags,
+    TurnModel, TurnOptions, parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -582,9 +582,6 @@ struct MemoryState {
     applied_results: Vec<ToolResult>,
     recorded_catalogs: Vec<Vec<String>>,
     model: String,
-    reasoning: Option<Reasoning>,
-    provider_preferences: String,
-    include_router_metadata: bool,
     compactions: VecDeque<CompactedContext>,
     last_turn: Option<ConversationTurn>,
     pending_messages: VecDeque<(Delivery, Message)>,
@@ -722,9 +719,6 @@ impl MemoryState {
             applied_results: Vec::new(),
             recorded_catalogs: Vec::new(),
             model: "memory/model".into(),
-            reasoning: None,
-            provider_preferences: String::new(),
-            include_router_metadata: false,
             compactions: VecDeque::new(),
             last_turn: None,
             pending_messages: VecDeque::new(),
@@ -801,19 +795,11 @@ impl MemoryState {
             Ok(!self.pending_messages.is_empty())
         })
     }
-    fn capture_options(&self) -> (TurnOptions, StepOptions) {
-        (
-            TurnOptions {
-                maximum_requests: self.maximum,
-                stall_steps: self.stall_steps,
-            },
-            StepOptions {
-                model: self.model.clone(),
-                reasoning: self.reasoning.clone(),
-                provider_preferences: self.provider_preferences.clone(),
-                include_router_metadata: self.include_router_metadata,
-            },
-        )
+    fn capture_options(&self) -> TurnOptions {
+        TurnOptions {
+            maximum_requests: self.maximum,
+            stall_steps: self.stall_steps,
+        }
     }
     fn prime_context(&mut self, estimate: i64) {
         let mut request = self.request();
@@ -856,13 +842,9 @@ impl MemoryState {
         let provider = self.provider.clone();
         self.run_with(&tools, &provider)
     }
-    fn apply_options(&mut self, turn: &TurnOptions, step: &StepOptions) {
+    fn apply_options(&mut self, turn: &TurnOptions) {
         self.maximum = turn.maximum_requests;
         self.stall_steps = turn.stall_steps;
-        self.model = step.model.clone();
-        self.reasoning = step.reasoning.clone();
-        self.provider_preferences = step.provider_preferences.clone();
-        self.include_router_metadata = step.include_router_metadata;
     }
     fn run_with(&mut self, tools: &dyn Tools, provider: &dyn Provider) -> Result<Outcome, Error> {
         self.compaction
@@ -1026,8 +1008,7 @@ impl States for MemoryState {
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
         Box::pin(async move {
             match key {
-                ConfigKey::Turn => Ok(ConfigValue::Turn(self.capture_options().0)),
-                ConfigKey::Step => Ok(ConfigValue::Step(self.capture_options().1)),
+                ConfigKey::Turn => Ok(ConfigValue::Turn(self.capture_options())),
                 ConfigKey::Context => {
                     self.trace.step("context_configuration", self.fail_at)?;
                     Ok(ConfigValue::Context(
@@ -1540,7 +1521,7 @@ fn compaction_that_does_not_reduce_context_returns_the_original_provider_error()
 }
 
 #[test]
-fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
+fn fresh_invocations_refresh_tools_each_step() {
     let mut state = MemoryState::new([
         Reply::invalid("invalid"),
         Reply::TooLarge("oversized"),
@@ -1562,20 +1543,11 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
         maximum_requests: 10,
         stall_steps: 2,
     };
-    let step_options = StepOptions {
-        model: "first/model".into(),
-        reasoning: Some(Reasoning {
-            effort: "first effort".into(),
-            summary: "first summary".into(),
-        }),
-        provider_preferences: " { \"raw\" : [1.2300] } ".into(),
-        include_router_metadata: true,
-    };
     state.budget = AgentState::default();
 
     assert_eq!(
         finish({
-            state.apply_options(&turn_options, &step_options);
+            state.apply_options(&turn_options);
             run_turn(
                 &mut state,
                 &tools,
@@ -1590,12 +1562,6 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
     assert_eq!(state.retries, [("invalid tool calls".into(), 1)]);
     assert_eq!(state.applied_results.len(), 1);
     assert_eq!(state.completion_blocker_feedback.len(), 1);
-    assert!(provider.requests.lock().unwrap().iter().all(|request| {
-        request.model == step_options.model
-            && request.reasoning == step_options.reasoning
-            && request.provider_preferences == step_options.provider_preferences
-            && request.include_router_metadata == step_options.include_router_metadata
-    }));
     let trace = state.trace.values();
     assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 5);
     assert_eq!(trace.iter().filter(|step| *step == "compact").count(), 1);
@@ -1605,17 +1571,11 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
         maximum_requests: 1,
         stall_steps: 2,
     };
-    let step_options = StepOptions {
-        model: "second/model".into(),
-        reasoning: None,
-        provider_preferences: "second preferences".into(),
-        include_router_metadata: false,
-    };
     state.enqueue_message(Delivery::Queue, "second question");
 
     assert_eq!(
         finish({
-            state.apply_options(&turn_options, &step_options);
+            state.apply_options(&turn_options);
             run_turn(
                 &mut state,
                 &tools,
@@ -1625,19 +1585,6 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
         }),
         Ok(Outcome::Completed("second answer".into()))
     );
-    {
-        let requests = provider.requests.lock().unwrap();
-        assert_eq!(requests[5].model, step_options.model);
-        assert_eq!(requests[5].reasoning, step_options.reasoning);
-        assert_eq!(
-            requests[5].provider_preferences,
-            step_options.provider_preferences
-        );
-        assert_eq!(
-            requests[5].include_router_metadata,
-            step_options.include_router_metadata
-        );
-    }
     assert!(state.final_requests.contains(&5));
     assert_eq!(state.turn_reads.load(Ordering::SeqCst), 6);
     let trace = state.trace.values();
@@ -1648,7 +1595,7 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
 
     assert_eq!(
         finish({
-            state.apply_options(&turn_options, &step_options);
+            state.apply_options(&turn_options);
             run(
                 &mut state,
                 &tools,
@@ -1926,7 +1873,6 @@ impl Provider for EchoProvider {
         'c: 'a,
     {
         Box::pin(async move {
-            assert_eq!(request.model, "memory/model");
             assert_eq!(
                 request
                     .tools

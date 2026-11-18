@@ -69,7 +69,7 @@ pub(super) fn compactor(input_budget: i32) -> Compactor {
 
 #[derive(Default)]
 pub(super) struct Script {
-    pub requests: Mutex<Vec<ProviderRequest>>,
+    pub requests: Mutex<Vec<Request>>,
     pub fast_modes: Mutex<Vec<bool>>,
     pub replies: Mutex<VecDeque<Vec<Result<Event, sessions::Error>>>>,
     pub close_error: Mutex<Option<sessions::Error>>,
@@ -165,7 +165,7 @@ impl Session for ScriptedSession {
     }
     fn call(&self, request: Request) -> Result<Box<dyn EventStream>, sessions::Error> {
         self.0.fast_modes.lock().unwrap().push(request.fast_mode);
-        self.0.requests.lock().unwrap().push(request.into());
+        self.0.requests.lock().unwrap().push(request);
         let events = self
             .0
             .replies

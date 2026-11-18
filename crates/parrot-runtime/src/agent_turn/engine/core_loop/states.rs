@@ -272,15 +272,6 @@ where
                         stall_steps: self.stall_steps,
                     }))
                 }
-                ConfigKey::Step => {
-                    let selection = self.binding.capture_selection()?;
-                    Ok(ConfigValue::Step(StepOptions {
-                        model: selection.model.canonical_model.model.id.clone(),
-                        reasoning: selection.model.canonical_model.reasoning(),
-                        provider_preferences: String::new(),
-                        include_router_metadata: false,
-                    }))
-                }
                 ConfigKey::Context => {
                     let state = self.state.lock().await;
                     let selection = self.binding.capture_selection()?;

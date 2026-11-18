@@ -1,4 +1,4 @@
-use super::message::{ProviderResponse, Reasoning};
+use super::message::ProviderResponse;
 use super::{
     BoxFuture, CancellationToken, Error, EventPublisher, Provider, SkillProvider, States, Tools,
 };
@@ -61,18 +61,6 @@ pub struct TurnOptions {
     pub stall_steps: i32,
 }
 
-/// Per-step provider request settings, re-read by the engine from
-/// `ConfigKey::Step` at the start of each step, after `TurnHooks::begin_step`.
-/// A changed `model` or `reasoning` applies from the next provider request; the
-/// current request and its in-flight settlement keep the values they were
-/// prepared with.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StepOptions {
-    pub model: String,
-    pub reasoning: Option<Reasoning>,
-    pub provider_preferences: String,
-    pub include_router_metadata: bool,
-}
 /// Consolidates the agent-local state that survives across turns and restarts.
 /// Core reads this state at turn start and reloads it after provider and tool effects.
 /// The states side persists complete values core saves, including after a turn fails.

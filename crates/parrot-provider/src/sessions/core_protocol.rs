@@ -1,36 +1,5 @@
-use super::{Completion, Content, Message, Request};
+use super::{Completion, Content, Message};
 use parrot_core::FinishReason;
-
-impl From<Request> for parrot_core::ProviderRequest {
-    fn from(request: Request) -> Self {
-        Self {
-            model: request.model,
-            instructions: request.instructions,
-            messages: request.messages.into_iter().map(Into::into).collect(),
-            tools: request.tools,
-            max_output_tokens: request.max_output_tokens,
-            reasoning: request.reasoning,
-            provider_preferences: request.provider_preferences,
-            include_router_metadata: request.include_router_metadata,
-        }
-    }
-}
-
-impl From<parrot_core::ProviderRequest> for Request {
-    fn from(request: parrot_core::ProviderRequest) -> Self {
-        Self {
-            fast_mode: false,
-            model: request.model,
-            instructions: request.instructions,
-            messages: request.messages.into_iter().map(Into::into).collect(),
-            tools: request.tools,
-            max_output_tokens: request.max_output_tokens,
-            reasoning: request.reasoning,
-            provider_preferences: request.provider_preferences,
-            include_router_metadata: request.include_router_metadata,
-        }
-    }
-}
 
 impl From<Completion> for parrot_core::ProviderResponse {
     fn from(completion: Completion) -> Self {
@@ -156,11 +125,11 @@ impl From<parrot_core::Content> for Content {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sessions::model::{Reasoning, Role, Tool, ToolCall};
+    use crate::sessions::model::{Role, ToolCall};
     use parrot_core::{Content as CoreContent, Message as CoreMessage};
 
     #[test]
-    fn request_round_trip_preserves_all_fields_and_ordered_values() {
+    fn message_round_trip_preserves_all_fields_and_ordered_values() {
         let mut native_message = Message::new(
             Role::Assistant,
             vec![
@@ -185,52 +154,11 @@ mod tests {
         native_message.tool_call_id = "response-bound-call".into();
         native_message.provider_id = "future-provider-id".into();
         native_message.provider_content = "  {\"unknown\":\"opaque\\u003dstring\"}\n".into();
-        let request = Request {
-            fast_mode: false,
-            model: "provider/model:variant ".into(),
-            instructions: "system\nwith whitespace".into(),
-            messages: vec![Message::user("first"), native_message],
-            tools: vec![
-                Tool {
-                    name: "read".into(),
-                    description: "description with whitespace  ".into(),
-                    parameters_json: " { \"$schema\" : \"future\", \"limit\":1.2300 } ".into(),
-                },
-                Tool {
-                    name: "another".into(),
-                    description: "second".into(),
-                    parameters_json: "[true,null,3]".into(),
-                },
-            ],
-            max_output_tokens: -17,
-            reasoning: Some(Reasoning {
-                effort: "effort \n verbatim".into(),
-                summary: "summary".into(),
-            }),
-            provider_preferences: "routing prefs {future=opaque}".into(),
-            include_router_metadata: true,
-        };
-        let core: parrot_core::ProviderRequest = request.clone().into();
-        assert_eq!(Request::from(core.clone()), request);
-        assert_eq!(
-            core.tools[0].parameters_json,
-            request.tools[0].parameters_json
-        );
-        assert_eq!(
-            core.messages[1].provider_content,
-            request.messages[1].provider_content
-        );
-        assert_eq!(request.messages[1].content(), "prefix suffix");
-
-        let no_reasoning = Request {
-            model: "provider/no-reasoning".into(),
-            reasoning: None,
-            ..Request::default()
-        };
-        assert_eq!(
-            Request::from(parrot_core::ProviderRequest::from(no_reasoning.clone())),
-            no_reasoning
-        );
+        let native_messages = vec![Message::user("first"), native_message];
+        let core_messages: Vec<parrot_core::Message> =
+            native_messages.iter().cloned().map(Into::into).collect();
+        let restored: Vec<Message> = core_messages.into_iter().map(Into::into).collect();
+        assert_eq!(restored, native_messages);
     }
 
     #[test]
@@ -344,17 +272,5 @@ mod tests {
                 content
             );
         }
-    }
-
-    #[test]
-    fn core_request_round_trip_does_not_retain_transport_fast_mode() {
-        let request = Request {
-            fast_mode: true,
-            model: "model".into(),
-            ..Request::default()
-        };
-        let restored = Request::from(parrot_core::ProviderRequest::from(request));
-        assert!(!restored.fast_mode);
-        assert_eq!(restored.model, "model");
     }
 }

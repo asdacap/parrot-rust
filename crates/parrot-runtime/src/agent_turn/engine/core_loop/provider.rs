@@ -126,7 +126,17 @@ impl<S: AccessSnapshot> parrot_core::Provider for RuntimeProvider<'_, S> {
         Box::pin(async move {
             let selection = self.binding.capture_selection().map_err(CoreError::from)?;
             let selected = &selection.model.canonical_model;
-            let request: sessions::Request = request.into();
+            let request = sessions::Request {
+                fast_mode: false,
+                model: selected.model.id.clone(),
+                instructions: request.instructions,
+                messages: request.messages.into_iter().map(Into::into).collect(),
+                tools: request.tools,
+                max_output_tokens: request.max_output_tokens,
+                reasoning: selected.reasoning(),
+                provider_preferences: String::new(),
+                include_router_metadata: false,
+            };
             let mut usage = RequestUsage {
                 selected,
                 recorder: self.usage,

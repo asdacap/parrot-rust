@@ -4,9 +4,8 @@ use super::{
     test_support::*,
     *,
 };
-use parrot_core::{
-    CompactionFailure, Content, Error, NeverCancelled, ProviderRequest, Reasoning, Role, ToolCall,
-};
+use crate::sessions::Request;
+use parrot_core::{CompactionFailure, Content, Error, NeverCancelled, Reasoning, Role, ToolCall};
 use std::sync::{Arc, atomic::AtomicBool};
 
 fn plan(groups: &[&str]) -> CompactionPlan {
@@ -72,14 +71,14 @@ fn run_with(
     ))
 }
 
-fn texts(request: &ProviderRequest) -> Vec<&str> {
+fn texts(request: &Request) -> Vec<&str> {
     request
         .messages
         .iter()
-        .flat_map(|message| &message.contents)
+        .flat_map(|message| message.contents())
         .filter_map(|content| match content {
-            Content::Text(text) => Some(text.as_str()),
-            Content::Image { .. } => None,
+            crate::sessions::Content::Text(text) => Some(text.as_str()),
+            crate::sessions::Content::Image { .. } => None,
         })
         .collect()
 }
@@ -108,20 +107,25 @@ fn builds_private_summary_requests_and_preserves_the_retained_suffix() {
     assert_eq!(requests.len(), 1);
     assert_eq!(
         requests[0],
-        ProviderRequest {
+        Request {
+            fast_mode: false,
             model: plan.model,
+            instructions: String::new(),
             messages: vec![
-                message("first"),
-                message("second"),
+                message("first").into(),
+                message("second").into(),
                 parrot_core::Message {
                     role: Role::System,
                     contents: vec![Content::Text(plan.summary_instructions)],
                     ..parrot_core::Message::default()
-                },
+                }
+                .into(),
             ],
+            tools: Vec::new(),
             max_output_tokens: plan.summary_output_tokens,
             reasoning: plan.reasoning,
-            ..ProviderRequest::default()
+            provider_preferences: String::new(),
+            include_router_metadata: false,
         }
     );
     assert_eq!(result.history[0], result.summary);
@@ -221,15 +225,20 @@ fn oversized_user_text_is_truncated_to_the_actual_budget_without_a_file() {
     .unwrap();
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
-    let Content::Text(clipped) = &requests[0].messages[0].contents[0] else {
+    let crate::sessions::Content::Text(clipped) = &requests[0].messages[0].contents()[0] else {
         panic!("expected retained text prefix")
     };
     assert!(clipped.ends_with("[...]"));
     assert!(original.starts_with(clipped.strip_suffix("[...]").unwrap()));
     assert!(clipped.len() < original.len());
+    let core_messages: Vec<parrot_core::Message> = requests[0]
+        .messages
+        .clone()
+        .into_iter()
+        .map(Into::into)
+        .collect();
     assert!(
-        parrot_core::Provider::estimate_input_tokens(&estimates, "", &[], &requests[0].messages,)
-            .unwrap()
+        parrot_core::Provider::estimate_input_tokens(&estimates, "", &[], &core_messages).unwrap()
             <= plan.input_budget
     );
     assert_eq!(
@@ -353,7 +362,10 @@ fn truncation_omits_images_but_keeps_atomic_tool_calls_and_result_identities() {
     assert_eq!(messages[0].tool_calls, source[0].tool_calls);
     assert_eq!(messages[1].role, Role::Tool);
     assert_eq!(messages[1].tool_call_id, "call");
-    assert_eq!(messages[1].contents, [Content::Text("[...]".into())]);
+    assert_eq!(
+        messages[1].contents(),
+        [crate::sessions::Content::Text("[...]".into())]
+    );
     assert!(
         texts(&requests[0])
             .iter()
@@ -418,6 +430,12 @@ fn complete_summary_requests_include_estimator_overhead() {
         ["prefix:x", "other-14-bytes!", "instructions"]
     );
     for request in requests.iter() {
+        let core_messages: Vec<parrot_core::Message> = request
+            .messages
+            .clone()
+            .into_iter()
+            .map(Into::into)
+            .collect();
         assert!(
             estimates
                 .requests
@@ -426,7 +444,7 @@ fn complete_summary_requests_include_estimator_overhead() {
                 .iter()
                 .any(|estimate| estimate.instructions == request.instructions
                     && estimate.tools == request.tools
-                    && estimate.messages == request.messages)
+                    && estimate.messages == core_messages)
         );
     }
     assert_eq!(result.summary.contents, [Content::Text("prefix:y".into())]);

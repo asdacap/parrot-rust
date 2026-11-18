@@ -2,8 +2,7 @@ use super::*;
 use parrot_core::{
     ConfigKey, ContextSnapshot as CoreContextSnapshot, ConversationAddition,
     ConversationPersistence, Error as CoreError, ErrorKind, FinishReason, Message, ProviderRequest,
-    ProviderResponse, Role, States as CoreStates, StepOptions, ToolCatalog, ToolDefinition,
-    TurnOptions,
+    ProviderResponse, Role, States as CoreStates, ToolCatalog, ToolDefinition, TurnOptions,
 };
 
 mod conversation;

@@ -5,8 +5,8 @@ use crate::{
     ContextCompaction, ContextSnapshot, ConversationAddition, ConversationEvent,
     ConversationOrigin, ConversationPersistence, ConversationTurn, Error, ErrorKind,
     EventPublisher, FinishReason, InputAdmission, Message, Outcome, PromotedInput, Provider,
-    ProviderRequest, Role, SkillProvider, States, StepOptions, ToolCallReceipt, ToolDefinition,
-    Tools, TurnEngine, TurnHooks, TurnLifecycle, rendering, skills, stall, status::steer_status,
+    ProviderRequest, Role, SkillProvider, States, ToolCallReceipt, ToolDefinition, Tools,
+    TurnEngine, TurnHooks, TurnLifecycle, rendering, skills, stall, status::steer_status,
     tool_settlement::execute_tools,
 };
 
@@ -57,7 +57,6 @@ impl AgentTurn<'_> {
             self.hooks.begin_step().await?;
 
             let turn_options = self.states.get_config(ConfigKey::Turn).await?.into_turn()?;
-            let step_options = self.states.get_config(ConfigKey::Step).await?.into_step()?;
             let catalog = self.tools.capture_catalog().await?;
             let last_turn = self.states.get_last_turn().await?;
             let admission = if last_turn
@@ -120,9 +119,7 @@ impl AgentTurn<'_> {
                 self.add_phase_prompt(&content, true).await?;
             }
 
-            let prepared = self
-                .prepare_request(definitions, &step_options, cancellation)
-                .await?;
+            let prepared = self.prepare_request(definitions, cancellation).await?;
 
             let attempt = self.agent_state.count_request();
             self.states
@@ -382,7 +379,6 @@ impl AgentTurn<'_> {
     async fn prepare_request(
         &mut self,
         definitions: &[ToolDefinition],
-        options: &StepOptions,
         cancellation: CancellationToken<'_>,
     ) -> Result<PreparedRequest, Error> {
         let instructions = self
@@ -411,14 +407,10 @@ impl AgentTurn<'_> {
             estimated_input_tokens: estimate,
             model_selector: context_configuration.canonical_model,
             request: ProviderRequest {
-                model: options.model.clone(),
                 instructions,
                 messages,
                 tools: definitions.to_vec(),
                 max_output_tokens,
-                reasoning: options.reasoning.clone(),
-                provider_preferences: options.provider_preferences.clone(),
-                include_router_metadata: options.include_router_metadata,
             },
         })
     }
