@@ -7,7 +7,7 @@ use parrot_core::{
     ProviderResponse, Role, Skill, SkillContent, SkillMention, SkillProvider, SkillReference,
     States, StatusKey, StatusOffer, StatusOffering, StatusStanding, ToolCall, ToolCallReceipt,
     ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult, ToolStatus, Tools, TurnFlags,
-    TurnModel, TurnOptions, parse_skill_mentions,
+    TurnOptions, parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -56,7 +56,19 @@ use compaction_dependencies::MemoryCompaction;
 
 struct MemoryEventPublisher {
     events: Arc<Mutex<Vec<ConversationEvent>>>,
-    started_turns: Arc<Mutex<Vec<TurnModel>>>,
+    started_turns: Arc<Mutex<usize>>,
+}
+
+impl MemoryEventPublisher {
+    fn report_turn_started<'a>(
+        &'a self,
+        _: CancellationToken<'a>,
+    ) -> BoxFuture<'a, Result<(), Error>> {
+        Box::pin(async move {
+            *self.started_turns.lock().unwrap() += 1;
+            Ok(())
+        })
+    }
 }
 
 impl EventPublisher for MemoryEventPublisher {
@@ -70,39 +82,28 @@ impl EventPublisher for MemoryEventPublisher {
             Ok(())
         })
     }
-    fn report_turn_started<'a>(
-        &'a self,
-        model: &'a TurnModel,
-        _: CancellationToken<'a>,
-    ) -> BoxFuture<'a, Result<(), Error>> {
-        Box::pin(async move {
-            self.started_turns.lock().unwrap().push(model.clone());
-            Ok(())
-        })
-    }
 }
 
 const RUNAWAY_NOTICE: &str = "configured runaway notice";
 
 struct MemoryTurnHooks {
-    model: String,
     activations: Arc<Mutex<usize>>,
     activation_error: Option<Error>,
     fail_at: Option<&'static str>,
 }
 
-impl parrot_core::TurnHooks for MemoryTurnHooks {
-    fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<TurnModel, Error>> {
+impl MemoryTurnHooks {
+    fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             if self.fail_at == Some("open") {
                 return Err(Error::failed("open"));
             }
-            Ok(TurnModel {
-                selector: self.model.clone(),
-                alias_icon: None,
-            })
+            Ok(())
         })
     }
+}
+
+impl parrot_core::TurnHooks for MemoryTurnHooks {
     fn activate_conversation_turn(&self) -> BoxFuture<'_, Result<(), Error>> {
         *self.activations.lock().unwrap() += 1;
         let result = self.activation_error.clone().map_or(Ok(()), Err);
@@ -142,14 +143,13 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
     ) -> BoxFuture<'a, Result<Box<dyn parrot_core::Turn + 'a>, Error>> {
         Box::pin(async move {
             let hooks = MemoryTurnHooks {
-                model: self.states.model.clone(),
                 activations: self.states.turn_activations.clone(),
                 activation_error: self.states.activation_error.clone(),
                 fail_at: self.states.fail_at,
             };
-            let model = parrot_core::TurnHooks::begin_conversation_turn(&hooks).await?;
+            hooks.begin_conversation_turn().await?;
             self.event_publisher
-                .report_turn_started(&model, cancellation)
+                .report_turn_started(cancellation)
                 .await?;
             let skills = MemorySkills::new(self.states);
             self.opened = true;
@@ -557,7 +557,7 @@ struct MemoryPromptData {
 
 struct MemoryState {
     events: Arc<Mutex<Vec<ConversationEvent>>>,
-    started_turns: Arc<Mutex<Vec<TurnModel>>>,
+    started_turns: Arc<Mutex<usize>>,
     turn_activations: Arc<Mutex<usize>>,
     closed_turns: Vec<ConversationAddition>,
     disposed_turns: Vec<Result<Outcome, Error>>,
@@ -581,7 +581,6 @@ struct MemoryState {
     recorded_tools: Vec<Message>,
     applied_results: Vec<ToolResult>,
     recorded_catalogs: Vec<Vec<String>>,
-    model: String,
     compactions: VecDeque<CompactedContext>,
     last_turn: Option<ConversationTurn>,
     pending_messages: VecDeque<(Delivery, Message)>,
@@ -718,7 +717,6 @@ impl MemoryState {
             recorded_tools: Vec::new(),
             applied_results: Vec::new(),
             recorded_catalogs: Vec::new(),
-            model: "memory/model".into(),
             compactions: VecDeque::new(),
             last_turn: None,
             pending_messages: VecDeque::new(),
@@ -1531,7 +1529,6 @@ fn fresh_invocations_refresh_tools_each_step() {
         Reply::final_response("second answer"),
     ]);
     state.maximum = 0;
-    state.model = "unused/state-model".into();
     state
         .prompts()
         .exit_blockers

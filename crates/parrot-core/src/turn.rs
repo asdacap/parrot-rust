@@ -637,9 +637,6 @@ mod tests {
 
     struct UnusedHooks;
     impl TurnHooks for UnusedHooks {
-        fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<crate::TurnModel, Error>> {
-            Box::pin(async { Err(Error::unsupported("hooks")) })
-        }
         fn activate_conversation_turn(&self) -> BoxFuture<'_, Result<(), Error>> {
             Box::pin(async { Err(Error::unsupported("hooks")) })
         }

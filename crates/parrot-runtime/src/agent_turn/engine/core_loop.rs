@@ -182,14 +182,12 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                     &backend.broker,
                     backend.event_id.as_ref(),
                 ),
+                selection: backend.selection.clone(),
             };
-            let model = parrot_core::TurnHooks::begin_conversation_turn(&hooks).await?;
-            parrot_core::EventPublisher::report_turn_started(
-                &event_publisher,
-                &model,
-                parrot_core::CancellationToken::new(cancellation),
-            )
-            .await?;
+            hooks.begin_conversation_turn().await?;
+            event_publisher
+                .report_turn_started(parrot_core::CancellationToken::new(cancellation))
+                .await?;
             let provider = RuntimeProvider {
                 binding: binding.clone(),
                 state: &backend.state,
@@ -234,7 +232,7 @@ struct RuntimeTurn<'a, S: AccessSnapshot + 'static> {
     states: RuntimeStates<'a, S>,
     tools: RuntimeTools<'a, S>,
     hooks: RuntimeTurnHooks<'a, S>,
-    event_publisher: RuntimeEventPublisher<'a>,
+    event_publisher: RuntimeEventPublisher<'a, S>,
     provider: RuntimeProvider<'a, S>,
     skills: RuntimeSkillProvider<'a>,
 }
