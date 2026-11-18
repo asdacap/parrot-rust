@@ -17,6 +17,76 @@ pub fn render(changes: &[FileChange<'_>]) -> String {
     output
 }
 
+/// Summarizes changes as file headers and hunk coordinates only, the way
+/// `git diff --unified=0` headers read. No context lines and no body lines.
+pub fn ranges(changes: &[FileChange<'_>]) -> String {
+    let mut output = String::new();
+    for change in changes {
+        render_ranges_file(&mut output, change);
+    }
+    output
+}
+
+fn render_ranges_file(output: &mut String, change: &FileChange<'_>) {
+    if contains_nul(change.before) || contains_nul(change.after) {
+        return;
+    }
+    let hunks = coordinate_hunks(&lines(change.before), &lines(change.after));
+    if hunks.is_empty() {
+        return;
+    }
+    let after_path = if change.after.is_none() {
+        "/dev/null".to_owned()
+    } else {
+        header_path("b", change.path)
+    };
+    writeln!(output, "+++ {after_path}").unwrap();
+    for (old_start, old_count, new_start, new_count) in hunks {
+        writeln!(
+            output,
+            "@@ -{} +{} @@",
+            coordinate(old_start, old_count),
+            coordinate(new_start, new_count)
+        )
+        .unwrap();
+    }
+}
+
+fn coordinate(start: usize, count: usize) -> String {
+    if count == 1 {
+        format!("{start}")
+    } else {
+        format!("{start},{count}")
+    }
+}
+
+fn coordinate_hunks(
+    old_lines: &[String],
+    new_lines: &[String],
+) -> Vec<(usize, usize, usize, usize)> {
+    let edits = shortest_edit_script(old_lines, new_lines);
+    let mut hunks = Vec::new();
+    let mut index = 0;
+    while index < edits.len() {
+        if edits[index].kind == ' ' {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < edits.len() && edits[index].kind != ' ' {
+            index += 1;
+        }
+        let group = &edits[start..index];
+        let first = &group[0];
+        let old_count = group.iter().filter(|edit| edit.kind != '+').count();
+        let new_count = group.iter().filter(|edit| edit.kind != '-').count();
+        let old_start = first.old_line - usize::from(old_count == 0);
+        let new_start = first.new_line - usize::from(new_count == 0);
+        hunks.push((old_start, old_count, new_start, new_count));
+    }
+    hunks
+}
+
 fn render_file(output: &mut String, change: &FileChange<'_>) {
     let before_path = if change.before.is_none() {
         "/dev/null".to_owned()

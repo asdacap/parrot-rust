@@ -89,6 +89,7 @@ pub struct FileToolResult {
     pub text: String,
     pub image_artifacts: Vec<ImageArtifactMetadata>,
     pub outcome: FileToolOutcome,
+    pub display_result: Option<String>,
 }
 
 impl FileToolResult {
@@ -97,6 +98,7 @@ impl FileToolResult {
             text: text.into(),
             image_artifacts: Vec::new(),
             outcome: FileToolOutcome::Finished,
+            display_result: None,
         }
     }
 }

@@ -1,8 +1,16 @@
-use parrot_tools::files::diff::{FileChange, render};
+use parrot_tools::files::diff::{FileChange, ranges, render};
 use std::fmt::Write;
 
 fn diff(before: Option<&[u8]>, after: Option<&[u8]>) -> String {
     render(&[FileChange {
+        path: "file.txt",
+        before,
+        after,
+    }])
+}
+
+fn range(before: Option<&[u8]>, after: Option<&[u8]>) -> String {
+    ranges(&[FileChange {
         path: "file.txt",
         before,
         after,
@@ -332,4 +340,83 @@ fn fallback_handles_an_empty_side_and_does_not_overlap_common_prefix_and_suffix(
         "+line\n".repeat(1025)
     );
     assert_eq!(diff(Some(b"same\n"), Some(after.as_bytes())), expected);
+}
+
+#[test]
+fn ranges_report_only_header_and_hunk_coordinates() {
+    assert_eq!(
+        range(Some(b"old\n".as_slice()), Some(b"new\n".as_slice())),
+        "+++ b/file.txt\n@@ -1 +1 @@\n"
+    );
+    assert_eq!(
+        range(
+            Some(b"1\n2\nold\n4\n".as_slice()),
+            Some(b"1\n2\nnew\n4\n".as_slice())
+        ),
+        "+++ b/file.txt\n@@ -3 +3 @@\n"
+    );
+}
+
+#[test]
+fn ranges_use_zero_counts_and_omit_single_counts_like_git() {
+    assert_eq!(
+        range(None, Some(b"first\nsecond\n")),
+        "+++ b/file.txt\n@@ -0,0 +1,2 @@\n"
+    );
+    assert_eq!(
+        range(Some(b"old\n"), None),
+        "+++ /dev/null\n@@ -1 +0,0 @@\n"
+    );
+    assert_eq!(
+        range(Some(b"a\nb\nc\n"), Some(b"c\n")),
+        "+++ b/file.txt\n@@ -1,2 +0,0 @@\n"
+    );
+}
+
+#[test]
+fn ranges_place_insertions_at_the_previous_old_line() {
+    assert_eq!(
+        range(Some(b"two\n"), Some(b"one\ntwo\n")),
+        "+++ b/file.txt\n@@ -0,0 +1 @@\n"
+    );
+    assert_eq!(
+        range(Some(b"a\nc\n"), Some(b"a\nb\nc\n")),
+        "+++ b/file.txt\n@@ -1,0 +2 @@\n"
+    );
+    assert_eq!(
+        range(Some(b"a\n"), Some(b"a\nb\n")),
+        "+++ b/file.txt\n@@ -1,0 +2 @@\n"
+    );
+    assert_eq!(
+        range(Some(b"one\n"), Some(b"one\n\n")),
+        "+++ b/file.txt\n@@ -1,0 +2 @@\n"
+    );
+}
+
+#[test]
+fn ranges_delete_single_and_multi_line_runs() {
+    assert_eq!(
+        range(Some(b"a\nb\nc\n"), Some(b"a\nc\n")),
+        "+++ b/file.txt\n@@ -2 +1,0 @@\n"
+    );
+    assert_eq!(range(Some(b"one\n"), Some(b"one\n")), "");
+    assert_eq!(
+        range(Some(b""), Some(b"one")),
+        "+++ b/file.txt\n@@ -0,0 +1 @@\n"
+    );
+}
+
+#[test]
+fn ranges_split_hunks_on_a_single_unchanged_line() {
+    assert_eq!(
+        range(Some(b"a\nx\nb\n"), Some(b"A\nx\nB\n")),
+        "+++ b/file.txt\n@@ -1 +1 @@\n@@ -3 +3 @@\n"
+    );
+    assert_eq!(
+        range(
+            Some(b"a\n1\n2\n3\n4\n5\nb\n".as_slice()),
+            Some(b"A\n1\n2\n3\n4\n5\nB\n".as_slice())
+        ),
+        "+++ b/file.txt\n@@ -1 +1 @@\n@@ -7 +7 @@\n"
+    );
 }

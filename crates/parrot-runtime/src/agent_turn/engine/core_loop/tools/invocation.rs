@@ -251,6 +251,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                         status: ToolStatus::Finished,
                         text,
                         error_message: String::new(),
+                        display_result: result.display_result,
                     },
                     yielded_process,
                 })
@@ -304,6 +305,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                 status: ToolStatus::Cancelled,
                 text: self.interrupted_result.into(),
                 error_message: String::new(),
+                display_result: None,
             },
             yielded_process: None,
         }
@@ -325,6 +327,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                 status: ToolStatus::Error,
                 text,
                 error_message: message,
+                display_result: None,
             },
             yielded_process: None,
         })

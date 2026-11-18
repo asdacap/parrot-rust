@@ -9,9 +9,9 @@ use parrot_domain::{
 };
 
 use super::{
-    FileToolError, FileToolInvocation, FileToolResult, Formatter, WorkspacePaths,
+    FileToolError, FileToolInvocation, FileToolOutcome, FileToolResult, Formatter, WorkspacePaths,
     append_short_path_note,
-    diff::{FileChange, render},
+    diff::{FileChange, ranges, render},
     file_error,
     input::{EditInput, WriteInput},
 };
@@ -201,15 +201,21 @@ impl<S: AuthorizedMutationService> EditTool<S> {
             Ok(target) => target,
             Err(error) => return mutation_error(error, &formatter),
         };
+        let changes = [FileChange {
+            path: &target.display_path,
+            before: Some(&before),
+            after: Some(&after),
+        }];
         append_short_path_note(
             &self.paths,
             &input.path,
             &formatter,
-            FileToolResult::text(render(&[FileChange {
-                path: &target.display_path,
-                before: Some(&before),
-                after: Some(&after),
-            }])),
+            FileToolResult {
+                text: ranges(&changes),
+                image_artifacts: Vec::new(),
+                outcome: FileToolOutcome::Finished,
+                display_result: Some(render(&changes)),
+            },
         )
     }
 }

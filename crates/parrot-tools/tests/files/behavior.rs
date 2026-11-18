@@ -667,9 +667,21 @@ async fn mutations_repeat_original_requested_path_and_snapshot_and_edit_renders_
         }
         .unwrap();
         if edit_mode {
-            assert!(result.text.contains("--- a/actual-final.txt"));
-            assert!(result.text.contains("+++ b/actual-final.txt"));
+            assert!(
+                result
+                    .text
+                    .starts_with("+++ b/actual-final.txt\n@@ -1 +1 @@\n"),
+                "{}",
+                result.text
+            );
+            assert!(!result.text.contains("--- a/"));
             assert!(!result.text.contains("old-display"));
+            assert_eq!(
+                result.display_result.as_deref(),
+                Some(
+                    "--- a/actual-final.txt\n+++ b/actual-final.txt\n@@ -1,1 +1,1 @@\n-before\n+after\n"
+                )
+            );
         } else {
             assert_eq!(result.text, "Lines before: 1\nLines after: 1");
         }
@@ -1267,7 +1279,15 @@ async fn edit_appends_the_path_variable_note_to_applied_diff_and_no_change_resul
         .execute(&invocation(applied_call.clone()), &Snapshot(1), &NoCancel)
         .await
         .unwrap();
-    assert!(applied.text.starts_with("--- a//scratch/notes.txt\n"));
+    assert!(
+        applied
+            .text
+            .starts_with("+++ b//scratch/notes.txt\n@@ -1 +1 @@\n")
+    );
+    assert_eq!(
+        applied.display_result.as_deref(),
+        Some("--- a//scratch/notes.txt\n+++ b//scratch/notes.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n")
+    );
     assert!(applied.text.ends_with(note), "{}", applied.text);
     let unchanged = tool_for(Some(b"old\n"))
         .execute(

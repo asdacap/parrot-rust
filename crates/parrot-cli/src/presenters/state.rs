@@ -349,6 +349,7 @@ impl AgentSessionState {
                     result: tool.result.clone().unwrap_or_default(),
                     yielded_process: tool.yielded_process.as_ref().cloned(),
                     artifacts: tool.artifacts.clone(),
+                    display_result: tool.display_result.clone(),
                     ..ToolTerminalPresentation::default()
                 },
             ),

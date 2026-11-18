@@ -196,3 +196,43 @@ fn non_diff_success_is_text_not_diff_and_empty_output_stays_compact() {
         assert_eq!(report.block.kind, kind);
     }
 }
+#[test]
+fn display_result_diff_renders_full_diff_and_ranges_text_falls_back_to_text() {
+    let presenter = FileMutationToolPresenter::new("edit");
+    let call = ToolCallPresentation::new("edit", r#"{"path":"src/file.txt"}"#);
+    let display = "--- a/src/file.txt\n+++ b/src/file.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n";
+    let item = presenter
+        .present_terminal(
+            &call,
+            &ToolTerminalPresentation {
+                result_present: true,
+                result: "+++ b/src/file.txt\n@@ -1 +1 @@\n".into(),
+                display_result: Some(display.into()),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+    let Presentation::Diff {
+        diff: displayed, ..
+    } = item
+    else {
+        panic!("diff")
+    };
+    assert_eq!(displayed, display);
+    let item = presenter
+        .present_terminal(
+            &call,
+            &ToolTerminalPresentation {
+                result_present: true,
+                result: "+++ b/src/file.txt\n@@ -1 +1 @@\n".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+    let Presentation::Tool(report) = item else {
+        panic!("expected tool")
+    };
+    assert_eq!(report.block.kind, ToolBlockKind::Text);
+}

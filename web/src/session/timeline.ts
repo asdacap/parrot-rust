@@ -33,6 +33,7 @@ export type TimelineItem =
       args: string
       status: ToolStatus
       output: string
+      display: string
     }
   | { kind: "notice"; agentSessionId: string; tone: NoticeTone; text: string; detail: string }
   | { kind: "plan"; agentSessionId: string; markdown: string; taskDeclarations: PlanTaskDeclaration[] }
@@ -157,6 +158,7 @@ function updateTool(
     args: "",
     status: "running",
     output: "",
+    display: "",
   }
   return { ...state, items: [...state.items, { ...created, ...update(created) }] }
 }
@@ -311,7 +313,11 @@ function reduceItems(state: TimelineState, event: Event): TimelineState {
     case "toolStarted":
       return updateTool(state, event, payload.value.toolCallId, () => ({ name: payload.value.toolName, status: "running" }))
     case "toolFinished":
-      return updateTool(state, event, payload.value.toolCallId, () => ({ status: "finished", output: payload.value.result ?? "" }))
+      return updateTool(state, event, payload.value.toolCallId, () => ({
+        status: "finished",
+        output: payload.value.result ?? "",
+        display: payload.value.displayResult ?? "",
+      }))
     case "toolCancelled":
       return updateTool(state, event, payload.value.toolCallId, () => ({ status: "cancelled" }))
     case "toolError":

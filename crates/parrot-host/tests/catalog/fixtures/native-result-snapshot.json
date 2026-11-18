@@ -11,7 +11,7 @@
   "imagegen": "generated.png",
   "glob": "file.txt\n",
   "write": "Lines before: 1\nLines after: 1",
-  "edit": "--- a/old.txt\n+++ b/old.txt\n@@ -1,1 +1,1 @@\n-created\n+new\n",
+  "edit": "+++ b/old.txt\n@@ -1 +1 @@\n",
   "web_fetch": "catalog web",
   "agent_spawn": "{\"name\":\"child\",\"kind\":\"agent\",\"status\":\"running\",\"depth\":1,\"output\":\"catalog/child/output.txt\"}",
   "set_agent_tasks": "AgentTask update accepted (1 tasks). State changes are delivered as notifications.",

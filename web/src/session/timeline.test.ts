@@ -37,7 +37,7 @@ describe("reduceTimeline", () => {
         items: [
           { kind: "assistant", agentSessionId: root, text: "Hello" },
           { kind: "reasoning", agentSessionId: child, text: "thinking", completed: false },
-          { kind: "tool", agentSessionId: root, toolCallId: "call-1", name: "read", args: "", status: "running", output: "" },
+          { kind: "tool", agentSessionId: root, toolCallId: "call-1", name: "read", args: "", status: "running", output: "", display: "" },
           { kind: "assistant", agentSessionId: root, text: "Done" },
         ],
       },
@@ -54,8 +54,43 @@ describe("reduceTimeline", () => {
       ],
       {
         items: [
-          { kind: "tool", agentSessionId: root, toolCallId: "call-1", name: "exec", args: '{"cmd":"ls"}', status: "finished", output: "a.txt" },
-          { kind: "tool", agentSessionId: root, toolCallId: "call-2", name: "write", args: "", status: "error", output: "denied" },
+          { kind: "tool", agentSessionId: root, toolCallId: "call-1", name: "exec", args: '{"cmd":"ls"}', status: "finished", output: "a.txt", display: "" },
+          { kind: "tool", agentSessionId: root, toolCallId: "call-2", name: "write", args: "", status: "error", output: "denied", display: "" },
+        ],
+      },
+    ],
+    [
+      "keeps the edit diff for display separate from the model's ranges-only result",
+      [
+        [root, { case: "toolStarted", value: { toolCallId: "call-1", toolName: "edit" } }],
+        [
+          root,
+          {
+            case: "toolFinished",
+            value: {
+              toolCallId: "call-1",
+              toolName: "edit",
+              result: "+++ b/file.txt\n@@ -1 +1 @@\n",
+              displayResult: "--- a/file.txt\n+++ b/file.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+            },
+          },
+        ],
+        [root, { case: "toolStarted", value: { toolCallId: "call-2", toolName: "edit" } }],
+        [root, { case: "toolFinished", value: { toolCallId: "call-2", toolName: "edit", result: "No changes made." } }],
+      ],
+      {
+        items: [
+          {
+            kind: "tool",
+            agentSessionId: root,
+            toolCallId: "call-1",
+            name: "edit",
+            args: "",
+            status: "finished",
+            output: "+++ b/file.txt\n@@ -1 +1 @@\n",
+            display: "--- a/file.txt\n+++ b/file.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+          },
+          { kind: "tool", agentSessionId: root, toolCallId: "call-2", name: "edit", args: "", status: "finished", output: "No changes made.", display: "" },
         ],
       },
     ],

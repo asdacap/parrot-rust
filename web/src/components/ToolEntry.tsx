@@ -56,8 +56,10 @@ function ToolBody({ item, args }: { item: ToolItem; args: Record<string, unknown
   if (item.status === "error") return <pre className="mt-2 font-mono whitespace-pre-wrap text-destructive">{item.output}</pre>
   switch (item.name) {
     case "edit":
-    case "write":
-      return isUnifiedDiff(item.output) ? <DiffBlock diff={item.output} /> : <Output text={item.output} />
+    case "write": {
+      const diff = item.display || (isUnifiedDiff(item.output) ? item.output : "")
+      return diff ? <DiffBlock diff={diff} /> : <Output text={item.output} />
+    }
     case "exec_command":
       return <Output text={tailLines(item.output, 10)} full={item.output} />
     case "agent_send":
