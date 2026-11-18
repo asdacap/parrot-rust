@@ -856,6 +856,7 @@ providers:
     api_key_env: OPENCODE_GO_API_KEY
     header_timeout_ms: 60000
     session_header: x-opencode-session
+    models_dev_id: opencode
     model_defaults:
       minimax-m3: { name: MiniMax M3, reasoning: false }
       minimax-m2.7: { name: MiniMax M2.7, reasoning: false }

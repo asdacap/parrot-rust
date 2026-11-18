@@ -254,7 +254,7 @@ impl HttpTransport for Transport {
             } else {
                 match self.mode {
                 Mode::Unavailable => (503, "temporarily unavailable".into()),
-                Mode::ModelsDevId if uri.as_str() == "https://models.dev/api.json" => (200, r#"{"opencode":{"id":"opencode","models":{"zen":{"id":"zen-only"}}}}"#.into()),
+                Mode::ModelsDevId if uri.as_str() == "https://models.dev/api.json" => (200, r#"{"opencode":{"id":"opencode","models":{"zen":{"id":"zen-only"},"glm-5.3":{"id":"glm-5.3","name":"GLM 5.3","cost":{"input":1.4,"cache_read":0.26,"output":4.4}}}}}"#.into()),
                 Mode::ModelsDevId => (503, "temporarily unavailable".into()),
                 Mode::AnthropicOverride if uri.as_str() == "https://models.dev/api.json" => (200, r#"{"openai":{"id":"openai","models":{"gpt-9":{"id":"gpt-9","name":"GPT 9"},"gpt-4o":{"id":"gpt-4o","name":"GPT 4o"}}},"anthropic":{"id":"anthropic","models":{"claude-external":{"id":"claude-external","name":"Claude External"}}}}"#.into()),
                 Mode::AnthropicOverride => (503, "temporarily unavailable".into()),
@@ -501,6 +501,19 @@ async fn build_reads_the_models_dev_catalogue_named_by_models_dev_id() {
             .models("opencode-zen")
             .iter()
             .any(|m| m.id == "zen-only")
+    );
+    let models = registry.models("opencode-go");
+    let glm = models
+        .iter()
+        .find(|m| m.id == "glm-5.3")
+        .expect("opencode-go must receive the models.dev opencode catalogue");
+    assert_eq!(glm.input_price, 1.4 / 1_000_000.0);
+    assert_eq!(glm.cached_input_price, 0.26 / 1_000_000.0);
+    assert_eq!(glm.output_price, 4.4 / 1_000_000.0);
+    assert!(
+        models.iter().any(|m| m.id == "hy3-preview"),
+        "configured model defaults must survive the catalogue merge, got {:?}",
+        models.iter().map(|m| m.id.clone()).collect::<Vec<_>>()
     );
 }
 #[tokio::test]
