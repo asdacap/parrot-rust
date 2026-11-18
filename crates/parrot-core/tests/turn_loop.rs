@@ -5,9 +5,9 @@ use parrot_core::{
     ErrorCode, ErrorKind, EventPublisher, FinishReason, InputAdmission, Message, Outcome,
     PreparedSkillPrompt, PromotedInput, PromptTemplate, Provider, ProviderRequest,
     ProviderResponse, Reasoning, Role, Skill, SkillContent, SkillMention, SkillProvider,
-    SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding, ToolCall,
-    ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult, ToolStatus,
-    Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
+    SkillReference, States, StatusKey, StatusOffer, StatusOffering, StatusStanding, StepOptions,
+    ToolCall, ToolCallReceipt, ToolCatalog, ToolDefinition, ToolExecutionRequest, ToolResult,
+    ToolStatus, Tools, TurnFlags, TurnModel, TurnOptions, parse_skill_mentions,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -794,14 +794,18 @@ impl MemoryState {
             Ok(!self.pending_messages.is_empty())
         })
     }
-    fn capture_options(&self) -> TurnOptions {
-        TurnOptions {
-            maximum_requests: self.maximum,
-            model: self.model.clone(),
-            reasoning: self.reasoning.clone(),
-            provider_preferences: self.provider_preferences.clone(),
-            include_router_metadata: self.include_router_metadata,
-        }
+    fn capture_options(&self) -> (TurnOptions, StepOptions) {
+        (
+            TurnOptions {
+                maximum_requests: self.maximum,
+            },
+            StepOptions {
+                model: self.model.clone(),
+                reasoning: self.reasoning.clone(),
+                provider_preferences: self.provider_preferences.clone(),
+                include_router_metadata: self.include_router_metadata,
+            },
+        )
     }
     fn prime_context(&mut self, estimate: i64) {
         let mut request = self.request();
@@ -844,12 +848,12 @@ impl MemoryState {
         let provider = self.provider.clone();
         self.run_with(&tools, &provider)
     }
-    fn apply_options(&mut self, options: &TurnOptions) {
-        self.maximum = options.maximum_requests;
-        self.model = options.model.clone();
-        self.reasoning = options.reasoning.clone();
-        self.provider_preferences = options.provider_preferences.clone();
-        self.include_router_metadata = options.include_router_metadata;
+    fn apply_options(&mut self, turn: &TurnOptions, step: &StepOptions) {
+        self.maximum = turn.maximum_requests;
+        self.model = step.model.clone();
+        self.reasoning = step.reasoning.clone();
+        self.provider_preferences = step.provider_preferences.clone();
+        self.include_router_metadata = step.include_router_metadata;
     }
     fn run_with(&mut self, tools: &dyn Tools, provider: &dyn Provider) -> Result<Outcome, Error> {
         self.compaction
@@ -1000,7 +1004,8 @@ impl States for MemoryState {
     fn get_config(&self, key: ConfigKey) -> BoxFuture<'_, Result<ConfigValue, Error>> {
         Box::pin(async move {
             match key {
-                ConfigKey::Turn => Ok(ConfigValue::Turn(self.capture_options())),
+                ConfigKey::Turn => Ok(ConfigValue::Turn(self.capture_options().0)),
+                ConfigKey::Step => Ok(ConfigValue::Step(self.capture_options().1)),
                 ConfigKey::Context => {
                     self.trace.step("context_configuration", self.fail_at)?;
                     Ok(ConfigValue::Context(
@@ -1530,8 +1535,10 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
     state.compact_with("core summary");
     let tools = state.tools.clone();
     let provider = state.provider.clone();
-    let options = TurnOptions {
+    let turn_options = TurnOptions {
         maximum_requests: 10,
+    };
+    let step_options = StepOptions {
         model: "first/model".into(),
         reasoning: Some(Reasoning {
             effort: "first effort".into(),
@@ -1544,7 +1551,7 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
 
     assert_eq!(
         finish({
-            state.apply_options(&options);
+            state.apply_options(&turn_options, &step_options);
             run_turn(
                 &mut state,
                 &tools,
@@ -1560,18 +1567,20 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
     assert_eq!(state.applied_results.len(), 1);
     assert_eq!(state.completion_blocker_feedback.len(), 1);
     assert!(provider.requests.lock().unwrap().iter().all(|request| {
-        request.model == options.model
-            && request.reasoning == options.reasoning
-            && request.provider_preferences == options.provider_preferences
-            && request.include_router_metadata == options.include_router_metadata
+        request.model == step_options.model
+            && request.reasoning == step_options.reasoning
+            && request.provider_preferences == step_options.provider_preferences
+            && request.include_router_metadata == step_options.include_router_metadata
     }));
     let trace = state.trace.values();
     assert_eq!(trace.iter().filter(|step| *step == "catalog").count(), 5);
     assert_eq!(trace.iter().filter(|step| *step == "compact").count(), 1);
     assert_eq!(trace.iter().filter(|step| *step == "complete").count(), 1);
 
-    let options = TurnOptions {
+    let turn_options = TurnOptions {
         maximum_requests: 1,
+    };
+    let step_options = StepOptions {
         model: "second/model".into(),
         reasoning: None,
         provider_preferences: "second preferences".into(),
@@ -1581,7 +1590,7 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
 
     assert_eq!(
         finish({
-            state.apply_options(&options);
+            state.apply_options(&turn_options, &step_options);
             run_turn(
                 &mut state,
                 &tools,
@@ -1593,15 +1602,15 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
     );
     {
         let requests = provider.requests.lock().unwrap();
-        assert_eq!(requests[5].model, options.model);
-        assert_eq!(requests[5].reasoning, options.reasoning);
+        assert_eq!(requests[5].model, step_options.model);
+        assert_eq!(requests[5].reasoning, step_options.reasoning);
         assert_eq!(
             requests[5].provider_preferences,
-            options.provider_preferences
+            step_options.provider_preferences
         );
         assert_eq!(
             requests[5].include_router_metadata,
-            options.include_router_metadata
+            step_options.include_router_metadata
         );
     }
     assert!(state.final_requests.contains(&5));
@@ -1614,7 +1623,7 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
 
     assert_eq!(
         finish({
-            state.apply_options(&options);
+            state.apply_options(&turn_options, &step_options);
             run(
                 &mut state,
                 &tools,

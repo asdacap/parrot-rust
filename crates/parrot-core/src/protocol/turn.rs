@@ -52,9 +52,20 @@ pub enum TurnModelIconColor {
     Gray,
 }
 
+/// Per-turn request budget, re-read by the engine from `ConfigKey::Turn` at the
+/// start of each step.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TurnOptions {
     pub maximum_requests: i32,
+}
+
+/// Per-step provider request settings, re-read by the engine from
+/// `ConfigKey::Step` at the start of each step, after `TurnHooks::begin_step`.
+/// A changed `model` or `reasoning` applies from the next provider request; the
+/// current request and its in-flight settlement keep the values they were
+/// prepared with.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StepOptions {
     pub model: String,
     pub reasoning: Option<Reasoning>,
     pub provider_preferences: String,

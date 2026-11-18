@@ -5,8 +5,8 @@ use crate::{
     ContextCompaction, ContextSnapshot, ConversationAddition, ConversationEvent,
     ConversationOrigin, ConversationPersistence, ConversationTurn, Error, ErrorKind,
     EventPublisher, FinishReason, InputAdmission, Message, Outcome, PromotedInput, Provider,
-    ProviderRequest, Role, SkillProvider, States, ToolCallReceipt, ToolDefinition, Tools,
-    TurnEngine, TurnHooks, TurnLifecycle, TurnOptions, rendering, skills, status::steer_status,
+    ProviderRequest, Role, SkillProvider, States, StepOptions, ToolCallReceipt, ToolDefinition,
+    Tools, TurnEngine, TurnHooks, TurnLifecycle, rendering, skills, status::steer_status,
     tool_settlement::execute_tools,
 };
 
@@ -56,7 +56,8 @@ impl AgentTurn<'_> {
 
             self.hooks.begin_step().await?;
 
-            let options = self.states.get_config(ConfigKey::Turn).await?.into_turn()?;
+            let turn_options = self.states.get_config(ConfigKey::Turn).await?.into_turn()?;
+            let step_options = self.states.get_config(ConfigKey::Step).await?.into_step()?;
             let catalog = self.tools.capture_catalog().await?;
             let last_turn = self.states.get_last_turn().await?;
             let admission = if last_turn
@@ -80,7 +81,7 @@ impl AgentTurn<'_> {
 
             self.add_skill_prompt(&inputs, cancellation).await?;
 
-            let Some(flags) = self.agent_state.admit(options.maximum_requests) else {
+            let Some(flags) = self.agent_state.admit(turn_options.maximum_requests) else {
                 return self.exhaust_budget().await;
             };
             let definitions = if flags.final_phase {
@@ -99,7 +100,7 @@ impl AgentTurn<'_> {
             }
 
             let prepared = self
-                .prepare_request(definitions, &options, cancellation)
+                .prepare_request(definitions, &step_options, cancellation)
                 .await?;
 
             let attempt = self.agent_state.count_request();
@@ -348,7 +349,7 @@ impl AgentTurn<'_> {
     async fn prepare_request(
         &mut self,
         definitions: &[ToolDefinition],
-        options: &TurnOptions,
+        options: &StepOptions,
         cancellation: CancellationToken<'_>,
     ) -> Result<PreparedRequest, Error> {
         let instructions = self

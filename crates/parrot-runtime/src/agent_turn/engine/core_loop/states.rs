@@ -267,6 +267,11 @@ where
                     let selection = self.binding.capture_selection()?;
                     Ok(ConfigValue::Turn(TurnOptions {
                         maximum_requests: selection.profile.maximum_requests,
+                    }))
+                }
+                ConfigKey::Step => {
+                    let selection = self.binding.capture_selection()?;
+                    Ok(ConfigValue::Step(StepOptions {
                         model: selection.model.canonical_model.model.id.clone(),
                         reasoning: selection.model.canonical_model.reasoning(),
                         provider_preferences: String::new(),

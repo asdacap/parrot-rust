@@ -1,12 +1,13 @@
 use super::Error;
 use super::context::ContextConfiguration;
-use super::turn::TurnOptions;
+use super::turn::{StepOptions, TurnOptions};
 use std::sync::Arc;
 
 /// Selects a typed runtime configuration value without an additional service contract.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ConfigKey {
     Turn,
+    Step,
     Context,
     SkillUnavailableTemplate,
     SkillSelectedTemplate,
@@ -23,6 +24,7 @@ pub enum ConfigKey {
 
 pub enum ConfigValue {
     Turn(TurnOptions),
+    Step(StepOptions),
     Context(ContextConfiguration),
     PromptTemplate(Arc<PromptTemplate>),
 }
@@ -32,6 +34,12 @@ impl ConfigValue {
         match self {
             Self::Turn(value) => Ok(value),
             _ => Err(Error::failed("expected turn configuration")),
+        }
+    }
+    pub fn into_step(self) -> Result<StepOptions, Error> {
+        match self {
+            Self::Step(value) => Ok(value),
+            _ => Err(Error::failed("expected step configuration")),
         }
     }
     pub fn into_context(self) -> Result<ContextConfiguration, Error> {

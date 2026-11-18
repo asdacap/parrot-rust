@@ -52,6 +52,7 @@ pub use tool::{
     ToolResult, ToolSettlement, ToolStatus,
 };
 pub use turn::{
-    AgentState, CompletionBlockerFeedback, Outcome, Turn, TurnEngine, TurnFlags, TurnHooks,
-    TurnLifecycle, TurnModel, TurnModelIcon, TurnModelIconColor, TurnOptions, TurnServices,
+    AgentState, CompletionBlockerFeedback, Outcome, StepOptions, Turn, TurnEngine, TurnFlags,
+    TurnHooks, TurnLifecycle, TurnModel, TurnModelIcon, TurnModelIconColor, TurnOptions,
+    TurnServices,
 };
