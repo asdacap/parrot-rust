@@ -45,7 +45,6 @@ impl SlashCommand for ModelCommand {
             let Some(selected) = selected else {
                 return Ok(());
             };
-            environment.activity.wait_until_idle(cancellation).await?;
             environment
                 .session
                 .select_model(&selected, cancellation)
@@ -282,7 +281,6 @@ impl SlashCommand for ModelPresetSelectCommand {
             check_cancelled(cancellation)?;
 
             let name = if arguments.trim().is_empty() {
-                environment.activity.wait_until_idle(cancellation).await?;
                 let presets = load(
                     environment.dialog,
                     "Loading presets…",
@@ -317,7 +315,6 @@ impl SlashCommand for ModelPresetSelectCommand {
                         .await?;
                     return Ok(());
                 }
-                environment.activity.wait_until_idle(cancellation).await?;
                 arguments.to_owned()
             };
             match environment

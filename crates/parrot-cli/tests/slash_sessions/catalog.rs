@@ -126,7 +126,7 @@ fn rpc_code(result: Result<(), SlashFailure>) -> Code {
 }
 
 #[tokio::test]
-async fn mode_selects_then_waits_updates_refreshes_and_shows() {
+async fn mode_selects_updates_refreshes_and_shows() {
     let trace = Arc::new(Mutex::new(Vec::new()));
     let observed = trace.clone();
     let mut fixture = Fixture::start(move |method, bytes| match method {
@@ -169,7 +169,7 @@ async fn mode_selects_then_waits_updates_refreshes_and_shows() {
     .unwrap();
     assert_eq!(session.mode(), "plan");
     assert_eq!(session.id(), "session-0");
-    assert_eq!(activity.waits.load(Ordering::SeqCst), 1);
+    assert_eq!(activity.waits.load(Ordering::SeqCst), 0);
     assert_eq!(dialog.shown, ["mode is now plan"]);
     assert_eq!(dialog.pickers[0].0, "Select a mode");
     assert_eq!(
@@ -190,7 +190,6 @@ async fn mode_selects_then_waits_updates_refreshes_and_shows() {
             "loading:Loading modes…",
             "loaded:Loading modes…",
             "select:Select a mode",
-            "idle",
             "update",
             "refresh",
             "show:mode is now plan"

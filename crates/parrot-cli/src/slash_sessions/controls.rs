@@ -376,7 +376,6 @@ async fn run_skills(
                 "Sequence contains more than one matching element".to_owned(),
             ));
         }
-        environment.activity.wait_until_idle(cancellation).await?;
         let configured = environment
             .session
             .configure_skill(&skill.path, !skill.enabled, cancellation)
