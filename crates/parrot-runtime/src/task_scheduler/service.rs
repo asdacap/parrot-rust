@@ -1647,10 +1647,17 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
     ) -> ChildResult<&'a mut TaskNotificationSnapshot> {
         let text = render(&self.config.configuration, template, values)?;
         let text = if is_tool_output_oversized(&text) {
-            self.config
+            let path = self
+                .config
                 .output_blobs
                 .persist(&text, &NeverCancelled)
-                .map_err(|error| ChildError::failure("io", error.to_string()))?
+                .map_err(|error| ChildError::failure("io", error.to_string()))?;
+            crate::tool_settlement::render_spill_notice(
+                &self.config.configuration.templates,
+                &path,
+                &text,
+            )
+            .map_err(|error| ChildError::failure("argument", error))?
         } else {
             text
         };

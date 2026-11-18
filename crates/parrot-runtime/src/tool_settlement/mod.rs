@@ -11,7 +11,7 @@ use parrot_domain::{
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_storage::{
-    artifacts::output_blobs::ToolOutputBlobStore,
+    artifacts::output_blobs::{ToolOutputBlobStore, tool_output_preview},
     diagnostics::{DiagnosticEvent, FileDiagnosticLog},
 };
 use std::sync::Arc;
@@ -33,4 +33,42 @@ pub struct ToolExecutionConfig {
     pub diagnostics: Arc<dyn ToolDiagnostics>,
     pub image_bytes_per_cycle: i32,
     pub path_variables: std::collections::BTreeMap<String, String>,
+}
+
+/// Renders the templated spill notice for a saved tool output blob and appends
+/// the templated preview block when the output fits the preview budget.
+pub(crate) fn render_spill_notice(
+    templates: &PromptTemplateCatalog,
+    path: &str,
+    output: &str,
+) -> Result<String, String> {
+    let mut notice = templates
+        .render(
+            "tool-result.spill-notice",
+            &[(
+                "path".to_owned(),
+                serde_json::Value::String(path.to_owned()),
+            )],
+            &parrot_storage::events::NeverCancelled,
+        )
+        .map_err(|error| error.to_string())?;
+    if let Some(preview) = tool_output_preview(output) {
+        let block = templates
+            .render(
+                "tool-result.spill-preview",
+                &[
+                    ("head".to_owned(), serde_json::Value::String(preview.head)),
+                    ("tail".to_owned(), serde_json::Value::String(preview.tail)),
+                    (
+                        "omitted".to_owned(),
+                        serde_json::Value::from(preview.omitted),
+                    ),
+                ],
+                &parrot_storage::events::NeverCancelled,
+            )
+            .map_err(|error| error.to_string())?;
+        notice.push('\n');
+        notice.push_str(&block);
+    }
+    Ok(notice)
 }

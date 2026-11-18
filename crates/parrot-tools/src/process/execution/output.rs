@@ -5,11 +5,18 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use parrot_core::NeverCancelled;
+use parrot_storage::artifacts::output_blobs::OutputPreview;
+use serde_json::Value as TemplateValue;
+
+use super::ProcessResult;
 use super::filenames::HaikunatorNameGenerator;
 use parrot_domain::contracts::filenames::FilenameGenerator;
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
 
 pub const MAX_OUTPUT_CHARACTERS: usize = 64 << 10;
 const NAME_ATTEMPTS: usize = 16;
+const PREVIEW_LINES: usize = 5;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn invalid(message: &str) -> io::Error {
@@ -469,6 +476,124 @@ pub fn format_result(
     result
 }
 
+/// Formats the agent-facing result text with the templated spill notice and
+/// preview. The completion line and non-spilled sections keep the raw text
+/// format; the spilled path renders through tool-result.spill-notice and the
+/// captured preview through tool-result.spill-preview.
+pub fn format_result_with_templates(
+    templates: &PromptTemplateCatalog,
+    result: &ProcessResult,
+) -> io::Result<String> {
+    let mut text = format_completion(result.exit_code, result.elapsed_milliseconds);
+    if let Some(path) = &result.blob_path {
+        text.push('\n');
+        text.push_str(&render(
+            templates,
+            "tool-result.spill-notice",
+            &[("path", TemplateValue::from(path.display().to_string()))],
+        )?);
+        if let Some(preview) = &result.spill_preview {
+            text.push('\n');
+            text.push_str(&render(
+                templates,
+                "tool-result.spill-preview",
+                &[
+                    ("head", TemplateValue::from(preview.head.as_str())),
+                    ("tail", TemplateValue::from(preview.tail.as_str())),
+                    ("omitted", TemplateValue::from(preview.omitted)),
+                ],
+            )?);
+        }
+    } else {
+        for (name, section) in [("stdout", &result.stdout), ("stderr", &result.stderr)] {
+            if !section.is_empty() {
+                text.push_str(&format!("\n[{name}]\n{section}"));
+            }
+        }
+    }
+    Ok(text)
+}
+
+fn render(
+    templates: &PromptTemplateCatalog,
+    key: &str,
+    arguments: &[(&str, TemplateValue)],
+) -> io::Result<String> {
+    let arguments = arguments
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), value.clone()))
+        .collect::<Vec<_>>();
+    templates
+        .render(key, &arguments, &NeverCancelled)
+        .map_err(|error| io::Error::other(error.to_string()))
+}
+
+/// Keeps the first 10 lines, the last 5 lines and the total count of one
+/// output stream while it streams to the blob file.
+#[derive(Default)]
+struct LineCapture {
+    head: Vec<String>,
+    tail: Vec<String>,
+    count: usize,
+    current: Vec<u8>,
+}
+
+impl LineCapture {
+    fn observe(&mut self, bytes: &[u8]) {
+        for chunk in bytes.split_inclusive(|byte| *byte == b'\n') {
+            self.current.extend_from_slice(chunk);
+            if chunk.ends_with(b"\n") {
+                self.complete_line();
+            }
+        }
+    }
+
+    fn finish(&mut self) {
+        if !self.current.is_empty() {
+            self.complete_line();
+        }
+    }
+
+    fn complete_line(&mut self) {
+        let mut line = String::from_utf8_lossy(&self.current).into_owned();
+        while line.ends_with('\n') || line.ends_with('\r') {
+            line.pop();
+        }
+        self.count += 1;
+        if self.head.len() < 2 * PREVIEW_LINES {
+            self.head.push(line.clone());
+        }
+        if self.tail.len() == PREVIEW_LINES {
+            self.tail.remove(0);
+        }
+        self.tail.push(line);
+        self.current.clear();
+    }
+
+    fn into_preview(mut self) -> Option<OutputPreview> {
+        self.finish();
+        OutputPreview::from_captured(&self.head, &self.tail, self.count)
+    }
+}
+
+/// Forwards every written byte to the blob file while observing it.
+struct TeeWriter<'a, W: Write> {
+    inner: W,
+    capture: &'a mut LineCapture,
+}
+
+impl<W: Write> Write for TeeWriter<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.capture.observe(&buf[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 pub struct ProcessOutputBlobStore {
     directory: PathBuf,
 }
@@ -486,8 +611,10 @@ impl ProcessOutputBlobStore {
         stderr: &ProcessOutput,
         mut next_name: impl FnMut() -> String,
         cancelled: impl Fn() -> bool,
-    ) -> io::Result<PathBuf> {
-        self.write_unique(&mut next_name, |writer| {
+    ) -> io::Result<(PathBuf, Option<OutputPreview>)> {
+        let mut capture = (!stdout.is_empty() || !stderr.is_empty()).then(LineCapture::default);
+        let observes_stdout = !stdout.is_empty();
+        let path = self.write_unique(&mut next_name, |writer| {
             if cancelled() {
                 return Err(io::Error::new(
                     io::ErrorKind::Interrupted,
@@ -504,7 +631,16 @@ impl ProcessOutputBlobStore {
                         ));
                     }
                     write!(writer, "\n[{name}]\n")?;
-                    output.copy_to_cancellable(writer, &cancelled)?;
+                    match capture.as_mut() {
+                        Some(lines) if observes_stdout == (name == "stdout") => {
+                            let mut tee = TeeWriter {
+                                inner: &mut *writer,
+                                capture: lines,
+                            };
+                            output.copy_to_cancellable(&mut tee, &cancelled)?;
+                        }
+                        _ => output.copy_to_cancellable(writer, &cancelled)?,
+                    }
                 }
             }
             if cancelled() {
@@ -514,7 +650,9 @@ impl ProcessOutputBlobStore {
                 ));
             }
             writer.flush()
-        })
+        })?;
+        let preview = capture.and_then(LineCapture::into_preview);
+        Ok((path, preview))
     }
     fn write_unique(
         &self,
@@ -558,7 +696,7 @@ impl ProcessOutputBlobStore {
 pub(crate) mod tests {
     use super::*;
     use std::cell::Cell;
-    use std::collections::VecDeque;
+    use std::collections::{BTreeMap, VecDeque};
 
     pub(crate) struct Directory(pub PathBuf);
     impl Directory {
@@ -721,7 +859,7 @@ pub(crate) mod tests {
         let store = ProcessOutputBlobStore::new(&dir.0);
         let stdout = ProcessOutput::inline("out");
         let stderr = ProcessOutput::inline("err");
-        let path = store
+        let (path, preview) = store
             .persist_with(
                 7,
                 1234,
@@ -731,6 +869,14 @@ pub(crate) mod tests {
                 || false,
             )
             .unwrap();
+        assert_eq!(
+            preview,
+            Some(OutputPreview {
+                head: "out".into(),
+                tail: String::new(),
+                omitted: 0,
+            })
+        );
         assert_eq!(fs::read_to_string(collision).unwrap(), "existing");
         assert_eq!(
             fs::read_to_string(path).unwrap(),
@@ -790,6 +936,58 @@ pub(crate) mod tests {
             .delete_temporary_file()
             .unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn templated_result_formats_notice_preview_and_plain_sections() {
+        let templates = PromptTemplateCatalog::from_content(
+            "",
+            &BTreeMap::from([
+                ("HOME".to_owned(), "/tmp/c/home".to_owned()),
+                ("XDG_CONFIG_HOME".to_owned(), "/tmp/c/xdg/config".to_owned()),
+                ("XDG_STATE_HOME".to_owned(), "/tmp/c/xdg/state".to_owned()),
+                ("XDG_DATA_HOME".to_owned(), "/tmp/c/xdg/data".to_owned()),
+                ("WORKDIR".to_owned(), "/tmp/c/workspace".to_owned()),
+            ]),
+        )
+        .unwrap()
+        .1;
+        let spilled = ProcessResult {
+            exit_code: 0,
+            elapsed_milliseconds: 1234,
+            stdout: String::new(),
+            stderr: String::new(),
+            blob_path: Some(PathBuf::from("/fixture/blob.dat")),
+            spill_preview: Some(OutputPreview {
+                head: "first".into(),
+                tail: "last".into(),
+                omitted: 3,
+            }),
+        };
+        assert_eq!(
+            format_result_with_templates(&templates, &spilled).unwrap(),
+            "Process exited with code 0 after 1.23s\nTool output exceeded 64 KiB and was saved to /fixture/blob.dat.\nPreview of saved output:\nfirst\n<3 lines omitted to save context>\nlast"
+        );
+        let wide = ProcessResult {
+            spill_preview: None,
+            ..spilled
+        };
+        assert_eq!(
+            format_result_with_templates(&templates, &wide).unwrap(),
+            "Process exited with code 0 after 1.23s\nTool output exceeded 64 KiB and was saved to /fixture/blob.dat."
+        );
+        let plain = ProcessResult {
+            exit_code: 2,
+            elapsed_milliseconds: 1234,
+            stdout: "out".into(),
+            stderr: "failure".into(),
+            blob_path: None,
+            spill_preview: None,
+        };
+        assert_eq!(
+            format_result_with_templates(&templates, &plain).unwrap(),
+            "Process exited with code 2 after 1.23s\n[stdout]\nout\n[stderr]\nfailure"
+        );
     }
 
     #[test]

@@ -27,7 +27,12 @@ async fn compacted_full_fork_pending_interactions_process_wait_and_same_session_
     .await;
     idle(&root).await;
 
-    let execution = integrated_adapters::start_process(&root, "t76-combined-process").await;
+    let execution = integrated_adapters::start_process(
+        &root,
+        "t76-combined-process",
+        integrated_adapters::delivery_templates(),
+    )
+    .await;
     let child_gate = Arc::new(Semaphore::new(0));
     let final_root_gate = Arc::new(Semaphore::new(0));
     // Even an observation failure releases the supplied work naturally, never by signal.

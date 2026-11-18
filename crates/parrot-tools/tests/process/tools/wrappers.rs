@@ -1163,7 +1163,7 @@ async fn pipe_yield_live_paths_metadata_claim_duplicate_and_reuse_are_real_owner
         .wait(Some(Duration::ZERO), &NeverCancelled)
         .await
         .unwrap();
-    assert_eq!(repeated.format(), initial.text);
+    assert_eq!(repeated.format(&fixture.templates).unwrap(), initial.text);
     assert_eq!(
         repeated.yielded_process.as_ref().unwrap().stdout_path,
         yielded.stdout_path
@@ -1175,7 +1175,7 @@ async fn pipe_yield_live_paths_metadata_claim_duplicate_and_reuse_are_real_owner
         .unwrap()
         .unwrap();
     completed(
-        &complete.format(),
+        &complete.format(&fixture.templates).unwrap(),
         0,
         "s\n[stdout]\nbeforeafter\n[stderr]\nproblem",
     );
@@ -1313,7 +1313,11 @@ async fn environment_survives_yield_and_the_completed_name_can_be_reused() {
         .await
         .unwrap()
         .unwrap();
-    completed(&waited.format(), 0, "s\n[stdout]\nlater");
+    completed(
+        &waited.format(&fixture.templates).unwrap(),
+        0,
+        "s\n[stdout]\nlater",
+    );
     let reused = fixture
         .exec(json!({"command":"printf reused","name":"later"}))
         .await;
@@ -1571,6 +1575,8 @@ async fn oversized_exec_output_is_really_spilled_into_the_fixture_blob_directory
         .text
         .split_once(notice)
         .expect("missing real output-spill notice");
+    // One 70k line exceeds the preview budget, so only the notice renders.
+    assert!(!result.text.contains("Preview of saved output"));
     let path = Path::new(path.strip_suffix('.').unwrap());
     assert!(path.is_absolute());
     assert_eq!(path.parent(), Some(fixture.launcher.blobs.as_path()));
@@ -1579,6 +1585,52 @@ async fn oversized_exec_output_is_really_spilled_into_the_fixture_blob_directory
     assert!(durable.ends_with(&format!("\n[stdout]\n{}", "x".repeat(70000))));
     fixture.finish().await;
     assert!(path.is_file(), "settlement must retain durable output");
+}
+
+#[tokio::test]
+async fn multiline_exec_spill_renders_the_templated_preview() {
+    let fixture = Fixture::new();
+    let result = fixture
+        .exec(json!({"command":"for ((i=0;i<70000;i++)); do printf 'line-%04d\\n' $i; done"}))
+        .await;
+    assert!(result.text.starts_with("Process exited with code 0 after "));
+    assert!(
+        result
+            .text
+            .contains("\nTool output exceeded 64 KiB and was saved to ")
+    );
+    let preview = result
+        .text
+        .split_once("\nPreview of saved output:\n")
+        .expect("spilled multiline output must render the preview block")
+        .1;
+    let expected = "line-0000\nline-0001\nline-0002\nline-0003\nline-0004\n\
+                    <69990 lines omitted to save context>\n\
+                    line-69995\nline-69996\nline-69997\nline-69998\nline-69999";
+    assert_eq!(preview, expected);
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn exec_spill_with_empty_stdout_previews_stderr() {
+    let fixture = Fixture::new();
+    let result = fixture
+        .exec(json!({"command":"for ((i=0;i<70000;i++)); do printf 'err-%04d\\n' $i >&2; done"}))
+        .await;
+    assert!(result.text.starts_with("Process exited with code 0 after "));
+    let preview = result
+        .text
+        .split_once("\nPreview of saved output:\n")
+        .expect("empty stdout must feed the preview from stderr")
+        .1;
+    assert_eq!(
+        preview,
+        "err-0000\nerr-0001\nerr-0002\nerr-0003\nerr-0004\n\
+         <69990 lines omitted to save context>\n\
+         err-69995\nerr-69996\nerr-69997\nerr-69998\nerr-69999"
+    );
+    assert!(!result.text.contains("\n[stdout]"));
+    fixture.finish().await;
 }
 
 #[tokio::test]
@@ -1780,7 +1832,11 @@ async fn cancelling_an_active_exec_wait_releases_claim_without_detaching_ownersh
         .await
         .unwrap()
         .unwrap();
-    completed(&outcome.format(), 0, "s\n[stdout]\nsurvived");
+    completed(
+        &outcome.format(&fixture.templates).unwrap(),
+        0,
+        "s\n[stdout]\nsurvived",
+    );
     fixture.finish().await;
 }
 
@@ -1801,7 +1857,11 @@ async fn precancelled_exec_keeps_the_started_process_owned_until_observed() {
         .await
         .unwrap()
         .unwrap();
-    completed(&outcome.format(), 0, "s\n[stdout]\ncomplete");
+    completed(
+        &outcome.format(&fixture.templates).unwrap(),
+        0,
+        "s\n[stdout]\ncomplete",
+    );
     fixture.finish().await;
 }
 

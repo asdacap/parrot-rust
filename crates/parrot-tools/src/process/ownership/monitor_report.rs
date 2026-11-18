@@ -10,22 +10,30 @@ use std::time::Duration;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_foundation::clock::SystemClock;
 
-use super::execution::Execution;
+use super::execution::{Execution, ProcessResult};
 use super::inventory::{ActiveShellProcessState, ActivityKind};
 use super::managed::ProcessReport;
 use super::monitor::{MonitorIdentity, MonitorReport, MonitorSink, ShellProcessMonitor};
+use crate::process::execution::output::format_result_with_templates;
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
 
 pub struct MonitorProcessReport {
     timeout: Duration,
     sink: Arc<dyn MonitorSink>,
     report: Mutex<MonitorReport>,
+    templates: Arc<PromptTemplateCatalog>,
 }
 
 impl MonitorProcessReport {
-    pub fn new(timeout: Duration, sink: Arc<dyn MonitorSink>) -> Self {
+    pub fn new(
+        timeout: Duration,
+        sink: Arc<dyn MonitorSink>,
+        templates: Arc<PromptTemplateCatalog>,
+    ) -> Self {
         Self {
             timeout,
             sink,
+            templates,
             report: Mutex::new(
                 ShellProcessMonitor::new(timeout, Arc::new(SystemClock))
                     .report()
@@ -51,6 +59,10 @@ impl ProcessReport for MonitorProcessReport {
 
     fn activity_kind(&self) -> ActivityKind {
         ActivityKind::Monitor
+    }
+
+    fn format_result(&self, result: &ProcessResult) -> io::Result<String> {
+        format_result_with_templates(&self.templates, result)
     }
 
     fn observe<'a>(

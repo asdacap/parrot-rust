@@ -88,6 +88,7 @@ impl Execution for ScriptedExecution {
                     stdout: String::new(),
                     stderr: String::new(),
                     blob_path: None,
+                    spill_preview: None,
                 })
             }
         })

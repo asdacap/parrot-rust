@@ -14,6 +14,8 @@ use super::execution::{Execution, Failure, NeverCancelled, ProcessLifetime, Proc
 use super::inventory::{
     ActiveShellProcessState, ActivityKind, ShellProcessInventory, YieldedShellProcess,
 };
+use crate::process::execution::output::format_result_with_templates;
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompletionMessage {
@@ -100,28 +102,28 @@ pub struct ShellWaitResult {
 }
 
 impl ShellWaitResult {
-    pub fn format(&self) -> String {
+    pub fn format(&self, templates: &PromptTemplateCatalog) -> io::Result<String> {
         if let Some(result) = &self.result {
-            return result.format();
+            return format_result_with_templates(templates, result);
         }
         if let Some(yielded) = &self.yielded_process
             && let (Some(stdout), Some(stderr)) = (&yielded.stdout_path, &yielded.stderr_path)
         {
-            return format!(
+            return Ok(format!(
                 "{}\nProcess output is streaming.\nstdout: {}\nstderr: {}",
                 self.name,
                 stdout.display(),
                 stderr.display()
-            );
+            ));
         }
         let text = String::from_utf16_lossy(&self.output);
-        if text.is_empty() {
+        Ok(if text.is_empty() {
             self.name.clone()
         } else if text.ends_with('\n') {
             format!("{text}{}", self.name)
         } else {
             format!("{text}\n{}", self.name)
-        }
+        })
     }
 }
 

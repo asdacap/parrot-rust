@@ -162,21 +162,28 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                     })?;
                 if is_tool_output_oversized(&text) {
                     let store = self.config.output_blobs.clone();
-                    text =
-                        tokio::task::spawn_blocking(move || store.persist(&text, &NeverCancelled))
-                            .await
-                            .map_err(|error| {
-                                OperationError::Failed(ToolFailure::new(
-                                    error.to_string(),
-                                    FailureKind::Unexpected,
-                                ))
-                            })?
-                            .map_err(|error| {
-                                OperationError::Failed(ToolFailure::new(
-                                    error.to_string(),
-                                    FailureKind::Io,
-                                ))
-                            })?;
+                    let blob_source = text.clone();
+                    let path = tokio::task::spawn_blocking(move || {
+                        store.persist(&blob_source, &NeverCancelled)
+                    })
+                    .await
+                    .map_err(|error| {
+                        OperationError::Failed(ToolFailure::new(
+                            error.to_string(),
+                            FailureKind::Unexpected,
+                        ))
+                    })?
+                    .map_err(|error| {
+                        OperationError::Failed(ToolFailure::new(error.to_string(), FailureKind::Io))
+                    })?;
+                    text = crate::tool_settlement::render_spill_notice(
+                        &self.config.templates,
+                        &path,
+                        &text,
+                    )
+                    .map_err(|error| {
+                        OperationError::Failed(ToolFailure::new(error, FailureKind::Argument))
+                    })?;
                 }
                 text = self.config.output_blobs.substitute_process_notice(&text);
                 let yielded = result.yielded_process.is_some();

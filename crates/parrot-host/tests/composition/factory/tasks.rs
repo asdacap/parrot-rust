@@ -849,6 +849,8 @@ async fn actual_scoped_notifier_spills_exact_bytes_and_wakes_only_its_owning_ses
     let requests = fixture::requests(&h.provider, "owner");
     let conversation = fixture::conversation(&requests[0]);
     assert!(conversation.contains("Tool output exceeded 64 KiB and was saved to "));
+    assert!(conversation.contains("Preview of saved output:"));
+    assert!(conversation.contains("<891 lines omitted to save context>"));
     assert!(fixture::requests(&h.provider, "unrelated").is_empty());
     let paths: Vec<_> = std::fs::read_dir(h.histories.path.join("scratch/task-adapter-blobs"))
         .unwrap()

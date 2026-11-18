@@ -455,8 +455,13 @@ async fn utf8_output_spills_only_above_64kib_and_preserves_actual_blob_bytes() {
         let terminal = terminals(&fixture, &["large"]).await.remove(0);
         let content = terminal.content();
         if spilled {
+            // The single huge line exceeds the preview budget, so only the
+            // notice line renders.
             assert!(content.starts_with("Tool output exceeded 64 KiB and was saved to "));
-            let path = content
+            assert!(!content.contains("Preview of saved output:"));
+            let (notice, rest) = content.split_once('\n').unwrap_or((content.as_str(), ""));
+            assert_eq!(rest, "");
+            let path = notice
                 .strip_prefix("Tool output exceeded 64 KiB and was saved to $AGENT_DIR/")
                 .expect("overflow notice must use the agent directory variable")
                 .strip_suffix('.')
@@ -470,6 +475,44 @@ async fn utf8_output_spills_only_above_64kib_and_preserves_actual_blob_bytes() {
             assert_eq!(terminal.content(), text);
         }
     }
+}
+
+#[tokio::test]
+async fn oversized_multiline_outputs_render_preview_lines_with_the_spill_notice() {
+    let text = (0..9000)
+        .map(|index| format!("line-{index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.len() > 64 * 1024);
+    let fixture = Fixture::new();
+    let mut tool = RecordingTool::new(&fixture, "large", ParallelSafety::Sequential);
+    tool.output = ToolOutput::text(text.clone());
+    fixture.batch(vec![call("large", "large")]).await;
+    let mut harness = Harness::new(&fixture, vec![Arc::new(tool).handle()]).await;
+    harness.run(&fixture, &NeverCancelled).await.unwrap();
+    let terminal = terminals(&fixture, &["large"]).await.remove(0);
+    let content = terminal.content();
+    let (notice, rest) = content.split_once('\n').expect("notice line must exist");
+    let path = notice
+        .strip_prefix("Tool output exceeded 64 KiB and was saved to $AGENT_DIR/")
+        .expect("overflow notice must use the agent directory variable")
+        .strip_suffix('.')
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(fixture.path.join(path)).unwrap(),
+        text
+    );
+    let mut lines = rest.lines();
+    assert_eq!(lines.next(), Some("Preview of saved output:"));
+    for index in 0..5 {
+        assert_eq!(lines.next(), Some(format!("line-{index}").as_str()));
+    }
+    assert_eq!(lines.next(), Some("<8990 lines omitted to save context>"));
+    for index in 8995..9000 {
+        assert_eq!(lines.next(), Some(format!("line-{index}").as_str()));
+    }
+    assert_eq!(lines.next(), None);
+    assert!(!fixture.jsonl().contains(&text));
 }
 
 #[tokio::test]

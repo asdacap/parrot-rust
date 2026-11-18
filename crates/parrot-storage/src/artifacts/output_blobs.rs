@@ -12,6 +12,75 @@ use super::{Error, ErrorKind, Result, internal_resource};
 
 pub const MAXIMUM_INLINE_BYTES: usize = 64 * 1024;
 const MAXIMUM_NAME_ATTEMPTS: usize = 16;
+const SPILL_NOTICE_PREFIX: &str = "Tool output exceeded 64 KiB and was saved to ";
+const PREVIEW_LINES: usize = 5;
+const PREVIEW_MAXIMUM_BYTES: usize = 2048;
+
+/// A bounded preview of spilled tool output for the tool-result.spill-preview
+/// template.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OutputPreview {
+    pub head: String,
+    pub tail: String,
+    pub omitted: usize,
+}
+
+impl OutputPreview {
+    /// Builds the preview from bounded first-line and last-line captures with
+    /// the total line count, applying the same byte budget as
+    /// tool_output_preview. Callers keep at most the first 10 lines so counts
+    /// of 10 or fewer render every line once.
+    pub fn from_captured(
+        head_lines: &[String],
+        tail_lines: &[String],
+        count: usize,
+    ) -> Option<Self> {
+        if count == 0 {
+            return None;
+        }
+        let (head, tail, omitted) = if count <= 2 * PREVIEW_LINES {
+            (head_lines.join("\n"), String::new(), 0)
+        } else {
+            (
+                head_lines[..PREVIEW_LINES].join("\n"),
+                tail_lines.join("\n"),
+                count - 2 * PREVIEW_LINES,
+            )
+        };
+        let mut candidate = head.clone();
+        if omitted > 0 {
+            candidate.push_str(&format!(
+                "\n<{omitted} lines omitted to save context>\n{tail}"
+            ));
+        }
+        if candidate.len() > PREVIEW_MAXIMUM_BYTES {
+            return None;
+        }
+        Some(Self {
+            head,
+            tail,
+            omitted,
+        })
+    }
+}
+
+/// Selects preview lines for spilled output, or None when the assembled
+/// preview exceeds the byte budget. The omission marker wording must stay in
+/// step with the tool-result.spill-preview template, whose size check counts
+/// the same marker.
+pub fn tool_output_preview(output: &str) -> Option<OutputPreview> {
+    let lines: Vec<&str> = output.lines().collect();
+    let count = lines.len();
+    let head: Vec<String> = lines[..count.min(2 * PREVIEW_LINES)]
+        .iter()
+        .map(|line| (*line).to_owned())
+        .collect();
+    let tail: Vec<String> = lines[count.saturating_sub(PREVIEW_LINES)..]
+        .iter()
+        .map(|line| (*line).to_owned())
+        .collect();
+    OutputPreview::from_captured(&head, &tail, count)
+}
 
 /// Reports whether the source's 64-KiB inline output budget is exceeded, by UTF-8 bytes.
 pub fn is_tool_output_oversized(output: &str) -> bool {
@@ -31,28 +100,16 @@ impl ToolOutputBlobStore {
     }
 
     pub fn substitute_process_notice(&self, text: &str) -> String {
-        let Some((completion, notice)) = text.rsplit_once('\n') else {
+        let Some((before, path, after_start)) = spill_notice_line(text) else {
             return text.to_owned();
         };
-        let process_completion = completion
-            .strip_prefix("Shell process '")
-            .and_then(|text| text.split_once("' completed.\n"))
-            .map_or(completion, |(_, completion)| completion);
-        if !process_completion.starts_with("Process exited with code ")
-            || process_completion.contains('\n')
-        {
-            return text.to_owned();
-        }
-        let Some(path) = notice
-            .strip_prefix("Tool output exceeded 64 KiB and was saved to ")
-            .and_then(|path| path.strip_suffix('.'))
-        else {
-            return text.to_owned();
-        };
-        format!(
-            "{completion}\nTool output exceeded 64 KiB and was saved to {}.",
-            self.format_path(Path::new(path))
-        )
+        let mut result = String::with_capacity(text.len());
+        result.push_str(before);
+        result.push_str(SPILL_NOTICE_PREFIX);
+        result.push_str(&self.format_path(Path::new(path)));
+        result.push('.');
+        result.push_str(&text[after_start..]);
+        result
     }
 
     fn format_path(&self, path: &Path) -> String {
@@ -107,10 +164,7 @@ impl ToolOutputBlobStore {
             }
             file.flush()
                 .map_err(|e| Error::io("could not flush tool output blob", e))?;
-            Ok(format!(
-                "Tool output exceeded 64 KiB and was saved to {}.",
-                self.format_path(&path)
-            ))
+            Ok(self.format_path(&path))
         })();
         if result.is_err() {
             drop(file);
@@ -118,6 +172,40 @@ impl ToolOutputBlobStore {
         }
         result
     }
+}
+
+/// Finds the last spill notice line, returning the text before it including
+/// its trailing newline, the saved path, and the byte offset after the line.
+/// Preview lines may follow the notice, so the search walks back over notice
+/// lookalikes that lack a valid process completion before them.
+fn spill_notice_line(text: &str) -> Option<(&str, &str, usize)> {
+    let mut end = text.len();
+    while let Some(start) = text[..end].rfind(SPILL_NOTICE_PREFIX) {
+        if start == 0 {
+            return None;
+        }
+        let line_end = text[start..]
+            .find('\n')
+            .map_or(text.len(), |offset| start + offset);
+        if let Some(path) = text[start..line_end]
+            .strip_prefix(SPILL_NOTICE_PREFIX)
+            .and_then(|line| line.strip_suffix('.'))
+            && text.as_bytes()[start - 1] == b'\n'
+            && is_process_completion(&text[..start - 1])
+        {
+            return Some((&text[..start], path, line_end));
+        }
+        end = start;
+    }
+    None
+}
+
+fn is_process_completion(before: &str) -> bool {
+    let completion = before
+        .strip_prefix("Shell process '")
+        .and_then(|rest| rest.split_once("' completed.\n"))
+        .map_or(before, |(_, completion)| completion);
+    completion.starts_with("Process exited with code ") && !completion.contains('\n')
 }
 
 fn create_unique(

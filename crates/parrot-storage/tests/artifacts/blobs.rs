@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use crate::common::{Cancelled, Names, NeverCancelled, TempDir};
-use parrot_storage::artifacts::output_blobs::{ToolOutputBlobStore, is_tool_output_oversized};
+use parrot_storage::artifacts::output_blobs::{
+    OutputPreview, ToolOutputBlobStore, is_tool_output_oversized, tool_output_preview,
+};
 
 fn names(values: &[&str]) -> Arc<Names> {
     Arc::new(Names::new(values.iter().copied()))
@@ -27,17 +29,11 @@ fn tool_output_budget_counts_utf8_bytes_and_collision_link_text_is_exact() {
     )
     .unwrap();
     let output = "large 😀 output";
-    let notice = store.persist(output, &NeverCancelled).unwrap();
+    let path_reference = store.persist(output, &NeverCancelled).unwrap();
     let path = directory.join("bold-river-arse.dat");
     assert_eq!(std::fs::read_to_string(&collision).unwrap(), "existing");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), output);
-    assert_eq!(
-        notice,
-        format!(
-            "Tool output exceeded 64 KiB and was saved to {}.",
-            path.display()
-        )
-    );
+    assert_eq!(path_reference, path.display().to_string());
     assert!(path.is_absolute());
 }
 
@@ -58,7 +54,7 @@ fn configured_tool_output_notices_use_the_longest_path_variable_and_preserve_byt
     let text = "original output 😀";
     assert_eq!(
         store.persist(text, &NeverCancelled).unwrap(),
-        "Tool output exceeded 64 KiB and was saved to $AGENT_DIR/blobs/bold-river-arse.dat."
+        "$AGENT_DIR/blobs/bold-river-arse.dat"
     );
     assert_eq!(
         std::fs::read_to_string(store.directory().join("bold-river-arse.dat")).unwrap(),
@@ -111,6 +107,165 @@ fn process_notices_substitute_paths_without_rewriting_inline_output_or_sibling_p
 }
 
 #[test]
+fn process_notices_rewrite_paths_and_keep_preview_lines_that_follow() {
+    let root_dir = TempDir::new("process-notice-preview");
+    let store = ToolOutputBlobStore::for_session(&root_dir.root(), "blobs", names(&[]))
+        .unwrap()
+        .with_path_variables(std::collections::BTreeMap::from([(
+            "AGENT_DIR".into(),
+            "/session/main".into(),
+        )]));
+    let completion =
+        "Shell process 'integrated-checks' completed.\nProcess exited with code 0 after 83.76s";
+    let notice = "Tool output exceeded 64 KiB and was saved to /session/main/blobs/output.dat.";
+    let preview = "Preview of saved output:\nfirst\n<3 lines omitted to save context>\nlast";
+    assert_eq!(
+        store.substitute_process_notice(&format!("{completion}\n{notice}\n{preview}")),
+        format!(
+            "{completion}\nTool output exceeded 64 KiB and was saved to $AGENT_DIR/blobs/output.dat.\n{preview}"
+        )
+    );
+    assert_eq!(
+        store.substitute_process_notice(&format!(
+            "Process exited with code 0 after 1.00s\n{notice}\n{preview}"
+        )),
+        format!(
+            "Process exited with code 0 after 1.00s\nTool output exceeded 64 KiB and was saved to $AGENT_DIR/blobs/output.dat.\n{preview}"
+        )
+    );
+    // A notice lookalike inside the preview lines must not win over the real
+    // notice, which keeps a valid completion line before it.
+    let lookalike = "Tool output exceeded 64 KiB and was saved to /session/main/blobs/echo.dat.";
+    assert_eq!(
+        store.substitute_process_notice(&format!("{completion}\n{notice}\n{lookalike}\n{preview}")),
+        format!(
+            "{completion}\nTool output exceeded 64 KiB and was saved to $AGENT_DIR/blobs/output.dat.\n{lookalike}\n{preview}"
+        )
+    );
+}
+
+#[test]
+fn spill_preview_shows_all_lines_within_ten_and_first_last_five_above() {
+    fn preview(lines: usize) -> Option<OutputPreview> {
+        tool_output_preview(
+            &(0..lines)
+                .map(|index| format!("line-{index}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
+    assert!(tool_output_preview("").is_none());
+    assert!(tool_output_preview("single").is_none_or(|p| p.omitted == 0 && p.tail.is_empty()));
+    let ten = preview(10).unwrap();
+    assert_eq!(ten.head.lines().count(), 10);
+    assert_eq!(ten.tail, "");
+    assert_eq!(ten.omitted, 0);
+    let eleven = preview(11).unwrap();
+    assert_eq!(eleven.head, "line-0\nline-1\nline-2\nline-3\nline-4");
+    assert_eq!(eleven.tail, "line-6\nline-7\nline-8\nline-9\nline-10");
+    assert_eq!(eleven.omitted, 1);
+}
+
+#[test]
+fn spill_preview_skips_assembled_candidates_over_the_byte_budget() {
+    // A single wide line within the budget stays, and one more byte drops it.
+    let wide = format!("{}😀", "a".repeat(2044));
+    assert_eq!(wide.len(), 2048);
+    assert!(tool_output_preview(&wide).is_some());
+    assert!(tool_output_preview(&(wide.clone() + "é")).is_none());
+    // The omission marker counts toward the budget: these five-plus-five
+    // lines fit alone, but the candidate with the marker exceeds 2048 bytes.
+    let head_tail_bytes = 2 * (5 * 202 + 4);
+    assert!(head_tail_bytes <= 2048);
+    assert!(head_tail_bytes + "\n<1 lines omitted to save context>\n".len() > 2048);
+    let line = "a".repeat(200);
+    let lines = (0..11)
+        .map(|index| format!("{line}-{index}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(tool_output_preview(&lines).is_none());
+    // Shorter lines keep the candidate, marker included, within the budget.
+    let short = (0..11)
+        .map(|index| index.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(tool_output_preview(&short).is_some());
+    // Multibyte characters at the boundary count as whole characters.
+    let boundary = "é".repeat(1024);
+    assert_eq!(boundary.len(), 2048);
+    assert!(tool_output_preview(&boundary).is_some());
+    assert!(tool_output_preview(&format!("{boundary}é")).is_none());
+}
+
+#[test]
+fn spill_notice_and_preview_templates_render_the_documented_text() {
+    let environment = std::collections::BTreeMap::from([
+        ("HOME".to_owned(), "/tmp/c/home".to_owned()),
+        ("XDG_CONFIG_HOME".to_owned(), "/tmp/c/xdg/config".to_owned()),
+        ("XDG_STATE_HOME".to_owned(), "/tmp/c/xdg/state".to_owned()),
+        ("XDG_DATA_HOME".to_owned(), "/tmp/c/xdg/data".to_owned()),
+        ("WORKDIR".to_owned(), "/tmp/c/workspace".to_owned()),
+    ]);
+    let (_, catalog) =
+        parrot_foundation::template_catalog::PromptTemplateCatalog::from_content("", &environment)
+            .unwrap();
+    assert_eq!(
+        catalog
+            .render(
+                "tool-result.spill-notice",
+                &[("path".to_owned(), "/x/output.dat".into())],
+                &NeverCancelled
+            )
+            .unwrap(),
+        "Tool output exceeded 64 KiB and was saved to /x/output.dat."
+    );
+    assert_eq!(
+        catalog
+            .render(
+                "tool-result.spill-preview",
+                &[
+                    ("head".to_owned(), "first".into()),
+                    ("tail".to_owned(), "last".into()),
+                    ("omitted".to_owned(), 3.into()),
+                ],
+                &NeverCancelled
+            )
+            .unwrap(),
+        "Preview of saved output:\nfirst\n<3 lines omitted to save context>\nlast"
+    );
+    assert_eq!(
+        catalog
+            .render(
+                "tool-result.spill-preview",
+                &[
+                    ("head".to_owned(), "all".into()),
+                    ("tail".to_owned(), "".into()),
+                    ("omitted".to_owned(), 0.into()),
+                ],
+                &NeverCancelled
+            )
+            .unwrap(),
+        "Preview of saved output:\nall"
+    );
+}
+
+#[test]
+fn captured_preview_applies_the_same_budget_and_short_output_rule() {
+    let head: Vec<String> = (0..3).map(|index| format!("head-{index}")).collect();
+    let tail: Vec<String> = (0..3).map(|index| format!("tail-{index}")).collect();
+    let short = OutputPreview::from_captured(&head, &tail, 3).unwrap();
+    assert_eq!(short.head, "head-0\nhead-1\nhead-2");
+    assert_eq!(short.tail, "");
+    assert_eq!(short.omitted, 0);
+    let eleven: Vec<String> = (0..11).map(|index| format!("line-{index:02}")).collect();
+    let preview = OutputPreview::from_captured(&eleven, &tail, 11).unwrap();
+    assert_eq!(preview.head, "line-00\nline-01\nline-02\nline-03\nline-04");
+    assert_eq!(preview.tail, "tail-0\ntail-1\ntail-2");
+    assert_eq!(preview.omitted, 1);
+    assert!(OutputPreview::from_captured(&[], &[], 0).is_none());
+}
+
+#[test]
 fn tool_output_cancellation_removes_create_new_file_and_retries_are_bounded() {
     let root_dir = TempDir::new("tool-output-cancel");
     let root = root_dir.root();
@@ -149,12 +304,12 @@ fn generated_filename_is_consumed_as_an_exact_basename_without_path_normalizatio
     let root = root_dir.root();
     let generator = names(&["kept-case-arse.dat"]);
     let store = ToolOutputBlobStore::for_session(&root, "blobs", generator).unwrap();
-    let notice = store.persist("x", &NeverCancelled).unwrap();
+    let path_reference = store.persist("x", &NeverCancelled).unwrap();
     assert_eq!(
-        notice,
-        format!(
-            "Tool output exceeded 64 KiB and was saved to {}.",
-            root.path().join("blobs/kept-case-arse.dat").display()
-        )
+        path_reference,
+        root.path()
+            .join("blobs/kept-case-arse.dat")
+            .display()
+            .to_string()
     );
 }

@@ -16,6 +16,7 @@ use super::pipe_decoder::PipeDecoder;
 use super::transcript::PtyTranscript;
 use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_domain::contracts::filenames::FilenameGenerator;
+use parrot_storage::artifacts::output_blobs::OutputPreview;
 use std::io;
 use std::os::fd::AsRawFd;
 use std::os::unix::process::ExitStatusExt;
@@ -35,6 +36,7 @@ pub struct ProcessResult {
     pub stdout: String,
     pub stderr: String,
     pub blob_path: Option<PathBuf>,
+    pub spill_preview: Option<OutputPreview>,
 }
 impl ProcessResult {
     pub fn format(&self) -> String {
@@ -750,21 +752,22 @@ fn format_result(
         stdout: stdout.text(),
         stderr: stderr.text(),
         blob_path: None,
+        spill_preview: None,
     };
     if stdout.spilled() || stderr.spilled() || result.format().len() > MAX_OUTPUT_CHARACTERS {
         let names = HaikunatorNameGenerator::default();
-        result.blob_path = Some(
-            ProcessOutputBlobStore::new(directory)
-                .persist_with(
-                    exit,
-                    elapsed,
-                    stdout,
-                    stderr,
-                    || names.next_filename(),
-                    || cancellation.is_some_and(|flag| flag.load(Ordering::Acquire)),
-                )
-                .map_err(|error| blob_error(directory, error))?,
-        );
+        let (path, spill_preview) = ProcessOutputBlobStore::new(directory)
+            .persist_with(
+                exit,
+                elapsed,
+                stdout,
+                stderr,
+                || names.next_filename(),
+                || cancellation.is_some_and(|flag| flag.load(Ordering::Acquire)),
+            )
+            .map_err(|error| blob_error(directory, error))?;
+        result.blob_path = Some(path);
+        result.spill_preview = spill_preview;
         result.stdout.clear();
         result.stderr.clear();
     }

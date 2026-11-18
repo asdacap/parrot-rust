@@ -45,7 +45,14 @@ impl AccessSnapshot for Security {
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 fn id() -> String {
-    format!("clipboard-{}", NEXT.fetch_add(1, Ordering::SeqCst))
+    // Nextest runs every test in its own process, so a counter alone would
+    // reuse the same retained session directory across parallel test
+    // processes and leak notices between fixtures.
+    format!(
+        "clipboard-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    )
 }
 
 fn templates() -> Arc<PromptTemplateCatalog> {

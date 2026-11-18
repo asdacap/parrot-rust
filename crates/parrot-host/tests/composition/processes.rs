@@ -87,6 +87,7 @@ impl ControlledExecution {
             stdout: "synthetic output".into(),
             stderr: String::new(),
             blob_path: None,
+            spill_preview: None,
         }
     }
 }

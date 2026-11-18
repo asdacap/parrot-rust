@@ -286,7 +286,7 @@ where
                     .await?;
                 let text = match &outcome.result {
                     Some(result) => report.format_result(result)?,
-                    None => outcome.format(),
+                    None => outcome.format(&invocation.prompt_templates)?,
                 };
                 Ok(ProcessToolResult {
                     text,
@@ -314,7 +314,9 @@ where
                     )
                     .await?;
                 // The source wrapper returns formatted text, not a yielded-process envelope.
-                Ok(ProcessToolResult::text(outcome.format()))
+                Ok(ProcessToolResult::text(
+                    outcome.format(&invocation.prompt_templates)?,
+                ))
             }
             ProcessToolKind::InterruptProcess => {
                 let input = match InterruptInput::parse(&invocation.arguments_json) {
@@ -364,6 +366,7 @@ where
                 let report = Arc::new(MonitorProcessReport::new(
                     Duration::from_millis(input.timeout_ms as u64),
                     Arc::clone(&self.services.monitor_sink),
+                    Arc::clone(&invocation.prompt_templates),
                 ));
                 let process = self
                     .start(
@@ -484,7 +487,7 @@ impl ProcessReport for ExecCommandReport {
 
     fn format_result(&self, result: &ProcessResult) -> io::Result<String> {
         if result.exit_code != 0 || result.stderr.is_empty() || result.blob_path.is_some() {
-            return Ok(result.format());
+            return output::format_result_with_templates(&self.templates, result);
         }
         let line_count = result.stderr.lines().count().to_string();
         let summary = render(

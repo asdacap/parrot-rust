@@ -295,6 +295,16 @@ prompt_templates:
     template: 'Full output is retained at {path}; metadata: {{literal}}.'
     allowed_arguments: [path]
     required_arguments: [path]
+  tool-result.spill-notice:
+    engine: minijinja
+    template: 'Tool output exceeded 64 KiB and was saved to {{path}}.'
+    allowed_arguments: [path]
+    required_arguments: [path]
+  tool-result.spill-preview:
+    engine: minijinja
+    template: "Preview of saved output:\n{{ head }}{% if omitted > 0 %}\n<{{ omitted }} lines omitted to save context>\n{{ tail }}{% endif %}"
+    allowed_arguments: [head, tail, omitted]
+    required_arguments: [head, tail, omitted]
   tool-result.question-answer:
     template: "Question: {question}\nAnswer: {answer}"
     allowed_arguments: [question, answer]

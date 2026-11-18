@@ -198,10 +198,21 @@ async fn oversized_owner_notification_persists_actual_bytes_once_before_same_id_
             .text
             .starts_with("Tool output exceeded 64 KiB and was saved to ")
     );
+    assert!(sends[0].text.contains("Preview of saved output:"));
+    assert!(
+        sends[0]
+            .text
+            .contains("<891 lines omitted to save context>")
+    );
     let record = calls.iter().find(|call| call.kind == "record").unwrap();
     let path = |text: &str| {
+        let notice = text
+            .lines()
+            .find(|line| line.starts_with("Tool output exceeded 64 KiB and was saved to "))
+            .unwrap();
         std::path::PathBuf::from(
-            text.strip_prefix("Tool output exceeded 64 KiB and was saved to ")
+            notice
+                .strip_prefix("Tool output exceeded 64 KiB and was saved to ")
                 .unwrap()
                 .strip_suffix('.')
                 .unwrap(),
@@ -221,6 +232,37 @@ async fn oversized_owner_notification_persists_actual_bytes_once_before_same_id_
             .count(),
         2
     );
+    h.close().await;
+}
+
+#[tokio::test]
+async fn oversized_owner_notification_without_a_fitting_preview_keeps_the_plain_notice() {
+    let h = Harness::new();
+    let root = h.root("owner").await;
+    let owner = h.factory.get("owner");
+    let tasks: Vec<_> = (0..900)
+        .map(|index| state(&format!("task-{index:04}-{}", "x".repeat(500)), Canceled))
+        .collect();
+    use std::fmt::Write as _;
+    let mut items = String::new();
+    for task in &tasks {
+        write!(items, "\n- {}: canceled", task.name).unwrap();
+    }
+    let expected_update = format!("AgentTask states changed by your update:{items}");
+    assert!(expected_update.len() > parrot_storage::artifacts::output_blobs::MAXIMUM_INLINE_BYTES);
+    set(&root, tasks).await;
+    owner
+        .task_session
+        .wait_calls(|calls| calls.iter().any(|call| call.kind == "send"))
+        .await;
+    let calls = owner.task_session.calls.lock().unwrap().clone();
+    let send = calls.iter().find(|call| call.kind == "send").unwrap();
+    assert!(
+        send.text
+            .starts_with("Tool output exceeded 64 KiB and was saved to ")
+    );
+    assert!(!send.text.contains("Preview of saved output:"));
+    assert!(send.text.ends_with('.'));
     h.close().await;
 }
 

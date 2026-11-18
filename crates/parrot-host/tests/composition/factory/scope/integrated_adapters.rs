@@ -7,15 +7,18 @@ use parrot_domain::values::{
     agent_tasks::ExecutionStatus,
     progress::{Progress, ProgressUpdate},
 };
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_host::composition::agents::ScopedAgentRuntime;
 use parrot_runtime::agent_turn::services::TurnProfile;
 use parrot_runtime::tool_settlement::SharedSecurity;
-use parrot_storage::artifacts::output_blobs::MAXIMUM_INLINE_BYTES;
+use parrot_storage::artifacts::output_blobs::{MAXIMUM_INLINE_BYTES, OutputPreview};
 use parrot_tools::{
     agents::{AgentSelection, AgentTool, AgentToolKind},
+    process::execution::output::format_result_with_templates,
     process::ownership::{
         execution::ProcessResult,
-        managed::CompletionReport,
+        inventory::{ActiveShellProcessState, ActivityKind},
+        managed::{CompletionReport, ProcessReport},
         owner::{ProcessAgent, ProcessStart},
     },
     tasks_queues::tasks::{TaskQuery, TaskTool, TaskToolKind},
@@ -313,10 +316,15 @@ async fn retained_wait_wakes_from_actual_task_notifier_and_oversized_publication
     })
     .await;
     let relative = reference
-        .strip_prefix("Tool output exceeded 64 KiB and was saved to $AGENT_DIR/")
+        .lines()
+        .find(|line| line.starts_with("Tool output exceeded 64 KiB and was saved to $AGENT_DIR/"))
         .expect("overflow notice must use the agent directory variable")
+        .strip_prefix("Tool output exceeded 64 KiB and was saved to $AGENT_DIR/")
+        .unwrap()
         .strip_suffix('.')
         .unwrap();
+    assert!(reference.contains("Preview of saved output:"));
+    assert!(reference.contains("<891 lines omitted to save context>"));
     let names: Vec<_> = root
         .identity()
         .name_path
@@ -415,6 +423,55 @@ async fn retained_wait_wakes_from_real_child_completion_and_cleans_child_registr
     bounded(hosted.close()).await.unwrap();
 }
 
+/// Completion delivery mirrors the production reports: the result text renders
+/// through the templated spill notice and preview.
+struct TemplatedCompletionReport {
+    templates: Arc<PromptTemplateCatalog>,
+}
+
+pub(super) fn delivery_templates() -> Arc<PromptTemplateCatalog> {
+    Arc::new(
+        PromptTemplateCatalog::from_content(
+            "",
+            &BTreeMap::from([
+                ("HOME".to_owned(), "/tmp/c/home".to_owned()),
+                ("XDG_CONFIG_HOME".to_owned(), "/tmp/c/xdg/config".to_owned()),
+                ("XDG_STATE_HOME".to_owned(), "/tmp/c/xdg/state".to_owned()),
+                ("XDG_DATA_HOME".to_owned(), "/tmp/c/xdg/data".to_owned()),
+                ("WORKDIR".to_owned(), "/tmp/c/workspace".to_owned()),
+            ]),
+        )
+        .unwrap()
+        .1,
+    )
+}
+impl ProcessReport for TemplatedCompletionReport {
+    fn blocks_turn(&self) -> bool {
+        CompletionReport.blocks_turn()
+    }
+
+    fn activity_kind(&self) -> ActivityKind {
+        CompletionReport.activity_kind()
+    }
+
+    fn observe<'a>(
+        &'a self,
+        state: &'a ActiveShellProcessState,
+        execution: Arc<dyn Execution>,
+        lifetime: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, io::Result<()>> {
+        CompletionReport.observe(state, execution, lifetime)
+    }
+
+    fn format_result(&self, result: &ProcessResult) -> io::Result<String> {
+        format_result_with_templates(&self.templates, result)
+    }
+
+    fn complete(&self, state: &ActiveShellProcessState, output: &str) -> io::Result<String> {
+        CompletionReport.complete(state, output)
+    }
+}
+
 /// No child process is spawned. The real managed owner, completion delivery,
 /// scoped status and resource joins run around this naturally released execution.
 #[derive(Default)]
@@ -422,6 +479,7 @@ pub(super) struct NaturalExecution {
     finished: AtomicBool,
     changed: tokio::sync::Notify,
     blob_path: Option<PathBuf>,
+    spill_preview: Option<OutputPreview>,
 }
 impl NaturalExecution {
     pub(super) fn finish(&self) {
@@ -446,6 +504,7 @@ impl NaturalExecution {
             stdout: "natural synthetic output".into(),
             stderr: String::new(),
             blob_path: self.blob_path.clone(),
+            spill_preview: self.spill_preview.clone(),
         }
     }
 }
@@ -497,14 +556,22 @@ impl Execution for NaturalExecution {
 pub(super) async fn start_process(
     root: &Arc<Scope<Security>>,
     name: &str,
+    fixture_templates: Arc<PromptTemplateCatalog>,
 ) -> Arc<NaturalExecution> {
-    start_execution(root, name, Arc::new(NaturalExecution::default())).await
+    start_execution(
+        root,
+        name,
+        Arc::new(NaturalExecution::default()),
+        fixture_templates,
+    )
+    .await
 }
 
 async fn start_execution(
     root: &Arc<Scope<Security>>,
     name: &str,
     execution: Arc<NaturalExecution>,
+    fixture_templates: Arc<PromptTemplateCatalog>,
 ) -> Arc<NaturalExecution> {
     let owner = root.get_service::<ShellProcessOwner>().unwrap();
     let launched = execution.clone();
@@ -523,7 +590,9 @@ async fn start_execution(
                     depth: root.identity().session.depth,
                 },
             },
-            Arc::new(CompletionReport),
+            Arc::new(TemplatedCompletionReport {
+                templates: fixture_templates.clone(),
+            }),
             move |_| Box::pin(async move { Ok(launched as Arc<dyn Execution>) }),
         )
         .await
@@ -537,7 +606,7 @@ async fn retained_wait_uses_actual_process_completion_and_live_scoped_status() {
     let fixture = fixture().await;
     let hosted = fixture.open().await.unwrap();
     let root = fixture.root();
-    let execution = start_process(&root, "natural-shell").await;
+    let execution = start_process(&root, "natural-shell", delivery_templates()).await;
     let source = root
         .get_service::<dyn parrot_domain::contracts::status::ProcessStatusSource>()
         .unwrap();
@@ -612,13 +681,20 @@ async fn background_process_completion_uses_agent_variable_for_saved_output() {
     let path = scratch.blob_directory().join("integrated-checks.dat");
     std::fs::create_dir_all(scratch.blob_directory()).unwrap();
     std::fs::write(&path, "saved process output").unwrap();
+    let preview = OutputPreview {
+        head: "saved first".into(),
+        tail: "saved last".into(),
+        omitted: 2,
+    };
     let execution = start_execution(
         &root,
         "integrated-checks",
         Arc::new(NaturalExecution {
             blob_path: Some(path.clone()),
+            spill_preview: Some(preview),
             ..Default::default()
         }),
+        delivery_templates(),
     )
     .await;
     execution.finish();
@@ -640,7 +716,7 @@ async fn background_process_completion_uses_agent_variable_for_saved_output() {
     .await;
     assert_eq!(
         completion,
-        "Shell process 'integrated-checks' completed.\nProcess exited with code 0 after 0.00s\nTool output exceeded 64 KiB and was saved to $AGENT_DIR/blobs/integrated-checks.dat."
+        "Shell process 'integrated-checks' completed.\nProcess exited with code 0 after 0.00s\nTool output exceeded 64 KiB and was saved to $AGENT_DIR/blobs/integrated-checks.dat.\nPreview of saved output:\nsaved first\n<2 lines omitted to save context>\nsaved last"
     );
     assert_eq!(
         std::fs::read_to_string(path).unwrap(),
@@ -663,7 +739,7 @@ async fn retained_wait_timeout_lists_actual_child_process_and_task() {
     );
     let spawn = agent_tool(&fixture, &root, AgentToolKind::Spawn);
     agent_invoke(&spawn, json!({"name":"timeout-child","agent":"adapter","prompt":"timeout-child-marker","fork":"empty"}), &NeverCancelled).await.unwrap();
-    let process = start_process(&root, "timeout-process").await;
+    let process = start_process(&root, "timeout-process", delivery_templates()).await;
     // A failed dependency and its pending successor are real scheduler state,
     // without admitting an unwanted worker or synthesizing notification input.
     let mut failed = task("unresolved-dependency", "not executed", None);

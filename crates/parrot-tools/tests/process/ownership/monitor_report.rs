@@ -11,6 +11,8 @@ use crate::process::ownership::monitor::{
     MonitorDelivery, MonitorEvent, MonitorInputSource, MonitorReason,
 };
 use crate::process::ownership::owner::{ProcessAgent, ProcessStart, ShellProcessOwner};
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use std::collections::BTreeMap;
 
 struct NoProcessDiagnostics;
 impl ProcessDiagnostics for NoProcessDiagnostics {
@@ -120,12 +122,25 @@ async fn actual_owner_monitor_blocks_turn_until_terminal_delivery() {
     let mut spec = LaunchSpec::new("/bin/sh");
     spec.args = vec!["-c".into(), input.command.clone().into()];
     let blob_directory = directory.clone();
+    let templates = PromptTemplateCatalog::from_content(
+        "",
+        &BTreeMap::from([
+            ("HOME".to_owned(), "/tmp/c/home".to_owned()),
+            ("XDG_CONFIG_HOME".to_owned(), "/tmp/c/xdg/config".to_owned()),
+            ("XDG_STATE_HOME".to_owned(), "/tmp/c/xdg/state".to_owned()),
+            ("XDG_DATA_HOME".to_owned(), "/tmp/c/xdg/data".to_owned()),
+            ("WORKDIR".to_owned(), "/tmp/c/workspace".to_owned()),
+        ]),
+    )
+    .unwrap()
+    .1;
     let claimed = owner
         .start(
             input,
             Arc::new(MonitorProcessReport::new(
                 Duration::from_millis(300_000),
                 sink.clone(),
+                Arc::new(templates),
             )),
             move |_| {
                 Box::pin(async move {

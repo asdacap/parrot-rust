@@ -9,11 +9,28 @@ use crate::process::ownership::managed::{
     CompletionMessage, CompletionReport, CompletionSink, ProcessDiagnostic, ProcessDiagnostics,
 };
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::Notify;
+
+fn wait_templates() -> PromptTemplateCatalog {
+    PromptTemplateCatalog::from_content(
+        "",
+        &BTreeMap::from([
+            ("HOME".to_owned(), "/tmp/c/home".to_owned()),
+            ("XDG_CONFIG_HOME".to_owned(), "/tmp/c/xdg/config".to_owned()),
+            ("XDG_STATE_HOME".to_owned(), "/tmp/c/xdg/state".to_owned()),
+            ("XDG_DATA_HOME".to_owned(), "/tmp/c/xdg/data".to_owned()),
+            ("WORKDIR".to_owned(), "/tmp/c/workspace".to_owned()),
+        ]),
+    )
+    .unwrap()
+    .1
+}
 
 #[derive(Default)]
 struct FakeExecution {
@@ -40,6 +57,7 @@ impl FakeExecution {
             stdout: String::from_utf16_lossy(&self.output.lock().unwrap()),
             stderr: String::new(),
             blob_path: None,
+            spill_preview: None,
         }));
         self.changed.notify_waiters();
     }
@@ -861,7 +879,7 @@ async fn cursor_segments_are_committed_once_and_terminal_wait_retires() {
         .await
         .unwrap();
     assert_eq!(first.output, "first".encode_utf16().collect::<Vec<_>>());
-    assert_eq!(first.format(), "first\nwork");
+    assert_eq!(first.format(&wait_templates()).unwrap(), "first\nwork");
     execution.append("second");
     let second = owner
         .claim("work")
