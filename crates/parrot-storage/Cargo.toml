@@ -8,17 +8,17 @@ rust-version.workspace = true
 parrot-core = { path = "../parrot-core" }
 parrot-domain = { path = "../parrot-domain" }
 parrot-media = { path = "../parrot-media" }
-rusqlite = { version = "0.32.1", features = ["bundled"] }
-protobuf = "=3.7.2"
+rusqlite = { version = "0.39", features = ["bundled"] }
+protobuf = "3.7.2"
 tokio = { version = "1.43", default-features = false, features = ["rt", "sync", "macros"] }
 serde_json = { version = "1.0.138", features = ["preserve_order", "raw_value"] }
 serde = { version = "1.0.229", features = ["derive"] }
-unicode-general-category = "=1.0.0"
-sha2 = "=0.10.8"
+unicode-general-category = "1.0.0"
+sha2 = "0.10.8"
 rustix = { version = "1.1.5", features = ["fs"] }
 
 [dev-dependencies]
-base64 = "=0.22.1"
+base64 = "0.22.1"
 parrot-foundation = { path = "../parrot-foundation" }
 
 [[test]]

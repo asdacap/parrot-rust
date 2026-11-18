@@ -17,7 +17,7 @@ use parrot_domain::{
     protocol::messages::parrot::Event,
     values::tools::{ConfiguredToolDefinition, MissingToolDefinition, ToolDefinitionCatalog},
 };
-use parrot_foundation::{config::Configuration, template_catalog::PromptTemplateCatalog};
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_storage::artifacts::{ImageArtifactMetadata, ImageArtifactRepository};
 use parrot_storage::conversation::AgentHistoryView;
 
@@ -43,26 +43,6 @@ use parrot_tools_process::process::{
     ownership::{domain::CapturedProcessLauncher, inventory::YieldedShellProcess},
     tools::{CommandRequest, ProcessToolFactory, ProcessToolKind, ProcessToolServices},
 };
-
-/// Converts the actual Foundation-loaded definitions without rewriting schemas.
-pub fn configured_definitions(configuration: &Configuration) -> ToolDefinitionCatalog {
-    ToolDefinitionCatalog::new(
-        &configuration
-            .runtime
-            .tools
-            .iter()
-            .map(|(name, definition)| {
-                (
-                    name.clone(),
-                    ConfiguredToolDefinition::new(
-                        &definition.description,
-                        &definition.parameters_json,
-                    ),
-                )
-            })
-            .collect(),
-    )
-}
 
 #[derive(Clone)]
 pub struct Invocation {

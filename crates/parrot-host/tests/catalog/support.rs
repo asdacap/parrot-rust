@@ -30,6 +30,7 @@ use parrot_domain::{
         activity::{AgentSessionActivitySnapshot, DrainState},
         agent_tasks::{Task, TaskSetResponse, TaskView},
         progress::{ProgressSnapshot, ProgressUpdate},
+        tools::WriteTargetKind,
     },
 };
 use parrot_provider::image_generation::{ImageGenerationRequest, ImageGenerationResult};
@@ -49,7 +50,7 @@ use parrot_tools::{
     },
 };
 use parrot_tools_process::permission::{
-    Failure as PermissionFailure, PermissionReply, PermissionServices, WriteTarget, WriteTargetKind,
+    Failure as PermissionFailure, PermissionReply, PermissionServices, WriteTarget,
 };
 use parrot_tools_process::process::{
     ownership::{

@@ -1,11 +1,11 @@
 //! Native process execution bound to one user workspace and an immutable turn capture.
 
-use super::policy::{ProductionAccessRule, ProductionPolicy};
 use parrot_domain::contracts::{
     async_ops::{BoxFuture, Cancellation},
     paths::ResolvedRead,
     security::AccessSnapshot,
 };
+use parrot_runtime::policy::{ProductionAccessRule, ProductionPolicy};
 use parrot_runtime::tool_settlement::SharedSecurity;
 use parrot_tools_process::process::{
     execution::{
@@ -280,7 +280,7 @@ mod tests {
             }
         }
         fn policy(&self, rules: &[SandboxRule]) -> Arc<ProductionPolicy> {
-            let materializer = super::super::policy::ProductionPolicyMaterializer::new();
+            let materializer = parrot_runtime::policy::ProductionPolicyMaterializer::new();
             materializer
                 .register_session(
                     self.session.clone(),
@@ -519,7 +519,7 @@ mod tests {
         let scratch =
             AgentScratchDirectory::new(&fixture.scratch.root().join("child"), &fixture.root)
                 .unwrap();
-        let materializer = super::super::policy::ProductionPolicyMaterializer::new();
+        let materializer = parrot_runtime::policy::ProductionPolicyMaterializer::new();
         materializer
             .register_session(
                 fixture.session.clone(),

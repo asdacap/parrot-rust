@@ -30,6 +30,7 @@ use parrot_domain::{
         config::{ModelProfiles, PathPlatform, SkillConfiguration},
         identifiers::{Identifier, UserSessionId},
         project_workspace::ProjectWorkspace,
+        tools::WriteTargetKind,
     },
 };
 use parrot_foundation::{
@@ -91,7 +92,7 @@ use parrot_tools::web_fetch::{
 };
 use parrot_tools_process::permission::{
     Failure as PermissionFailure, FailureKind as PermissionFailureKind, PermissionReply,
-    PermissionServices, WriteTarget, WriteTargetKind,
+    PermissionServices, WriteTarget,
 };
 use parrot_tools_process::process::{
     execution::runner::SandboxGate,

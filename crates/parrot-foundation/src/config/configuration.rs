@@ -7,6 +7,7 @@ use super::templates::{self, TemplateSpec};
 use super::{ConfigError, Result, yaml};
 use parrot_domain::values::config::{PathPlatform, PlatformPath};
 use parrot_domain::values::context::ContextSize;
+use parrot_domain::values::tools::ToolDefinitionCatalog;
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
@@ -70,6 +71,12 @@ pub struct Configuration {
 }
 
 impl Configuration {
+    /// Builds the tool definition catalog served to agent sessions from the
+    /// runtime tool configuration.
+    pub fn tool_definitions(&self) -> ToolDefinitionCatalog {
+        ToolDefinitionCatalog::new(&self.runtime.tools)
+    }
+
     /// Pure layering/validation. The caller must supply completed scalar/Scriban validation.
     pub fn from_content<F>(
         content: &str,

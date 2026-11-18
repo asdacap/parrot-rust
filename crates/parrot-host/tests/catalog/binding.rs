@@ -174,7 +174,7 @@ impl Fixture {
         )
         .unwrap();
         let templates = Arc::new(templates);
-        let definitions = catalog::configured_definitions(&configuration);
+        let definitions = configuration.tool_definitions();
         let services = Services::default();
         let shared = Arc::new(services.clone());
         let process_services = services.process_services();

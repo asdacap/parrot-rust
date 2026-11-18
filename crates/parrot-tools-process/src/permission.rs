@@ -10,7 +10,7 @@ use parrot_domain::{
         security::{AccessSnapshot, InvocationScope},
         tools::{ParallelSafety, Tool},
     },
-    values::tools::ConfiguredToolDefinition,
+    values::tools::{ConfiguredToolDefinition, WriteTargetKind},
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use serde_json::Value;
@@ -66,13 +66,6 @@ impl From<String> for Output {
         Self { text }
     }
 }
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum WriteTargetKind {
-    File,
-    Directory,
-}
-
 /// A resolver report, not an authorization or open-file capability. The actual
 /// approval adapter must validate the target again before changing policy.
 #[derive(Clone, Debug, Eq, PartialEq)]

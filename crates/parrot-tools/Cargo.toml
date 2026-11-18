@@ -7,21 +7,21 @@ rust-version.workspace = true
 [dependencies]
 async-compression.workspace = true
 cookie_store.workspace = true
-mime = "=0.3.17"
+mime = "0.3.17"
 parrot-core = { path = "../parrot-core" }
 parrot-domain = { path = "../parrot-domain" }
 parrot-foundation = { path = "../parrot-foundation" }
 parrot-provider = { path = "../parrot-provider" }
 parrot-runtime = { path = "../parrot-runtime" }
 parrot-storage = { path = "../parrot-storage" }
-protobuf = "=3.7.2"
+protobuf = "3.7.2"
 reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1.0.229", default-features = false, features = ["std"] }
 serde_json = { version = "1.0.138", features = ["raw_value"] }
-base64 = "=0.22.1"
+base64 = "0.22.1"
 tokio = { version = "1.43", default-features = false, features = ["time", "rt", "macros", "sync", "net", "io-util"] }
 url = { version = "2.5.4", default-features = false }
-unicode-general-category = "=1.0.0"
+unicode-general-category = "1.0.0"
 
 [dev-dependencies]
 parrot-runtime = { path = "../parrot-runtime" }

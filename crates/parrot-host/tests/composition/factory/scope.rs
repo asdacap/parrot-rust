@@ -28,12 +28,12 @@ use parrot_domain::{
         config::{ModelProfiles, PathPlatform, SkillConfiguration},
         identifiers::Identifier,
         project_workspace::ProjectWorkspace,
+        tools::WriteTargetKind,
     },
 };
 use parrot_foundation::{
     config::Configuration, paths::AgentScratchDirectory, template_catalog::PromptTemplateCatalog,
 };
-use parrot_host::composition::catalog;
 use parrot_host::composition::{
     agents::AgentSessionServices,
     factory::{
@@ -100,7 +100,7 @@ use parrot_tools::{
 };
 use parrot_tools_process::permission::{
     Failure as PermissionFailure, FailureKind as PermissionFailureKind, PermissionReply,
-    PermissionServices, WriteTarget, WriteTargetKind,
+    PermissionServices, WriteTarget,
 };
 use parrot_tools_process::process::{
     ownership::{
