@@ -6,7 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 chrono = { version = "0.4.39", default-features = false, features = ["std"] }
-parrot-domain = { path = "../parrot-domain" }
+parrot-domain = { path = "../parrot-domain", features = ["grpc"] }
 parrot-foundation = { path = "../parrot-foundation" }
 parrot-fs = { path = "../parrot-fs" }
 parrot-mcp = { path = "../parrot-mcp" }

@@ -9,7 +9,7 @@ name = "parrot"
 path = "src/main.rs"
 
 [dependencies]
-parrot-domain = { path = "../parrot-domain" }
+parrot-domain = { path = "../parrot-domain", features = ["grpc"] }
 parrot-foundation = { path = "../parrot-foundation" }
 parrot-runtime = { path = "../parrot-runtime" }
 parrot-storage = { path = "../parrot-storage" }
