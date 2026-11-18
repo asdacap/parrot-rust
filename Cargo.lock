@@ -1462,6 +1462,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "parrot-fs"
+version = "0.0.0-dev"
+dependencies = [
+ "libc",
+ "parrot-domain",
+ "rustix 1.1.5",
+]
+
+[[package]]
 name = "parrot-fuzz-regressions"
 version = "0.0.0-dev"
 dependencies = [
@@ -1498,6 +1507,7 @@ dependencies = [
  "parrot-core",
  "parrot-domain",
  "parrot-foundation",
+ "parrot-fs",
  "parrot-mcp",
  "parrot-provider",
  "parrot-runtime",
