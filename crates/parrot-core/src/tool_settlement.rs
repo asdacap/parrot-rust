@@ -142,7 +142,14 @@ impl ToolSettlement {
     }
 }
 
-/// Settles the full tool batch and returns its first successful compaction request.
+/// Settles the full tool batch and returns its first successful compaction request
+/// with the results the batch recorded.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct SettledTools {
+    pub(crate) compaction_request: Option<crate::CompactionRequest>,
+    pub(crate) results: Vec<ToolResult>,
+}
+
 pub(crate) async fn execute_tools(
     states: &mut dyn States,
     tools: &dyn Tools,
@@ -150,7 +157,7 @@ pub(crate) async fn execute_tools(
     receipt: ToolCallReceipt,
     flags: TurnFlags,
     cancellation: CancellationToken<'_>,
-) -> Result<Option<crate::CompactionRequest>, Error> {
+) -> Result<SettledTools, Error> {
     let mut settlement = ToolSettlement::default();
     settlement.begin_execution(receipt.assistant_sequence, calls.clone())?;
     let mut results = Vec::with_capacity(calls.len());
@@ -177,13 +184,16 @@ pub(crate) async fn execute_tools(
         results.extend(chunk);
     }
     settlement.complete_execution(&results)?;
-    Ok(calls.iter().zip(&results).find_map(|(call, result)| {
-        if result.requests_compaction() {
-            crate::CompactionRequest::parse(&call.arguments_json).ok()
-        } else {
-            None
-        }
-    }))
+    Ok(SettledTools {
+        compaction_request: calls.iter().zip(&results).find_map(|(call, result)| {
+            if result.requests_compaction() {
+                crate::CompactionRequest::parse(&call.arguments_json).ok()
+            } else {
+                None
+            }
+        }),
+        results,
+    })
 }
 
 #[cfg(test)]

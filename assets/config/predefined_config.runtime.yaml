@@ -197,6 +197,10 @@ agent_ask_timeout_ms: 300000
 # Milliseconds exec_command waits before yielding when run_async is false or omitted.
 exec_command_yield_after_ms: 10000
 
+# Number of previous steps that must repeat exactly, with no user steer and no
+# wait or monitor tool call, before core steers a stall notice into the turn.
+stall_steps: 2
+
 # Compaction thresholds, and the hard cap on the output tokens requested from any model.
 # The cap bounds the output capacity reserved from the context window, so a model that
 # declares a large maximum output cannot drive the compaction trigger far below
