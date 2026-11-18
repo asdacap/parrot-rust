@@ -1210,7 +1210,12 @@ pub fn read_tool_definitions(root: &Node) -> Result<BTreeMap<String, ConfiguredT
             .filter(|node| node.as_mapping().is_some())
             .ok_or_else(|| error(format!("{path}.parameters must be a mapping")))?;
         validate_schema_descriptions(parameters, &format!("{path}.parameters"), false)?;
-        let description = nonempty_scalar(node, "description", &format!("{path}.description"))?;
+        let description = node
+            .get("description")
+            .filter(|node| !plain_null(node))
+            .and_then(Node::as_str)
+            .map(str::to_owned)
+            .unwrap_or_default();
         let parameters_json = schema_json(parameters, &format!("{path}.parameters"))?;
         result.insert(
             name.to_owned(),

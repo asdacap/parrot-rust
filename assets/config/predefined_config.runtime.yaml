@@ -375,12 +375,6 @@ tools:
       - new_string
       additionalProperties: false
   exec_command:
-    description: >-
-      Run a shell command. Commands run in the sandbox by default.
-      You can reserve a name that is unique among this agent session's running processes.
-      You can return from the call without stopping the command.
-      You can reuse completed process names. If you omit the name, the tool generates one.
-      If the call returns before the command ends, you receive a notification when the command ends.
     parameters:
       type: object
       properties:

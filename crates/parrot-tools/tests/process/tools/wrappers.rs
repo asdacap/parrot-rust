@@ -36,7 +36,6 @@ use parrot_tools::process::tools::{
 use serde_json::{Value, json};
 
 const LIMIT: Duration = Duration::from_secs(20);
-const METADATA_REMINDER: &str = "\n\nReminder: include 'name' and 'description' for multiline commands or commands longer than 300 characters.";
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
 struct NoProcessDiagnostics;
@@ -1103,88 +1102,6 @@ async fn redundant_cd_and_leading_sleep_rejections_do_not_reserve_names() {
         !sleepy
             .text
             .contains("Do not start an exec_command command with 'sleep'")
-    );
-    fixture.finish().await;
-}
-
-#[tokio::test]
-async fn metadata_reminder_uses_real_default_template_for_completion_and_yield() {
-    let fixture = Fixture::new();
-    let long = format!("printf ok #{}", "x".repeat(300));
-    for arguments in [
-        json!({"command":long,"description":"print ok"}),
-        json!({"command":long,"name":"long"}),
-        json!({"command":long,"name":"long","description":" "}),
-        json!({"command":long}),
-    ] {
-        let result = fixture.exec(arguments).await;
-        completed(
-            &result.text,
-            0,
-            &format!("s\n[stdout]\nok{METADATA_REMINDER}"),
-        );
-    }
-    for (command, reminder) in [
-        (format!("printf ok #{}x", "😀".repeat(144)), false),
-        (format!("printf ok #{}", "😀".repeat(145)), true),
-    ] {
-        assert_eq!(
-            command.encode_utf16().count(),
-            if reminder { 301 } else { 300 }
-        );
-        let result = fixture.exec(json!({"command":command})).await;
-        completed(
-            &result.text,
-            0,
-            if reminder {
-                METADATA_REMINDER
-            } else {
-                "s\n[stdout]\nok"
-            },
-        );
-        assert_eq!(result.text.contains(METADATA_REMINDER), reminder);
-    }
-    let multiline = fixture
-        .exec(json!({"command":"printf multi\nprintf line; exit 7"}))
-        .await;
-    completed(
-        &multiline.text,
-        7,
-        &format!("s\n[stdout]\nmultiline{METADATA_REMINDER}"),
-    );
-    for arguments in [
-        json!({"command":long,"name":"long","description":"print ok"}),
-        json!({"command":"printf multi\nprintf line","name":"multiline","description":"print multiline"}),
-        json!({"command":"printf short"}),
-        json!({"command":"printf short","description":"print short"}),
-    ] {
-        assert!(
-            !fixture
-                .exec(arguments)
-                .await
-                .text
-                .contains(METADATA_REMINDER)
-        );
-    }
-    let yielded = fixture
-        .exec(json!({"command":"printf begun;\nsleep 30","name":"metadata-yield","run_async":true}))
-        .await;
-    assert!(
-        yielded
-            .text
-            .starts_with("metadata-yield\nProcess output is streaming.")
-    );
-    assert!(yielded.text.ends_with(METADATA_REMINDER));
-    assert_eq!(yielded.yielded_process.unwrap().name, "metadata-yield");
-    let signal = fixture
-        .invoke(
-            ProcessToolKind::InterruptProcess,
-            json!({"name":"metadata-yield","signal":9}),
-        )
-        .await;
-    assert_eq!(
-        signal.text,
-        "Signal 9 sent to shell process 'metadata-yield'."
     );
     fixture.finish().await;
 }

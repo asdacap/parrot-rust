@@ -29,8 +29,6 @@ use super::ownership::owner::{ProcessAgent, ProcessStart, ShellProcessOwner};
 use crate::sandbox::linux::ReadOnlyExecCommandClassifier;
 use input::{ExecInput, InterruptInput, MonitorInput, WriteStdinInput};
 
-pub const NAMED_COMMAND_LENGTH: usize = 300;
-
 /// Overrides only; the platform launcher owns the inherited environment and
 /// selected resources. Values are passed literally, never shell-expanded here.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -255,13 +253,6 @@ where
                 if leading_sleep(&input.command) {
                     return self.error(invocation, "Do not start an exec_command command with 'sleep'. Use the wait tool to pause instead.");
                 }
-                let reminder = (input.command.trim().contains('\n')
-                    || input.command.encode_utf16().count() > NAMED_COMMAND_LENGTH)
-                    && (name.is_none()
-                        || input
-                            .description
-                            .as_deref()
-                            .is_none_or(|value| value.trim().is_empty()));
                 let report: Arc<dyn ProcessReport> = Arc::new(ExecCommandReport {
                     templates: Arc::clone(&invocation.prompt_templates),
                 });
@@ -293,18 +284,10 @@ where
                         cancellation,
                     )
                     .await?;
-                let mut text = match &outcome.result {
+                let text = match &outcome.result {
                     Some(result) => report.format_result(result)?,
                     None => outcome.format(),
                 };
-                if reminder {
-                    text.push_str("\n\n");
-                    text.push_str(&render(
-                        &invocation.prompt_templates,
-                        "exec-command.metadata-reminder",
-                        &[("command_length", &NAMED_COMMAND_LENGTH.to_string())],
-                    )?);
-                }
                 Ok(ProcessToolResult {
                     text,
                     yielded_process: outcome.yielded_process,
