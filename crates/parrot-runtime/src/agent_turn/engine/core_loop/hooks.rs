@@ -1,6 +1,5 @@
 use super::*;
-use parrot_core::{TurnHooks, TurnModel, TurnModelIcon, TurnModelIconColor};
-use parrot_provider::routing::aliases::{ModelAliasIconColor, ResolvedModelSelection};
+use parrot_core::TurnHooks;
 
 pub(super) struct RuntimeTurnHooks<'a, S: AccessSnapshot + 'static> {
     pub(super) backend: &'a RuntimeBackend<S>,
@@ -8,17 +7,17 @@ pub(super) struct RuntimeTurnHooks<'a, S: AccessSnapshot + 'static> {
     pub(super) cancellation: &'a dyn Cancellation,
 }
 
-impl<S: AccessSnapshot + 'static> TurnHooks for RuntimeTurnHooks<'_, S> {
-    fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<TurnModel, CoreError>> {
+impl<S: AccessSnapshot + 'static> RuntimeTurnHooks<'_, S> {
+    /// Notifies provider sessions before the turn start event is published.
+    pub(super) fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
-            let selection = self.backend.selection.capture()?;
             self.backend.sessions.begin_turn().await?;
-            let model = presented_model(&selection.model);
-            self.binding.bind(selection);
-            Ok(model)
+            Ok(())
         })
     }
+}
 
+impl<S: AccessSnapshot + 'static> TurnHooks for RuntimeTurnHooks<'_, S> {
     fn activate_conversation_turn(&self) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
             self.backend.activity.turn_started();
@@ -39,33 +38,5 @@ impl<S: AccessSnapshot + 'static> TurnHooks for RuntimeTurnHooks<'_, S> {
             self.binding.bind(self.backend.selection.capture()?);
             Ok(())
         })
-    }
-}
-
-fn presented_model(selection: &ResolvedModelSelection) -> TurnModel {
-    TurnModel {
-        selector: selection.canonical_model.selector(),
-        alias_icon: selection
-            .alias
-            .as_ref()
-            .and_then(|alias| alias.icon.as_ref())
-            .map(|icon| TurnModelIcon {
-                glyph: icon.glyph.clone(),
-                color: presented_icon_color(icon.color),
-            }),
-    }
-}
-
-fn presented_icon_color(color: ModelAliasIconColor) -> TurnModelIconColor {
-    match color {
-        ModelAliasIconColor::Black => TurnModelIconColor::Black,
-        ModelAliasIconColor::Red => TurnModelIconColor::Red,
-        ModelAliasIconColor::Green => TurnModelIconColor::Green,
-        ModelAliasIconColor::Yellow => TurnModelIconColor::Yellow,
-        ModelAliasIconColor::Blue => TurnModelIconColor::Blue,
-        ModelAliasIconColor::Magenta => TurnModelIconColor::Magenta,
-        ModelAliasIconColor::Cyan => TurnModelIconColor::Cyan,
-        ModelAliasIconColor::White => TurnModelIconColor::White,
-        ModelAliasIconColor::Gray => TurnModelIconColor::Gray,
     }
 }

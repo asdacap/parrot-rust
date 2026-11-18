@@ -20,37 +20,6 @@ pub struct CompletionBlockerFeedback {
     pub messages: Vec<String>,
     pub candidate: ProviderResponse,
 }
-/// Describes the model a turn runs under, as presented by the turn start event.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TurnModel {
-    /// Provider-qualified selector of the selected model.
-    pub selector: String,
-    /// Alias icon configured for the selected model.
-    pub alias_icon: Option<TurnModelIcon>,
-}
-
-/// Icon an alias associates with the model a turn runs under.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TurnModelIcon {
-    /// Grapheme shown beside the model.
-    pub glyph: String,
-    /// Color the presentation assigns to the glyph.
-    pub color: TurnModelIconColor,
-}
-
-/// Colors available to model alias icons.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TurnModelIconColor {
-    Black,
-    Red,
-    Green,
-    Yellow,
-    Blue,
-    Magenta,
-    Cyan,
-    White,
-    Gray,
-}
 
 /// Per-turn request budget, re-read by the engine from `ConfigKey::Turn` at the
 /// start of each step.
@@ -162,8 +131,6 @@ pub struct TurnServices<'a> {
 
 /// Receives core's lifecycle notifications independently of conversation storage.
 pub trait TurnHooks: Send + Sync {
-    /// Captures the initial model selection and notifies provider sessions before publication.
-    fn begin_conversation_turn(&self) -> BoxFuture<'_, Result<crate::TurnModel, Error>>;
     /// Starts runtime activity and prepares the prompt epoch and skill snapshot after publication.
     fn activate_conversation_turn(&self) -> BoxFuture<'_, Result<(), Error>>;
     /// Captures settings for the next step without changing in-flight operations.

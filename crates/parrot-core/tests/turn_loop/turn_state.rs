@@ -192,13 +192,7 @@ fn run_turn_opens_the_turn_and_presents_the_selected_model() {
         )),
         Ok(Outcome::Completed("answer".into()))
     );
-    assert_eq!(
-        *state.started_turns.lock().unwrap(),
-        [TurnModel {
-            selector: "memory/model".into(),
-            alias_icon: None,
-        }]
-    );
+    assert_eq!(*state.started_turns.lock().unwrap(), 1);
     assert_eq!(*state.turn_activations.lock().unwrap(), 1);
     assert_eq!(
         state.closed_turns,
@@ -597,7 +591,7 @@ fn core_disposes_activation_state_and_provider_failures() {
         }
         assert_eq!(state.run(), Err(error.clone()));
         assert_eq!(state.disposed_turns, [Err(error)]);
-        assert_eq!(state.started_turns.lock().unwrap().len(), 1);
+        assert_eq!(*state.started_turns.lock().unwrap(), 1);
     }
 }
 
@@ -622,7 +616,7 @@ fn disposal_errors_stop_draining_and_take_precedence_over_execution() {
         assert_eq!(state.run(), Err(Error::failed("dispose")));
         let expected = activation_error.map_or(Ok(Outcome::Completed("answer".into())), Err);
         assert_eq!(state.disposed_turns, [expected]);
-        assert_eq!(state.started_turns.lock().unwrap().len(), 1);
+        assert_eq!(*state.started_turns.lock().unwrap(), 1);
     }
 }
 
@@ -642,6 +636,6 @@ fn core_does_not_dispose_when_no_turn_was_opened() {
     let mut unopened = MemoryState::new([]);
     unopened.fail_at = Some("open");
     assert_eq!(unopened.run(), Err(Error::failed("open")));
-    assert!(unopened.started_turns.lock().unwrap().is_empty());
+    assert_eq!(*unopened.started_turns.lock().unwrap(), 0);
     assert!(unopened.disposed_turns.is_empty());
 }
