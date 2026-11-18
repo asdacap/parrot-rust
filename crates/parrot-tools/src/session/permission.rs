@@ -8,16 +8,10 @@ use parrot_domain::{
         security::{AccessSnapshot, InvocationScope},
         tools::{ParallelSafety, Tool},
     },
-    values::tools::ConfiguredToolDefinition,
+    values::tools::{ConfiguredToolDefinition, WriteTargetKind},
 };
 use serde_json::Value;
 use std::{path::PathBuf, sync::Arc};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum WriteTargetKind {
-    File,
-    Directory,
-}
 
 /// A resolver report, not an authorization or open-file capability. The actual
 /// approval adapter must validate the target again before changing policy.

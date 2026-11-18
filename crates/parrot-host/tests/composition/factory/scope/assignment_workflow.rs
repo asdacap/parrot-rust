@@ -10,7 +10,7 @@ async fn invoke_task(
 ) -> String {
     let tool = TaskTool::new(
         kind,
-        &catalog::configured_definitions(&fixture.configuration),
+        &fixture.configuration.tool_definitions(),
         scope
             .get_service::<ScopedTaskController<Security, InvocationSelection<Security>>>()
             .unwrap(),

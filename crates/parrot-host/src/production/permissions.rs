@@ -1,6 +1,5 @@
 //! Scoped durable permission requests over real, identity-bound write targets.
 
-use super::policy::{ProductionPolicy, ProductionPolicyMaterializer, ProductionWriteTarget};
 use crate::composition::{
     factory::user::UserServices,
     invocation::InvocationSelection,
@@ -10,6 +9,9 @@ use parrot_domain::contracts::async_ops::{
     BoxFuture, Cancellation, OperationError, OperationResult,
 };
 use parrot_foundation::paths::AgentScratchDirectory;
+use parrot_runtime::policy::{
+    ProductionPolicy, ProductionPolicyMaterializer, ProductionWriteTarget,
+};
 use parrot_runtime::{
     children::{AgentIdentity, Scope},
     interactions::{
@@ -231,8 +233,8 @@ fn interaction_error(error: impl std::fmt::Display) -> InteractionError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parrot_domain::values::tools::WriteTargetKind;
     use parrot_foundation::template_catalog::PromptTemplateCatalog;
-    use parrot_tools::session::WriteTargetKind;
     use std::{
         collections::BTreeMap,
         fs,

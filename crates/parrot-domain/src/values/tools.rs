@@ -2,6 +2,12 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Mutex;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WriteTargetKind {
+    File,
+    Directory,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfiguredToolDefinition {
     pub description: String,

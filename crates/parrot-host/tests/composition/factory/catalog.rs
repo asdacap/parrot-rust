@@ -40,6 +40,7 @@ mod fixture_support {
         values::{
             activity::{AgentSessionActivitySnapshot, DrainState},
             agent_tasks::{Task, TaskSetResponse, TaskView},
+            tools::WriteTargetKind,
         },
     };
     use parrot_provider::image_generation::{ImageGenerationRequest, ImageGenerationResult};
@@ -69,7 +70,7 @@ mod fixture_support {
         },
         session::{
             Failure, ImageProvider, PermissionReply, PermissionServices, SessionServices,
-            WriteTarget, WriteTargetKind,
+            WriteTarget,
         },
         tasks_queues::{
             ToolFailure,
@@ -1101,7 +1102,7 @@ mod fixture_binding {
             )
             .unwrap();
             let templates = Arc::new(templates);
-            let definitions = catalog::configured_definitions(&configuration);
+            let definitions = configuration.tool_definitions();
             let services = Services::default();
             let shared = Arc::new(services.clone());
             let process_services = services.process_services();

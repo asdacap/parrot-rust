@@ -30,6 +30,7 @@ use parrot_domain::{
         config::{ModelProfiles, PathPlatform, SkillConfiguration},
         identifiers::{Identifier, UserSessionId},
         project_workspace::ProjectWorkspace,
+        tools::WriteTargetKind,
     },
 };
 use parrot_foundation::{
@@ -95,9 +96,7 @@ use parrot_tools::{
         },
         tools::CommandRequest,
     },
-    session::{
-        Failure, FailureKind, PermissionReply, PermissionServices, WriteTarget, WriteTargetKind,
-    },
+    session::{Failure, FailureKind, PermissionReply, PermissionServices, WriteTarget},
     web_fetch::{
         FetchError, Options, PublicAddressPolicy, Resolver, Transport, TransportSession, WebFetcher,
     },

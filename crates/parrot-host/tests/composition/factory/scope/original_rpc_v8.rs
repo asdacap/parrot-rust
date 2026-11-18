@@ -6,6 +6,7 @@ use super::*;
 use parrot_domain::{
     contracts::{filesystem::EntryKind, interactions::QuestionOption},
     protocol::messages::parrot as wire,
+    values::tools::WriteTargetKind,
 };
 use parrot_host::composition::protocol::{
     ParrotService, SessionHost, SessionListener, models::ModelOperations,

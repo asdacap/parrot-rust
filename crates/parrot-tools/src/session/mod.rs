@@ -10,7 +10,7 @@ mod tools;
 
 pub use image::{ImageGenerationTool, ImageProvider};
 pub use permission::{
-    PermissionReply, PermissionServices, RequestWritePermissionTool, WriteTarget, WriteTargetKind,
+    PermissionReply, PermissionServices, RequestWritePermissionTool, WriteTarget,
 };
 pub use services::{Failure, FailureKind, SessionServices};
 pub use tools::{Invocation, Kind, Output, SessionTool};
