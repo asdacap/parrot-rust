@@ -24,3 +24,4 @@ grpc = ["dep:tonic", "dep:tonic-build"]
 
 [[test]]
 name = "protocol"
+path = "tests/protocol/main.rs"

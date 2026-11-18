@@ -39,6 +39,9 @@
       || builtins.match "crates/[^/]+" relative != null
       || builtins.match "crates/[^/]+/(Cargo.toml|build.rs)" relative != null
       || builtins.match "crates/[^/]+/(src|build|native)(/.*)?" relative != null
+      # Links to the top-level proto/ and assets/, which a git dependency's
+      # copy of the crate follows.
+      || builtins.match "crates/[^/]+/(proto|assets)" relative != null
       || (top == "web" && !lib.any (part: builtins.elem part ["node_modules" "dist" ".tmp" ".git"]) parts);
   };
 
@@ -89,11 +92,11 @@
         install -m755 "target/${buildPkgs.stdenv.hostPlatform.rust.rustcTargetSpec}/release/parrot" "$out/bin/parrot"
         ${lib.optionalString buildPkgs.stdenv.hostPlatform.isLinux ''
           "$CC" -std=c11 -O2 -Wall -Wextra -Werror ${lib.optionalString (target == "x86_64-linux-musl") "-static"} \
-            crates/parrot-tools/native/parrot-pty-attach.c -o "$out/bin/parrot-pty-attach"
+            crates/parrot-tools-process/native/parrot-pty-attach.c -o "$out/bin/parrot-pty-attach"
         ''}
         cp -R assets/config assets/skills proto "$out/share/parrot/"
         mkdir -p "$out/share/parrot/native" "$out/share/parrot/web"
-        cp crates/parrot-tools/native/parrot-pty-attach.c "$out/share/parrot/native/"
+        cp crates/parrot-tools-process/native/parrot-pty-attach.c "$out/share/parrot/native/"
         cp -R ${web}/dist/. "$out/share/parrot/web/"
         mkdir -p "$out/share/parrot/licenses"
         cp -R ${web}/licenses "$out/share/parrot/licenses/web"
