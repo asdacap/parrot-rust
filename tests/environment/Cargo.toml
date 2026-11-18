@@ -15,12 +15,12 @@ parrot-provider = { path = "../../crates/parrot-provider" }
 parrot-runtime = { path = "../../crates/parrot-runtime" }
 parrot-storage = { path = "../../crates/parrot-storage" }
 parrot-tools = { path = "../../crates/parrot-tools" }
-futures-core = "=0.3.34"
+futures-core = "0.3.34"
 openssl = { version = "0.10.81", features = ["vendored"] }
-protobuf = "=3.7.2"
+protobuf = "3.7.2"
 reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "=1.0.138"
+serde_json = "1.0.138"
 tokio = { version = "1.43", default-features = false, features = ["rt", "sync", "time", "macros", "net", "io-util"] }
 tonic = { version = "0.12.3", default-features = false, features = ["transport", "codegen", "tls", "tls-webpki-roots"] }
 

@@ -7,16 +7,16 @@ rust-version.workspace = true
 [dependencies]
 parrot-core = { path = "../parrot-core" }
 serde = { version = "1.0.229", features = ["derive"] }
-bytes = "=1.12.1"
-protobuf = "=3.7.2"
-tiktoken-rs = "=0.12.1"
+bytes = "1.12.1"
+protobuf = "3.7.2"
+tiktoken-rs = "0.12.1"
 tonic = { version = "0.12.3", default-features = false, features = ["transport", "codegen"], optional = true }
 
 [build-dependencies]
-home = "=0.5.11"
-protobuf = "=3.7.2"
-protobuf-codegen = "=3.7.2"
-protobuf-parse = "=3.7.2"
+home = "0.5.11"
+protobuf = "3.7.2"
+protobuf-codegen = "3.7.2"
+protobuf-parse = "3.7.2"
 tonic-build = { version = "0.12.3", default-features = false, optional = true }
 
 [features]
@@ -24,7 +24,3 @@ grpc = ["dep:tonic", "dep:tonic-build"]
 
 [[test]]
 name = "protocol"
-path = "tests/protocol/main.rs"
-
-[lints]
-workspace = true
