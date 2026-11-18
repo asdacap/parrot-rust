@@ -297,14 +297,19 @@ prompt_templates:
     required_arguments: [path]
   tool-result.spill-notice:
     engine: minijinja
-    template: 'Tool output exceeded 64 KiB and was saved to {{path}}.'
-    allowed_arguments: [path]
-    required_arguments: [path]
+    template: 'Tool output exceeded {{limit}} and was saved to {{path}}.'
+    allowed_arguments: [limit, path]
+    required_arguments: [limit, path]
   tool-result.spill-preview:
     engine: minijinja
     template: "Preview of saved output:\n{{ head }}{% if omitted > 0 %}\n<{{ omitted }} lines omitted to save context>\n{{ tail }}{% endif %}"
     allowed_arguments: [head, tail, omitted]
     required_arguments: [head, tail, omitted]
+  process-result.spill-notice:
+    engine: minijinja
+    template: 'Tool output exceeded {{limit}} and was saved to {{path}}.'
+    allowed_arguments: [limit, path]
+    required_arguments: [limit, path]
   tool-result.question-answer:
     template: "Question: {question}\nAnswer: {answer}"
     allowed_arguments: [question, answer]

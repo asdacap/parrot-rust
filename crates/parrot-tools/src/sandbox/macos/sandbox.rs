@@ -117,6 +117,7 @@ impl ProcessSandbox for MacSeatbeltSandbox {
                 &launch,
                 &request.resources.blob_directory,
                 profile.into_cleanup_path(),
+                request.output_spill_limit,
             )
         })
     }

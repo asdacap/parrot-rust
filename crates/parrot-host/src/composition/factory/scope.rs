@@ -1215,9 +1215,14 @@ where
             let root = self.user.lease.selected_root();
             let agent_relative = scratch.root().strip_prefix(root.path()).map_err(child)?;
             let filenames = production_filename_generator();
+            let runtime = &self.config.configuration.runtime;
             let blobs = Arc::new(
                 ToolOutputBlobStore::for_session(root, agent_relative.join("blobs"), filenames)
                     .map_err(child)?
+                    .with_spill_limits(
+                        runtime.tool_output_spill_limit_bytes as usize,
+                        runtime.process_output_spill_limit_bytes as usize,
+                    )
                     .with_path_variables(environment.materialize().clone()),
             );
             let output = Arc::new(AgentOutput::open(scratch.root()).map_err(io_child)?);

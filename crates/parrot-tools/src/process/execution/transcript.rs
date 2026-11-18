@@ -5,12 +5,11 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
-use super::output::{
-    MAX_OUTPUT_CHARACTERS, OutputEncoding, ProcessOutput, Utf8Decoder, invalid, temporary_file,
-};
+use super::output::{OutputEncoding, ProcessOutput, Utf8Decoder, invalid, temporary_file};
 
 pub struct PtyTranscript {
     directory: PathBuf,
+    spill_limit: usize,
     state: Mutex<State>,
 }
 
@@ -25,9 +24,10 @@ struct State {
 }
 
 impl PtyTranscript {
-    pub fn new(directory: impl Into<PathBuf>) -> Self {
+    pub fn new(directory: impl Into<PathBuf>, spill_limit: usize) -> Self {
         Self {
             directory: directory.into(),
+            spill_limit,
             state: Mutex::new(State::default()),
         }
     }
@@ -95,7 +95,7 @@ impl PtyTranscript {
     pub fn read(&self, offset: u64) -> io::Result<(u64, Vec<u16>)> {
         let mut state = self.state()?;
         Self::validate_offset(&state, offset)?;
-        Self::read_locked(&mut state, offset)
+        Self::read_locked(&mut state, offset, self.spill_limit)
     }
 
     fn validate_offset(state: &State, offset: u64) -> io::Result<()> {
@@ -105,14 +105,18 @@ impl PtyTranscript {
         Ok(())
     }
 
-    fn read_locked(state: &mut State, offset: u64) -> io::Result<(u64, Vec<u16>)> {
+    fn read_locked(
+        state: &mut State,
+        offset: u64,
+        spill_limit: usize,
+    ) -> io::Result<(u64, Vec<u16>)> {
         if offset == state.length {
             return Ok((offset, Vec::new()));
         }
         if let Some(file) = &mut state.file {
             file.flush()?;
         }
-        let count = (state.length - offset).min(MAX_OUTPUT_CHARACTERS as u64) as usize;
+        let count = (state.length - offset).min(spill_limit as u64) as usize;
         let path = state.path.as_ref().expect("nonempty transcript file");
         let mut file = File::open(path)?;
         file.seek(SeekFrom::Start(
@@ -145,8 +149,8 @@ impl PtyTranscript {
             return Err(invalid("The PTY transcript is not complete."));
         }
         let remaining = state.length - offset;
-        if remaining <= MAX_OUTPUT_CHARACTERS as u64 {
-            let (cursor, units) = Self::read_locked(&mut state, offset)?;
+        if remaining <= self.spill_limit as u64 {
+            let (cursor, units) = Self::read_locked(&mut state, offset, self.spill_limit)?;
             return Ok((cursor, ProcessOutput::inline_utf16(units)));
         }
         if let Some(file) = &mut state.file {
@@ -191,6 +195,7 @@ impl Drop for PtyTranscript {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process::execution::output::MAX_OUTPUT_CHARACTERS;
     use crate::process::execution::output::tests::{Directory, copy_output};
     use std::sync::{Arc, Barrier};
 
@@ -203,7 +208,7 @@ mod tests {
     #[test]
     fn utf16_cursors_decode_one_byte_utf8_chunks() {
         let dir = Directory::new();
-        let transcript = PtyTranscript::new(&dir.0);
+        let transcript = PtyTranscript::new(&dir.0, MAX_OUTPUT_CHARACTERS);
         let expected = "a€😀z";
         for byte in expected.as_bytes() {
             transcript.append(&[*byte]).unwrap();
@@ -220,7 +225,7 @@ mod tests {
     #[test]
     fn returned_cursor_reads_only_later_output() {
         let dir = Directory::new();
-        let transcript = PtyTranscript::new(&dir.0);
+        let transcript = PtyTranscript::new(&dir.0, MAX_OUTPUT_CHARACTERS);
         transcript.append("A😀".as_bytes()).unwrap();
         let (cursor, first) = read_text(&transcript, 0);
         transcript.append("€B".as_bytes()).unwrap();
@@ -234,7 +239,7 @@ mod tests {
     #[test]
     fn every_in_range_offset_including_low_surrogate_is_preserved() {
         let dir = Directory::new();
-        let transcript = PtyTranscript::new(&dir.0);
+        let transcript = PtyTranscript::new(&dir.0, MAX_OUTPUT_CHARACTERS);
         transcript.append("😀x".as_bytes()).unwrap();
         let (cursor, units) = transcript.read(1).unwrap();
         assert_eq!(cursor, 3);
@@ -252,7 +257,7 @@ mod tests {
     #[test]
     fn completion_flushes_incomplete_utf8_once_and_rejects_append() {
         let dir = Directory::new();
-        let transcript = PtyTranscript::new(&dir.0);
+        let transcript = PtyTranscript::new(&dir.0, MAX_OUTPUT_CHARACTERS);
         transcript.append(&[0xe2]).unwrap();
         assert_eq!(transcript.len(), 0);
         transcript.complete().unwrap();
@@ -266,7 +271,7 @@ mod tests {
     #[test]
     fn bounded_reads_extend_one_unit_to_preserve_surrogate_pair() {
         let dir = Directory::new();
-        let transcript = PtyTranscript::new(&dir.0);
+        let transcript = PtyTranscript::new(&dir.0, MAX_OUTPUT_CHARACTERS);
         let prefix = "a".repeat(MAX_OUTPUT_CHARACTERS - 1);
         let expected = format!("{prefix}😀tail");
         transcript.append(expected.as_bytes()).unwrap();
@@ -284,7 +289,7 @@ mod tests {
     #[test]
     fn concurrent_reads_return_identical_snapshots() {
         let dir = Directory::new();
-        let transcript = Arc::new(PtyTranscript::new(&dir.0));
+        let transcript = Arc::new(PtyTranscript::new(&dir.0, MAX_OUTPUT_CHARACTERS));
         transcript
             .append("界".repeat(MAX_OUTPUT_CHARACTERS + 100).as_bytes())
             .unwrap();
@@ -311,7 +316,7 @@ mod tests {
     #[test]
     fn spilled_completion_copies_exact_utf16_suffix_and_borrowed_cleanup() {
         let dir = Directory::new();
-        let transcript = PtyTranscript::new(&dir.0);
+        let transcript = PtyTranscript::new(&dir.0, MAX_OUTPUT_CHARACTERS);
         let consumed = "a😀€";
         let remaining = "界".repeat(MAX_OUTPUT_CHARACTERS + 1) + "\u{feff}tail";
         transcript
@@ -341,7 +346,7 @@ mod tests {
     #[test]
     fn utf16_spill_copy_keeps_pair_across_4096_unit_copy_boundary() {
         let dir = Directory::new();
-        let transcript = PtyTranscript::new(&dir.0);
+        let transcript = PtyTranscript::new(&dir.0, MAX_OUTPUT_CHARACTERS);
         let expected = "a".repeat(4095) + "😀" + &"界".repeat(MAX_OUTPUT_CHARACTERS);
         transcript.append(expected.as_bytes()).unwrap();
         transcript.complete().unwrap();

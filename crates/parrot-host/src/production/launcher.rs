@@ -30,6 +30,7 @@ pub struct ProductionLauncher {
     runner: ConfiguredProcessRunner,
     launch_directory: PathBuf,
     session_root: PathBuf,
+    output_spill_limit: usize,
 }
 
 impl ProductionLauncher {
@@ -38,6 +39,7 @@ impl ProductionLauncher {
         launch_directory: PathBuf,
         session_root: PathBuf,
         device_paths: Vec<PathBuf>,
+        output_spill_limit: usize,
     ) -> io::Result<Self> {
         if !launch_directory.is_absolute() || !session_root.is_absolute() {
             return Err(io::Error::new(
@@ -50,6 +52,7 @@ impl ProductionLauncher {
             runner,
             launch_directory,
             session_root,
+            output_spill_limit,
         })
     }
 }
@@ -101,6 +104,7 @@ impl CapturedProcessLauncher for ProductionLauncher {
                 with_tmp_environment_defaults(rules.as_deref(), request.environment);
             start.terminal_mode = request.terminal_mode;
             start.cancellation = Some(lifetime);
+            start.output_spill_limit = self.output_spill_limit;
 
             // ProcessRunner alone selects the sandbox before materializing its
             // policy. A failed sandbox start is never retried outside the sandbox.
@@ -295,6 +299,7 @@ mod tests {
                 self.work.clone(),
                 self.session.clone(),
                 Vec::new(),
+                parrot_tools::process::execution::MAX_OUTPUT_CHARACTERS,
             )
             .unwrap()
         }
@@ -676,6 +681,7 @@ mod tests {
             ),
             launch_directory: fixture.work.clone(),
             session_root: fixture.session.clone(),
+            output_spill_limit: parrot_tools::process::execution::MAX_OUTPUT_CHARACTERS,
         };
         let request = command(&format!("printf bypass > '{}'", marker.display()));
         let error = launcher

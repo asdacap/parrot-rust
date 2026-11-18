@@ -37,18 +37,26 @@ pub struct ToolExecutionConfig {
 
 /// Renders the templated spill notice for a saved tool output blob and appends
 /// the templated preview block when the output fits the preview budget.
+/// The limit text carries the configured spill threshold into the wording.
 pub(crate) fn render_spill_notice(
     templates: &PromptTemplateCatalog,
     path: &str,
+    limit_text: &str,
     output: &str,
 ) -> Result<String, String> {
     let mut notice = templates
         .render(
             "tool-result.spill-notice",
-            &[(
-                "path".to_owned(),
-                serde_json::Value::String(path.to_owned()),
-            )],
+            &[
+                (
+                    "path".to_owned(),
+                    serde_json::Value::String(path.to_owned()),
+                ),
+                (
+                    "limit".to_owned(),
+                    serde_json::Value::String(limit_text.to_owned()),
+                ),
+            ],
             &parrot_storage::events::NeverCancelled,
         )
         .map_err(|error| error.to_string())?;

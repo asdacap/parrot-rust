@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use parrot_core::NeverCancelled;
-use parrot_storage::artifacts::output_blobs::OutputPreview;
+use parrot_storage::artifacts::output_blobs::{
+    DEFAULT_PROCESS_SPILL_LIMIT_BYTES, OutputPreview, spill_limit_text,
+};
 use serde_json::Value as TemplateValue;
 
 use super::ProcessResult;
@@ -14,7 +16,7 @@ use super::filenames::HaikunatorNameGenerator;
 use parrot_domain::contracts::filenames::FilenameGenerator;
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 
-pub const MAX_OUTPUT_CHARACTERS: usize = 64 << 10;
+pub const MAX_OUTPUT_CHARACTERS: usize = DEFAULT_PROCESS_SPILL_LIMIT_BYTES;
 const NAME_ATTEMPTS: usize = 16;
 const PREVIEW_LINES: usize = 5;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -459,11 +461,12 @@ pub fn format_result(
     stdout: &str,
     stderr: &str,
     blob_path: Option<&Path>,
+    spill_limit_text: &str,
 ) -> String {
     let mut result = format_completion(exit_code, elapsed_milliseconds);
     if let Some(path) = blob_path {
         result.push_str(&format!(
-            "\nTool output exceeded 64 KiB and was saved to {}.",
+            "\nTool output exceeded {spill_limit_text} and was saved to {}.",
             path.display()
         ));
     } else {
@@ -478,8 +481,8 @@ pub fn format_result(
 
 /// Formats the agent-facing result text with the templated spill notice and
 /// preview. The completion line and non-spilled sections keep the raw text
-/// format; the spilled path renders through tool-result.spill-notice and the
-/// captured preview through tool-result.spill-preview.
+/// format; the spilled path renders through process-result.spill-notice and
+/// the captured preview through tool-result.spill-preview.
 pub fn format_result_with_templates(
     templates: &PromptTemplateCatalog,
     result: &ProcessResult,
@@ -489,8 +492,14 @@ pub fn format_result_with_templates(
         text.push('\n');
         text.push_str(&render(
             templates,
-            "tool-result.spill-notice",
-            &[("path", TemplateValue::from(path.display().to_string()))],
+            "process-result.spill-notice",
+            &[
+                (
+                    "limit",
+                    TemplateValue::from(spill_limit_text(result.spill_limit)),
+                ),
+                ("path", TemplateValue::from(path.display().to_string())),
+            ],
         )?);
         if let Some(preview) = &result.spill_preview {
             text.push('\n');
@@ -963,10 +972,11 @@ pub(crate) mod tests {
                 tail: "last".into(),
                 omitted: 3,
             }),
+            spill_limit: MAX_OUTPUT_CHARACTERS,
         };
         assert_eq!(
             format_result_with_templates(&templates, &spilled).unwrap(),
-            "Process exited with code 0 after 1.23s\nTool output exceeded 64 KiB and was saved to /fixture/blob.dat.\nPreview of saved output:\nfirst\n<3 lines omitted to save context>\nlast"
+            "Process exited with code 0 after 1.23s\nTool output exceeded 2 KiB and was saved to /fixture/blob.dat.\nPreview of saved output:\nfirst\n<3 lines omitted to save context>\nlast"
         );
         let wide = ProcessResult {
             spill_preview: None,
@@ -974,7 +984,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             format_result_with_templates(&templates, &wide).unwrap(),
-            "Process exited with code 0 after 1.23s\nTool output exceeded 64 KiB and was saved to /fixture/blob.dat."
+            "Process exited with code 0 after 1.23s\nTool output exceeded 2 KiB and was saved to /fixture/blob.dat."
         );
         let plain = ProcessResult {
             exit_code: 2,
@@ -983,6 +993,7 @@ pub(crate) mod tests {
             stderr: "failure".into(),
             blob_path: None,
             spill_preview: None,
+            spill_limit: MAX_OUTPUT_CHARACTERS,
         };
         assert_eq!(
             format_result_with_templates(&templates, &plain).unwrap(),
@@ -997,16 +1008,16 @@ pub(crate) mod tests {
             "Process exited with code 7 after 0.00s"
         );
         assert_eq!(
-            format_result(0, 320, "", "", None),
+            format_result(0, 320, "", "", None, "2 KiB"),
             "Process exited with code 0 after 0.32s"
         );
         assert_eq!(
-            format_result(2, 1234, "", "failure", None),
+            format_result(2, 1234, "", "failure", None, "2 KiB"),
             "Process exited with code 2 after 1.23s\n[stderr]\nfailure"
         );
         assert_eq!(
-            format_result(0, 0, "hidden", "hidden", Some(Path::new("blob"))),
-            "Process exited with code 0 after 0.00s\nTool output exceeded 64 KiB and was saved to blob."
+            format_result(0, 0, "hidden", "hidden", Some(Path::new("blob")), "2 KiB"),
+            "Process exited with code 0 after 0.00s\nTool output exceeded 2 KiB and was saved to blob."
         );
     }
 }

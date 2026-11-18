@@ -197,6 +197,14 @@ agent_ask_timeout_ms: 300000
 # Milliseconds exec_command waits before yielding when run_async is false or omitted.
 exec_command_yield_after_ms: 10000
 
+# Byte limit above which a rendered tool result spills to a saved file with a
+# first/last-lines preview instead of staying inline.
+tool_output_spill_limit_bytes: 65536
+
+# Byte limit above which inline process output spills to a saved file with a
+# first/last-lines preview instead of staying inline.
+process_output_spill_limit_bytes: 2048
+
 # Number of previous steps that must repeat exactly, with no user steer and no
 # wait or monitor tool call, before core steers a stall notice into the turn.
 stall_steps: 2

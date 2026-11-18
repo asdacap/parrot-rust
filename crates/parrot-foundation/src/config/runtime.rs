@@ -218,6 +218,10 @@ pub struct RuntimeSettings {
     pub user_input_timeout_ms: i32,
     pub agent_ask_timeout_ms: i32,
     pub exec_command_yield_after_ms: i32,
+    /// Rendered tool result text above this byte count spills to a blob file.
+    pub tool_output_spill_limit_bytes: i32,
+    /// Inline process output above this byte count spills to a blob file.
+    pub process_output_spill_limit_bytes: i32,
     /// Number of previous steps that must repeat exactly, with no user steer and
     /// no wait or monitor tool call, before core steers a stall notice.
     pub stall_steps: i32,
@@ -270,6 +274,25 @@ impl RuntimeSettings {
             "exec_command_yield_after_ms",
             "exec_command_yield_after_ms",
         )?;
+        let tool_output_spill_limit_bytes = if root.get("tool_output_spill_limit_bytes").is_some() {
+            positive_integer(
+                root,
+                "tool_output_spill_limit_bytes",
+                "tool_output_spill_limit_bytes",
+            )?
+        } else {
+            64 * 1024
+        };
+        let process_output_spill_limit_bytes =
+            if root.get("process_output_spill_limit_bytes").is_some() {
+                positive_integer(
+                    root,
+                    "process_output_spill_limit_bytes",
+                    "process_output_spill_limit_bytes",
+                )?
+            } else {
+                2 * 1024
+            };
         let stall_steps = if root.get("stall_steps").is_some() {
             positive_integer(root, "stall_steps", "stall_steps")?
         } else {
@@ -314,6 +337,8 @@ impl RuntimeSettings {
             user_input_timeout_ms,
             agent_ask_timeout_ms,
             exec_command_yield_after_ms,
+            tool_output_spill_limit_bytes,
+            process_output_spill_limit_bytes,
             request_limits,
             web_fetch_allow_private,
             image_upload,
@@ -379,6 +404,8 @@ impl RuntimeSettings {
             "agentLimits":{"disableRecursionLimit":self.agent_limits.disable_recursion_limit},
             "liveBufferRows":self.live_buffer_rows,"userInputTimeoutMs":self.user_input_timeout_ms,
             "execCommandYieldAfterMs":self.exec_command_yield_after_ms,
+            "toolOutputSpillLimitBytes":self.tool_output_spill_limit_bytes,
+            "processOutputSpillLimitBytes":self.process_output_spill_limit_bytes,
             "requestLimits":{"imageBytesPerToolCycle":self.request_limits.image_bytes_per_tool_cycle,"imageBytesPerRead":self.request_limits.image_bytes_per_read,"providerRequestBytes":self.request_limits.provider_request_bytes},
             "webFetch":{"allowPrivate":self.web_fetch_allow_private},"imageUpload":upload,
             "mcp":mcp,

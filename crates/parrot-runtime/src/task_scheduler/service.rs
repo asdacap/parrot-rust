@@ -49,7 +49,6 @@ use parrot_domain::{
     },
 };
 use parrot_storage::{
-    artifacts::output_blobs::is_tool_output_oversized,
     conversation::{HistoryForkBoundary, HistoryForkSelection},
     events::{ConversationOrigin, ConversationPart, NeverCancelled},
 };
@@ -1646,7 +1645,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
         wake: bool,
     ) -> ChildResult<&'a mut TaskNotificationSnapshot> {
         let text = render(&self.config.configuration, template, values)?;
-        let text = if is_tool_output_oversized(&text) {
+        let text = if self.config.output_blobs.is_oversized(&text) {
             let path = self
                 .config
                 .output_blobs
@@ -1655,6 +1654,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
             crate::tool_settlement::render_spill_notice(
                 &self.config.configuration.templates,
                 &path,
+                &self.config.output_blobs.tool_spill_limit_text(),
                 &text,
             )
             .map_err(|error| ChildError::failure("argument", error))?

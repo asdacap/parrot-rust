@@ -4,7 +4,6 @@ use parrot_domain::{
     protocol::messages::parrot::{Delivery, InputAdmitted, MessageContentPart, ToolStarted},
 };
 use parrot_storage::{
-    artifacts::output_blobs::is_tool_output_oversized,
     conversation::ConversationOrigin,
     diagnostics::{DiagnosticFailure, DiagnosticSeverity, FailureKind},
     events::ConversationPart,
@@ -160,7 +159,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                             FailureKind::Argument,
                         ))
                     })?;
-                if is_tool_output_oversized(&text) {
+                if self.config.output_blobs.is_oversized(&text) {
                     let store = self.config.output_blobs.clone();
                     let blob_source = text.clone();
                     let path = tokio::task::spawn_blocking(move || {
@@ -179,6 +178,7 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                     text = crate::tool_settlement::render_spill_notice(
                         &self.config.templates,
                         &path,
+                        &self.config.output_blobs.tool_spill_limit_text(),
                         &text,
                     )
                     .map_err(|error| {

@@ -9,14 +9,13 @@ use super::LaunchSpec;
 use super::filenames::HaikunatorNameGenerator;
 use super::native::NativeProcess;
 use super::output::{
-    self, MAX_OUTPUT_CHARACTERS, PipeProcessOutputFiles, ProcessOutput, ProcessOutputBlobStore,
-    Utf8Decoder, Utf16Writer,
+    self, PipeProcessOutputFiles, ProcessOutput, ProcessOutputBlobStore, Utf8Decoder, Utf16Writer,
 };
 use super::pipe_decoder::PipeDecoder;
 use super::transcript::PtyTranscript;
 use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_domain::contracts::filenames::FilenameGenerator;
-use parrot_storage::artifacts::output_blobs::OutputPreview;
+use parrot_storage::artifacts::output_blobs::{OutputPreview, spill_limit_text};
 use std::io;
 use std::os::fd::AsRawFd;
 use std::os::unix::process::ExitStatusExt;
@@ -37,6 +36,7 @@ pub struct ProcessResult {
     pub stderr: String,
     pub blob_path: Option<PathBuf>,
     pub spill_preview: Option<OutputPreview>,
+    pub spill_limit: usize,
 }
 impl ProcessResult {
     pub fn format(&self) -> String {
@@ -46,6 +46,7 @@ impl ProcessResult {
             &self.stdout,
             &self.stderr,
             self.blob_path.as_deref(),
+            &spill_limit_text(self.spill_limit),
         )
     }
 }
@@ -117,6 +118,7 @@ struct Shared {
     drains_cancelled: AtomicBool,
     failure: Mutex<Option<Failure>>,
     exited: Mutex<Option<(ExitStatus, i64)>>,
+    spill_limit: usize,
 }
 impl Shared {
     fn stop(&self) {
@@ -208,9 +210,10 @@ impl ShellProcessExecution {
         spec: &LaunchSpec,
         blob_directory: impl AsRef<Path>,
         cleanup_path: impl Into<PathBuf>,
+        spill_limit: usize,
     ) -> io::Result<Self> {
         let mut owned_path = CleanupPath(Some(cleanup_path.into()));
-        match Self::start_pipe(spec, blob_directory) {
+        match Self::start_pipe(spec, blob_directory, spill_limit) {
             Ok(execution) => {
                 recover(&execution.cleanup_path).0 = owned_path.0.take();
                 Ok(execution)
@@ -254,7 +257,11 @@ impl ShellProcessExecution {
         Ok(())
     }
 
-    pub fn start_pipe(spec: &LaunchSpec, blob_directory: impl AsRef<Path>) -> io::Result<Self> {
+    pub fn start_pipe(
+        spec: &LaunchSpec,
+        blob_directory: impl AsRef<Path>,
+        spill_limit: usize,
+    ) -> io::Result<Self> {
         let mut files = PipeProcessOutputFiles::open(blob_directory.as_ref())
             .map_err(|error| blob_error(blob_directory.as_ref(), error))?;
         let started = Instant::now();
@@ -266,7 +273,13 @@ impl ShellProcessExecution {
             }
         };
         let files = Arc::new(Mutex::new(files));
-        let execution = Self::new(native, blob_directory.as_ref(), Some(files.clone()), None);
+        let execution = Self::new(
+            native,
+            blob_directory.as_ref(),
+            Some(files.clone()),
+            None,
+            spill_limit,
+        );
         let startup = (|| {
             for stdout in [true, false] {
                 let reader = {
@@ -298,15 +311,17 @@ impl ShellProcessExecution {
         blob_directory: impl AsRef<Path>,
         rows: u16,
         columns: u16,
+        spill_limit: usize,
     ) -> io::Result<Self> {
         let started = Instant::now();
         let native = NativeProcess::start_pty(spec, helper, rows, columns).await?;
-        let transcript = Arc::new(PtyTranscript::new(blob_directory.as_ref()));
+        let transcript = Arc::new(PtyTranscript::new(blob_directory.as_ref(), spill_limit));
         let execution = Self::new(
             native,
             blob_directory.as_ref(),
             None,
             Some(transcript.clone()),
+            spill_limit,
         );
         let (reader, stderr) = {
             let mut native = recover(&execution.shared.native);
@@ -334,6 +349,7 @@ impl ShellProcessExecution {
         directory: &Path,
         files: Option<Arc<Mutex<PipeProcessOutputFiles>>>,
         transcript: Option<Arc<PtyTranscript>>,
+        spill_limit: usize,
     ) -> Self {
         let id = native.id();
         Self {
@@ -343,6 +359,7 @@ impl ShellProcessExecution {
                 drains_cancelled: AtomicBool::new(false),
                 failure: Mutex::new(None),
                 exited: Mutex::new(None),
+                spill_limit,
             }),
             state: Arc::new(Mutex::new(State::default())),
             supervisor: Mutex::new(None),
@@ -523,6 +540,7 @@ impl ShellProcessExecution {
             &stdout,
             &ProcessOutput::inline(""),
             None,
+            self.shared.spill_limit,
         );
         let _ = stdout.delete_temporary_file();
         result.map(|result| (cursor, result))
@@ -714,6 +732,7 @@ fn finish(
                 &stdout,
                 &ProcessOutput::inline(""),
                 None,
+                shared.spill_limit,
             )
         } else {
             if actual.len() != 2 {
@@ -726,6 +745,7 @@ fn finish(
                 &actual[0],
                 &actual[1],
                 Some(&shared.cancelled),
+                shared.spill_limit,
             )
         }
     })();
@@ -745,6 +765,7 @@ fn format_result(
     stdout: &ProcessOutput,
     stderr: &ProcessOutput,
     cancellation: Option<&AtomicBool>,
+    spill_limit: usize,
 ) -> io::Result<ProcessResult> {
     let mut result = ProcessResult {
         exit_code: exit,
@@ -753,8 +774,9 @@ fn format_result(
         stderr: stderr.text(),
         blob_path: None,
         spill_preview: None,
+        spill_limit,
     };
-    if stdout.spilled() || stderr.spilled() || result.format().len() > MAX_OUTPUT_CHARACTERS {
+    if stdout.spilled() || stderr.spilled() || result.format().len() > spill_limit {
         let names = HaikunatorNameGenerator::default();
         let (path, spill_preview) = ProcessOutputBlobStore::new(directory)
             .persist_with(
@@ -937,7 +959,7 @@ fn drain_pipe(
         }
         if let Some(spill) = &mut spill {
             spill.append(&units)?;
-        } else if inline.len() + units.len() <= MAX_OUTPUT_CHARACTERS {
+        } else if inline.len() + units.len() <= shared.spill_limit {
             inline.extend_from_slice(&units);
         } else {
             // Source Spill maintains an independent private copy, not a reread
@@ -1028,7 +1050,7 @@ fn drain_diagnostics(
         let units = decoder.append(bytes, false);
         private.append(&units)?;
         if !spilled {
-            if inline.len() + units.len() <= MAX_OUTPUT_CHARACTERS {
+            if inline.len() + units.len() <= shared.spill_limit {
                 inline.extend_from_slice(&units);
             } else {
                 spilled = true;
@@ -1040,7 +1062,7 @@ fn drain_diagnostics(
     let units = decoder.append(&[], true);
     private.append(&units)?;
     if !spilled {
-        if inline.len() + units.len() <= MAX_OUTPUT_CHARACTERS {
+        if inline.len() + units.len() <= shared.spill_limit {
             inline.extend_from_slice(&units);
         } else {
             spilled = true;

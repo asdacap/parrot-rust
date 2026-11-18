@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::common::{Cancelled, Names, NeverCancelled, TempDir};
 use parrot_storage::artifacts::output_blobs::{
-    OutputPreview, ToolOutputBlobStore, is_tool_output_oversized, tool_output_preview,
+    OutputPreview, ToolOutputBlobStore, spill_limit_text, tool_output_preview,
 };
 
 fn names(values: &[&str]) -> Arc<Names> {
@@ -13,8 +13,6 @@ fn names(values: &[&str]) -> Arc<Names> {
 fn tool_output_budget_counts_utf8_bytes_and_collision_link_text_is_exact() {
     let exact = format!("{}😀", "a".repeat(64 * 1024 - 4));
     assert_eq!(exact.len(), 64 * 1024);
-    assert!(!is_tool_output_oversized(&exact));
-    assert!(is_tool_output_oversized(&(exact.clone() + "é")));
 
     let root_dir = TempDir::new("tool-output");
     let root = root_dir.root();
@@ -28,6 +26,8 @@ fn tool_output_budget_counts_utf8_bytes_and_collision_link_text_is_exact() {
         names(&["quiet-tree-arse.dat", "bold-river-arse.dat"]),
     )
     .unwrap();
+    assert!(!store.is_oversized(&exact));
+    assert!(store.is_oversized(&(exact.clone() + "é")));
     let output = "large 😀 output";
     let path_reference = store.persist(output, &NeverCancelled).unwrap();
     let path = directory.join("bold-river-arse.dat");
@@ -35,6 +35,53 @@ fn tool_output_budget_counts_utf8_bytes_and_collision_link_text_is_exact() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), output);
     assert_eq!(path_reference, path.display().to_string());
     assert!(path.is_absolute());
+}
+
+#[test]
+fn configured_spill_limits_drive_the_oversized_check_and_notice_prefixes() {
+    assert_eq!(spill_limit_text(64 * 1024), "64 KiB");
+    assert_eq!(spill_limit_text(2 * 1024), "2 KiB");
+    assert_eq!(spill_limit_text(4096), "4 KiB");
+    assert_eq!(spill_limit_text(3000), "3000 B");
+
+    let root_dir = TempDir::new("tool-output-limit");
+    let root = root_dir.root();
+    let store =
+        ToolOutputBlobStore::for_session(&root, "agent/blobs", names(&["bold-river-arse.dat"]))
+            .unwrap()
+            .with_path_variables(std::collections::BTreeMap::from([(
+                "AGENT_DIR".into(),
+                root.path().display().to_string(),
+            )]));
+    let oversized = "x".repeat(4 * 1024 + 1);
+    assert!(!store.is_oversized(&oversized));
+    let custom = store.with_spill_limits(4 * 1024, 8 * 1024);
+    assert!(custom.is_oversized(&oversized));
+    assert_eq!(custom.tool_spill_limit_text(), "4 KiB");
+
+    // Both notice prefixes derive from the configured limits, and a notice
+    // written with any other limit is left untouched.
+    let tool_notice = format!(
+        "Process exited with code 0 after 0.01s\nTool output exceeded {} and was saved to {}/agent/blobs/bold-river-arse.dat.",
+        spill_limit_text(4 * 1024),
+        root.path().display(),
+    );
+    let process_notice =
+        tool_notice.replace(&spill_limit_text(4 * 1024), &spill_limit_text(8 * 1024));
+    let foreign_notice = tool_notice.replace(&spill_limit_text(4 * 1024), "7 KiB");
+    let expected = "Process exited with code 0 after 0.01s\nTool output exceeded {} and was saved to $AGENT_DIR/agent/blobs/bold-river-arse.dat.";
+    assert_eq!(
+        custom.substitute_process_notice(&tool_notice),
+        expected.replace("{}", "4 KiB")
+    );
+    assert_eq!(
+        custom.substitute_process_notice(&process_notice),
+        expected.replace("{}", "8 KiB")
+    );
+    assert_eq!(
+        custom.substitute_process_notice(&foreign_notice),
+        foreign_notice
+    );
 }
 
 #[test]
@@ -213,7 +260,10 @@ fn spill_notice_and_preview_templates_render_the_documented_text() {
         catalog
             .render(
                 "tool-result.spill-notice",
-                &[("path".to_owned(), "/x/output.dat".into())],
+                &[
+                    ("path".to_owned(), "/x/output.dat".into()),
+                    ("limit".to_owned(), "64 KiB".into()),
+                ],
                 &NeverCancelled
             )
             .unwrap(),

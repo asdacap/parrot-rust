@@ -7,8 +7,8 @@ use super::{
 };
 use crate::process::execution::locator::ExecutableLocator;
 use crate::process::execution::{
-    ProcessResources, ProcessResult, ProcessSandbox, ProcessStartRequest, ShellProcessExecution,
-    TerminalMode,
+    MAX_OUTPUT_CHARACTERS, ProcessResources, ProcessResult, ProcessSandbox, ProcessStartRequest,
+    ShellProcessExecution, TerminalMode,
 };
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_foundation::paths::AgentScratchDirectory;
@@ -46,6 +46,7 @@ impl Fixture {
             terminal_mode,
             pty_helper: Some(self.0.join("missing-helper")),
             cancellation: None,
+            output_spill_limit: MAX_OUTPUT_CHARACTERS,
         }
     }
 

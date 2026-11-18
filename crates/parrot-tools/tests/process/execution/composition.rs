@@ -1,5 +1,6 @@
 //! Source-shaped independent ShellProcessExecution predicates and lifetime regressions.
 use super::*;
+use crate::process::execution::output::MAX_OUTPUT_CHARACTERS;
 use std::fs;
 #[cfg(target_os = "linux")]
 use std::process::{Child, Command, Stdio};
@@ -35,6 +36,29 @@ fn shell(script: &str) -> LaunchSpec {
     let mut spec = LaunchSpec::new("/bin/sh");
     spec.args = vec!["-c".into(), script.into()];
     spec
+}
+fn start_pipe(
+    spec: &LaunchSpec,
+    blob_directory: impl AsRef<Path>,
+) -> io::Result<ShellProcessExecution> {
+    ShellProcessExecution::start_pipe(spec, blob_directory, MAX_OUTPUT_CHARACTERS)
+}
+async fn start_pty(
+    spec: &LaunchSpec,
+    helper: &Path,
+    blob_directory: impl AsRef<Path>,
+    rows: u16,
+    columns: u16,
+) -> io::Result<ShellProcessExecution> {
+    ShellProcessExecution::start_pty(
+        spec,
+        helper,
+        blob_directory,
+        rows,
+        columns,
+        MAX_OUTPUT_CHARACTERS,
+    )
+    .await
 }
 async fn until(mut ready: impl FnMut() -> bool) {
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -85,7 +109,7 @@ fn fixture(name: &str) -> PathBuf {
 async fn pipe_eager_live_files_cached_result_and_concurrent_waiters() {
     let directory = Directory::new();
     let execution = Arc::new(
-        ShellProcessExecution::start_pipe(
+        start_pipe(
             &shell("printf live; sleep 0.1; printf end; printf error >&2; exit 7"),
             &directory.0,
         )
@@ -156,7 +180,7 @@ async fn pipe_bom_decodes_independent_stdout_and_stderr_into_live_files() {
             quoted(&stdout),
             quoted(&stderr)
         );
-        let execution = ShellProcessExecution::start_pipe(&shell(&script), &directory.0).unwrap();
+        let execution = start_pipe(&shell(&script), &directory.0).unwrap();
         let actual = result(&execution).await;
         assert_eq!(actual.exit_code, 0);
         assert_eq!(actual.stdout, "A😀", "{stdout:?}");
@@ -178,7 +202,7 @@ async fn pipe_bom_decodes_independent_stdout_and_stderr_into_live_files() {
 #[tokio::test]
 async fn pipe_bom_spill_retains_decoded_text_and_character_limits() {
     let directory = Directory::new();
-    let execution = ShellProcessExecution::start_pipe(
+    let execution = start_pipe(
         &shell("printf '\\377\\376'; awk 'BEGIN{for(i=0;i<70000;i++)printf \"A%c\",0}'"),
         &directory.0,
     )
@@ -205,7 +229,7 @@ async fn pipe_bom_spill_retains_decoded_text_and_character_limits() {
 #[tokio::test]
 async fn pipe_bom_cancellation_flushes_partial_units_after_live_output() {
     let directory = Directory::new();
-    let execution = ShellProcessExecution::start_pipe(
+    let execution = start_pipe(
         &shell("printf '\\377\\376A\\000\\000\\330'; exec sleep 30"),
         &directory.0,
     )
@@ -226,7 +250,7 @@ async fn pipe_bom_cancellation_flushes_partial_units_after_live_output() {
 #[test]
 fn pipe_bom_detection_does_not_change_pty_utf8_transcripts() {
     let directory = Directory::new();
-    let transcript = PtyTranscript::new(&directory.0);
+    let transcript = PtyTranscript::new(&directory.0, MAX_OUTPUT_CHARACTERS);
     transcript.append(b"\xef\xbb\xbfA").unwrap();
     transcript.complete().unwrap();
     assert_eq!(
@@ -254,7 +278,7 @@ async fn original_oversized_and_combined_utf8_results_spill_without_loss() {
         ),
     ] {
         let directory = Directory::new();
-        let execution = ShellProcessExecution::start_pipe(&shell(script), &directory.0).unwrap();
+        let execution = start_pipe(&shell(script), &directory.0).unwrap();
         let actual = result(&execution).await;
         assert_eq!(actual.exit_code, exit);
         assert!(actual.stdout.is_empty() && actual.stderr.is_empty());
@@ -287,7 +311,7 @@ async fn original_oversized_and_combined_utf8_results_spill_without_loss() {
 async fn private_spill_is_independent_of_overwritten_or_unlinked_live_output() {
     for unlink in [false, true] {
         let directory = Directory::new();
-        let execution = ShellProcessExecution::start_pipe(
+        let execution = start_pipe(
             &shell("awk 'BEGIN{for(i=0;i<70000;i++)printf \"o\"}'; kill -STOP $$; printf suffix"),
             &directory.0,
         )
@@ -328,7 +352,7 @@ async fn private_spill_is_independent_of_overwritten_or_unlinked_live_output() {
 async fn simultaneous_pressure_and_utf8_stream_boundaries_are_preserved() {
     let directory = Directory::new();
     let script = "awk 'BEGIN{for(i=0;i<20000;i++)printf \"界😀\"}' & awk 'BEGIN{for(i=0;i<20000;i++)printf \"e\"}' >&2 & wait";
-    let execution = ShellProcessExecution::start_pipe(&shell(script), &directory.0).unwrap();
+    let execution = start_pipe(&shell(script), &directory.0).unwrap();
     let actual = result(&execution).await;
     assert_eq!(actual.exit_code, 0);
     let blob = fs::read_to_string(actual.blob_path.as_ref().unwrap()).unwrap();
@@ -346,7 +370,7 @@ async fn simultaneous_pressure_and_utf8_stream_boundaries_are_preserved() {
 #[tokio::test]
 async fn completion_progresses_without_observers_and_does_not_time_observer_delay() {
     let directory = Directory::new();
-    let execution = ShellProcessExecution::start_pipe(&shell("printf done"), &directory.0).unwrap();
+    let execution = start_pipe(&shell("printf done"), &directory.0).unwrap();
     until(|| recover(&execution.shared.exited).is_some()).await;
     let elapsed = recover(&execution.shared.exited).unwrap().1;
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -364,9 +388,7 @@ async fn completion_progresses_without_observers_and_does_not_time_observer_dela
 
 #[cfg(target_os = "linux")]
 async fn inherited_pipe_case(directory: &Directory) -> (ShellProcessExecution, Holder) {
-    let execution =
-        ShellProcessExecution::start_pipe(&shell("kill -STOP $$; printf done"), &directory.0)
-            .unwrap();
+    let execution = start_pipe(&shell("kill -STOP $$; printf done"), &directory.0).unwrap();
     until(|| {
         fs::read_to_string(format!("/proc/{}/status", execution.id())).is_ok_and(|text| {
             text.lines()
@@ -448,7 +470,7 @@ async fn cancel_and_drop_join_drains_and_settle_escaped_descendants() {
         let mut spec =
             shell("setsid /bin/sh -c 'printf \"%s\\n\" \"$$\" > ready; exec sleep 20' & wait");
         spec.current_dir = Some(directory.0.clone());
-        let execution = ShellProcessExecution::start_pipe(&spec, &directory.0).unwrap();
+        let execution = start_pipe(&spec, &directory.0).unwrap();
         let mut descendant = 0;
         until(|| {
             descendant = fs::read_to_string(&ready)
@@ -491,9 +513,7 @@ async fn cancel_and_drop_join_drains_and_settle_escaped_descendants() {
 #[tokio::test]
 async fn wait_observer_cancellation_does_not_detach_and_explicit_cancel_is_not_success() {
     let directory = Directory::new();
-    let execution =
-        ShellProcessExecution::start_pipe(&shell("printf ready; exec sleep 30"), &directory.0)
-            .unwrap();
+    let execution = start_pipe(&shell("printf ready; exec sleep 30"), &directory.0).unwrap();
     until(|| fs::read(execution.stdout_path().unwrap()).unwrap() == b"ready").await;
     assert!(
         tokio::time::timeout(Duration::from_millis(20), execution.wait())
@@ -534,7 +554,7 @@ async fn cancellation_preserves_payload_written_before_marker_in_live_output() {
             "kill -STOP $$; awk 'BEGIN{{for(i=0;i<{ascii};i++)printf \"t\"}}'; {suffix} printf written > '{}'; exec sleep 30",
             marker.display()
         );
-        let execution = ShellProcessExecution::start_pipe(&shell(&script), &directory.0).unwrap();
+        let execution = start_pipe(&shell(&script), &directory.0).unwrap();
         until(|| {
             fs::read_to_string(format!("/proc/{}/status", execution.id())).is_ok_and(|text| {
                 text.lines()
@@ -577,13 +597,7 @@ async fn cancellation_preserves_payload_written_before_marker_in_live_output() {
 async fn startup_failure_deletes_only_new_output_files() {
     let directory = Directory::new();
     fs::write(directory.0.join("prior"), "untouched").unwrap();
-    assert!(
-        ShellProcessExecution::start_pipe(
-            &LaunchSpec::new("/parrot-missing-executable"),
-            &directory.0
-        )
-        .is_err()
-    );
+    assert!(start_pipe(&LaunchSpec::new("/parrot-missing-executable"), &directory.0).is_err());
     let entries: Vec<_> = fs::read_dir(&directory.0)
         .unwrap()
         .map(|entry| entry.unwrap().file_name())
@@ -598,7 +612,7 @@ async fn startup_failure_deletes_only_new_output_files() {
 #[tokio::test]
 async fn actual_stream_failure_preserves_first_error_and_settles_other_work() {
     let directory = Directory::new();
-    let execution = ShellProcessExecution::start_pipe(
+    let execution = start_pipe(
         &shell("sleep 0.05; printf failure; exec sleep 30"),
         &directory.0,
     )
@@ -634,7 +648,7 @@ async fn faulted_blob_capture_retains_blob_fault_but_settlement_does_not_rethrow
         "while [ ! -f '{}' ]; do sleep 0.01; done; awk 'BEGIN{{for(i=0;i<1000000;i++)printf \"x\"}}'",
         marker.display()
     );
-    let execution = ShellProcessExecution::start_pipe(&shell(&script), &blob).unwrap();
+    let execution = start_pipe(&shell(&script), &blob).unwrap();
     fs::rename(&blob, directory.0.join("blob-moved")).unwrap();
     fs::write(&blob, "not a directory").unwrap();
     fs::write(marker, "produce").unwrap();
@@ -684,8 +698,7 @@ async fn faulted_blob_capture_retains_blob_fault_but_settlement_does_not_rethrow
 #[tokio::test]
 async fn poisoned_native_state_still_cancels_reaps_and_joins() {
     let directory = Directory::new();
-    let execution =
-        ShellProcessExecution::start_pipe(&shell("exec sleep 30"), &directory.0).unwrap();
+    let execution = start_pipe(&shell("exec sleep 30"), &directory.0).unwrap();
     let shared = execution.shared.clone();
     let poisoned = thread::spawn(move || {
         let _guard = shared.native.lock().unwrap();
@@ -705,8 +718,7 @@ async fn poisoned_native_state_still_cancels_reaps_and_joins() {
 #[tokio::test]
 async fn uncancelled_signal_exit_uses_source_unix_exit_code() {
     let directory = Directory::new();
-    let execution =
-        ShellProcessExecution::start_pipe(&shell("exec sleep 30"), &directory.0).unwrap();
+    let execution = start_pipe(&shell("exec sleep 30"), &directory.0).unwrap();
     execution.send_signal(libc::SIGTERM).unwrap();
     assert_eq!(result(&execution).await.exit_code, 128 + libc::SIGTERM);
 }
@@ -715,7 +727,7 @@ async fn uncancelled_signal_exit_uses_source_unix_exit_code() {
 #[tokio::test]
 async fn pty_interaction_raw_cursors_incremental_results_and_cleanup() {
     let directory = Directory::new();
-    let execution = ShellProcessExecution::start_pty(
+    let execution = start_pty(
         &shell("stty -echo; printf 'A界😀'; read value; stty size; printf '%s' \"$value\""),
         helper(),
         &directory.0,
@@ -748,7 +760,7 @@ async fn pty_interaction_raw_cursors_incremental_results_and_cleanup() {
 #[tokio::test]
 async fn pty_spill_and_incremental_suffix_preserve_borrowed_transcript_lifetime() {
     let directory = Directory::new();
-    let execution = ShellProcessExecution::start_pty(
+    let execution = start_pty(
         &shell("awk 'BEGIN{for(i=0;i<70000;i++)printf \"o\"}'"),
         helper(),
         &directory.0,
@@ -781,7 +793,7 @@ async fn pty_spill_and_incremental_suffix_preserve_borrowed_transcript_lifetime(
 #[tokio::test]
 async fn independent_transcript_cleanup_error_is_not_hidden_by_settlement() {
     let directory = Directory::new();
-    let execution = ShellProcessExecution::start_pty(
+    let execution = start_pty(
         &shell("awk 'BEGIN{for(i=0;i<70000;i++)printf \"o\"}'"),
         helper(),
         &directory.0,
@@ -815,7 +827,7 @@ async fn independent_transcript_cleanup_error_is_not_hidden_by_settlement() {
 #[tokio::test]
 async fn dropped_pty_writer_releases_gate_and_cancel_joins_terminal_drains() {
     let directory = Directory::new();
-    let execution = ShellProcessExecution::start_pty(
+    let execution = start_pty(
         &shell("stty -echo -icanon; printf ready; exec sleep 30"),
         helper(),
         &directory.0,
@@ -846,10 +858,9 @@ async fn dropped_pty_writer_releases_gate_and_cancel_joins_terminal_drains() {
 async fn pty_bridge_error_is_failure_and_startup_future_cancellation_reaps() {
     let directory = Directory::new();
     let helper_path = fixture("bridge-error-helper.sh");
-    let execution =
-        ShellProcessExecution::start_pty(&shell("exit 0"), &helper_path, &directory.0, 24, 80)
-            .await
-            .unwrap();
+    let execution = start_pty(&shell("exit 0"), &helper_path, &directory.0, 24, 80)
+        .await
+        .unwrap();
     assert!(
         execution
             .wait()
@@ -870,7 +881,7 @@ async fn pty_bridge_error_is_failure_and_startup_future_cancellation_reaps() {
     assert!(
         tokio::time::timeout(
             Duration::from_millis(50),
-            ShellProcessExecution::start_pty(&spec, &helper_path, &directory.0, 24, 80)
+            start_pty(&spec, &helper_path, &directory.0, 24, 80)
         )
         .await
         .is_err()

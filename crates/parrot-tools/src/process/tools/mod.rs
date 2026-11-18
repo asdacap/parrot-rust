@@ -28,6 +28,7 @@ use super::ownership::monitor_report::MonitorProcessReport;
 use super::ownership::owner::{ProcessAgent, ProcessStart, ShellProcessOwner};
 use crate::sandbox::linux::ReadOnlyExecCommandClassifier;
 use input::{ExecInput, InterruptInput, MonitorInput, WriteStdinInput};
+use parrot_storage::artifacts::output_blobs::spill_limit_text;
 
 /// Overrides only; the platform launcher owns the inherited environment and
 /// selected resources. Values are passed literally, never shell-expanded here.
@@ -501,6 +502,7 @@ impl ProcessReport for ExecCommandReport {
             &result.stdout,
             &summary,
             result.blob_path.as_deref(),
+            &spill_limit_text(result.spill_limit),
         ))
     }
 

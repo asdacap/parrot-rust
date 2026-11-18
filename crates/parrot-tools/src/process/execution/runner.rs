@@ -5,6 +5,7 @@
 //! is never retried through the explicit unsandboxed branch.
 
 use super::locator::ExecutableLocator;
+use super::output::MAX_OUTPUT_CHARACTERS;
 use super::{LaunchSpec, ShellProcessExecution};
 use crate::sandbox::linux::UnsandboxedProcessSandbox;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
@@ -73,6 +74,9 @@ pub struct ProcessStartRequest {
     pub pty_helper: Option<PathBuf>,
     /// Retained by the execution until settlement, not just observed by `start`.
     pub cancellation: Option<Arc<dyn Cancellation>>,
+    /// Inline process output budget in characters. Output above it spills to
+    /// the blob store. The launcher supplies the session's configured value.
+    pub output_spill_limit: usize,
 }
 
 impl ProcessStartRequest {
@@ -84,6 +88,7 @@ impl ProcessStartRequest {
             terminal_mode: TerminalMode::Pipe,
             pty_helper: None,
             cancellation: None,
+            output_spill_limit: MAX_OUTPUT_CHARACTERS,
         }
     }
 
@@ -206,8 +211,13 @@ pub async fn start_selected_launch(
                 spec,
                 &request.resources.blob_directory,
                 path,
+                request.output_spill_limit,
             ),
-            None => ShellProcessExecution::start_pipe(spec, &request.resources.blob_directory),
+            None => ShellProcessExecution::start_pipe(
+                spec,
+                &request.resources.blob_directory,
+                request.output_spill_limit,
+            ),
         },
         TerminalMode::PseudoTerminal => {
             if let Some(path) = cleanup_path {
@@ -235,6 +245,7 @@ pub async fn start_selected_launch(
                 &request.resources.blob_directory,
                 24,
                 80,
+                request.output_spill_limit,
             )
             .await
         }

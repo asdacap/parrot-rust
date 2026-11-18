@@ -2,6 +2,7 @@
 //! ShellProcessInteractionTests. The pass-through launcher below owns real OS
 //! processes but provides no sandbox, filesystem authorization, or T36 approval.
 
+use parrot_tools::process::execution::MAX_OUTPUT_CHARACTERS;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -95,6 +96,7 @@ struct PassThroughLauncher {
     workspace: PathBuf,
     blobs: PathBuf,
     environment: BTreeMap<String, String>,
+    spill_limit: usize,
     records: Mutex<Vec<LaunchRecord>>,
     executions: Mutex<Vec<Arc<ShellProcessExecution>>>,
     failure: Mutex<Option<(io::ErrorKind, String)>>,
@@ -137,13 +139,22 @@ impl CapturedProcessLauncher for PassThroughLauncher {
                 return Err(io::Error::new(kind, message));
             }
             let mut execution = match request.terminal_mode {
-                TerminalMode::Pipe => ShellProcessExecution::start_pipe(&spec, &self.blobs)?,
+                TerminalMode::Pipe => {
+                    ShellProcessExecution::start_pipe(&spec, &self.blobs, self.spill_limit)?
+                }
                 TerminalMode::PseudoTerminal => {
                     let helper = std::env::var_os("T57_PTY_HELPER")
                         .or_else(|| option_env!("PARROT_PTY_HELPER").map(Into::into))
                         .expect("PTY wrapper tests require the retained built helper; no pipe fallback is permitted");
-                    ShellProcessExecution::start_pty(&spec, Path::new(&helper), &self.blobs, 24, 80)
-                        .await?
+                    ShellProcessExecution::start_pty(
+                        &spec,
+                        Path::new(&helper),
+                        &self.blobs,
+                        24,
+                        80,
+                        self.spill_limit,
+                    )
+                    .await?
                 }
             };
             execution.bind_cancellation(lifetime)?;
@@ -327,6 +338,10 @@ impl Fixture {
     }
 
     fn with_configuration(content: &str) -> Self {
+        Self::with_configuration_and_spill_limit(content, MAX_OUTPUT_CHARACTERS)
+    }
+
+    fn with_configuration_and_spill_limit(content: &str, spill_limit: usize) -> Self {
         let directory = Directory::new();
         let environment =
             BTreeMap::from([("HOME".into(), directory.0.to_string_lossy().into_owned())]);
@@ -404,6 +419,7 @@ impl Fixture {
             workspace: directory.0.clone(),
             blobs,
             environment,
+            spill_limit,
             records: Mutex::new(Vec::new()),
             executions: Mutex::new(Vec::new()),
             failure: Mutex::new(None),
@@ -637,11 +653,20 @@ async fn real_completion_environment_and_owned_security_capture_reach_the_launch
     let inherited = fixture
         .exec(json!({"command":"printf '%s' \"$PATH\""}))
         .await;
-    completed(
-        &inherited.text,
-        0,
-        &format!("s\n[stdout]\n{}", std::env::var("PATH").unwrap()),
+    // The inherited PATH exceeds the 2 KiB inline limit in this environment,
+    // so the launcher capture is verified in the spill blob instead.
+    assert!(
+        inherited
+            .text
+            .starts_with("Process exited with code 0 after ")
     );
+    let notice = "\nTool output exceeded 2 KiB and was saved to ";
+    let (_, path) = inherited
+        .text
+        .split_once(notice)
+        .expect("inherited PATH output spills");
+    let durable = fs::read_to_string(Path::new(path.strip_suffix('.').unwrap())).unwrap();
+    assert!(durable.ends_with(&format!("\n[stdout]\n{}", std::env::var("PATH").unwrap())));
     let command =
         "printf '<%s>' \"$WORKDIR\" \"${SCRATCH_DIR}\" \"$AGENT_SCRATCH_DIR\" \"${AGENT_DIR}\"";
     let expected = ["WORKDIR", "SCRATCH_DIR", "AGENT_SCRATCH_DIR", "AGENT_DIR"]
@@ -879,7 +904,7 @@ async fn exec_stderr_summary_preserves_combined_output_spill() {
         &result.text,
         0,
         &format!(
-            "s\nTool output exceeded 64 KiB and was saved to {}.",
+            "s\nTool output exceeded 2 KiB and was saved to {}.",
             path.display()
         ),
     );
@@ -1570,7 +1595,7 @@ async fn oversized_exec_output_is_really_spilled_into_the_fixture_blob_directory
         .exec(json!({"command":"for ((i=0;i<70000;i++)); do printf x; done"}))
         .await;
     assert!(result.text.starts_with("Process exited with code 0 after "));
-    let notice = "\nTool output exceeded 64 KiB and was saved to ";
+    let notice = "\nTool output exceeded 2 KiB and was saved to ";
     let (_, path) = result
         .text
         .split_once(notice)
@@ -1597,7 +1622,7 @@ async fn multiline_exec_spill_renders_the_templated_preview() {
     assert!(
         result
             .text
-            .contains("\nTool output exceeded 64 KiB and was saved to ")
+            .contains("\nTool output exceeded 2 KiB and was saved to ")
     );
     let preview = result
         .text
@@ -1608,6 +1633,32 @@ async fn multiline_exec_spill_renders_the_templated_preview() {
                     <69990 lines omitted to save context>\n\
                     line-69995\nline-69996\nline-69997\nline-69998\nline-69999";
     assert_eq!(preview, expected);
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn configured_process_spill_limit_drives_the_boundary() {
+    let fixture = Fixture::with_configuration_and_spill_limit("", 100);
+    let spilled = fixture
+        .exec(json!({"command":"printf '%032d' 0; printf '%032d' 0; printf '%032d' 0; printf '%032d' 0"}))
+        .await;
+    assert!(
+        spilled
+            .text
+            .starts_with("Process exited with code 0 after ")
+    );
+    let (_, tail) = spilled
+        .text
+        .split_once("\nTool output exceeded 100 B and was saved to ")
+        .expect("custom configured limit must spill and render its own limit text");
+    let path = Path::new(tail.lines().next().unwrap().strip_suffix('.').unwrap());
+    assert!(spilled.text.contains("Preview of saved output:"));
+    let output = "00000000000000000000000000000000".repeat(4);
+    let durable = fs::read_to_string(path).unwrap();
+    assert!(durable.starts_with("Process exited with code 0 after "));
+    assert!(durable.ends_with(&format!("\n[stdout]\n{output}")));
+    let inline = fixture.exec(json!({"command":"printf tiny"})).await;
+    completed(&inline.text, 0, "s\n[stdout]\ntiny");
     fixture.finish().await;
 }
 

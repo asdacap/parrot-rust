@@ -3,7 +3,7 @@ use super::*;
 use parrot_domain::protocol::messages::parrot::{Delivery, InputSource};
 use parrot_domain::values::identifiers::Identifier;
 
-use crate::process::execution::{LaunchSpec, ShellProcessExecution};
+use crate::process::execution::{LaunchSpec, MAX_OUTPUT_CHARACTERS, ShellProcessExecution};
 use crate::process::ownership::managed::{
     CompletionMessage, CompletionSink, ProcessDiagnostic, ProcessDiagnostics,
 };
@@ -144,7 +144,11 @@ async fn actual_owner_monitor_blocks_turn_until_terminal_delivery() {
             )),
             move |_| {
                 Box::pin(async move {
-                    let execution = ShellProcessExecution::start_pipe(&spec, blob_directory)?;
+                    let execution = ShellProcessExecution::start_pipe(
+                        &spec,
+                        blob_directory,
+                        MAX_OUTPUT_CHARACTERS,
+                    )?;
                     Ok(Arc::new(execution) as Arc<dyn Execution>)
                 })
             },

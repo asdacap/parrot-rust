@@ -13,6 +13,7 @@ pub mod filenames;
 pub mod locator;
 pub mod native;
 pub mod output;
+pub use output::MAX_OUTPUT_CHARACTERS;
 mod pipe_decoder;
 mod probe;
 pub use probe::probe_sandbox_read;

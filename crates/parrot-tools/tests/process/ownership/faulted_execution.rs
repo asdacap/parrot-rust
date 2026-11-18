@@ -7,7 +7,7 @@ use std::time::Duration;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_domain::values::identifiers::Identifier;
 
-use crate::process::execution::{LaunchSpec, ShellProcessExecution};
+use crate::process::execution::{LaunchSpec, MAX_OUTPUT_CHARACTERS, ShellProcessExecution};
 use crate::process::ownership::execution::{Execution, NeverCancelled};
 use crate::process::ownership::managed::{
     CompletionMessage, CompletionReport, CompletionSink, ProcessDiagnostic, ProcessDiagnostics,
@@ -69,10 +69,11 @@ async fn original_blob_directory_fault_keeps_real_error_source_and_elapsedless_t
     let claimed = owner
         .start(input, Arc::new(CompletionReport), move |_| {
             Box::pin(async move {
-                Ok(
-                    Arc::new(ShellProcessExecution::start_pipe(&spec, output_directory)?)
-                        as Arc<dyn Execution>,
-                )
+                Ok(Arc::new(ShellProcessExecution::start_pipe(
+                    &spec,
+                    output_directory,
+                    MAX_OUTPUT_CHARACTERS,
+                )?) as Arc<dyn Execution>)
             })
         })
         .await

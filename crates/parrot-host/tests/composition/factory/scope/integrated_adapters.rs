@@ -505,6 +505,7 @@ impl NaturalExecution {
             stderr: String::new(),
             blob_path: self.blob_path.clone(),
             spill_preview: self.spill_preview.clone(),
+            spill_limit: 2048,
         }
     }
 }
@@ -716,7 +717,7 @@ async fn background_process_completion_uses_agent_variable_for_saved_output() {
     .await;
     assert_eq!(
         completion,
-        "Shell process 'integrated-checks' completed.\nProcess exited with code 0 after 0.00s\nTool output exceeded 64 KiB and was saved to $AGENT_DIR/blobs/integrated-checks.dat.\nPreview of saved output:\nsaved first\n<2 lines omitted to save context>\nsaved last"
+        "Shell process 'integrated-checks' completed.\nProcess exited with code 0 after 0.00s\nTool output exceeded 2 KiB and was saved to $AGENT_DIR/blobs/integrated-checks.dat.\nPreview of saved output:\nsaved first\n<2 lines omitted to save context>\nsaved last"
     );
     assert_eq!(
         std::fs::read_to_string(path).unwrap(),

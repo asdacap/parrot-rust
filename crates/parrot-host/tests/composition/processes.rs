@@ -88,6 +88,7 @@ impl ControlledExecution {
             stderr: String::new(),
             blob_path: None,
             spill_preview: None,
+            spill_limit: 2048,
         }
     }
 }

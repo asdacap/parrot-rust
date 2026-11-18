@@ -9,6 +9,7 @@ use std::time::SystemTime;
 
 use parrot_domain::contracts::async_ops::Cancelled;
 
+use crate::process::execution::MAX_OUTPUT_CHARACTERS;
 use crate::process::execution::ProcessResult;
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -89,6 +90,7 @@ impl Execution for ScriptedExecution {
                     stderr: String::new(),
                     blob_path: None,
                     spill_preview: None,
+                    spill_limit: MAX_OUTPUT_CHARACTERS,
                 })
             }
         })
@@ -122,7 +124,7 @@ impl MonitorSink for Sink {
             if self.persist_error {
                 Err(io::Error::other("persist failed"))
             } else {
-                Ok("Tool output exceeded 64 KiB and was saved to /fixture/blob.".into())
+                Ok("Tool output exceeded 2 KiB and was saved to /fixture/blob.".into())
             }
         })
     }
@@ -571,7 +573,7 @@ async fn oversized_rendered_utf8_uses_blob_callback_only_above_exact_byte_limit(
         if extra == 1 {
             assert_eq!(
                 sink.events.lock().unwrap()[0].text,
-                "Tool output exceeded 64 KiB and was saved to /fixture/blob."
+                "Tool output exceeded 2 KiB and was saved to /fixture/blob."
             );
         }
     }
@@ -670,6 +672,7 @@ fn real_pipe(fixture: &Fixture, command: &str) -> crate::process::execution::She
     crate::process::execution::ShellProcessExecution::start_pipe(
         &spec,
         fixture.directory.join("blobs"),
+        MAX_OUTPUT_CHARACTERS,
     )
     .unwrap()
 }

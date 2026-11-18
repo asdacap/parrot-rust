@@ -2,6 +2,7 @@
 //! execution futures to expose the precise claim and shutdown interleavings.
 
 use super::*;
+use crate::process::execution::MAX_OUTPUT_CHARACTERS;
 use crate::process::ownership::execution::{
     Execution, NeverCancelled, ProcessLifetime, ProcessResult,
 };
@@ -58,6 +59,7 @@ impl FakeExecution {
             stderr: String::new(),
             blob_path: None,
             spill_preview: None,
+            spill_limit: MAX_OUTPUT_CHARACTERS,
         }));
         self.changed.notify_waiters();
     }
@@ -551,7 +553,7 @@ async fn synchronous_observation_omits_failed_and_cancelled_pending_startup() {
 
 #[tokio::test]
 async fn actual_t40_pipe_yield_keeps_live_files_and_terminal_wait_uses_same_instance() {
-    use crate::process::execution::{LaunchSpec, ShellProcessExecution};
+    use crate::process::execution::{LaunchSpec, MAX_OUTPUT_CHARACTERS, ShellProcessExecution};
     let directory = Directory::new();
     let marker = directory.0.join("finish");
     let mut spec = LaunchSpec::new("/bin/sh");
@@ -563,7 +565,9 @@ async fn actual_t40_pipe_yield_keeps_live_files_and_terminal_wait_uses_same_inst
         )
         .into(),
     ];
-    let raw = Arc::new(ShellProcessExecution::start_pipe(&spec, &directory.0).unwrap());
+    let raw = Arc::new(
+        ShellProcessExecution::start_pipe(&spec, &directory.0, MAX_OUTPUT_CHARACTERS).unwrap(),
+    );
     let execution = raw.clone();
     let sink = Arc::new(Sink::default());
     let owner = owner("agent", sink.clone());
@@ -606,15 +610,19 @@ async fn actual_t40_pipe_yield_keeps_live_files_and_terminal_wait_uses_same_inst
 
 #[tokio::test]
 async fn actual_t40_shutdown_kills_and_joins_owned_process_not_its_sibling() {
-    use crate::process::execution::{LaunchSpec, ShellProcessExecution};
+    use crate::process::execution::{LaunchSpec, MAX_OUTPUT_CHARACTERS, ShellProcessExecution};
     let first_directory = Directory::new();
     let second_directory = Directory::new();
     let mut spec = LaunchSpec::new("/bin/sh");
     spec.args = vec!["-c".into(), "printf ready; sleep 30 & wait".into()];
-    let first_execution =
-        Arc::new(ShellProcessExecution::start_pipe(&spec, &first_directory.0).unwrap());
-    let second_execution =
-        Arc::new(ShellProcessExecution::start_pipe(&spec, &second_directory.0).unwrap());
+    let first_execution = Arc::new(
+        ShellProcessExecution::start_pipe(&spec, &first_directory.0, MAX_OUTPUT_CHARACTERS)
+            .unwrap(),
+    );
+    let second_execution = Arc::new(
+        ShellProcessExecution::start_pipe(&spec, &second_directory.0, MAX_OUTPUT_CHARACTERS)
+            .unwrap(),
+    );
     let first = owner("first", Arc::new(Sink::default()));
     let second = owner("second", Arc::new(Sink::default()));
     let execution = first_execution.clone();
@@ -662,7 +670,7 @@ async fn actual_t40_shutdown_kills_and_joins_owned_process_not_its_sibling() {
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn actual_t40_pty_claims_consume_ready_and_input_suffix_once() {
-    use crate::process::execution::{LaunchSpec, ShellProcessExecution};
+    use crate::process::execution::{LaunchSpec, MAX_OUTPUT_CHARACTERS, ShellProcessExecution};
     let directory = Directory::new();
     let mut spec = LaunchSpec::new("/bin/sh");
     spec.args = vec![
@@ -678,6 +686,7 @@ async fn actual_t40_pty_claims_consume_ready_and_input_suffix_once() {
                 &directory.0,
                 24,
                 80,
+                MAX_OUTPUT_CHARACTERS,
             ),
         )
         .await
@@ -1155,11 +1164,13 @@ async fn cancelled_signal_records_cancelled_without_sending_or_losing_claim() {
 
 #[tokio::test]
 async fn actual_t40_parent_cancellation_records_cancelled_without_command_payloads() {
-    use crate::process::execution::{LaunchSpec, ShellProcessExecution};
+    use crate::process::execution::{LaunchSpec, MAX_OUTPUT_CHARACTERS, ShellProcessExecution};
     let directory = Directory::new();
     let mut spec = LaunchSpec::new("/bin/sh");
     spec.args = vec!["-c".into(), "exec sleep 30 # secret-command".into()];
-    let raw = Arc::new(ShellProcessExecution::start_pipe(&spec, &directory.0).unwrap());
+    let raw = Arc::new(
+        ShellProcessExecution::start_pipe(&spec, &directory.0, MAX_OUTPUT_CHARACTERS).unwrap(),
+    );
     let parent = Arc::new(ProcessLifetime::default());
     let diagnostics = Arc::new(Diagnostics::default());
     let owner = ShellProcessOwner::new(
@@ -1249,7 +1260,7 @@ async fn shutdown_cancels_pending_factory_and_closes_inventory_before_startup_ga
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn shutdown_drops_real_pending_pty_readiness_and_reaps_started_helper() {
-    use crate::process::execution::{LaunchSpec, ShellProcessExecution};
+    use crate::process::execution::{LaunchSpec, MAX_OUTPUT_CHARACTERS, ShellProcessExecution};
     use std::os::unix::fs::PermissionsExt;
     let directory = Directory::new();
     let helper = directory.0.join("stalled-helper");
@@ -1274,9 +1285,15 @@ async fn shutdown_drops_real_pending_pty_readiness_and_reaps_started_helper() {
             Box::pin(async move {
                 let mut spec = LaunchSpec::new("/bin/sh");
                 spec.args = vec!["-c".into(), "exit 0".into()];
-                let execution =
-                    ShellProcessExecution::start_pty(&spec, &helper, &blob_directory, 24, 80)
-                        .await?;
+                let execution = ShellProcessExecution::start_pty(
+                    &spec,
+                    &helper,
+                    &blob_directory,
+                    24,
+                    80,
+                    MAX_OUTPUT_CHARACTERS,
+                )
+                .await?;
                 Ok(Arc::new(execution) as Arc<dyn Execution>)
             })
         },
@@ -1342,11 +1359,13 @@ async fn retired_near_limit_pipes_release_execution_despite_retained_name_histor
 
 #[tokio::test]
 async fn actual_retired_pipe_releases_cached_output_while_owner_retains_metadata() {
-    use crate::process::execution::{LaunchSpec, ShellProcessExecution};
+    use crate::process::execution::{LaunchSpec, MAX_OUTPUT_CHARACTERS, ShellProcessExecution};
     let directory = Directory::new();
     let mut spec = LaunchSpec::new("/bin/sh");
-    spec.args = vec!["-c".into(), "printf '%064000d' 0".into()];
-    let execution = Arc::new(ShellProcessExecution::start_pipe(&spec, &directory.0).unwrap());
+    spec.args = vec!["-c".into(), "printf '%02000d' 0".into()];
+    let execution = Arc::new(
+        ShellProcessExecution::start_pipe(&spec, &directory.0, MAX_OUTPUT_CHARACTERS).unwrap(),
+    );
     let weak = Arc::downgrade(&execution);
     let owner = owner("agent", Arc::new(Sink::default()));
     let claim = owner
@@ -1362,7 +1381,7 @@ async fn actual_retired_pipe_releases_cached_output_while_owner_retains_metadata
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(result.result.as_ref().unwrap().stdout.len(), 64_000);
+    assert_eq!(result.result.as_ref().unwrap().stdout.len(), 2_000);
     assert!(result.result.as_ref().unwrap().blob_path.is_none());
     drop(result);
     until(|| weak.upgrade().is_none()).await;

@@ -216,6 +216,32 @@ fn exec_automatic_yield_time_requires_a_positive_integer() {
 }
 
 #[test]
+fn spill_limits_default_to_bundled_values_and_validate_custom_values() {
+    let settings = read(&root()).unwrap();
+    assert_eq!(settings.tool_output_spill_limit_bytes, 64 * 1024);
+    assert_eq!(settings.process_output_spill_limit_bytes, 2 * 1024);
+    for key in [
+        "tool_output_spill_limit_bytes",
+        "process_output_spill_limit_bytes",
+    ] {
+        for value in ["0", "-1", "1.5", "null", "true", "2147483648"] {
+            let mut node = root();
+            node.set(key, scalar(value));
+            assert_eq!(error(&node), format!("{key} must be a positive integer"));
+        }
+    }
+    let mut node = root();
+    node.set("tool_output_spill_limit_bytes", scalar("8192"));
+    node.set("process_output_spill_limit_bytes", scalar("4096"));
+    let settings = read(&node).unwrap();
+    assert_eq!(settings.tool_output_spill_limit_bytes, 8192);
+    assert_eq!(settings.process_output_spill_limit_bytes, 4096);
+    let snapshot = settings.snapshot();
+    assert_eq!(snapshot["toolOutputSpillLimitBytes"], 8192);
+    assert_eq!(snapshot["processOutputSpillLimitBytes"], 4096);
+}
+
+#[test]
 fn runtime_default_record_shapes_and_timeout_legacy_precedence_match_source() {
     let root = root();
     let settings = read(&root).unwrap();

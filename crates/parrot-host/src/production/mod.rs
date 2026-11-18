@@ -451,6 +451,7 @@ impl AgentFactorySource<ProductionPolicy> for ProductionSource {
                     .iter()
                     .map(PathBuf::from)
                     .collect(),
+                self.configuration.runtime.process_output_spill_limit_bytes as usize,
             )
             .map_err(internal)?,
         );

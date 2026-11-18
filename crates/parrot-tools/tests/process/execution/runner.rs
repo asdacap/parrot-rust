@@ -1,6 +1,7 @@
 //! Code-first regression sources. These additions have NOT been executed.
 
 use super::*;
+use crate::process::execution::MAX_OUTPUT_CHARACTERS;
 use crate::sandbox::linux::UnavailableProcessSandbox;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use parrot_foundation::paths::AgentScratchDirectory;
@@ -54,6 +55,18 @@ fn shell(command: &str) -> LaunchSpec {
     let mut spec = LaunchSpec::new("/bin/sh");
     spec.args = vec!["-c".into(), command.into()];
     spec
+}
+fn start_pipe_with_cleanup_path(
+    spec: &LaunchSpec,
+    blob_directory: impl AsRef<Path>,
+    cleanup_path: impl Into<PathBuf>,
+) -> io::Result<ShellProcessExecution> {
+    ShellProcessExecution::start_pipe_with_cleanup_path(
+        spec,
+        blob_directory,
+        cleanup_path,
+        MAX_OUTPUT_CHARACTERS,
+    )
 }
 
 #[tokio::test]
@@ -194,12 +207,9 @@ async fn profile_cleanup_is_owned_until_settlement_not_result_completion() {
     let directory = Directory::new();
     let profile = directory.0.join("profile.sb");
     fs::write(&profile, "synthetic-profile").unwrap();
-    let execution = ShellProcessExecution::start_pipe_with_cleanup_path(
-        &shell("printf complete"),
-        &directory.0,
-        profile.clone(),
-    )
-    .unwrap();
+    let execution =
+        start_pipe_with_cleanup_path(&shell("printf complete"), &directory.0, profile.clone())
+            .unwrap();
     assert_eq!(execution.wait().await.unwrap().stdout, "complete");
     assert!(profile.is_file());
     execution.settle().await.unwrap();
@@ -213,10 +223,7 @@ fn profile_cleanup_survives_failed_process_start() {
     let profile = directory.0.join("profile.sb");
     fs::write(&profile, "synthetic-profile").unwrap();
     let spec = LaunchSpec::new(directory.0.join("not-an-executable"));
-    assert!(
-        ShellProcessExecution::start_pipe_with_cleanup_path(&spec, &directory.0, profile.clone(),)
-            .is_err()
-    );
+    assert!(start_pipe_with_cleanup_path(&spec, &directory.0, profile.clone(),).is_err());
     assert!(!profile.exists());
 }
 
@@ -225,12 +232,9 @@ async fn dropping_profile_execution_joins_child_and_removes_profile() {
     let directory = Directory::new();
     let profile = directory.0.join("profile.sb");
     fs::write(&profile, "synthetic-profile").unwrap();
-    let execution = ShellProcessExecution::start_pipe_with_cleanup_path(
-        &shell("exec sleep 60"),
-        &directory.0,
-        profile.clone(),
-    )
-    .unwrap();
+    let execution =
+        start_pipe_with_cleanup_path(&shell("exec sleep 60"), &directory.0, profile.clone())
+            .unwrap();
     let pid = execution.id();
     drop(execution);
     assert!(!profile.exists());

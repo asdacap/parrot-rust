@@ -12,7 +12,10 @@ use super::{Error, ErrorKind, Result, internal_resource};
 
 pub const MAXIMUM_INLINE_BYTES: usize = 64 * 1024;
 const MAXIMUM_NAME_ATTEMPTS: usize = 16;
-const SPILL_NOTICE_PREFIX: &str = "Tool output exceeded 64 KiB and was saved to ";
+/// The bundled default process output spill threshold in bytes. The runtime
+/// configuration supplies the actual value; this default keeps direct
+/// constructors at the bundled behavior.
+pub const DEFAULT_PROCESS_SPILL_LIMIT_BYTES: usize = 2 * 1024;
 const PREVIEW_LINES: usize = 5;
 const PREVIEW_MAXIMUM_BYTES: usize = 2048;
 
@@ -82,15 +85,22 @@ pub fn tool_output_preview(output: &str) -> Option<OutputPreview> {
     OutputPreview::from_captured(&head, &tail, count)
 }
 
-/// Reports whether the source's 64-KiB inline output budget is exceeded, by UTF-8 bytes.
-pub fn is_tool_output_oversized(output: &str) -> bool {
-    output.len() > MAXIMUM_INLINE_BYTES
+/// Renders a spill limit as notice text, for example "64 KiB" or "2 KiB".
+/// Whole-KiB multiples render in KiB, every other value in bytes.
+pub fn spill_limit_text(bytes: usize) -> String {
+    if bytes >= 1024 && bytes.is_multiple_of(1024) {
+        format!("{} KiB", bytes / 1024)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 pub struct ToolOutputBlobStore {
     directory: PathBuf,
     filename_generator: Arc<dyn FilenameGenerator>,
     path_variables: BTreeMap<String, String>,
+    tool_spill_limit: usize,
+    process_spill_limit: usize,
 }
 
 impl ToolOutputBlobStore {
@@ -99,13 +109,48 @@ impl ToolOutputBlobStore {
         self
     }
 
+    /// Sets both configured spill limits in bytes. The tool limit decides the
+    /// inline oversized check, and both limits build the notice prefixes that
+    /// substitute_process_notice rewrites.
+    pub fn with_spill_limits(mut self, tool_limit: usize, process_limit: usize) -> Self {
+        self.tool_spill_limit = tool_limit;
+        self.process_spill_limit = process_limit;
+        self
+    }
+
+    /// Reports whether the rendered tool result exceeds the configured inline
+    /// spill limit, by UTF-8 bytes.
+    pub fn is_oversized(&self, output: &str) -> bool {
+        output.len() > self.tool_spill_limit
+    }
+
+    /// Renders the configured tool spill limit as notice text, for example
+    /// "64 KiB".
+    pub fn tool_spill_limit_text(&self) -> String {
+        spill_limit_text(self.tool_spill_limit)
+    }
+
+    fn spill_notice_prefixes(&self) -> [String; 2] {
+        [
+            format!(
+                "Tool output exceeded {} and was saved to ",
+                spill_limit_text(self.tool_spill_limit)
+            ),
+            format!(
+                "Tool output exceeded {} and was saved to ",
+                spill_limit_text(self.process_spill_limit)
+            ),
+        ]
+    }
+
     pub fn substitute_process_notice(&self, text: &str) -> String {
-        let Some((before, path, after_start)) = spill_notice_line(text) else {
+        let prefixes = self.spill_notice_prefixes();
+        let Some((before, prefix, path, after_start)) = spill_notice_line(text, &prefixes) else {
             return text.to_owned();
         };
         let mut result = String::with_capacity(text.len());
         result.push_str(before);
-        result.push_str(SPILL_NOTICE_PREFIX);
+        result.push_str(prefix);
         result.push_str(&self.format_path(Path::new(path)));
         result.push('.');
         result.push_str(&text[after_start..]);
@@ -143,6 +188,8 @@ impl ToolOutputBlobStore {
             directory: resource.path().to_owned(),
             filename_generator,
             path_variables: BTreeMap::new(),
+            tool_spill_limit: MAXIMUM_INLINE_BYTES,
+            process_spill_limit: DEFAULT_PROCESS_SPILL_LIMIT_BYTES,
         })
     }
 
@@ -175,25 +222,38 @@ impl ToolOutputBlobStore {
 }
 
 /// Finds the last spill notice line, returning the text before it including
-/// its trailing newline, the saved path, and the byte offset after the line.
-/// Preview lines may follow the notice, so the search walks back over notice
-/// lookalikes that lack a valid process completion before them.
-fn spill_notice_line(text: &str) -> Option<(&str, &str, usize)> {
+/// its trailing newline, the matched notice prefix, the saved path, and the
+/// byte offset after the line. Preview lines may follow the notice, so the
+/// search walks back over notice lookalikes that lack a valid process
+/// completion before them.
+fn spill_notice_line<'a>(
+    text: &'a str,
+    prefixes: &'a [String],
+) -> Option<(&'a str, &'a str, &'a str, usize)> {
     let mut end = text.len();
-    while let Some(start) = text[..end].rfind(SPILL_NOTICE_PREFIX) {
+    while let Some(start) = prefixes
+        .iter()
+        .filter_map(|prefix| text[..end].rfind(prefix.as_str()))
+        .max()
+    {
         if start == 0 {
             return None;
         }
+        let prefix = prefixes
+            .iter()
+            .find(|candidate| text[start..].starts_with(candidate.as_str()))
+            .expect("at least one prefix matched at start")
+            .as_str();
         let line_end = text[start..]
             .find('\n')
             .map_or(text.len(), |offset| start + offset);
         if let Some(path) = text[start..line_end]
-            .strip_prefix(SPILL_NOTICE_PREFIX)
+            .strip_prefix(prefix)
             .and_then(|line| line.strip_suffix('.'))
             && text.as_bytes()[start - 1] == b'\n'
             && is_process_completion(&text[..start - 1])
         {
-            return Some((&text[..start], path, line_end));
+            return Some((&text[..start], prefix, path, line_end));
         }
         end = start;
     }
