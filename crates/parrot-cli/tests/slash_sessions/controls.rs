@@ -458,7 +458,7 @@ fn skill_inventory_preserves_optional_metadata_scope_paths_and_load_errors() {
 }
 
 #[test]
-fn skills_repeatedly_toggle_exact_paths_after_idle_refresh_and_relist() {
+fn skills_repeatedly_toggle_exact_paths_refresh_and_relist() {
     let mut h = Harness::new();
     h.session.skills.skills = supplied_skills();
     h.session.skills.errors.push(SkillLoadError {
@@ -507,10 +507,8 @@ fn skills_repeatedly_toggle_exact_paths_after_idle_refresh_and_relist() {
     assert_eq!(
         transitions,
         [
-            "wait",
             "configure:/user/two/SKILL.md:true",
             "refresh",
-            "wait",
             "configure:/repo/one/SKILL.md:false",
             "refresh"
         ]
@@ -601,23 +599,6 @@ fn skills_generic_load_failure_is_not_flattened_into_rpc_error() {
             "loaded:Loading skills…"
         ]
     );
-}
-
-#[test]
-fn skills_wait_cancellation_preserves_current_and_does_not_configure_refresh_or_show_error() {
-    let mut h = Harness::new();
-    h.session.skills.skills = supplied_skills();
-    h.dialog
-        .select(&[Some("manage"), Some("/user/two/SKILL.md")]);
-    h.activity.cancel_on_wait = Some(h.token.0.clone());
-    let previous = h.session.current.clone();
-    assert!(
-        matches!(h.run(&SkillsCommand, "").unwrap_err(), SlashFailure::Rpc(status) if status.code() == Code::Cancelled)
-    );
-    assert!(h.session.configured.is_empty());
-    assert!(!h.record.events().iter().any(|event| event == "refresh"));
-    assert!(h.dialog.errors.is_empty());
-    assert_eq!(h.session.current, previous);
 }
 
 #[test]

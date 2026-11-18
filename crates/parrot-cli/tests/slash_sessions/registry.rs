@@ -262,7 +262,7 @@ async fn mode_clear_and_modes_use_shared_activity_and_actual_replacement() {
             .iter()
             .filter(|event| event.as_str() == "wait")
             .count(),
-        2
+        1
     );
     record.assert_same_token(&stop);
     for line in ["mode is now plan", "build", "query"] {

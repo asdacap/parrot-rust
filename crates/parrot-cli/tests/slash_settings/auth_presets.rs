@@ -3,7 +3,7 @@ use parrot_cli::{
     slash_settings::auth::{AuthPresetSelectCommand, AuthPresetSetCommand},
 };
 use parrot_foundation::credentials::{Credential, OAuthCredential};
-use tonic::{Code, Status};
+use tonic::Code;
 
 use super::{
     auth::Fixture,
@@ -136,7 +136,7 @@ async fn credential_presets_switch_accounts_sync_refresh_and_confirm_unsaved_dis
         accepted.shown.last().map(String::as_str),
         Some("Credential preset selected: personal")
     );
-    assert_eq!(activity.waits(), 5);
+    assert_eq!(activity.waits(), 0);
     fixture.assert_legacy_untouched();
 }
 
@@ -321,10 +321,7 @@ async fn invalid_auth_preset_requests_leave_credentials_and_presets_unchanged() 
                 None
             }
         );
-        assert_eq!(
-            activity.waits(),
-            usize::from(command == "select" && arguments.is_empty())
-        );
+        assert_eq!(activity.waits(), 0);
         fixture.assert_legacy_untouched();
     }
 }
@@ -371,52 +368,6 @@ async fn auth_presets_cancel_before_wait_or_mutation() {
     );
     assert!(!fixture.services.presets.path().exists());
     fixture.assert_legacy_untouched();
-}
-
-#[tokio::test]
-async fn cancelled_idle_wait_does_not_apply_or_sync_an_auth_preset() {
-    let fixture = Fixture::new(&[], None);
-    fixture
-        .services
-        .credentials
-        .set("provider", &Credential::for_api_key("retained-key"), &NEVER)
-        .await
-        .unwrap();
-    run(
-        &AuthPresetSetCommand::new(fixture.services.clone()),
-        "work",
-        &mut Dialog::default(),
-        &Activity::default(),
-        &NEVER,
-    )
-    .await
-    .unwrap();
-    let original = std::fs::read(fixture.services.credentials.path()).unwrap();
-    let preset = std::fs::read(fixture.services.presets.path().join("work.json")).unwrap();
-    let mut activity = Activity::default();
-    activity.failure = Some(Status::cancelled("waiting cancelled"));
-    let mut dialog = Dialog::default();
-    let failure = run(
-        &AuthPresetSelectCommand::new(fixture.services.clone()),
-        "work",
-        &mut dialog,
-        &activity,
-        &NEVER,
-    )
-    .await
-    .unwrap_err();
-    assert!(
-        matches!(failure, SlashFailure::Rpc(status) if status.code() == Code::Cancelled && status.message() == "waiting cancelled")
-    );
-    assert_eq!(
-        std::fs::read(fixture.services.credentials.path()).unwrap(),
-        original
-    );
-    assert_eq!(
-        std::fs::read(fixture.services.presets.path().join("work.json")).unwrap(),
-        preset
-    );
-    assert!(dialog.shown.is_empty() && dialog.errors.is_empty());
 }
 
 #[tokio::test]

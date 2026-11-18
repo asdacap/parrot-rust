@@ -304,6 +304,56 @@ async fn effort_picker_returns_to_prompt_without_ending_the_running_turn() {
     rpc.close().await;
 }
 
+#[tokio::test]
+async fn model_picker_responds_while_a_turn_is_running() {
+    let mut rpc = Fixture::start().await;
+    let mut terminal = TerminalFixture::new();
+    let cli = rpc.cli(terminal.take(), "", None);
+    let stop = rpc.stopping.clone();
+    let result = fixture::run_flow(cli, stop.clone(), terminal.end_input(), async {
+        terminal.output_contains("❯ ").await;
+        terminal.input.type_text("running prompt\r");
+        rpc.wait(|state| state.sent.len() == 1).await;
+        rpc.publish(
+            "session-1",
+            event(
+                "started",
+                wire::event::Payload::TurnStarted(wire::TurnStarted::new()),
+            ),
+        )
+        .await;
+        terminal.input.type_text("/model\r");
+        terminal.output_contains("Select a provider").await;
+        terminal.input.type_text("provider\r");
+        terminal.output_contains("Select a model").await;
+        terminal.input.type_text("model\r");
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            terminal.output_contains("model is now provider/model (saved)"),
+        )
+        .await
+        .expect("model selection must finish before the running turn ends");
+        rpc.wait(|state| state.updated.len() == 1).await;
+        assert_eq!(rpc.state.lock().unwrap().updated[0].model, "provider/model");
+        terminal.input.type_text("\r");
+        terminal.input.type_text("still running\r");
+        rpc.wait(|state| state.sent.len() == 2).await;
+        let state = rpc.state.lock().unwrap();
+        assert_eq!(state.sent[1].text, "still running");
+        assert_eq!(
+            state.sent[1].delivery.enum_value().unwrap(),
+            wire::Delivery::DELIVERY_STEER
+        );
+        assert!(state.interrupted.is_empty());
+        drop(state);
+        terminal.input.end();
+    })
+    .await;
+    assert_eq!(result.unwrap(), 0);
+    assert!(terminal.restored.load(Ordering::Acquire));
+    rpc.close().await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn many_agent_text_flood_keeps_draft_and_escape_responsive_with_bounded_draws() {
     const AGENTS: usize = 16;

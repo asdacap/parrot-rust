@@ -82,7 +82,6 @@ impl SlashCommand for ModeCommand {
             else {
                 return Ok(());
             };
-            environment.activity.wait_until_idle(cancellation).await?;
             environment
                 .session
                 .select_mode(&selected, cancellation)

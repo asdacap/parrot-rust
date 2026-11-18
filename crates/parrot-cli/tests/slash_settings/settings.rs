@@ -74,7 +74,7 @@ fn exact_settings_names_and_summaries() {
 }
 
 #[tokio::test]
-async fn model_command_preserves_variant_rules_and_waits_only_after_selection() {
+async fn model_command_preserves_variant_rules() {
     let fixture = RpcFixture::new(models()).await;
     let command = ModelCommand::new(ModelWizard::new(fixture.client.clone()));
     for (current, requested, expected) in [
@@ -98,7 +98,7 @@ async fn model_command_preserves_variant_rules_and_waits_only_after_selection() 
         .await
         .unwrap();
         assert_eq!(session.current.model, expected);
-        assert_eq!(activity.waits(), 1);
+        assert_eq!(activity.waits(), 0);
         assert_eq!(dialog.shown, [format!("model is now {expected} (saved)")]);
     }
     let mut session = Session::new("provider/current/high");
@@ -169,6 +169,32 @@ async fn effort_selection_completes_while_turn_is_running() {
         assert_eq!(session.current.model, "provider/current/high");
         assert_eq!(dialog.shown, ["Model effort selected: high"]);
     }
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn model_selection_completes_while_turn_is_running() {
+    let fixture = RpcFixture::new(models()).await;
+    let command = ModelCommand::new(ModelWizard::new(fixture.client.clone()));
+    let activity = PollingSlashActivity(Arc::new(|| true));
+    let mut session = Session::new("provider/current/low");
+    let mut dialog = Dialog::default().selects([Some("provider"), Some("next")]);
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        run_with_session(
+            &command,
+            "ignored",
+            &mut session,
+            &mut dialog,
+            &activity,
+            &NEVER,
+        ),
+    )
+    .await
+    .expect("changing model must not wait for the running turn to finish")
+    .unwrap();
+    assert_eq!(session.current.model, "provider/next/low");
+    assert_eq!(dialog.shown, ["model is now provider/next/low (saved)"]);
     fixture.close().await;
 }
 
@@ -342,7 +368,7 @@ async fn model_presets_save_and_select_exact_names_and_authoritative_result() {
     assert_eq!(session.saved_presets, ["Work", "Work"]);
     assert_eq!(session.selected_presets, ["Work"]);
     assert_eq!(session.current.model, "high_llm");
-    assert_eq!(activity.waits(), 1);
+    assert_eq!(activity.waits(), 0);
     assert_eq!(
         dialog.shown,
         [
@@ -456,7 +482,7 @@ async fn rpc_slash_session_uses_authoritative_preset_response_without_writing_cl
         assert_eq!(state.preset_lists, 1);
         assert_eq!(state.updated_sessions, 0);
     }
-    assert_eq!(activity.waits(), 1);
+    assert_eq!(activity.waits(), 0);
     fixture.close().await;
 }
 
@@ -478,7 +504,7 @@ async fn model_preset_picker_preserves_order_descriptions_and_selection() {
     .unwrap();
     assert_eq!(session.selected_presets, ["Research"]);
     assert_eq!(session.current.model, "medium_llm");
-    assert_eq!(activity.waits(), 1);
+    assert_eq!(activity.waits(), 0);
     assert_eq!(dialog.loads, ["Loading presets…"]);
     assert_eq!(dialog.pickers[0].0, "Select a model preset");
     assert_eq!(
@@ -518,7 +544,7 @@ async fn model_preset_dismissal_and_empty_list_have_no_mutation() {
         assert!(session.selected_presets.is_empty());
         assert!(session.saved_presets.is_empty());
         assert_eq!(session.current.model, "high_llm");
-        assert_eq!(activity.waits(), 1);
+        assert_eq!(activity.waits(), 0);
         assert!(dialog.shown.is_empty());
         if populated {
             assert!(dialog.errors.is_empty());
@@ -596,7 +622,7 @@ async fn model_presets_accept_backslash_as_source_token_not_path() {
     assert_eq!(session.saved_presets, ["bad\\name"]);
     assert_eq!(session.selected_presets, ["bad\\name"]);
     assert!(dialog.errors.is_empty());
-    assert_eq!(activity.waits(), 1);
+    assert_eq!(activity.waits(), 0);
 }
 
 #[tokio::test]
@@ -632,7 +658,7 @@ async fn preset_rpc_errors_are_shown_but_generic_errors_propagate() {
             "scripted model preset failure"
         ]
     );
-    assert_eq!(activity.waits(), 1);
+    assert_eq!(activity.waits(), 0);
     assert!(session.saved_presets.is_empty());
     assert!(session.selected_presets.is_empty());
     session.failure = None;

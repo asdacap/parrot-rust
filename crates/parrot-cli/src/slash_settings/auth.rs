@@ -544,11 +544,6 @@ impl SlashCommand for AuthPresetSelectCommand {
             let result = async {
                 let selected;
                 let arguments = if arguments.trim().is_empty() {
-                    environment
-                        .activity
-                        .wait_until_idle(cancellation)
-                        .await
-                        .map_err(AuthFailure::from)?;
                     let names = load(
                         environment.dialog,
                         "Loading presets…",
@@ -601,11 +596,6 @@ impl SlashCommand for AuthPresetSelectCommand {
                             "auth: credential preset not found".into(),
                         ));
                     }
-                    environment
-                        .activity
-                        .wait_until_idle(cancellation)
-                        .await
-                        .map_err(AuthFailure::from)?;
                     arguments
                 };
                 if !self
