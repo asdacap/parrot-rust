@@ -1229,6 +1229,7 @@ mod tests {
     use std::{
         fs,
         os::fd::AsFd,
+        os::unix::fs::{MetadataExt, symlink},
         sync::atomic::{AtomicU64, Ordering},
     };
 
