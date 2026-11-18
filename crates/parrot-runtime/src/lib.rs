@@ -7,6 +7,7 @@ pub mod compaction;
 pub mod event_broker;
 pub mod interactions;
 pub mod plan_mode;
+pub mod policy;
 pub mod prompt_assembly;
 pub mod task_scheduler;
 pub mod tool_settlement;

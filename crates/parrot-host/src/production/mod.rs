@@ -2,7 +2,6 @@
 
 pub mod launcher;
 pub mod permissions;
-pub mod policy;
 mod skills;
 
 #[cfg(test)]
@@ -55,6 +54,7 @@ use parrot_provider::routing::{
     configuration::{ModelConfigurationCoordinator, definitions_from_config},
     registry::ProviderRegistry,
 };
+use parrot_runtime::policy::{ProductionPolicy, ProductionPolicyMaterializer};
 use parrot_runtime::{
     agent_turn::{
         lifecycle::{IncomingActivity, OperationHandle, SendResult},
@@ -95,7 +95,6 @@ use parrot_tools::{
     web_fetch::{AddressPolicy, PrivateAddressPolicy, PublicAddressPolicy, WebFetcher},
 };
 use permissions::ProductionPermissionAuthority;
-use policy::{ProductionPolicy, ProductionPolicyMaterializer};
 use std::{
     path::{Path, PathBuf},
     sync::{

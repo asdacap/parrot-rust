@@ -18,6 +18,7 @@ use parrot_domain::{
         identifiers::Identifier,
         lineage::{AgentDirectoryLineage, AgentLineageRecord},
         project_workspace::ProjectWorkspace,
+        tools::WriteTargetKind,
     },
 };
 use parrot_foundation::{paths::UserSessionResources, template_catalog::PromptTemplateCatalog};
@@ -65,7 +66,7 @@ use parrot_storage::{
         SessionStoreError, StoredUserSession, StoredUserSessionFactory,
     },
 };
-use parrot_tools::session::{WriteTarget, WriteTargetKind};
+use parrot_tools::session::WriteTarget;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::Path,

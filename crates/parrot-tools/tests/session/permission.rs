@@ -5,11 +5,11 @@ use parrot_domain::{
         security::{AccessSnapshot, InvocationScope},
         tools::Tool,
     },
-    values::tools::ConfiguredToolDefinition,
+    values::tools::{ConfiguredToolDefinition, WriteTargetKind},
 };
 use parrot_tools::session::{
     Failure, FailureKind, Invocation, PermissionReply, PermissionServices,
-    RequestWritePermissionTool, WriteTarget, WriteTargetKind,
+    RequestWritePermissionTool, WriteTarget,
 };
 use std::{
     path::{Path, PathBuf},

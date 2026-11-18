@@ -1614,8 +1614,7 @@ where
                     agents: agents.clone(),
                     child_work,
                     catalog: Box::new(move |scope: &Arc<Scope<S>>| {
-                        let mut definitions =
-                            catalog::configured_definitions(&config.configuration);
+                        let mut definitions = config.configuration.tool_definitions();
                         let mcp_tools = user.mcp.connected_tools();
                         for tools in mcp_tools.values() {
                             definitions.merge(tools.clone());

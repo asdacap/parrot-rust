@@ -30,6 +30,7 @@ use parrot_domain::{
         activity::{AgentSessionActivitySnapshot, DrainState},
         agent_tasks::{Task, TaskSetResponse, TaskView},
         progress::{ProgressSnapshot, ProgressUpdate},
+        tools::WriteTargetKind,
     },
 };
 use parrot_provider::image_generation::{ImageGenerationRequest, ImageGenerationResult};
@@ -56,7 +57,6 @@ use parrot_tools::{
     },
     session::{
         Failure, ImageProvider, PermissionReply, PermissionServices, SessionServices, WriteTarget,
-        WriteTargetKind,
     },
     tasks_queues::{
         ToolFailure,

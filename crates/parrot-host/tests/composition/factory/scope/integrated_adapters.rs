@@ -128,7 +128,9 @@ pub(super) fn agent_tool(
 ) -> Agent {
     AgentTool::new(
         kind,
-        catalog::configured_definitions(&fixture.configuration)
+        fixture
+            .configuration
+            .tool_definitions()
             .describe(kind.name())
             .unwrap()
             .clone(),
@@ -169,7 +171,7 @@ pub(super) async fn set_tasks(
         .unwrap();
     let tool = TaskTool::new(
         TaskToolKind::Set,
-        &catalog::configured_definitions(&fixture.configuration),
+        &fixture.configuration.tool_definitions(),
         controller,
         Arc::new(Files::<SharedSecurity<Security>>(PhantomData)),
     )

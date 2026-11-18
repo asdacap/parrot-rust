@@ -20,7 +20,7 @@ const REMOVED_QUEUE_TOOLS: [&str; 4] = ["queue_create", "queue_info", "queue_pus
 async fn native_configuration_and_retained_factories_preserve_evolved_source_order_and_definitions()
 {
     let fixture = Fixture::new("", true, 0);
-    let definitions = catalog::configured_definitions(&fixture.configuration);
+    let definitions = fixture.configuration.tool_definitions();
     let original_order: Value =
         serde_json::from_str(include_str!("fixtures/source-factory-order.json")).unwrap();
     assert_eq!(
