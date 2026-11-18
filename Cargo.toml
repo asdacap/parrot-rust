@@ -26,8 +26,8 @@ protobuf-codegen = { path = "vendor/rust-protobuf-a001/protobuf-codegen" }
 tonic = { path = "vendor/tonic-0.12.3" }
 
 [workspace.dependencies]
-async-compression = { version = "=0.4.18", default-features = false, features = ["tokio", "gzip"] }
-cookie_store = { version = "=0.21.1", default-features = false }
+async-compression = { version = "0.4.18", default-features = false, features = ["tokio", "gzip"] }
+cookie_store = { version = "0.21.1", default-features = false }
 
 [workspace.package]
 version = "0.0.0-dev"

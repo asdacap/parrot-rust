@@ -17,24 +17,24 @@ parrot-core = { path = "../parrot-core" }
 parrot-host = { path = "../parrot-host", default-features = false }
 parrot-tools = { path = "../parrot-tools" }
 parrot-provider = { path = "../parrot-provider" }
-reqwest = { version = "=0.12.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls"] }
 protobuf = "=3.7.2"
 tokio = { version = "1.43", default-features = false, features = ["rt", "sync", "time", "macros", "net", "io-util"] }
-tonic = { version = "=0.12.3", default-features = false, features = ["transport", "codegen", "tls", "tls-webpki-roots"] }
-futures-util = { version = "=0.3.34", default-features = false, features = ["std"] }
-tokio-stream = { version = "=0.1.19", default-features = false, features = ["net", "sync"] }
-chrono = { version = "=0.4.39", default-features = false, features = ["clock", "std"] }
-rustix = { version = "=1.1.5", features = ["termios", "event"] }
+tonic = { version = "0.12.3", default-features = false, features = ["transport", "codegen", "tls", "tls-webpki-roots"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["std"] }
+tokio-stream = { version = "0.1.19", default-features = false, features = ["net", "sync"] }
+chrono = { version = "0.4.39", default-features = false, features = ["clock", "std"] }
+rustix = { version = "1.1.5", features = ["termios", "event"] }
 unicode-segmentation = "=1.12.0"
-serde_json = { version = "=1.0.138", features = ["arbitrary_precision"] }
+serde_json = { version = "1.0.138", features = ["arbitrary_precision"] }
 unicode-general-category = "=1.0.0"
-termimad = { version = "=0.35.5", default-features = false }
-syntect = { version = "=5.3.0", default-features = false, features = ["default-themes", "regex-fancy"] }
-two-face = { version = "=0.5.1", default-features = false, features = ["syntect-fancy"] }
+termimad = { version = "0.35.5", default-features = false }
+syntect = { version = "5.3.0", default-features = false, features = ["default-themes", "regex-fancy"] }
+two-face = { version = "0.5.1", default-features = false, features = ["syntect-fancy"] }
 
 [dev-dependencies]
-serde = { version = "=1.0.229", features = ["derive"] }
-openssl = { version = "=0.10.81", features = ["vendored"] }
+serde = { version = "1.0.229", features = ["derive"] }
+openssl = { version = "0.10.81", features = ["vendored"] }
 
 [[test]]
 name = "presenters"
