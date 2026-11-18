@@ -316,6 +316,7 @@ impl Fixture {
                 .unwrap_or_else(|| Arc::new(Parent(trace))),
             ancestors: vec![],
             event_id: Arc::new(id),
+            stall_steps: 2,
         };
         let backend = RuntimeBackend::with_sessions(
             runtime_config,

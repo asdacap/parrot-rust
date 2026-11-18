@@ -60,6 +60,9 @@ pub type Publisher = dyn EventPublisher<Event = Event, Error = BrokerError>;
 pub struct RuntimeConfig<S: AccessSnapshot + 'static> {
     pub identity: SessionIdentity,
     pub agent_limits: AgentLimitsConfig,
+    /// Global turn setting: the number of previous steps that must repeat
+    /// exactly before core steers a stall notice.
+    pub stall_steps: i32,
     pub agent_state: Arc<dyn AgentStateStore>,
     pub history: AgentHistoryView,
     pub broker: Arc<EventBroker>,
@@ -94,6 +97,7 @@ struct State {
 /// concrete filesystem/security implementation is constructed by the drain.
 pub struct RuntimeBackend<S: AccessSnapshot + 'static> {
     identity: SessionIdentity,
+    stall_steps: i32,
     history: AgentHistoryView,
     agent_state: Arc<dyn AgentStateStore>,
     broker: Arc<EventBroker>,
@@ -165,6 +169,7 @@ where
         };
         Ok(Arc::new(Self {
             identity: config.identity,
+            stall_steps: config.stall_steps,
             history: config.history,
             agent_state: config.agent_state,
             broker: config.broker,

@@ -42,6 +42,8 @@ mod provider_cancellation;
 mod request_assembly;
 #[path = "turn_loop/skills.rs"]
 mod skills;
+#[path = "turn_loop/stall.rs"]
+mod stall;
 #[path = "turn_loop/status_updates.rs"]
 mod status_updates;
 #[path = "turn_loop/tool_execution.rs"]
@@ -590,9 +592,11 @@ struct MemoryState {
     admissions: Vec<InputAdmission>,
     cancellation: Arc<CancellationSource>,
     maximum: i32,
+    stall_steps: i32,
     status_offering: StatusOffering,
     next_status_offering: Option<StatusOffering>,
     status_steered: Vec<String>,
+    stall_steered: Vec<String>,
     status_reads: AtomicUsize,
     last_capture_request: Option<usize>,
     fail_at: Option<&'static str>,
@@ -678,6 +682,7 @@ impl MemoryState {
                     "Tools are available again.".into(),
                 ),
                 (ConfigKey::RunawayTemplate, RUNAWAY_NOTICE.into()),
+                (ConfigKey::StallTemplate, "this is stall {stall}".into()),
                 (
                     ConfigKey::SkillSelectedTemplate,
                     "<skill>\n<name>{name}</name>\n<path>{path}</path>\n{content}\n</skill>".into(),
@@ -727,9 +732,11 @@ impl MemoryState {
             admissions: Vec::new(),
             cancellation,
             maximum: 10,
+            stall_steps: 2,
             status_offering: StatusOffering::default(),
             next_status_offering: None,
             status_steered: Vec::new(),
+            stall_steered: Vec::new(),
             status_reads: AtomicUsize::new(0),
             last_capture_request: None,
             fail_at: None,
@@ -798,6 +805,7 @@ impl MemoryState {
         (
             TurnOptions {
                 maximum_requests: self.maximum,
+                stall_steps: self.stall_steps,
             },
             StepOptions {
                 model: self.model.clone(),
@@ -850,6 +858,7 @@ impl MemoryState {
     }
     fn apply_options(&mut self, turn: &TurnOptions, step: &StepOptions) {
         self.maximum = turn.maximum_requests;
+        self.stall_steps = turn.stall_steps;
         self.model = step.model.clone();
         self.reasoning = step.reasoning.clone();
         self.provider_preferences = step.provider_preferences.clone();
@@ -897,6 +906,19 @@ impl States for MemoryState {
                         self.step("final_request")?;
                         let count = self.request().rendered_instructions.len();
                         self.final_requests.push(count);
+                    }
+                    ConversationEvent::Notice { kind, notice } if kind == "stall" => {
+                        self.step("stall_notice")?;
+                        assert!(notice.starts_with("Stall prompt injected\n"));
+                        let content = addition.messages[0]
+                            .contents
+                            .iter()
+                            .map(|part| match part {
+                                Content::Text(text) => text.as_str(),
+                                _ => "",
+                            })
+                            .collect::<String>();
+                        self.stall_steered.push(content);
                     }
                     ConversationEvent::Notice { kind, notice } if kind == "status" => {
                         self.step("steer_status")?;
@@ -1037,6 +1059,7 @@ impl States for MemoryState {
                         "parent_session_id",
                         "parent_session_name",
                         "agent_name",
+                        "stall",
                     ]
                     .map(str::to_owned);
                     Ok(ConfigValue::PromptTemplate(Arc::new(
@@ -1537,6 +1560,7 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
     let provider = state.provider.clone();
     let turn_options = TurnOptions {
         maximum_requests: 10,
+        stall_steps: 2,
     };
     let step_options = StepOptions {
         model: "first/model".into(),
@@ -1579,6 +1603,7 @@ fn fresh_invocations_use_supplied_settings_and_refresh_tools_each_step() {
 
     let turn_options = TurnOptions {
         maximum_requests: 1,
+        stall_steps: 2,
     };
     let step_options = StepOptions {
         model: "second/model".into(),

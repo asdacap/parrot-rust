@@ -57,6 +57,8 @@ pub enum TurnModelIconColor {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TurnOptions {
     pub maximum_requests: i32,
+    /// Number of previous steps that must repeat exactly to count as a stall.
+    pub stall_steps: i32,
 }
 
 /// Per-step provider request settings, re-read by the engine from
@@ -83,6 +85,12 @@ pub struct AgentState {
     pub last_request_statistic: crate::RequestStatistic,
     /// Per-slot hashes of the latest steered status assembly.
     pub standing_statuses: crate::StatusStanding,
+    /// Hash of the latest settled step's content for stall detection.
+    #[serde(default)]
+    pub(crate) stall_fingerprint: Option<u64>,
+    /// Length of the run of consecutive identical qualifying steps.
+    #[serde(default)]
+    pub(crate) stall_run: i32,
     /// Provider requests counted during the current turn. Not a token budget.
     pub(crate) provider_requests: i32,
     /// Settlement extensions retained across turns within the same invocation.

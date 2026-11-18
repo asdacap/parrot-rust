@@ -588,6 +588,7 @@ impl Factory {
             parent_completion: prepared.parent_completion,
             ancestors,
             event_id: Arc::new(id),
+            stall_steps: 2,
         };
         let backend = RuntimeBackend::with_sessions(
             runtime_config,

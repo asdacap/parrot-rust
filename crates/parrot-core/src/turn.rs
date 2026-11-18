@@ -6,7 +6,7 @@ use crate::{
     ConversationOrigin, ConversationPersistence, ConversationTurn, Error, ErrorKind,
     EventPublisher, FinishReason, InputAdmission, Message, Outcome, PromotedInput, Provider,
     ProviderRequest, Role, SkillProvider, States, StepOptions, ToolCallReceipt, ToolDefinition,
-    Tools, TurnEngine, TurnHooks, TurnLifecycle, rendering, skills, status::steer_status,
+    Tools, TurnEngine, TurnHooks, TurnLifecycle, rendering, skills, stall, status::steer_status,
     tool_settlement::execute_tools,
 };
 
@@ -91,6 +91,27 @@ impl AgentTurn<'_> {
             };
 
             steer_status(self.states, &mut self.agent_state, cancellation).await?;
+
+            if let Some(count) = stall::stall_index(&self.agent_state, turn_options.stall_steps) {
+                let content = rendering::render_template(
+                    self.states,
+                    ConfigKey::StallTemplate,
+                    &[("stall".into(), serde_json::Value::from(count.to_string()))],
+                )
+                .await?;
+                self.states
+                    .add_conversation_messages(ConversationAddition {
+                        messages: vec![Message::text(Role::System, content)],
+                        persistence: ConversationPersistence::Append {
+                            origin: ConversationOrigin::System,
+                            event: ConversationEvent::Notice {
+                                kind: "stall".into(),
+                                notice: format!("Stall prompt injected\nstall {count}"),
+                            },
+                        },
+                    })
+                    .await?;
+            }
 
             if flags.final_phase {
                 let content =
@@ -202,7 +223,7 @@ impl AgentTurn<'_> {
                 self.states
                     .set_agent_state(self.agent_state.clone())
                     .await?;
-                let compaction_request = execute_tools(
+                let settled = execute_tools(
                     self.states,
                     self.tools,
                     response.tool_calls.clone(),
@@ -212,8 +233,17 @@ impl AgentTurn<'_> {
                 )
                 .await?;
                 self.agent_state = self.states.get_agent_state().await?;
+                stall::record_step(
+                    &mut self.agent_state,
+                    &response,
+                    &settled.results,
+                    !inputs.is_empty(),
+                );
+                self.states
+                    .set_agent_state(self.agent_state.clone())
+                    .await?;
 
-                if let Some(request) = compaction_request {
+                if let Some(request) = settled.compaction_request {
                     self.compact_context(definitions, request, cancellation)
                         .await?;
                 }
@@ -241,18 +271,21 @@ impl AgentTurn<'_> {
                         persistence: ConversationPersistence::CompletionBlockerFeedback(
                             CompletionBlockerFeedback {
                                 messages,
-                                candidate: response,
+                                candidate: response.clone(),
                             },
                         ),
                     })
                     .await?;
 
+                stall::record_step(&mut self.agent_state, &response, &[], !inputs.is_empty());
                 self.agent_state.restart();
 
                 continue;
             }
 
             let usage = self.states.read_usage_totals().await?;
+
+            stall::record_step(&mut self.agent_state, &response, &[], !inputs.is_empty());
 
             self.states
                 .add_conversation_messages(ConversationAddition {
