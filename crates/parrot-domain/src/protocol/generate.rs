@@ -36,7 +36,7 @@ fn schema_path(proto_dir: &Path, name: &str) -> PathBuf {
 pub fn generate() {
     let manifest_dir =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo sets CARGO_MANIFEST_DIR"));
-    let proto_dir = manifest_dir.join("../../proto");
+    let proto_dir = manifest_dir.join("proto");
     let input_paths: Vec<_> = SCHEMAS
         .iter()
         .map(|name| schema_path(&proto_dir, name))

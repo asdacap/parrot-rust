@@ -5,67 +5,67 @@ use std::collections::BTreeMap;
 const BUILTIN_PROMPTS: [(&str, &str); 16] = [
     (
         "system-prompts/base.md",
-        include_str!("../../../../assets/config/system-prompts/base.md"),
+        include_str!("../../assets/config/system-prompts/base.md"),
     ),
     (
         "system-prompts/delegation.md",
-        include_str!("../../../../assets/config/system-prompts/delegation.md"),
+        include_str!("../../assets/config/system-prompts/delegation.md"),
     ),
     (
         "system-prompts/agent-tasks.md",
-        include_str!("../../../../assets/config/system-prompts/agent-tasks.md"),
+        include_str!("../../assets/config/system-prompts/agent-tasks.md"),
     ),
     (
         "system-prompts/subagent-patterns.md",
-        include_str!("../../../../assets/config/system-prompts/subagent-patterns.md"),
+        include_str!("../../assets/config/system-prompts/subagent-patterns.md"),
     ),
     (
         "system-prompts/behavior-guidelines.md",
-        include_str!("../../../../assets/config/system-prompts/behavior-guidelines.md"),
+        include_str!("../../assets/config/system-prompts/behavior-guidelines.md"),
     ),
     (
         "system-prompts/toolings.md",
-        include_str!("../../../../assets/config/system-prompts/toolings.md"),
+        include_str!("../../assets/config/system-prompts/toolings.md"),
     ),
     (
         "profile-prompts/general.md",
-        include_str!("../../../../assets/config/profile-prompts/general.md"),
+        include_str!("../../assets/config/profile-prompts/general.md"),
     ),
     (
         "profile-prompts/coordinator.md",
-        include_str!("../../../../assets/config/profile-prompts/coordinator.md"),
+        include_str!("../../assets/config/profile-prompts/coordinator.md"),
     ),
     (
         "profile-prompts/build.md",
-        include_str!("../../../../assets/config/profile-prompts/build.md"),
+        include_str!("../../assets/config/profile-prompts/build.md"),
     ),
     (
         "profile-prompts/plan.md",
-        include_str!("../../../../assets/config/profile-prompts/plan.md"),
+        include_str!("../../assets/config/profile-prompts/plan.md"),
     ),
     (
         "profile-prompts/query.md",
-        include_str!("../../../../assets/config/profile-prompts/query.md"),
+        include_str!("../../assets/config/profile-prompts/query.md"),
     ),
     (
         "profile-prompts/explorer.md",
-        include_str!("../../../../assets/config/profile-prompts/explorer.md"),
+        include_str!("../../assets/config/profile-prompts/explorer.md"),
     ),
     (
         "profile-prompts/review.md",
-        include_str!("../../../../assets/config/profile-prompts/review.md"),
+        include_str!("../../assets/config/profile-prompts/review.md"),
     ),
     (
         "profile-prompts/worker.md",
-        include_str!("../../../../assets/config/profile-prompts/worker.md"),
+        include_str!("../../assets/config/profile-prompts/worker.md"),
     ),
     (
         "profile-prompts/thinker.md",
-        include_str!("../../../../assets/config/profile-prompts/thinker.md"),
+        include_str!("../../assets/config/profile-prompts/thinker.md"),
     ),
     (
         "profile-prompts/agent-task-payload.md",
-        include_str!("../../../../assets/config/profile-prompts/agent-task-payload.md"),
+        include_str!("../../assets/config/profile-prompts/agent-task-payload.md"),
     ),
 ];
 

@@ -18,19 +18,19 @@ use std::thread::ThreadId;
 const RESOURCES: [(&str, &str); 4] = [
     (
         "Config/predefined_config.system_prompts.yaml",
-        include_str!("../../../../assets/config/predefined_config.system_prompts.minijinja.yaml"),
+        include_str!("../../assets/config/predefined_config.system_prompts.minijinja.yaml"),
     ),
     (
         "Config/predefined_config.agent_tasks.yaml",
-        include_str!("../../../../assets/config/predefined_config.agent_tasks.yaml"),
+        include_str!("../../assets/config/predefined_config.agent_tasks.yaml"),
     ),
     (
         "Config/predefined_config.profiles.yaml",
-        include_str!("../../../../assets/config/predefined_config.profiles.yaml"),
+        include_str!("../../assets/config/predefined_config.profiles.yaml"),
     ),
     (
         "Config/predefined_config.runtime.yaml",
-        include_str!("../../../../assets/config/predefined_config.runtime.yaml"),
+        include_str!("../../assets/config/predefined_config.runtime.yaml"),
     ),
 ];
 

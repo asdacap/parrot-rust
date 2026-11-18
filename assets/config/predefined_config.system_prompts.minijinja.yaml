@@ -244,7 +244,7 @@ prompt_templates:
   agent-session.stall:
     template: >-
       Your recent steps repeated the same response with no new user input; this
-      is stall {{stall}}. Do not repeat the same step again. If you are waiting
+      is stall {stall}. Do not repeat the same step again. If you are waiting
       for something, use the wait tool or the monitor tool. Otherwise change
       your approach or finish your turn.
     allowed_arguments: [stall]
