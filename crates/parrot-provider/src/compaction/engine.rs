@@ -1,6 +1,7 @@
 use super::model::{CompactionPlan, CompactionResult, SummaryResponse};
 use super::{CompactionEvent, CompactionProgress, Execution};
-use parrot_core::{BoxFuture, CompactionFailure, Content, Error, Message, ProviderRequest, Role};
+use crate::sessions::Request;
+use parrot_core::{BoxFuture, CompactionFailure, Content, Error, Message, Role};
 
 pub(super) async fn compact(
     plan: Option<CompactionPlan>,
@@ -228,12 +229,16 @@ impl CompactionRunner<'_> {
             }
             progress.total_groups += 1;
             self.report_progress(*progress).await?;
-            let request = ProviderRequest {
+            let request = Request {
+                fast_mode: false,
                 model: self.plan.model.clone(),
-                messages,
+                instructions: String::new(),
+                messages: messages.into_iter().map(Into::into).collect(),
+                tools: Vec::new(),
                 max_output_tokens: self.plan.summary_output_tokens,
                 reasoning: self.plan.reasoning.clone(),
-                ..ProviderRequest::default()
+                provider_preferences: String::new(),
+                include_router_metadata: false,
             };
             let outcome = self.execution.summarize(request).await?;
             progress.completed_groups += 1;

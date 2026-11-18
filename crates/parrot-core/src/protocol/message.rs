@@ -7,14 +7,10 @@ pub struct PromotedInput {
 }
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProviderRequest {
-    pub model: String,
     pub instructions: String,
     pub messages: Vec<Message>,
     pub tools: Vec<ToolDefinition>,
     pub max_output_tokens: i32,
-    pub reasoning: Option<Reasoning>,
-    pub provider_preferences: String,
-    pub include_router_metadata: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

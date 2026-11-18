@@ -42,13 +42,6 @@ fn state_supplies_fresh_rendered_instructions_on_each_request() {
 #[test]
 fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparation() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
-    state.model = "provider/model-with-options".into();
-    state.reasoning = Some(Reasoning {
-        effort: "custom effort".into(),
-        summary: "raw summary mode".into(),
-    });
-    state.provider_preferences = " { \"future\" : [1.2300, true] } \n".into();
-    state.include_router_metadata = true;
     state.request().messages = vec![Message {
         contents: vec![Content::Text("stale before preparation".into())],
         ..Message::default()
@@ -95,14 +88,10 @@ fn core_assembles_every_request_field_from_explicit_state_inputs_after_preparati
     assert_eq!(
         requests[0],
         ProviderRequest {
-            model: state.model.clone(),
             instructions,
             messages,
             tools: state.capture_request_estimates()[0].definitions.clone(),
             max_output_tokens: 1379,
-            reasoning: state.reasoning.clone(),
-            provider_preferences: state.provider_preferences.clone(),
-            include_router_metadata: true,
         }
     );
     assert_eq!(

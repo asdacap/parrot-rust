@@ -101,7 +101,12 @@ async fn noncontiguous_owned_results_reach_summary_together_without_status_messa
     assert_eq!(requests.len(), 1);
     assert_eq!(
         &requests[0].messages[..4],
-        [previous, owner, result, message("intervening user")]
+        [
+            previous.clone().into(),
+            owner.into(),
+            result.into(),
+            message("intervening user").into()
+        ]
     );
     assert_eq!(requests[0].messages.len(), 5);
     assert_eq!(effects.capture.conversation, original);
@@ -219,16 +224,23 @@ async fn oversized_tool_input_fits_real_estimates_without_corrupting_metadata() 
             assert_eq!(request.messages[0].tool_calls[0].arguments_json, arguments);
             assert_eq!(request.messages[0].tool_calls[0].id, "original-call");
             assert_eq!(request.messages[1].tool_call_id, "original-call");
-            let parrot_core::Content::Text(text) = &request.messages[1].contents[0] else {
+            let truncated: parrot_core::Message = request.messages[1].clone().into();
+            let parrot_core::Content::Text(text) = &truncated.contents[0] else {
                 panic!("expected truncated tool output")
             };
             assert!(text.ends_with("[...]"));
+            let core_messages: Vec<parrot_core::Message> = request
+                .messages
+                .clone()
+                .into_iter()
+                .map(Into::into)
+                .collect();
             assert!(
                 estimate_input_tokens(
                     &selected.canonical_model,
                     &request.instructions,
                     &request.tools,
-                    &request.messages,
+                    &core_messages,
                 )
                 .unwrap()
                     <= 80
@@ -337,8 +349,8 @@ async fn operation_publishes_private_progress_and_returns_only_after_commit() {
     let texts: Vec<_> = requests[0]
         .messages
         .iter()
-        .map(|message| match &message.contents[0] {
-            parrot_core::Content::Text(text) => text.as_str(),
+        .map(|message| match &message.contents()[0] {
+            sessions::Content::Text(text) => text.as_str(),
             _ => panic!("expected summary text"),
         })
         .collect();

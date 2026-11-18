@@ -1,6 +1,6 @@
 use super::{CompactionEffects, CompactionEvent, model::SummaryResponse};
-use crate::sessions::{Event, ProviderSessions};
-use parrot_core::{Error, ErrorCode, NeverCancelled, ProviderRequest};
+use crate::sessions::{Event, ProviderSessions, Request};
+use parrot_core::{Error, ErrorCode, NeverCancelled};
 use parrot_domain::contracts::async_ops::Cancellation;
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 
@@ -14,14 +14,14 @@ pub(super) struct Execution<'a> {
 }
 
 impl Execution<'_> {
-    pub async fn summarize(&self, request: ProviderRequest) -> Result<SummaryResponse, Error> {
+    pub async fn summarize(&self, request: Request) -> Result<SummaryResponse, Error> {
         self.cancellation.check().map_err(|_| Error::cancelled())?;
         let session = self
             .sessions
             .get(self.selected.provider.clone())
             .await
             .map_err(provider_error)?;
-        let mut stream = session.call(request.into()).map_err(provider_error)?;
+        let mut stream = session.call(request).map_err(provider_error)?;
         let result = async {
             let mut summary = SummaryText::default();
             while let Some(event) = stream
