@@ -1335,6 +1335,7 @@ dependencies = [
  "parrot-runtime",
  "parrot-storage",
  "parrot-tools",
+ "parrot-tools-process",
  "protobuf",
  "reqwest",
  "rustix 1.1.5",
@@ -1450,6 +1451,7 @@ dependencies = [
  "parrot-runtime",
  "parrot-storage",
  "parrot-tools",
+ "parrot-tools-process",
  "protobuf",
  "rustix 1.1.5",
  "serde_json",
@@ -1544,7 +1546,6 @@ dependencies = [
  "async-compression",
  "base64",
  "cookie_store",
- "libc",
  "mime",
  "parrot-core",
  "parrot-domain",
@@ -1559,6 +1560,21 @@ dependencies = [
  "tokio",
  "unicode-general-category",
  "url",
+]
+
+[[package]]
+name = "parrot-tools-process"
+version = "0.0.0-dev"
+dependencies = [
+ "libc",
+ "parrot-core",
+ "parrot-domain",
+ "parrot-foundation",
+ "parrot-storage",
+ "protobuf",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

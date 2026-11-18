@@ -7,7 +7,7 @@ use parrot_domain::contracts::{
     security::AccessSnapshot,
 };
 use parrot_runtime::tool_settlement::SharedSecurity;
-use parrot_tools::process::{
+use parrot_tools_process::process::{
     execution::{
         ConfiguredProcessRunner, ProcessResources, ProcessStartRequest, SandboxGate,
         locate_configured, locator::ExecutableLocator,
@@ -115,25 +115,27 @@ impl CapturedProcessLauncher for ProductionLauncher {
                     let rules = rules
                         .expect("sandboxed starts materialize rules before the policy factory");
                     #[cfg(target_os = "linux")]
-                    let sandbox_policy = parrot_tools::sandbox::linux::LinuxSandboxPolicy {
+                    let sandbox_policy = parrot_tools_process::sandbox::linux::LinuxSandboxPolicy {
                         rules: rules
                             .into_iter()
-                            .map(|rule| parrot_tools::sandbox::linux::LinuxAccessRule {
-                                path: rule.path,
-                                read: rule.read,
-                                write: rule.write,
-                            })
+                            .map(
+                                |rule| parrot_tools_process::sandbox::linux::LinuxAccessRule {
+                                    path: rule.path,
+                                    read: rule.read,
+                                    write: rule.write,
+                                },
+                            )
                             .collect(),
                         owned_roots: vec![scratch.root().to_path_buf()],
                         device_paths: Vec::new(),
                     };
                     #[cfg(target_os = "macos")]
                     let sandbox_policy =
-                        parrot_tools::sandbox::macos::SeatbeltPolicy::compile_rules(
+                        parrot_tools_process::sandbox::macos::SeatbeltPolicy::compile_rules(
                             rules.into_iter().map(|rule| {
                                 (
                                     rule.path.to_string_lossy().into_owned(),
-                                    parrot_tools::sandbox::macos::SeatbeltAccess {
+                                    parrot_tools_process::sandbox::macos::SeatbeltAccess {
                                         read: rule.read,
                                         write: rule.write,
                                     },
@@ -243,7 +245,7 @@ mod tests {
         paths::AgentScratchDirectory,
     };
     use parrot_runtime::plan_mode::RetainedModePolicyMaterializer;
-    use parrot_tools::process::execution::TerminalMode;
+    use parrot_tools_process::process::execution::TerminalMode;
     use std::{
         fs,
         path::Path,
@@ -299,7 +301,7 @@ mod tests {
                 self.work.clone(),
                 self.session.clone(),
                 Vec::new(),
-                parrot_tools::process::execution::MAX_OUTPUT_CHARACTERS,
+                parrot_tools_process::process::execution::MAX_OUTPUT_CHARACTERS,
             )
             .unwrap()
         }
@@ -669,9 +671,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn unavailable_sandbox_never_retries_the_command_unconfined() {
-        use parrot_tools::{
-            process::execution::ProcessRunner, sandbox::linux::LinuxBubblewrapSandbox,
-        };
+        use parrot_tools_process::process::execution::ProcessRunner;
+        use parrot_tools_process::sandbox::linux::LinuxBubblewrapSandbox;
         let fixture = Fixture::new();
         let marker = fixture.work.join("must-not-exist");
         let launcher = ProductionLauncher {
@@ -681,7 +682,7 @@ mod tests {
             ),
             launch_directory: fixture.work.clone(),
             session_root: fixture.session.clone(),
-            output_spill_limit: parrot_tools::process::execution::MAX_OUTPUT_CHARACTERS,
+            output_spill_limit: parrot_tools_process::process::execution::MAX_OUTPUT_CHARACTERS,
         };
         let request = command(&format!("printf bypass > '{}'", marker.display()));
         let error = launcher

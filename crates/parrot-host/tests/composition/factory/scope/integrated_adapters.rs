@@ -14,14 +14,16 @@ use parrot_runtime::tool_settlement::SharedSecurity;
 use parrot_storage::artifacts::output_blobs::{MAXIMUM_INLINE_BYTES, OutputPreview};
 use parrot_tools::{
     agents::{AgentSelection, AgentTool, AgentToolKind},
-    process::execution::output::format_result_with_templates,
-    process::ownership::{
+    tasks_queues::tasks::{TaskQuery, TaskTool, TaskToolKind},
+};
+use parrot_tools_process::process::{
+    execution::output::format_result_with_templates,
+    ownership::{
         execution::ProcessResult,
         inventory::{ActiveShellProcessState, ActivityKind},
         managed::{CompletionReport, ProcessReport},
         owner::{ProcessAgent, ProcessStart},
     },
-    tasks_queues::tasks::{TaskQuery, TaskTool, TaskToolKind},
 };
 use std::{
     collections::VecDeque,

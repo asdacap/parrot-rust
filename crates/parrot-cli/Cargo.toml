@@ -16,6 +16,7 @@ parrot-storage = { path = "../parrot-storage" }
 parrot-core = { path = "../parrot-core" }
 parrot-host = { path = "../parrot-host", default-features = false }
 parrot-tools = { path = "../parrot-tools" }
+parrot-tools-process = { path = "../parrot-tools-process" }
 parrot-provider = { path = "../parrot-provider" }
 reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls"] }
 protobuf = "=3.7.2"

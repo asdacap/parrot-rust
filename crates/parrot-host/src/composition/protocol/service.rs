@@ -21,7 +21,7 @@ use parrot_storage::{
         WorkingDirectoryClaim,
     },
 };
-use parrot_tools::process::execution::runner::SandboxGate;
+use parrot_tools_process::process::execution::runner::SandboxGate;
 use std::{
     path::Path,
     sync::{Arc, Mutex},

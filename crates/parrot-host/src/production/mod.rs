@@ -87,12 +87,12 @@ use parrot_storage::{
     },
 };
 use parrot_tools::{
-    process::execution::{
-        locator::{CliUtilityAvailability, ExecutableLocator},
-        runner::SandboxGate,
-    },
     task_artifacts::TaskArtifactParserAdapter,
     web_fetch::{AddressPolicy, PrivateAddressPolicy, PublicAddressPolicy, WebFetcher},
+};
+use parrot_tools_process::process::execution::{
+    locator::{CliUtilityAvailability, ExecutableLocator},
+    runner::SandboxGate,
 };
 use permissions::ProductionPermissionAuthority;
 use policy::{ProductionPolicy, ProductionPolicyMaterializer};

@@ -1,4 +1,4 @@
-use parrot_tools::sandbox::macos::{SeatbeltAccess, SeatbeltLaunchPlan, SeatbeltPolicy};
+use parrot_tools_process::sandbox::macos::{SeatbeltAccess, SeatbeltLaunchPlan, SeatbeltPolicy};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};

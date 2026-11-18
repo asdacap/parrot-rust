@@ -155,7 +155,7 @@ fn output_to_runtime(output: catalog::Output) -> ToolOutput {
             use parrot_domain::protocol::messages::parrot::{
                 ShellProcessActivityKind, YieldedShellProcess,
             };
-            use parrot_tools::process::ownership::inventory::ActivityKind;
+            use parrot_tools_process::process::ownership::inventory::ActivityKind;
             YieldedShellProcess {
                 process_id: process.process_id,
                 name: process.name,
@@ -224,13 +224,24 @@ fn error_to_runtime(error: catalog::Error) -> ToolFailure {
                 session::FailureKind::Json
                 | session::FailureKind::Format
                 | session::FailureKind::Argument => FailureKind::Argument,
-                session::FailureKind::Unauthorized | session::FailureKind::Permission => {
-                    FailureKind::AccessDenied
-                }
+                session::FailureKind::Unauthorized => FailureKind::AccessDenied,
                 session::FailureKind::Io => FailureKind::Io,
                 session::FailureKind::InvalidOperation => FailureKind::InvalidOperation,
                 session::FailureKind::Network => FailureKind::Http,
                 _ => FailureKind::Unexpected,
+            },
+            catalog::Error::Permission(error) => match error.kind {
+                parrot_tools_process::permission::FailureKind::Json
+                | parrot_tools_process::permission::FailureKind::Format
+                | parrot_tools_process::permission::FailureKind::Argument => FailureKind::Argument,
+                parrot_tools_process::permission::FailureKind::Unauthorized
+                | parrot_tools_process::permission::FailureKind::Permission => {
+                    FailureKind::AccessDenied
+                }
+                parrot_tools_process::permission::FailureKind::Io => FailureKind::Io,
+                parrot_tools_process::permission::FailureKind::InvalidOperation => {
+                    FailureKind::InvalidOperation
+                }
             },
             catalog::Error::TaskQueue(error) => match error.kind {
                 tasks_queues::FailureKind::Json

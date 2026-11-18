@@ -1,7 +1,6 @@
 mod checkpoint;
 mod compact;
 mod image;
-mod permission;
 mod progress;
 mod reminders;
 mod status;

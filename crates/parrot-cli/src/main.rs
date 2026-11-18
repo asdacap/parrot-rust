@@ -843,7 +843,7 @@ impl LocalHost {
             let warning = if self.no_sandbox {
                 Some("disabled by --no-sandbox".to_owned())
             } else if configuration.runtime.sandbox_enabled {
-                match parrot_tools::process::execution::probe_sandbox_read(
+                match parrot_tools_process::process::execution::probe_sandbox_read(
                     &self.directory,
                     cancellation,
                 )

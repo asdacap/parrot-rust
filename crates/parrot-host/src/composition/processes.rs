@@ -6,7 +6,7 @@ use parrot_domain::contracts::{
     filenames::FilenameGenerator,
     status::{ActiveWorkObservation, ProcessStatusSnapshot, ProcessStatusSource},
 };
-use parrot_tools::process::{
+use parrot_tools_process::process::{
     execution::filenames::HaikunatorNameGenerator, ownership::owner::ShellProcessOwner,
 };
 

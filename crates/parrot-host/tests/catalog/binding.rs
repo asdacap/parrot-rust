@@ -24,12 +24,12 @@ use parrot_storage::{
 };
 use parrot_tools::{
     files::WorkspacePaths,
-    process::ownership::owner::ShellProcessOwner,
     web_fetch::{
         self, FetchError, Options, Request, Resolver, Response, ResponseBody, Transport,
         TransportSession, WebFetcher,
     },
 };
+use parrot_tools_process::process::ownership::owner::ShellProcessOwner;
 
 #[derive(Default)]
 pub struct WebState {

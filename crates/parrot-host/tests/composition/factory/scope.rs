@@ -92,22 +92,23 @@ use parrot_storage::{
     },
 };
 use parrot_tools::{
-    process::{
-        ownership::{
-            domain::CapturedProcessLauncher,
-            execution::{Execution, ProcessLifetime},
-            owner::ShellProcessOwner,
-        },
-        tools::CommandRequest,
-    },
-    session::{
-        Failure, FailureKind, PermissionReply, PermissionServices, WriteTarget, WriteTargetKind,
-    },
     task_artifacts::TaskArtifactParserAdapter,
     tasks_queues::ToolInvocation,
     web_fetch::{
         FetchError, Options, PublicAddressPolicy, Resolver, Transport, TransportSession, WebFetcher,
     },
+};
+use parrot_tools_process::permission::{
+    Failure as PermissionFailure, FailureKind as PermissionFailureKind, PermissionReply,
+    PermissionServices, WriteTarget, WriteTargetKind,
+};
+use parrot_tools_process::process::{
+    ownership::{
+        domain::CapturedProcessLauncher,
+        execution::{Execution, ProcessLifetime},
+        owner::ShellProcessOwner,
+    },
+    tools::CommandRequest,
 };
 use serde_json::{Value, json};
 
@@ -441,7 +442,7 @@ impl Transport for NoExternal {
 impl PermissionServices for NoExternal {
     type Security = SharedSecurity<Security>;
     type Selection = InvocationSelection<Security>;
-    fn resolve_target(&self, requested: &str) -> Result<WriteTarget, Failure> {
+    fn resolve_target(&self, requested: &str) -> Result<WriteTarget, PermissionFailure> {
         Ok(WriteTarget {
             path: requested.into(),
             kind: WriteTargetKind::File,
@@ -458,10 +459,10 @@ impl PermissionServices for NoExternal {
         _: &'a str,
         _: Vec<WriteTarget>,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<PermissionReply, Failure>> {
+    ) -> BoxFuture<'a, OperationResult<PermissionReply, PermissionFailure>> {
         Box::pin(async {
-            Err(OperationError::Failed(Failure::new(
-                FailureKind::InvalidOperation,
+            Err(OperationError::Failed(PermissionFailure::new(
+                PermissionFailureKind::InvalidOperation,
                 "synthetic permission supplier never grants access",
             )))
         })

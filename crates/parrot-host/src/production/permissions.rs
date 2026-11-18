@@ -18,7 +18,7 @@ use parrot_runtime::{
     },
     tool_settlement::SharedSecurity,
 };
-use parrot_tools::session::{
+use parrot_tools_process::permission::{
     Failure, FailureKind, PermissionReply, PermissionServices, WriteTarget,
 };
 use std::{
@@ -232,7 +232,7 @@ fn interaction_error(error: impl std::fmt::Display) -> InteractionError {
 mod tests {
     use super::*;
     use parrot_foundation::template_catalog::PromptTemplateCatalog;
-    use parrot_tools::session::WriteTargetKind;
+    use parrot_tools_process::permission::WriteTargetKind;
     use std::{
         collections::BTreeMap,
         fs,

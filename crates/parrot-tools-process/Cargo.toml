@@ -1,0 +1,38 @@
+[package]
+name = "parrot-tools-process"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+libc = "=0.2.191"
+parrot-core = { path = "../parrot-core" }
+parrot-domain = { path = "../parrot-domain" }
+parrot-foundation = { path = "../parrot-foundation" }
+parrot-storage = { path = "../parrot-storage" }
+protobuf = "=3.7.2"
+serde = { version = "1.0.229", default-features = false, features = ["std"] }
+serde_json = { version = "1.0.138" }
+tokio = { version = "1.43", default-features = false, features = ["rt", "sync", "time", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "1.43", default-features = false, features = ["rt", "sync", "time", "macros", "test-util"] }
+
+[[test]]
+name = "sandbox_linux"
+path = "tests/sandbox/linux/main.rs"
+
+[[test]]
+name = "sandbox_macos"
+path = "tests/sandbox/macos/main.rs"
+
+[[test]]
+name = "process_tools"
+path = "tests/process/tools/main.rs"
+
+[[test]]
+name = "permission"
+path = "tests/permission.rs"
+
+[lints]
+workspace = true

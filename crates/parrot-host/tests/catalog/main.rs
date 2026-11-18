@@ -383,7 +383,7 @@ async fn every_actual_factory_dispatches_its_wrapper_and_preserves_family_result
         assert!(request.environment.is_empty());
         assert_eq!(
             request.terminal_mode,
-            parrot_tools::process::execution::TerminalMode::Pipe
+            parrot_tools_process::process::execution::TerminalMode::Pipe
         );
     }
     for call in &calls {

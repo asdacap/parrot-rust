@@ -7,14 +7,13 @@ rust-version.workspace = true
 [dependencies]
 async-compression.workspace = true
 cookie_store.workspace = true
-libc = "=0.2.191"
 mime = "=0.3.17"
 parrot-core = { path = "../parrot-core" }
 parrot-domain = { path = "../parrot-domain" }
 parrot-foundation = { path = "../parrot-foundation" }
 parrot-provider = { path = "../parrot-provider" }
-parrot-storage = { path = "../parrot-storage" }
 parrot-runtime = { path = "../parrot-runtime" }
+parrot-storage = { path = "../parrot-storage" }
 protobuf = "=3.7.2"
 reqwest = { version = "0.12.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1.0.229", default-features = false, features = ["std"] }
@@ -29,14 +28,6 @@ parrot-runtime = { path = "../parrot-runtime" }
 tokio = { version = "1.43", default-features = false, features = ["test-util"] }
 
 [[test]]
-name = "sandbox_linux"
-path = "tests/sandbox/linux/main.rs"
-
-[[test]]
-name = "sandbox_macos"
-path = "tests/sandbox/macos/main.rs"
-
-[[test]]
 name = "task_artifacts"
 path = "tests/task_artifacts/main.rs"
 
@@ -47,10 +38,6 @@ path = "tests/session/main.rs"
 [[test]]
 name = "clipboard"
 path = "tests/clipboard/main.rs"
-
-[[test]]
-name = "process_tools"
-path = "tests/process/tools/main.rs"
 
 [[test]]
 name = "tasks_queues"

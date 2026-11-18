@@ -65,7 +65,7 @@ use parrot_storage::{
         SessionStoreError, StoredUserSession, StoredUserSessionFactory,
     },
 };
-use parrot_tools::session::{WriteTarget, WriteTargetKind};
+use parrot_tools_process::permission::{WriteTarget, WriteTargetKind};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::Path,

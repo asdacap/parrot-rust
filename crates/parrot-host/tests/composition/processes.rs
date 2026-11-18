@@ -18,7 +18,7 @@ use parrot_domain::contracts::{
 use parrot_host::composition::processes::{ScopedProcessStatus, production_filename_generator};
 use parrot_runtime::active_work::blockers::{ActiveWorkBlocker, ProcessBlocker};
 use parrot_storage::artifacts::output_blobs::ToolOutputBlobStore;
-use parrot_tools::process::ownership::{
+use parrot_tools_process::process::ownership::{
     execution::{Execution, NeverCancelled, ProcessResult},
     inventory::{ActiveShellProcessState, ActivityKind},
     managed::{

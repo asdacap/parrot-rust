@@ -14,7 +14,7 @@ use parrot_foundation::{
     paths::AgentScratchDirectory,
 };
 use parrot_runtime::plan_mode::{ModeError, ModeResult, RetainedModePolicyMaterializer};
-use parrot_tools::session::WriteTargetKind;
+use parrot_tools_process::permission::WriteTargetKind;
 use std::{
     collections::{BTreeSet, HashMap},
     fs,

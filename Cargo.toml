@@ -11,6 +11,7 @@ members = [
     "crates/parrot-provider",
     "crates/parrot-runtime",
     "crates/parrot-tools",
+    "crates/parrot-tools-process",
     "crates/parrot-host",
     "crates/parrot-cli",
     "tests/fuzz",

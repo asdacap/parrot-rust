@@ -42,25 +42,25 @@ use parrot_tools::{
         AgentToolError, ModelSelector, NamedRequest, SendRequest, SendResult, SpawnRequest,
         SpawnResult, input::WaitInput, status::StatusSnapshot,
     },
-    process::{
-        ownership::{
-            domain::CapturedProcessLauncher,
-            execution::{Execution, ProcessLifetime},
-            managed::{CompletionMessage, CompletionSink, ProcessDiagnostic, ProcessDiagnostics},
-            monitor::{MonitorEvent, MonitorIdentity, MonitorReport, MonitorSink},
-            owner::{ProcessAgent, ShellProcessOwner},
-        },
-        tools::{
-            CommandRequest, ProcessResolver, ProcessToolServices, ProcessWorkspace, ResolvedProcess,
-        },
-    },
-    session::{
-        Failure, ImageProvider, PermissionReply, PermissionServices, SessionServices, WriteTarget,
-        WriteTargetKind,
-    },
+    session::{Failure, ImageProvider, SessionServices},
     tasks_queues::{
         ToolFailure,
         tasks::{TaskDetail, TaskQuery, TaskSnapshot, TaskUpdate},
+    },
+};
+use parrot_tools_process::permission::{
+    Failure as PermissionFailure, PermissionReply, PermissionServices, WriteTarget, WriteTargetKind,
+};
+use parrot_tools_process::process::{
+    ownership::{
+        domain::CapturedProcessLauncher,
+        execution::{Execution, ProcessLifetime},
+        managed::{CompletionMessage, CompletionSink, ProcessDiagnostic, ProcessDiagnostics},
+        monitor::{MonitorEvent, MonitorIdentity, MonitorReport, MonitorSink},
+        owner::{ProcessAgent, ShellProcessOwner},
+    },
+    tools::{
+        CommandRequest, ProcessResolver, ProcessToolServices, ProcessWorkspace, ResolvedProcess,
     },
 };
 
@@ -598,7 +598,7 @@ impl ImageProvider for Services {
 impl PermissionServices for Services {
     type Security = Snapshot;
     type Selection = Selection;
-    fn resolve_target(&self, requested: &str) -> Result<WriteTarget, Failure> {
+    fn resolve_target(&self, requested: &str) -> Result<WriteTarget, PermissionFailure> {
         self.record("permission_target", requested, None, None);
         Ok(WriteTarget {
             path: requested.into(),
@@ -623,7 +623,7 @@ impl PermissionServices for Services {
         reason: &'a str,
         targets: Vec<WriteTarget>,
         cancellation: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<PermissionReply, Failure>> {
+    ) -> BoxFuture<'a, OperationResult<PermissionReply, PermissionFailure>> {
         Box::pin(async move {
             cancelled(cancellation)?;
             self.record(

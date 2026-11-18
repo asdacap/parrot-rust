@@ -181,7 +181,7 @@ async fn root_with_controller(
         configuration,
         output_blobs: Arc::new(ToolOutputBlobStore::for_session(
             h.histories.repository.events().database().selected_root(), "scratch/task-adapter-blobs",
-            Arc::new(parrot_tools::process::execution::filenames::HaikunatorNameGenerator::default()),
+            Arc::new(parrot_tools_process::process::execution::filenames::HaikunatorNameGenerator::default()),
         ).unwrap()),
         publisher: built.publisher.clone(),
         diagnostics: h.factory.task_diagnostics.clone(),

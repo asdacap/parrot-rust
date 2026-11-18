@@ -98,22 +98,23 @@ use parrot_storage::{
 };
 use parrot_tools::{
     files::WorkspacePaths,
-    process::{
-        ownership::{
-            domain::CapturedProcessLauncher,
-            execution::{Execution, ProcessLifetime},
-            managed::{CompletionMessage, CompletionSink, ProcessDiagnostic, ProcessDiagnostics},
-            monitor::{MonitorEvent, MonitorIdentity, MonitorReport, MonitorSink},
-            owner::{ProcessAgent, ShellProcessOwner},
-            protocol as process_protocol,
-        },
-        tools::{
-            CommandRequest, ProcessResolver, ProcessToolServices, ProcessWorkspace, ResolvedProcess,
-        },
-    },
-    session::{Failure, FailureKind, ImageProvider, PermissionServices, SessionServices},
+    session::{Failure, FailureKind, ImageProvider, SessionServices},
     task_artifacts::TaskArtifactParserAdapter,
     web_fetch::WebFetcher,
+};
+use parrot_tools_process::permission::PermissionServices;
+use parrot_tools_process::process::{
+    ownership::{
+        domain::CapturedProcessLauncher,
+        execution::{Execution, ProcessLifetime},
+        managed::{CompletionMessage, CompletionSink, ProcessDiagnostic, ProcessDiagnostics},
+        monitor::{MonitorEvent, MonitorIdentity, MonitorReport, MonitorSink},
+        owner::{ProcessAgent, ShellProcessOwner},
+        protocol as process_protocol,
+    },
+    tools::{
+        CommandRequest, ProcessResolver, ProcessToolServices, ProcessWorkspace, ResolvedProcess,
+    },
 };
 use std::{
     collections::BTreeMap,

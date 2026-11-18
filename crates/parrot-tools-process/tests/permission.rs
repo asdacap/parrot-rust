@@ -7,7 +7,7 @@ use parrot_domain::{
     },
     values::tools::ConfiguredToolDefinition,
 };
-use parrot_tools::session::{
+use parrot_tools_process::permission::{
     Failure, FailureKind, Invocation, PermissionReply, PermissionServices,
     RequestWritePermissionTool, WriteTarget, WriteTargetKind,
 };

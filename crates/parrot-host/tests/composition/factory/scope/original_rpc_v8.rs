@@ -21,7 +21,7 @@ use parrot_storage::{
     history_files::{SessionCatalog, SessionMeta},
     ownership::WorkingDirectoryClaim,
 };
-use parrot_tools::process::execution::runner::SandboxGate;
+use parrot_tools_process::process::execution::runner::SandboxGate;
 use std::{fs, io::Read, os::unix::fs::MetadataExt};
 
 #[derive(Clone)]
@@ -210,7 +210,7 @@ impl CapturedProcessLauncher for DenyTools {
 impl PermissionServices for DenyTools {
     type Security = SharedSecurity<ReadOnlyFixture>;
     type Selection = InvocationSelection<ReadOnlyFixture>;
-    fn resolve_target(&self, path: &str) -> Result<WriteTarget, Failure> {
+    fn resolve_target(&self, path: &str) -> Result<WriteTarget, PermissionFailure> {
         Ok(WriteTarget {
             path: path.into(),
             kind: WriteTargetKind::File,
@@ -227,10 +227,10 @@ impl PermissionServices for DenyTools {
         _: &'a str,
         _: Vec<WriteTarget>,
         _: &'a dyn Cancellation,
-    ) -> BoxFuture<'a, OperationResult<PermissionReply, Failure>> {
+    ) -> BoxFuture<'a, OperationResult<PermissionReply, PermissionFailure>> {
         Box::pin(async {
-            Err(OperationError::Failed(Failure::new(
-                FailureKind::InvalidOperation,
+            Err(OperationError::Failed(PermissionFailure::new(
+                PermissionFailureKind::InvalidOperation,
                 "v8 fixture never grants",
             )))
         })

@@ -52,28 +52,26 @@ mod fixture_support {
             AgentToolError, ModelSelector, NamedRequest, SendRequest, SendResult, SpawnRequest,
             SpawnResult, input::WaitInput, status::StatusSnapshot,
         },
-        process::{
-            ownership::{
-                domain::CapturedProcessLauncher,
-                execution::{Execution, ProcessLifetime},
-                managed::{
-                    CompletionMessage, CompletionSink, ProcessDiagnostic, ProcessDiagnostics,
-                },
-                monitor::{MonitorEvent, MonitorIdentity, MonitorReport, MonitorSink},
-                owner::{ProcessAgent, ShellProcessOwner},
-            },
-            tools::{
-                CommandRequest, ProcessResolver, ProcessToolServices, ProcessWorkspace,
-                ResolvedProcess,
-            },
-        },
-        session::{
-            Failure, ImageProvider, PermissionReply, PermissionServices, SessionServices,
-            WriteTarget, WriteTargetKind,
-        },
+        session::{Failure, ImageProvider, SessionServices},
         tasks_queues::{
             ToolFailure,
             tasks::{TaskDetail, TaskQuery, TaskSnapshot, TaskUpdate},
+        },
+    };
+    use parrot_tools_process::permission::{
+        Failure as PermissionFailure, PermissionReply, PermissionServices, WriteTarget,
+        WriteTargetKind,
+    };
+    use parrot_tools_process::process::{
+        ownership::{
+            domain::CapturedProcessLauncher,
+            execution::{Execution, ProcessLifetime},
+            managed::{CompletionMessage, CompletionSink, ProcessDiagnostic, ProcessDiagnostics},
+            monitor::{MonitorEvent, MonitorIdentity, MonitorReport, MonitorSink},
+            owner::{ProcessAgent, ShellProcessOwner},
+        },
+        tools::{
+            CommandRequest, ProcessResolver, ProcessToolServices, ProcessWorkspace, ResolvedProcess,
         },
     };
 
@@ -611,7 +609,7 @@ mod fixture_support {
     impl PermissionServices for Services {
         type Security = Snapshot;
         type Selection = Selection;
-        fn resolve_target(&self, requested: &str) -> Result<WriteTarget, Failure> {
+        fn resolve_target(&self, requested: &str) -> Result<WriteTarget, PermissionFailure> {
             self.record("permission_target", requested, None, None);
             Ok(WriteTarget {
                 path: requested.into(),
@@ -636,7 +634,7 @@ mod fixture_support {
             reason: &'a str,
             targets: Vec<WriteTarget>,
             cancellation: &'a dyn Cancellation,
-        ) -> BoxFuture<'a, OperationResult<PermissionReply, Failure>> {
+        ) -> BoxFuture<'a, OperationResult<PermissionReply, PermissionFailure>> {
             Box::pin(async move {
                 cancelled(cancellation)?;
                 self.record(
@@ -948,12 +946,12 @@ mod fixture_binding {
     use parrot_storage::history_files::{AgentHistoryFile, SessionIndex, SessionMeta};
     use parrot_tools::{
         files::WorkspacePaths,
-        process::ownership::owner::ShellProcessOwner,
         web_fetch::{
             self, FetchError, Options, Request, Resolver, Response, ResponseBody, Transport,
             TransportSession, WebFetcher,
         },
     };
+    use parrot_tools_process::process::ownership::owner::ShellProcessOwner;
 
     #[derive(Default)]
     pub struct WebState {
@@ -1506,7 +1504,7 @@ async fn retained_session_uses_immutable_turn_selection_and_boundary_sequence() 
 
 #[test]
 fn output_conversion_preserves_artifacts_opaque_ids_optional_paths_and_activity() {
-    use parrot_tools::process::ownership::inventory::{ActivityKind, YieldedShellProcess};
+    use parrot_tools_process::process::ownership::inventory::{ActivityKind, YieldedShellProcess};
     let artifact = parrot_storage::artifacts::ImageArtifactMetadata {
         artifact_id: "artifact".into(),
         sha256: "sha".into(),

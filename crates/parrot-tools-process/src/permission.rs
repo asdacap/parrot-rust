@@ -1,7 +1,9 @@
-use super::{
-    Failure, FailureKind, Invocation, Output, input,
-    tools::{error_output, text_output},
-};
+mod input;
+mod output;
+
+use std::fmt;
+
+use output::{error_output, text_output};
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
@@ -10,8 +12,60 @@ use parrot_domain::{
     },
     values::tools::ConfiguredToolDefinition,
 };
+use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use serde_json::Value;
 use std::{path::PathBuf, sync::Arc};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FailureKind {
+    Json,
+    Format,
+    Argument,
+    Io,
+    Unauthorized,
+    Permission,
+    InvalidOperation,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Failure {
+    pub kind: FailureKind,
+    pub message: String,
+}
+
+impl Failure {
+    pub fn new(kind: FailureKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for Failure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+impl std::error::Error for Failure {}
+
+#[derive(Clone)]
+pub struct Invocation {
+    pub call_id: String,
+    pub arguments_json: String,
+    pub prompt_templates: Arc<PromptTemplateCatalog>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Output {
+    pub text: String,
+}
+
+impl From<String> for Output {
+    fn from(text: String) -> Self {
+        Self { text }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WriteTargetKind {

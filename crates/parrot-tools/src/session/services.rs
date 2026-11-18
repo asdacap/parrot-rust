@@ -14,7 +14,6 @@ pub enum FailureKind {
     Argument,
     Io,
     Unauthorized,
-    Permission,
     InvalidOperation,
     Provider,
     Authentication,

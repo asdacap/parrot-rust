@@ -1,5 +1,5 @@
-use parrot_tools::process::execution::LaunchSpec;
-use parrot_tools::sandbox::linux::{
+use parrot_tools_process::process::execution::LaunchSpec;
+use parrot_tools_process::sandbox::linux::{
     LinuxAccessRule, LinuxBubblewrapSandbox, LinuxSandboxPolicy, ReadOnlyExecCommandClassifier,
     UnsandboxedProcessSandbox,
 };

@@ -35,7 +35,7 @@ use parrot_storage::{
     history_files::SessionCatalog,
     ownership::*,
 };
-use parrot_tools::process::execution::runner::SandboxGate;
+use parrot_tools_process::process::execution::runner::SandboxGate;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},

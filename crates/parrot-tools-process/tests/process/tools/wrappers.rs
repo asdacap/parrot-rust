@@ -2,7 +2,7 @@
 //! ShellProcessInteractionTests. The pass-through launcher below owns real OS
 //! processes but provides no sandbox, filesystem authorization, or T36 approval.
 
-use parrot_tools::process::execution::MAX_OUTPUT_CHARACTERS;
+use parrot_tools_process::process::execution::MAX_OUTPUT_CHARACTERS;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io;
@@ -19,18 +19,20 @@ use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::protocol::messages::parrot::{Delivery, InputSource};
 use parrot_domain::values::tools::{ConfiguredToolDefinition, ToolDefinitionCatalog};
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
-use parrot_tools::process::execution::{LaunchSpec, ShellProcessExecution, TerminalMode};
-use parrot_tools::process::ownership::domain::CapturedProcessLauncher;
-use parrot_tools::process::ownership::execution::{Execution, NeverCancelled, ProcessLifetime};
-use parrot_tools::process::ownership::inventory::ActivityKind;
-use parrot_tools::process::ownership::managed::{
+use parrot_tools_process::process::execution::{LaunchSpec, ShellProcessExecution, TerminalMode};
+use parrot_tools_process::process::ownership::domain::CapturedProcessLauncher;
+use parrot_tools_process::process::ownership::execution::{
+    Execution, NeverCancelled, ProcessLifetime,
+};
+use parrot_tools_process::process::ownership::inventory::ActivityKind;
+use parrot_tools_process::process::ownership::managed::{
     CompletionMessage, CompletionSink, ProcessDiagnostic, ProcessDiagnostics,
 };
-use parrot_tools::process::ownership::monitor::{
+use parrot_tools_process::process::ownership::monitor::{
     MonitorDelivery, MonitorEvent, MonitorIdentity, MonitorInputSource, MonitorReport, MonitorSink,
 };
-use parrot_tools::process::ownership::owner::{ProcessAgent, ShellProcessOwner};
-use parrot_tools::process::tools::{
+use parrot_tools_process::process::ownership::owner::{ProcessAgent, ShellProcessOwner};
+use parrot_tools_process::process::tools::{
     CommandRequest, ProcessInvocation, ProcessResolver, ProcessTool, ProcessToolFactory,
     ProcessToolKind, ProcessToolResult, ProcessToolServices, ProcessWorkspace, ResolvedProcess,
 };

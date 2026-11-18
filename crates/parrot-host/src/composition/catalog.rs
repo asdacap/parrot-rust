@@ -32,18 +32,16 @@ use parrot_tools::{
         self, EditTool, FileToolError, FileToolOutcome, GlobTool, ReadImageTool, ReadTool,
         WorkspacePaths, WriteTool,
     },
-    process::{
-        ownership::{domain::CapturedProcessLauncher, inventory::YieldedShellProcess},
-        tools::{CommandRequest, ProcessToolFactory, ProcessToolKind, ProcessToolServices},
-    },
-    session::{
-        self, ImageGenerationTool, ImageProvider, PermissionServices, RequestWritePermissionTool,
-        SessionServices, SessionTool,
-    },
+    session::{self, ImageGenerationTool, ImageProvider, SessionServices, SessionTool},
     tasks_queues::{
         self, ToolFailure,
         tasks::{TaskQuery, TaskSnapshot, TaskTool, TaskToolKind, TaskUpdate},
     },
+};
+use parrot_tools_process::permission::{PermissionServices, RequestWritePermissionTool};
+use parrot_tools_process::process::{
+    ownership::{domain::CapturedProcessLauncher, inventory::YieldedShellProcess},
+    tools::{CommandRequest, ProcessToolFactory, ProcessToolKind, ProcessToolServices},
 };
 
 /// Converts the actual Foundation-loaded definitions without rewriting schemas.
@@ -127,8 +125,8 @@ impl From<files::FileToolResult> for Output {
         }
     }
 }
-impl From<parrot_tools::process::tools::ProcessToolResult> for Output {
-    fn from(result: parrot_tools::process::tools::ProcessToolResult) -> Self {
+impl From<parrot_tools_process::process::tools::ProcessToolResult> for Output {
+    fn from(result: parrot_tools_process::process::tools::ProcessToolResult) -> Self {
         Self {
             yielded_process: result.yielded_process,
             ..result.text.into()
@@ -152,6 +150,7 @@ pub enum Error {
     Process(std::io::Error),
     Agent(AgentToolError),
     Session(session::Failure),
+    Permission(parrot_tools_process::permission::Failure),
     TaskQueue(ToolFailure),
     WebFetch(parrot_tools::web_fetch::FetchError),
     Definition(MissingToolDefinition),
@@ -164,6 +163,7 @@ impl fmt::Display for Error {
             Self::Process(e) => e.fmt(f),
             Self::Agent(e) => e.fmt(f),
             Self::Session(e) => e.fmt(f),
+            Self::Permission(e) => e.fmt(f),
             Self::TaskQueue(e) => e.fmt(f),
             Self::WebFetch(e) => e.fmt(f),
             Self::Definition(e) => e.fmt(f),
@@ -185,6 +185,7 @@ family_error!(File, FileToolError);
 family_error!(Process, std::io::Error);
 family_error!(Agent, AgentToolError);
 family_error!(Session, session::Failure);
+family_error!(Permission, parrot_tools_process::permission::Failure);
 family_error!(TaskQueue, ToolFailure);
 family_error!(WebFetch, parrot_tools::web_fetch::FetchError);
 family_error!(Definition, MissingToolDefinition);
@@ -227,6 +228,21 @@ impl From<parrot_tools::web_fetch::Output> for Output {
     }
 }
 
+impl From<Invocation> for parrot_tools_process::permission::Invocation {
+    fn from(i: Invocation) -> Self {
+        Self {
+            call_id: i.call_id,
+            arguments_json: i.arguments_json,
+            prompt_templates: i.prompt_templates,
+        }
+    }
+}
+impl From<parrot_tools_process::permission::Output> for Output {
+    fn from(result: parrot_tools_process::permission::Output) -> Self {
+        result.text.into()
+    }
+}
+
 impl From<Invocation> for files::FileToolInvocation {
     fn from(i: Invocation) -> Self {
         Self {
@@ -237,7 +253,7 @@ impl From<Invocation> for files::FileToolInvocation {
         }
     }
 }
-impl From<Invocation> for parrot_tools::process::tools::ProcessInvocation {
+impl From<Invocation> for parrot_tools_process::process::tools::ProcessInvocation {
     fn from(i: Invocation) -> Self {
         Self {
             call_id: i.call_id,
