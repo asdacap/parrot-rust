@@ -87,7 +87,8 @@ pub struct AgentCompletionUsage {
     pub input_tokens: i64,
     pub cached_input_tokens: i64,
     pub output_tokens: i64,
-    /// What the provider says the request cost, in US dollars, if it says.
+    /// What the provider says the request cost, in US dollars, if it reports a
+    /// positive one. Zero or negative reports are treated as absent.
     pub cost: Option<f64>,
 }
 
@@ -119,8 +120,10 @@ impl AgentUsageIncrement {
         let input_cost = ((input_tokens - cached_input_tokens) as f64 * pricing.input_price)
             + (cached_input_tokens as f64 * cached_input_price);
         let output_cost = completed.output_tokens as f64 * pricing.output_price;
-        // The provider's own cost wins, split as the prices would split it.
-        let (input_cost, output_cost) = match completed.cost {
+        // A positive provider-reported cost wins, split as the prices would
+        // split it. A zero or negative report is not a real charge; plan-covered
+        // gateways report zero while catalog prices still apply.
+        let (input_cost, output_cost) = match completed.cost.filter(|cost| *cost > 0.0) {
             Some(cost) if input_cost + output_cost > 0.0 => {
                 let input_share = input_cost / (input_cost + output_cost);
                 (cost * input_share, cost * (1.0 - input_share))
