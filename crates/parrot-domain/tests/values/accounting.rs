@@ -209,6 +209,34 @@ fn reported_cost_replaces_the_priced_one_split_as_the_prices_split_it() {
     }
 }
 
+/// The opencode-go gateway reports `cost: 0` for plan-covered requests while
+/// charging an allowance, so a nonpositive reported cost must not override
+/// the catalog prices.
+#[test]
+fn nonpositive_reported_cost_falls_back_to_the_priced_one() {
+    for cost in [Some(0.0), Some(-1.0)] {
+        let usage = AgentUsageIncrement::from_completion(
+            key(None),
+            AgentCompletionUsage {
+                input_tokens: 96,
+                cached_input_tokens: 0,
+                output_tokens: 8,
+                cost,
+            },
+            AgentUsagePricing {
+                input_price: 0.125,
+                cached_input_price: None,
+                output_price: 0.25,
+                context_window: 1000,
+            },
+        );
+        assert_eq!(
+            (usage.totals.input_cost, usage.totals.output_cost),
+            (12.0, 2.0)
+        );
+    }
+}
+
 #[test]
 fn own_context_updates_independently_and_legacy_flag_survives() {
     let statistics = AgentSessionStatistics::new(AgentSessionStatisticsSnapshot {
