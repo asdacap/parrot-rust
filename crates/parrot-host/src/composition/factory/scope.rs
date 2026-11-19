@@ -1514,7 +1514,11 @@ where
                         log.clone(),
                     ))),
                 )
-                .with_fast_mode(self.user.fast_mode.clone());
+                .with_fast_mode(self.user.fast_mode.clone())
+                .with_id_store(
+                    identity.session.session_id.clone(),
+                    self.user.provider_session_ids.clone(),
+                );
                 let backend = RuntimeBackend::with_sessions(
                     RuntimeConfig {
                         agent_limits: self.config.configuration.runtime.agent_limits,

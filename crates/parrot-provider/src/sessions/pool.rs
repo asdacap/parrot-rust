@@ -3,6 +3,7 @@ use super::{
     diagnostic_session::DiagnosticSession,
     diagnostics::{DiagnosticClock, DiagnosticSink, LastRequestDumper},
     fast_mode::FastModeSession,
+    session_id::{ProviderSessionId, ProviderSessionIds},
 };
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
@@ -23,12 +24,15 @@ struct SessionDiagnostics {
 }
 
 /// Sessions belong to this owner, and provider keys use Arc reference identity.
+/// An injected id store keeps provider session ids stable across a user-session resume.
 #[derive(Default)]
 pub struct ProviderSessions {
     state: Arc<Mutex<State>>,
     closed: Arc<Notify>,
     diagnostics: Option<SessionDiagnostics>,
     fast_mode: Option<Arc<FastMode>>,
+    agent_session_id: Option<String>,
+    id_store: Option<Arc<dyn ProviderSessionIds>>,
 }
 
 impl ProviderSessions {
@@ -58,6 +62,16 @@ impl ProviderSessions {
         self
     }
 
+    pub fn with_id_store(
+        mut self,
+        agent_session_id: String,
+        store: Arc<dyn ProviderSessionIds>,
+    ) -> Self {
+        self.agent_session_id = Some(agent_session_id);
+        self.id_store = Some(store);
+        self
+    }
+
     pub async fn get(&self, provider: Arc<dyn Provider>) -> Result<Arc<dyn Session>, Error> {
         let mut state = self.state.lock().await;
         if state.disposing {
@@ -70,7 +84,20 @@ impl ProviderSessions {
         {
             return Ok(session.clone());
         }
-        let session = provider.open_session()?;
+        let session = match (&self.agent_session_id, &self.id_store) {
+            (Some(agent_session_id), Some(store)) => {
+                let session_id = match store.stored(agent_session_id, provider.id()) {
+                    Some(session_id) => session_id,
+                    None => {
+                        let session_id = ProviderSessionId::generate()?;
+                        store.record(agent_session_id, provider.id(), &session_id);
+                        session_id
+                    }
+                };
+                provider.open_session_with_id(&session_id)?
+            }
+            _ => provider.open_session()?,
+        };
         let session: Arc<dyn Session> = match &self.diagnostics {
             Some(diagnostics) => Arc::new(DiagnosticSession::new(
                 session,

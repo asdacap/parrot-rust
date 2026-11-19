@@ -7,6 +7,7 @@ use crate::{
         decorators::{UsageReporter, classify_failure},
         diagnostics::CallTrace,
         retry::{Failure, is_context_length_exceeded, is_engine_overloaded, is_usage_limit},
+        session_id::ProviderSessionId,
     },
 };
 use parrot_core::NeverCancelled;
@@ -77,6 +78,16 @@ impl Provider for ImageLinkingProvider {
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         Ok(Arc::new(LinkSession {
             inner: self.inner.open_session()?,
+            state: self.state.clone(),
+            scope: Arc::new(AtomicBool::new(false)),
+        }))
+    }
+    fn open_session_with_id(
+        &self,
+        session_id: &ProviderSessionId,
+    ) -> Result<Arc<dyn Session>, Error> {
+        Ok(Arc::new(LinkSession {
+            inner: self.inner.open_session_with_id(session_id)?,
             state: self.state.clone(),
             scope: Arc::new(AtomicBool::new(false)),
         }))

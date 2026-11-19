@@ -580,6 +580,12 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
     let permissions =
         durable_permission_factory(None, diagnostics.clone())(lease.clone(), broker.clone(), true)
             .unwrap();
+    let provider_session_ids = Arc::new(
+        crate::composition::provider_session_ids::FileProviderSessionIds::open(
+            resources.root().join("provider_sessions.json"),
+            Arc::new(|_| {}),
+        ),
+    );
     let services = Arc::new(UserServices {
         id: "user-session-test".into(),
         lease: lease.clone(),
@@ -597,6 +603,7 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
         activation: Arc::new(parrot_runtime::agent_turn::lifecycle::StartupActivation::new()),
         task_concurrency: TaskConcurrencyBudget::new(2),
         fast_mode: Arc::new(parrot_provider::sessions::FastMode::new(false)),
+        provider_session_ids,
         standing: StandingInstruction::new(catalog.clone()),
         statistics: lease.events.get_runtime_statistics().await.unwrap(),
         started_at: SystemTime::UNIX_EPOCH,

@@ -468,6 +468,7 @@ impl Rpc {
             ProviderRegistry::new(
                 vec![Arc::new(CredentialProvider(LocalProvider {
                     requests: Arc::new(Mutex::new(Vec::new())),
+                    requested_ids: Arc::new(Mutex::new(Vec::new())),
                     scripts: integrated_adapters::Scripts::default(),
                     turn_barriers: TurnBarriers::default(),
                 }))],

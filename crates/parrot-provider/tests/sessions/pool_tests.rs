@@ -70,6 +70,7 @@ impl Session for TestSession {
 struct TestProvider {
     opened: AtomicUsize,
     sessions: Mutex<Vec<Arc<TestSession>>>,
+    requested_ids: Mutex<Vec<String>>,
     failure: Option<Error>,
     blocking: bool,
 }
@@ -78,12 +79,16 @@ impl TestProvider {
         Arc::new(Self {
             opened: AtomicUsize::new(0),
             sessions: Mutex::new(Vec::new()),
+            requested_ids: Mutex::new(Vec::new()),
             failure,
             blocking,
         })
     }
     fn session(&self, index: usize) -> Arc<TestSession> {
         self.sessions.lock().unwrap()[index].clone()
+    }
+    fn requested_ids(&self) -> Vec<String> {
+        self.requested_ids.lock().unwrap().clone()
     }
 }
 impl Provider for TestProvider {
@@ -111,6 +116,23 @@ impl Provider for TestProvider {
     }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         self.opened.fetch_add(1, Ordering::SeqCst);
+        Ok(self.push_session())
+    }
+    fn open_session_with_id(
+        &self,
+        session_id: &parrot_provider::sessions::ProviderSessionId,
+    ) -> Result<Arc<dyn Session>, Error> {
+        self.opened.fetch_add(1, Ordering::SeqCst);
+        self.requested_ids
+            .lock()
+            .unwrap()
+            .push(session_id.value().to_owned());
+        Ok(self.push_session())
+    }
+}
+
+impl TestProvider {
+    fn push_session(&self) -> Arc<dyn Session> {
         let session = Arc::new(TestSession {
             fast_modes: Mutex::new(Vec::new()),
             calls: AtomicUsize::new(0),
@@ -124,7 +146,7 @@ impl Provider for TestProvider {
             release: Semaphore::new(0),
         });
         self.sessions.lock().unwrap().push(session.clone());
-        Ok(session)
+        session
     }
 }
 
@@ -418,4 +440,146 @@ async fn fast_mode_is_shared_across_existing_and_new_pooled_sessions() {
     child.close().await.unwrap();
     assert_eq!(provider.session(0).closes.load(Ordering::SeqCst), 1);
     assert_eq!(provider.session(1).closes.load(Ordering::SeqCst), 1);
+}
+
+use std::collections::HashMap;
+
+struct MemoryStore(Mutex<HashMap<(String, String), String>>);
+impl MemoryStore {
+    fn new() -> Arc<Self> {
+        Arc::new(Self(Mutex::new(HashMap::new())))
+    }
+    fn seed_raw(&self, agent_session_id: &str, provider_id: &str, value: &str) {
+        self.0
+            .lock()
+            .unwrap()
+            .insert((agent_session_id.into(), provider_id.into()), value.into());
+    }
+}
+impl parrot_provider::sessions::ProviderSessionIds for MemoryStore {
+    fn stored(
+        &self,
+        agent_session_id: &str,
+        provider_id: &str,
+    ) -> Option<parrot_provider::sessions::ProviderSessionId> {
+        let value = self
+            .0
+            .lock()
+            .unwrap()
+            .get(&(agent_session_id.into(), provider_id.into()))?
+            .clone();
+        parrot_provider::sessions::ProviderSessionId::try_parse(&value)
+    }
+    fn record(
+        &self,
+        agent_session_id: &str,
+        provider_id: &str,
+        session_id: &parrot_provider::sessions::ProviderSessionId,
+    ) {
+        self.0.lock().unwrap().insert(
+            (agent_session_id.into(), provider_id.into()),
+            session_id.value().into(),
+        );
+    }
+}
+
+#[tokio::test]
+async fn id_store_miss_generates_and_records_a_fresh_session_id() {
+    let provider = TestProvider::new(None, false);
+    let store = MemoryStore::new();
+    let owner = ProviderSessions::new().with_id_store("agent-1".into(), store.clone());
+    owner.get(provider.clone()).await.unwrap();
+    owner.close().await.unwrap();
+    let requested = provider.requested_ids();
+    assert_eq!(requested.len(), 1);
+    assert_eq!(
+        store
+            .0
+            .lock()
+            .unwrap()
+            .get(&("agent-1".into(), "session-provider".into()))
+            .map(|value| value.as_str()),
+        requested.first().map(|value| value.as_str())
+    );
+    assert!(
+        parrot_provider::sessions::ProviderSessionId::try_parse(requested.first().unwrap())
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn id_store_reuses_the_recorded_session_id_across_pool_instances() {
+    let provider = TestProvider::new(None, false);
+    let store = MemoryStore::new();
+    let first = ProviderSessions::new().with_id_store("agent-1".into(), store.clone());
+    first.get(provider.clone()).await.unwrap();
+    first.close().await.unwrap();
+    let second = ProviderSessions::new().with_id_store("agent-1".into(), store.clone());
+    second.get(provider.clone()).await.unwrap();
+    second.close().await.unwrap();
+    let requested = provider.requested_ids();
+    assert_eq!(requested.len(), 2);
+    assert_eq!(requested[0], requested[1]);
+    assert_eq!(provider.opened.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn id_store_different_agent_sessions_get_different_ids() {
+    let provider = TestProvider::new(None, false);
+    let store = MemoryStore::new();
+    let first = ProviderSessions::new().with_id_store("agent-1".into(), store.clone());
+    first.get(provider.clone()).await.unwrap();
+    first.close().await.unwrap();
+    let second = ProviderSessions::new().with_id_store("agent-2".into(), store);
+    second.get(provider.clone()).await.unwrap();
+    second.close().await.unwrap();
+    let requested = provider.requested_ids();
+    assert_eq!(requested.len(), 2);
+    assert_ne!(requested[0], requested[1]);
+}
+
+#[tokio::test]
+async fn id_store_invalid_stored_id_is_regenerated_and_rerecorded() {
+    let provider = TestProvider::new(None, false);
+    let store = MemoryStore::new();
+    store.seed_raw("agent-1", "session-provider", "not-a-session-id");
+    let owner = ProviderSessions::new().with_id_store("agent-1".into(), store.clone());
+    owner.get(provider.clone()).await.unwrap();
+    owner.close().await.unwrap();
+    let requested = provider.requested_ids();
+    assert_eq!(requested.len(), 1);
+    let recorded = store
+        .0
+        .lock()
+        .unwrap()
+        .get(&("agent-1".into(), "session-provider".into()))
+        .cloned()
+        .unwrap();
+    assert_ne!(recorded, "not-a-session-id");
+    assert_eq!(
+        recorded,
+        requested.first().map(|value| value.as_str()).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn id_store_session_id_survives_the_retrying_provider_decorator() {
+    let provider = TestProvider::new(None, false);
+    let store = MemoryStore::new();
+    let owner = ProviderSessions::new().with_id_store("agent-1".into(), store.clone());
+    let retrying =
+        Arc::new(parrot_provider::sessions::decorators::RetryingProvider::new(provider.clone(), 5));
+    owner.get(retrying).await.unwrap();
+    owner.close().await.unwrap();
+    let requested = provider.requested_ids();
+    assert_eq!(requested.len(), 1);
+    assert_eq!(
+        store
+            .0
+            .lock()
+            .unwrap()
+            .get(&("agent-1".into(), "session-provider".into()))
+            .map(|value| value.as_str()),
+        requested.first().map(|value| value.as_str())
+    );
 }
