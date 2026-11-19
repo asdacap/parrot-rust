@@ -47,3 +47,6 @@ A pending message eligible to join the turn already being processed.
 
 **Queued message**:
 A pending message intended to start a new conversation turn rather than steer one already being processed.
+
+**Provider session id**:
+An identifier Parrot generates per agent session and provider, sent to the provider to group that agent session's requests. Parrot assigns no meaning to it beyond reuse across a user-session resume.

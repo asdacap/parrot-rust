@@ -2,7 +2,7 @@
 use super::diagnostics::CallTrace;
 use super::http::{HttpDriver, HttpEventsBridge, Protocol};
 use super::socket_session::{ResponseCallFactory, ResponsePrepared, ResponseSession};
-use super::{Error, EventStream, Provider, Request, Session};
+use super::{Error, EventStream, Provider, Request, Session, session_id::ProviderSessionId};
 use crate::{
     catalogs::{
         self, CatalogError, LiteLlmModelInfoDecoder, Model, StandardModelDecoder,
@@ -292,12 +292,11 @@ impl Core {
             trace,
         ))
     }
-    fn session(self: &Arc<Self>) -> Result<Arc<dyn Session>, Error> {
-        let id = random_session_id()?;
+    fn session(self: &Arc<Self>, session_id: ProviderSessionId) -> Result<Arc<dyn Session>, Error> {
         if matches!(self.protocol, Protocol::ChatCompletions) {
             return Ok(Arc::new(StatelessSession {
                 core: self.clone(),
-                session_id: id,
+                session_id: session_id.value().to_owned(),
             }));
         }
         let client = WebSocketClient::new(
@@ -309,7 +308,7 @@ impl Core {
         )?;
         let headers = Arc::new(SessionHeaders {
             core: self.clone(),
-            session_id: id.clone(),
+            session_id: session_id.value().to_owned(),
         });
         let session =
             responses_websocket::Session::new(&self.id, headers, client, self.disable_websocket);
@@ -317,7 +316,7 @@ impl Core {
             session,
             Arc::new(Factory {
                 core: self.clone(),
-                session_id: id,
+                session_id: session_id.value().to_owned(),
             }),
         )))
     }
@@ -405,18 +404,6 @@ fn set_header(headers: &mut Vec<(String, String)>, name: &str, value: String) {
     } else {
         headers.push((name.into(), value));
     }
-}
-fn random_session_id() -> Result<String, Error> {
-    let mut bytes = [0_u8; 16];
-    getrandom::getrandom(&mut bytes)
-        .map_err(|_| Error::Provider("provider: cannot generate session ID".into()))?;
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut id = String::with_capacity(32);
-    for byte in bytes {
-        id.push(char::from(HEX[usize::from(byte >> 4)]));
-        id.push(char::from(HEX[usize::from(byte & 15)]));
-    }
-    Ok(id)
 }
 fn stream_options(header: i64, idle: i64, maximum: usize) -> Result<StreamOptions, Error> {
     if idle < 0 {
@@ -567,7 +554,13 @@ impl Provider for OpenAICompatibleProvider {
         &self.core.id
     }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
-        self.core.session()
+        self.core.session(ProviderSessionId::generate()?)
+    }
+    fn open_session_with_id(
+        &self,
+        session_id: &ProviderSessionId,
+    ) -> Result<Arc<dyn Session>, Error> {
+        self.core.session(session_id.clone())
     }
 }
 
@@ -677,7 +670,13 @@ impl Provider for ChatGptProvider {
         Self::PROVIDER_ID
     }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
-        self.core.session()
+        self.core.session(ProviderSessionId::generate()?)
+    }
+    fn open_session_with_id(
+        &self,
+        session_id: &ProviderSessionId,
+    ) -> Result<Arc<dyn Session>, Error> {
+        self.core.session(session_id.clone())
     }
 }
 

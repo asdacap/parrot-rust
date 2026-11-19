@@ -131,6 +131,7 @@ pub struct UserServices<S: RestrictableAccessSnapshot + 'static> {
     pub activation: Arc<StartupActivation>,
     pub task_concurrency: Arc<TaskConcurrencyBudget>,
     pub fast_mode: Arc<parrot_provider::sessions::FastMode>,
+    pub provider_session_ids: Arc<super::super::provider_session_ids::FileProviderSessionIds>,
     pub standing: StandingInstruction,
     pub statistics: Arc<UserSessionStatistics>,
     /// Wall time captured when the user-session scope was created; feeds the
@@ -648,6 +649,24 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 ..DiagnosticEvent::new("mcp", "server_connect_failed", DiagnosticSeverity::Warning)
             });
         }
+        let provider_session_ids = Arc::new(
+            super::super::provider_session_ids::FileProviderSessionIds::open(
+                resources.root().join("provider_sessions.json"),
+                {
+                    let lease = lease.clone();
+                    Arc::new(move |failure: &str| {
+                        lease.write_diagnostic(&DiagnosticEvent {
+                            error_code: Some(failure.to_owned()),
+                            ..DiagnosticEvent::new(
+                                "provider_session",
+                                "id_store_write_failed",
+                                DiagnosticSeverity::Warning,
+                            )
+                        })
+                    })
+                },
+            ),
+        );
         let services = Arc::new(UserServices {
             id: initialization.id.value().into(),
             lease: lease.clone(),
@@ -674,6 +693,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             fast_mode: Arc::new(parrot_provider::sessions::FastMode::new(
                 initialization.fast_mode.unwrap_or(config.fast_mode),
             )),
+            provider_session_ids,
             standing: StandingInstruction::new(config.templates.clone()),
             statistics,
             started_at: question_clock.utc_now(),

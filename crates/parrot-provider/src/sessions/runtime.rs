@@ -1,4 +1,4 @@
-use super::{Event, Request};
+use super::{Event, Request, session_id::ProviderSessionId};
 pub use crate::provider_error::Error;
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 use std::sync::Arc;
@@ -58,6 +58,14 @@ pub trait Provider: Send + Sync {
         crate::image_inspection::FALLBACK_IMAGE_TOKENS
     }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error>;
+    /// Opens a session that reuses a provider session id persisted from an earlier user session.
+    /// The default ignores the id; a provider whose requests carry a session header must override it.
+    fn open_session_with_id(
+        &self,
+        _session_id: &ProviderSessionId,
+    ) -> Result<Arc<dyn Session>, Error> {
+        self.open_session()
+    }
 }
 
 #[cfg(test)]

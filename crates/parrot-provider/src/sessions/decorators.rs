@@ -2,6 +2,7 @@
 use super::{
     Error, Event, EventStream, Provider, Request, Session,
     retry::{Failure, RetryPolicy},
+    session_id::ProviderSessionId,
 };
 use crate::{
     http_stream::HttpError, responses::ResponsesError, responses_websocket::WebSocketError,
@@ -83,6 +84,12 @@ impl Provider for UsageReportingProvider {
     }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         self.inner.open_session()
+    }
+    fn open_session_with_id(
+        &self,
+        session_id: &ProviderSessionId,
+    ) -> Result<Arc<dyn Session>, Error> {
+        self.inner.open_session_with_id(session_id)
     }
 }
 
@@ -179,6 +186,16 @@ impl Provider for RetryingProvider {
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
         Ok(Arc::new(RetryingSession {
             inner: self.inner.open_session()?,
+            header_max_retries: self.header_max_retries,
+            sleeper: self.sleeper.clone(),
+        }))
+    }
+    fn open_session_with_id(
+        &self,
+        session_id: &ProviderSessionId,
+    ) -> Result<Arc<dyn Session>, Error> {
+        Ok(Arc::new(RetryingSession {
+            inner: self.inner.open_session_with_id(session_id)?,
             header_max_retries: self.header_max_retries,
             sleeper: self.sleeper.clone(),
         }))

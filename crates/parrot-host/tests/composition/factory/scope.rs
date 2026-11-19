@@ -209,6 +209,7 @@ type TurnBarriers = Arc<Mutex<BTreeMap<String, Arc<TurnBarrier>>>>;
 
 struct LocalProvider {
     requests: Arc<Mutex<Vec<Request>>>,
+    requested_ids: Arc<Mutex<Vec<String>>>,
     scripts: integrated_adapters::Scripts,
     turn_barriers: TurnBarriers,
 }
@@ -246,6 +247,25 @@ impl Provider for LocalProvider {
         0
     }
     fn open_session(&self) -> Result<Arc<dyn Session>, Error> {
+        let generated = parrot_provider::sessions::ProviderSessionId::generate()?;
+        self.requested_ids
+            .lock()
+            .unwrap()
+            .push(generated.value().to_owned());
+        Ok(Arc::new(LocalSession(
+            self.requests.clone(),
+            self.scripts.clone(),
+            self.turn_barriers.clone(),
+        )))
+    }
+    fn open_session_with_id(
+        &self,
+        session_id: &parrot_provider::sessions::ProviderSessionId,
+    ) -> Result<Arc<dyn Session>, Error> {
+        self.requested_ids
+            .lock()
+            .unwrap()
+            .push(session_id.value().to_owned());
         Ok(Arc::new(LocalSession(
             self.requests.clone(),
             self.scripts.clone(),
@@ -705,6 +725,7 @@ struct Fixture {
     router: Arc<ModelRouter>,
     registry: Arc<ProviderRegistry>,
     requests: Arc<Mutex<Vec<Request>>>,
+    requested_ids: Arc<Mutex<Vec<String>>>,
     prompt_selections: Arc<Mutex<Vec<ResolvedModelSelection>>>,
     clock: Arc<FixtureClock>,
     scripts: integrated_adapters::Scripts,
@@ -805,12 +826,14 @@ impl Fixture {
             FileDiagnosticLog::open_global(root.join("logs"), "scope-test", |_| {}).unwrap(),
         );
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let requested_ids = Arc::new(Mutex::new(Vec::new()));
         let scripts = integrated_adapters::Scripts::default();
         let turn_barriers = TurnBarriers::default();
         let registry = Arc::new(
             ProviderRegistry::new(
                 vec![Arc::new(LocalProvider {
                     requests: requests.clone(),
+                    requested_ids: requested_ids.clone(),
                     scripts: scripts.clone(),
                     turn_barriers: turn_barriers.clone(),
                 })],
@@ -962,6 +985,7 @@ impl Fixture {
             router,
             registry,
             requests,
+            requested_ids,
             prompt_selections,
             clock,
             scripts,
@@ -2814,3 +2838,61 @@ mod e2e_scenarios;
 
 #[path = "../../../../../tests/stress/task_scheduler.rs"]
 mod t77_task_races;
+
+#[tokio::test]
+async fn resumed_session_reuses_the_recorded_provider_session_id() {
+    let fixture = Fixture::new(false, false).await;
+    let hosted = bounded(fixture.open()).await.unwrap();
+    let root = fixture.root();
+    let session = root.get_service::<RuntimeSession<Security>>().unwrap();
+    let sent = bounded(send_text(&session, "provider id before resume"))
+        .await
+        .unwrap();
+    bounded(sent.execution.join()).await.unwrap();
+    let requested = fixture.requested_ids.lock().unwrap().clone();
+    assert_eq!(requested.len(), 1, "one provider call must carry one id");
+    let first_id = requested[0].clone();
+
+    let user_session_id =
+        parrot_domain::values::identifiers::UserSessionId::parse(&hosted.snapshot().id).unwrap();
+    bounded(hosted.close()).await.unwrap();
+    let reopened = bounded(fixture.store.resume(&user_session_id, true, false))
+        .await
+        .unwrap();
+    let resumed = bounded(fixture.factory.bind_opened(reopened))
+        .await
+        .unwrap();
+    let root = fixture.root();
+    bounded(async {
+        loop {
+            let saved = root.agent_state().load().await.unwrap().unwrap();
+            if saved.tasks.notifications.is_empty() && !root.session().is_active() {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    let session = root.get_service::<RuntimeSession<Security>>().unwrap();
+    let sent = bounded(send_text(&session, "provider id after resume"))
+        .await
+        .unwrap();
+    bounded(sent.execution.join()).await.unwrap();
+    let requested = fixture.requested_ids.lock().unwrap().clone();
+    assert_eq!(requested.len(), 2, "the resumed call opens one session");
+    assert_eq!(requested[0], requested[1], "resume reuses the recorded id");
+    let persisted = std::fs::read_to_string(
+        fixture
+            .user()
+            .lease
+            .selected_root()
+            .path()
+            .join("provider_sessions.json"),
+    )
+    .unwrap();
+    assert!(
+        persisted.contains(&first_id),
+        "id is persisted: {persisted}"
+    );
+    bounded(resumed.close()).await.unwrap();
+}
