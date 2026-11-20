@@ -45,6 +45,7 @@ impl Session for BatchSession {
         Box::pin(async { Ok(()) })
     }
     fn call(&self, request: Request) -> Result<Box<dyn EventStream>, Error> {
+        let request = self.core.inner.prepare_request(request);
         let core = self.core.clone();
         let poll_interval = self.poll_interval;
         Ok(Box::new(LazyEventStream::new(
@@ -64,7 +65,7 @@ impl Session for BatchSession {
 }
 
 enum Stage {
-    Submit,
+    Submit { delay: Duration, backoff: Duration },
     Poll { batch_id: String, delay: Duration },
     Done,
 }
@@ -94,34 +95,63 @@ impl BatchCall {
             attempt: 0,
             submitted_at: None,
             pending: VecDeque::new(),
-            stage: Stage::Submit,
+            stage: Stage::Submit {
+                delay: Duration::ZERO,
+                backoff: Duration::from_secs(1),
+            },
         }
     }
 
     async fn advance(&mut self, cancellation: &dyn Cancellation) -> Result<(), Error> {
-        match std::mem::replace(&mut self.stage, Stage::Done) {
+        let stage = std::mem::replace(&mut self.stage, Stage::Done);
+        let delay = match &stage {
+            Stage::Submit { delay, .. } | Stage::Poll { delay, .. } => *delay,
+            Stage::Done => Duration::ZERO,
+        };
+        if !delay.is_zero() {
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return Err(Error::Cancelled),
+                _ = self.stop.cancelled() => return Err(Error::Cancelled),
+                _ = tokio::time::sleep(delay) => {}
+            }
+        }
+        match stage {
             Stage::Done => Ok(()),
-            Stage::Submit => {
+            Stage::Submit { backoff, .. } => {
                 self.attempt += 1;
                 self.pending.push_back(Event::HttpRequestStarted);
-                let batch_id = self.submit(cancellation).await?;
-                self.submitted_at = Some(Instant::now());
-                self.pending.push_back(Event::HttpResponseHeadersReceived);
-                self.stage = Stage::Poll {
-                    batch_id,
-                    delay: Duration::ZERO,
-                };
-                Ok(())
-            }
-            Stage::Poll { batch_id, delay } => {
-                if !delay.is_zero() {
-                    tokio::select! {
-                        biased;
-                        _ = cancellation.cancelled() => return Err(Error::Cancelled),
-                        _ = self.stop.cancelled() => return Err(Error::Cancelled),
-                        _ = tokio::time::sleep(delay) => {}
+                match self.submit(cancellation).await {
+                    Ok(batch_id) => {
+                        self.submitted_at = Some(Instant::now());
+                        self.pending.push_back(Event::HttpResponseHeadersReceived);
+                        self.stage = Stage::Poll {
+                            batch_id,
+                            delay: Duration::ZERO,
+                        };
+                        Ok(())
                     }
+                    Err(Error::Http(HttpError::Response(failure))) if failure.status == 429 => {
+                        let delay = failure.retry_after.unwrap_or(backoff);
+                        self.pending.push_back(Event::HttpResponseHeadersReceived);
+                        self.pending.push_back(Event::Retry {
+                            attempt: self.attempt,
+                            retry_after: delay,
+                            reason: format!(
+                                "batch submission rate limited, retrying: {}",
+                                failure.detail
+                            ),
+                        });
+                        self.stage = Stage::Submit {
+                            delay,
+                            backoff: backoff.saturating_mul(2).min(Duration::from_secs(60)),
+                        };
+                        Ok(())
+                    }
+                    Err(error) => Err(error),
                 }
+            }
+            Stage::Poll { batch_id, .. } => {
                 self.attempt += 1;
                 self.pending.push_back(Event::HttpRequestStarted);
                 match self.poll(&batch_id, cancellation).await {
@@ -178,13 +208,21 @@ impl BatchCall {
 
     async fn submit(&mut self, cancellation: &dyn Cancellation) -> Result<String, Error> {
         let mut request = self.request.clone();
-        request.provider_preferences.clear();
+        let preferences = std::mem::take(&mut request.provider_preferences);
+        let provider = if preferences.trim().is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::from_str(&preferences)
+                    .map_err(|error| Error::Encode(error.to_string()))?,
+            )
+        };
         let prepared = prepare_batch_body(&request, &self.core.id)
             .map_err(|error| Error::Encode(error.to_string()))?;
         let envelope = BatchSubmit {
             endpoint: BATCH_PROTOCOL_ENDPOINT.into(),
             model: request.model.clone(),
-            provider: None,
+            provider,
             callback_url: None,
             completion_window: None,
             requests: vec![BatchRequestEntry {
@@ -333,7 +371,10 @@ impl EventStream for BatchCall {
 
 fn is_transient(error: &Error) -> bool {
     match error {
-        Error::Http(HttpError::Response(failure)) => failure.status == 429 || failure.status >= 500,
+        Error::Http(HttpError::Response(failure)) => {
+            // A newly accepted batch can take time to become visible to GET.
+            failure.status == 404 || failure.status == 429 || failure.status >= 500
+        }
         Error::Http(
             HttpError::Transport(_) | HttpError::HeaderTimeout(_) | HttpError::ProviderHttp(_),
         ) => true,
@@ -342,13 +383,21 @@ fn is_transient(error: &Error) -> bool {
 }
 
 async fn status_error(response: &mut HttpResponse, cancellation: &dyn Cancellation) -> Error {
+    let retry_after = crate::retry_after::parse(
+        response
+            .headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("retry-after"))
+            .map(|(_, value)| value.as_str()),
+        std::time::SystemTime::now(),
+    );
     let body = read_body(response, cancellation).await.unwrap_or_default();
     let detail = error_detail(&body);
     if response.status == 429 || response.status >= 500 {
         // Retryable before a job is known to exist; the retry decorator may
         // resubmit, and a 202 that never arrived may still have created one.
         return Error::Http(HttpError::Response(HttpFailure {
-            retry_after: None,
+            retry_after,
             status: response.status,
             error_type: String::new(),
             error_code: String::new(),

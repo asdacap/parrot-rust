@@ -202,6 +202,7 @@ enum Mode {
     LiveModels,
     ExternalMembership,
     OpenRouter,
+    OpenRouterBatch,
     ChatGptModels,
     ChatGptCall,
     Google,
@@ -263,6 +264,8 @@ impl HttpTransport for Transport {
                 Mode::ExternalMembership => match uri.host_str().unwrap_or_default() { "first.test" => (200, r#"{"data":[{"id":"live-first"}]}"#.into()), "second.test" => (200, r#"{"data":[{"id":"live-second"}]}"#.into()), _ => (503, String::new()) },
                 Mode::OpenRouter if method == "GET" => (200, r#"{"data":[{"id":"vendor/model","context_length":200000,"top_provider":{"max_completion_tokens":8192}}]}"#.into()),
                 Mode::OpenRouter => (200, "data: {\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"delta\":{}}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n".into()),
+                Mode::OpenRouterBatch if method == "POST" => (202, r#"{"id":"batch_1","status":"validating"}"#.into()),
+                Mode::OpenRouterBatch => (200, r#"{"id":"batch_1","status":"completed","results":[{"custom_id":"parrot-step","response":{"status_code":200,"body":{"choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}}}]}"#.into()),
                 Mode::ChatGptModels => (200, r#"{"models":[{"slug":"live","display_name":"Live","context_window":321,"visibility":"list"}]}"#.into()),
                 Mode::ChatGptCall => (200, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".into()),
                 Mode::Google if uri.as_str() == "https://models.dev/api.json" => (200, r#"{"google":{"id":"google","models":{"gemini-fixture":{"id":"gemini-fixture","name":"Gemini Fixture","tool_call":true,"limit":{"context":32768,"output":8192}}}}}"#.into()),
@@ -1083,6 +1086,26 @@ fn built_image_cost(configuration: &Configuration, credentials: &Credentials, id
             1024,
         ),
     )
+}
+
+#[tokio::test]
+async fn configured_batch_provider_routes_the_batch_to_the_selected_endpoint() {
+    let transport = Transport::new(Mode::OpenRouterBatch);
+    let provider = configured_provider(
+        "openrouter-batch",
+        "providers:\n  openrouter-batch:\n    type: openrouter-batch\n    protocol: chat-completions\n    base_url: https://openrouter.test/api/v1\n    provider_preferences:\n      only: [sail-research/fp4]\n      allow_fallbacks: false\n",
+        Credentials::one("openrouter-batch", "key").as_ref(),
+        transport.clone(),
+    );
+    drain(provider.as_ref(), request("vendor/model", 0))
+        .await
+        .unwrap();
+    let bodies = transport.post_bodies();
+    assert_eq!(bodies.len(), 1);
+    assert_eq!(
+        bodies[0],
+        r#"{"endpoint":"/v1/chat/completions","model":"vendor/model","provider":{"only":["sail-research/fp4"],"allow_fallbacks":false},"requests":[{"custom_id":"parrot-step","body":{"model":"vendor/model","messages":[{"role":"user","content":"hello"}],"include_router_metadata":true}}]}"#
+    );
 }
 
 #[test]

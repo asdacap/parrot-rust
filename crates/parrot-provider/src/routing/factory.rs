@@ -174,16 +174,12 @@ pub fn build_provider(inputs: ProviderBuildInputs<'_>) -> Result<BuiltProvider, 
                 ProviderImplementation::OpenAi => {
                     options.image_token_calculator = Arc::new(OpenAiImageTokens)
                 }
-                ProviderImplementation::OpenRouter => {
+                ProviderImplementation::OpenRouter | ProviderImplementation::OpenRouterBatch => {
                     options.decoder =
                         CatalogDecoderSelection::Legacy(catalogs::OpenRouterModelDecoder::decode);
                     options
                         .provider_preferences
                         .clone_from(&config.provider_preferences);
-                }
-                ProviderImplementation::OpenRouterBatch => {
-                    options.decoder =
-                        CatalogDecoderSelection::Legacy(catalogs::OpenRouterModelDecoder::decode);
                 }
                 ProviderImplementation::KimiCode => {
                     options.decoder =

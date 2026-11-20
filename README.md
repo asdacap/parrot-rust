@@ -28,18 +28,40 @@ cross-version locking or simultaneous same-workspace safety guarantee**.
 
 ## Benchmark results
 
-| 113-task cohort with error-only reruns | Reasoning effort | Passed | Failed tests | Errors | Pass rate | Cumulative input tokens including cached | Cumulative cached input tokens | Cumulative output tokens | Estimated cumulative cost |
+| 113-task cohort | Reasoning effort | Passed | Failed tests | Errors | Pass rate | Cumulative input tokens including cached | Cumulative cached input tokens | Cumulative output tokens | Estimated cumulative cost |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
 | DeepSeek V4.1 Flash 1017 through DeepInfra FP8 | High | 69 | 43 | 1 | 61.1% | 1.114B | 1.083B (97.25%) | 12.98M | $31.27 peak; $15.63 off-peak |
 | GLM-5.3-Flash through CoreWeave NVFP4 | High | 71 | 42 | 0 | 62.8% | 1.432B | 1.392B (97.21%) | 8.95M | $52.22 |
 | MiMo V2.6 Flash through Cohere FP8 | High requested, semantics unverified | 61 | 52 | 0 | 54.0% | 2.152B | 1.981B (92.06%) | 17.93M | $34.49 |
+| GLM-5.3-Flash through CoreWeave NVFP4, 2026-11-18 | High | 65 | 48 | 0 | 57.5% | 1.167B | 1.110B (95.16%) | 8.46M | $32.20 |
+| Qwen3.8-Flash-Next through local Ollama, completed 2026-11-20 | Server default | 47 | 64 | 2 | 41.6% | 845.97M | 790.79M (93.48%) | 11.84M | Not estimated |
 
-Results include error-only reruns on master `f71ad31c`. Token counts and costs
-include all attempts, including MiMo's credit-interrupted work.
+The Qwen run used `f71ad31c` at concurrency two with one attempt per task and no
+error-only reruns. Both execution errors hit the original three-hour agent timeout,
+on `scriggo-method-declarations` and `wasmi-trap-coredumps`.
+Usage includes recorded root and child requests, deduplicated by agent session and request ID.
+Local inference cost was not estimated.
 
-Costs are estimates using official [DeepSeek](https://api-docs.deepseek.com/quick_start/pricing),
+The first three rows include error-only reruns on master `f71ad31c`.
+Token counts and costs include all attempts, including MiMo's credit-interrupted work.
+
+The November 18 run used master `5e545826` with local batch-provider fixes and
+OpenRouter's non-batch Chat Completions API. Its original pass at concurrency 32
+produced 62 passes, 44 scored failures, and seven execution errors.
+Only those seven errors were rerun at concurrency two, adding three passes and
+four scored failures. Six original errors came from ECR setup rate limits.
+The seventh came from a provider rate limit. Original scored results were not
+rerun. Cumulative usage includes both passes and root and child requests.
+These are separate cohorts, not a controlled comparison of client versions.
+
+Costs for the first three rows are estimates using official
+[DeepSeek](https://api-docs.deepseek.com/quick_start/pricing),
 [Z.AI](https://docs.z.ai/guides/overview/pricing), and
 [Xiaomi MiMo](https://mimo.mi.com/docs/en-US/price/pay-as-you-go) API prices.
+The November 18 estimate uses
+[OpenRouter's CoreWeave NVFP4 endpoint rates](https://openrouter.ai/api/v1/models/z-ai/glm-5.3-flash/endpoints)
+per million tokens of $0.12 for uncached input, $0.02 for cached input, and
+$0.38 for output. It excludes the preflight and is not a reconciled invoice.
 
 ## Design philosophy
 

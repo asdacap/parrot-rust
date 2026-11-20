@@ -79,7 +79,7 @@ impl ByteStream for StaticBody {
     }
 }
 
-type ScriptedResponse = Result<(u16, String), HttpError>;
+type ScriptedResponse = Result<(u16, String, Vec<(String, String)>), HttpError>;
 
 #[derive(Clone)]
 struct Scripted {
@@ -94,7 +94,10 @@ impl Scripted {
         }
     }
     fn ok(status: u16, body: &str) -> ScriptedResponse {
-        Ok((status, body.into()))
+        Ok((status, body.into(), Vec::new()))
+    }
+    fn with_header(status: u16, body: &str, name: &str, value: &str) -> ScriptedResponse {
+        Ok((status, body.into(), vec![(name.into(), value.into())]))
     }
     fn transport_error() -> ScriptedResponse {
         Err(HttpError::Transport("connection reset".into()))
@@ -126,10 +129,10 @@ impl HttpTransport for Scripted {
             }
             self.requests.lock().unwrap().push(request);
             match self.responses.lock().unwrap().pop_front() {
-                Some(Ok((status, body))) => Ok(HttpResponse {
+                Some(Ok((status, body, headers))) => Ok(HttpResponse {
                     status,
                     reason: String::new(),
-                    headers: Vec::new(),
+                    headers,
                     body: Box::new(StaticBody {
                         bytes: body.into_bytes(),
                         offset: 0,
@@ -153,12 +156,20 @@ impl ApiKeySource for StaticKey {
 }
 
 fn provider(script: Scripted) -> (Scripted, OpenRouterBatchProvider) {
+    provider_with_preferences(script, "")
+}
+
+fn provider_with_preferences(
+    script: Scripted,
+    preferences: &str,
+) -> (Scripted, OpenRouterBatchProvider) {
     let mut options = CompatibleOptions::new(
         "openrouter-batch",
         "https://batch.test/api/v1",
         Arc::new(StaticKey),
     );
     options.models = vec![Model::new("vendor/model", "openrouter-batch")];
+    options.provider_preferences = preferences.into();
     let inner =
         OpenAICompatibleProvider::new(options, Arc::new(NoResponses), Arc::new(NoResponses))
             .unwrap();
@@ -321,6 +332,29 @@ async fn lifecycle_streams_heartbeats_then_completion() {
 }
 
 #[tokio::test]
+async fn submits_provider_routing_on_the_batch_envelope() {
+    let (script, provider) = provider_with_preferences(
+        Scripted::new(vec![
+            Scripted::ok(
+                202,
+                r#"{"id":"batch_1","object":"batch","status":"validating"}"#,
+            ),
+            Scripted::ok(200, &completed_body()),
+        ]),
+        r#"{"only":["sail-research/fp4"],"allow_fallbacks":false}"#,
+    );
+    let session = provider.open_session().unwrap();
+    let mut stream = session.call(request()).unwrap();
+    while stream.next(&Never).await.unwrap().is_some() {}
+    let requests = script.requests();
+    let envelope = String::from_utf8(requests[0].2.clone()).unwrap();
+    assert_eq!(
+        envelope,
+        r#"{"endpoint":"/v1/chat/completions","model":"vendor/model","provider":{"only":["sail-research/fp4"],"allow_fallbacks":false},"requests":[{"custom_id":"parrot-step","body":{"model":"vendor/model","messages":[{"role":"system","content":"be brief"},{"role":"user","content":"hi"}],"include_router_metadata":true}}]}"#
+    );
+}
+
+#[tokio::test]
 async fn cancellation_mid_poll_returns_cancelled() {
     let (script, zero) = provider(Scripted::new(vec![
         Scripted::ok(
@@ -359,6 +393,103 @@ async fn cancellation_mid_poll_returns_cancelled() {
     let error = stream.next(&toggle).await.unwrap_err();
     assert!(matches!(error, Error::Cancelled));
     assert_eq!(script.requests().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn submit_429_retries_then_polls_the_accepted_batch() {
+    let (script, provider) = provider(Scripted::new(vec![
+        Scripted::ok(429, r#"{"error":{"message":"Rate limit exceeded"}}"#),
+        Scripted::ok(202, &status_body("validating")),
+        Scripted::ok(429, "poll rate limited"),
+        Scripted::ok(200, &completed_body()),
+    ]));
+    let started = tokio::time::Instant::now();
+    let session = provider.open_session().unwrap();
+    let (events, error) = drain(session.as_ref(), &Never).await;
+    assert!(error.is_none(), "{error:?}");
+    assert!(matches!(events.last(), Some(Event::Completed(_))));
+    assert_eq!(started.elapsed(), Duration::from_secs(1));
+    let requests = script.requests();
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[0].0, "POST");
+    assert_eq!(requests[1], requests[0]);
+    for (method, endpoint, _) in &requests[2..] {
+        assert_eq!(method, "GET");
+        assert!(endpoint.ends_with("/api/v1/batches/batch_1"));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn submit_429_backoff_grows_to_a_bounded_delay() {
+    let delays = [1, 2, 4, 8, 16, 32, 60, 60, 60];
+    let mut responses: Vec<_> = delays
+        .iter()
+        .map(|_| Scripted::ok(429, "rate limited"))
+        .collect();
+    responses.push(Scripted::ok(202, &status_body("validating")));
+    responses.push(Scripted::ok(200, &completed_body()));
+    let (script, provider) = provider(Scripted::new(responses));
+    let started = tokio::time::Instant::now();
+    let session = provider.open_session().unwrap();
+    let (events, error) = drain(session.as_ref(), &Never).await;
+    assert!(error.is_none(), "{error:?}");
+    let observed: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Retry { retry_after, .. } => Some(*retry_after),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(observed, delays.map(Duration::from_secs));
+    assert_eq!(started.elapsed(), Duration::from_secs(delays.iter().sum()));
+    let requests = script.requests();
+    assert_eq!(requests.len(), delays.len() + 2);
+    for submitted in &requests[..=delays.len()] {
+        assert_eq!(submitted, &requests[0]);
+    }
+    assert_eq!(requests.last().unwrap().0, "GET");
+}
+
+#[tokio::test(start_paused = true)]
+async fn submit_429_honors_retry_after_header() {
+    let (script, provider) = provider(Scripted::new(vec![
+        Scripted::with_header(429, "rate limited", "rEtRy-AfTeR", "7"),
+        Scripted::ok(202, &status_body("validating")),
+        Scripted::ok(200, &completed_body()),
+    ]));
+    let started = tokio::time::Instant::now();
+    let session = provider.open_session().unwrap();
+    let (events, error) = drain(session.as_ref(), &Never).await;
+    assert!(error.is_none(), "{error:?}");
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::Retry { retry_after, .. } if *retry_after == Duration::from_secs(7)
+    )));
+    assert_eq!(started.elapsed(), Duration::from_secs(7));
+    assert_eq!(script.requests().len(), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancellation_during_submit_429_backoff_does_not_resubmit() {
+    let (script, provider) = provider(Scripted::new(vec![Scripted::with_header(
+        429,
+        "rate limited",
+        "Retry-After",
+        "600",
+    )]));
+    let session = provider.open_session().unwrap();
+    let toggle = Toggle::new();
+    let mut stream = session.call(request()).unwrap();
+    loop {
+        match stream.next(&toggle).await.unwrap() {
+            Some(Event::Retry { .. }) => break,
+            Some(_) => {}
+            None => panic!("expected a rate-limit retry"),
+        }
+    }
+    toggle.cancel();
+    assert!(matches!(stream.next(&toggle).await, Err(Error::Cancelled)));
+    assert_eq!(script.requests().len(), 1);
 }
 
 #[tokio::test]
@@ -473,6 +604,30 @@ async fn transient_poll_failure_is_absorbed_and_recovered() {
     assert!(reasons[1].contains("validating"), "{reasons:?}");
     assert!(matches!(events.last(), Some(Event::Completed(_))));
     assert_eq!(script.requests().len(), 4);
+}
+
+#[tokio::test]
+async fn newly_submitted_batch_retries_not_found_without_resubmitting() {
+    let (script, provider) = provider(Scripted::new(vec![
+        Scripted::ok(
+            202,
+            r#"{"id":"batch_1","object":"batch","status":"validating"}"#,
+        ),
+        Scripted::ok(404, r#"{"error":{"message":"Batch not found"}}"#),
+        Scripted::ok(404, r#"{"error":{"message":"Batch not found"}}"#),
+        Scripted::ok(200, &completed_body()),
+    ]));
+    let session = provider.open_session().unwrap();
+    let (events, error) = drain(session.as_ref(), &Never).await;
+    assert!(error.is_none(), "{error:?}");
+    assert!(matches!(events.last(), Some(Event::Completed(_))));
+    let requests = script.requests();
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[0].0, "POST");
+    for (method, endpoint, _) in &requests[1..] {
+        assert_eq!(method, "GET");
+        assert!(endpoint.ends_with("/api/v1/batches/batch_1"));
+    }
 }
 
 #[tokio::test]

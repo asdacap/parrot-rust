@@ -428,6 +428,10 @@ pub struct OpenAICompatibleProvider {
     images: Option<ImageGenerationClient>,
 }
 impl OpenAICompatibleProvider {
+    pub(crate) fn prepare_request(&self, request: Request) -> Request {
+        self.core.prepare(request)
+    }
+
     /// Streaming-only injected compatibility constructor. Use `new_with_images` for images.
     pub fn new(
         options: CompatibleOptions,
