@@ -42,6 +42,7 @@ use parrot_host::web::{
     proxy::WebParrotProxy, router::WebSessionRouter, server::WebServer, slash::WebSlashService,
 };
 use parrot_host::{
+    acp::AcpAgent,
     composition::factory::user::ordinary_workspace_resolver,
     grpc::{
         address::TransportAddress,
@@ -249,6 +250,7 @@ impl CommandBackend for Application {
                 }
                 RuntimeCommand::Chat(options) => self.chat(options, cancellation).await,
                 RuntimeCommand::Serve(options) => self.serve(options, cancellation).await,
+                RuntimeCommand::Acp => self.acp(cancellation).await,
                 #[cfg(feature = "web")]
                 RuntimeCommand::Web { port, no_sandbox } => {
                     self.web(port, no_sandbox, cancellation).await
@@ -402,6 +404,36 @@ impl Application {
                 result.map(|()| dispatch::EXIT_SUCCESS),
                 server.close().await.map_err(command_failure),
             )
+        }
+        .await;
+        combine(result, local.close().await)
+    }
+
+    /// Serves ACP editor clients over stdio. The editor spawns this process
+    /// in the workspace; the connection ends when the editor closes stdin.
+    async fn acp(&self, cancellation: &dyn Cancellation) -> Result<i32, DispatchError> {
+        let (configuration, templates) = self.configuration_and_templates()?;
+        let request = wire::CreateSessionRequest {
+            model: configuration.model.clone(),
+            mode: configuration.runtime.default_profile.clone(),
+            ..Default::default()
+        };
+        let auth = self.auth_services(&configuration)?;
+        let local = self.local_host(
+            configuration,
+            templates,
+            auth,
+            ApplicationRoots::resolve(&std::env::vars().collect()),
+            std::env::current_dir()?,
+            false,
+        );
+        let result = async {
+            let service = local.service(cancellation).await?;
+            AcpAgent::new(service, request)
+                .run_stdio()
+                .await
+                .map_err(command_failure)?;
+            Ok(dispatch::EXIT_SUCCESS)
         }
         .await;
         combine(result, local.close().await)

@@ -7,6 +7,7 @@ pub const AUTH_USAGE: &str =
 pub const S3_USAGE: &str = "usage: parrot auth login image_upload --s3-stdin";
 pub const SERVE_USAGE: &str = "usage: parrot serve [--no-sandbox] [--listen unix:/path|http://host:port|https://host:port] [--token-file <path>] [--tls-cert-file <path> --tls-key-file <path>] [--unsafe-allow-external]";
 pub const WEB_USAGE: &str = "usage: parrot web [--port <n>] [--no-sandbox]";
+pub const ACP_USAGE: &str = "usage: parrot acp";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Command {
@@ -22,6 +23,7 @@ pub enum RuntimeCommand {
     Sessions,
     Chat(ChatOptions),
     Serve(ServeOptions),
+    Acp,
     Web { port: u16, no_sandbox: bool },
 }
 
@@ -142,6 +144,12 @@ pub fn parse(arguments: &[String]) -> Result<Command, UsageError> {
             RuntimeCommand::Chat(parse_chat(&chat_arguments)?)
         }
         "serve" => RuntimeCommand::Serve(parse_serve(arguments)?),
+        "acp" => {
+            if arguments.len() > 1 {
+                return Err(UsageError::usage(ACP_USAGE));
+            }
+            RuntimeCommand::Acp
+        }
         "web" => {
             let mut port = DEFAULT_WEB_PORT;
             let mut no_sandbox = false;

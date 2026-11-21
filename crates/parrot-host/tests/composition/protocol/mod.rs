@@ -1,3 +1,4 @@
+mod acp;
 mod models;
 mod registry_failure;
 mod service;
