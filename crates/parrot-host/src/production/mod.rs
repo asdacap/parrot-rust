@@ -435,10 +435,14 @@ impl AgentFactorySource<ProductionPolicy> for ProductionSource {
                 services.resources.workspace().clone(),
             )
             .map_err(internal)?;
-        let filesystem = ProductionFilesystem::<SharedSecurity<ProductionPolicy>>::new(
-            services.resources.workspace().clone(),
-        )
-        .map_err(internal)?;
+        let filesystem = crate::acp::filesystem::AcpFilesystem::new(
+            ProductionFilesystem::<SharedSecurity<ProductionPolicy>>::new(
+                services.resources.workspace().clone(),
+            )
+            .map_err(internal)?,
+            services.id.clone(),
+            crate::acp::filesystem::AcpFileRegistry::shared(),
+        );
         let launcher = Arc::new(
             ProductionLauncher::with_device_paths(
                 self.gate.clone(),
@@ -477,7 +481,14 @@ impl AgentFactorySource<ProductionPolicy> for ProductionSource {
                     .launch_directory()
                     .to_string_lossy(),
                 &self.configuration_directory.to_string_lossy(),
-                Arc::new(ProductionReader(filesystem.clone())),
+                Arc::new(ProductionReader(
+                    // A separate raw capture: this read-only snapshot stays
+                    // local even when tool grants route through an ACP client.
+                    ProductionFilesystem::<SharedSecurity<ProductionPolicy>>::new(
+                        services.resources.workspace().clone(),
+                    )
+                    .map_err(internal)?,
+                )),
                 Arc::new(InstructionSecurity(
                     ProductionPolicy::compose(true, &[], &[], &[]).map_err(internal)?,
                 )),

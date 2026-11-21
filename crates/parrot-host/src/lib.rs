@@ -1,5 +1,6 @@
 //! Application composition, session services, and server hosting.
 
+pub mod acp;
 pub mod composition;
 pub mod grpc;
 pub mod production;

@@ -20,6 +20,12 @@ A tool an MCP server lists and serves. Parrot routes the LLM's call to the serve
 **Tool namespace**:
 The `mcp__<server>__<tool>` name pattern that keeps MCP tool names distinct from built-in tools and from other servers' tools. Permission filters and name-uniqueness checks see only the namespaced name.
 
+## ACP
+
+**ACP**:
+Agent Client Protocol, the JSON-RPC protocol an editor client uses to drive a coding agent over stdio. Parrot serves it to external editors through the `parrot acp` subcommand. See ADR 0003.
+_Avoid_: Editor integration, Zed protocol
+
 ## Conversation language
 
 **Context**:
