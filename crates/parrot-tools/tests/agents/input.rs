@@ -12,6 +12,7 @@ fn spawn_preserves_empty_values_and_named_forks() {
     assert_eq!(input.fork, ForkSelection::Empty);
     for (wire, expected) in [
         ("empty", ForkSelection::Empty),
+        ("none", ForkSelection::Empty),
         ("full", ForkSelection::Full),
         ("checkpoint", ForkSelection::Named("checkpoint".into())),
         ("Full", ForkSelection::Named("Full".into())),

@@ -125,7 +125,7 @@ impl SpawnInput {
             .as_deref()
             .unwrap_or("")
         {
-            "" | "empty" => ForkSelection::Empty,
+            "" | "empty" | "none" => ForkSelection::Empty,
             "full" => ForkSelection::Full,
             title => ForkSelection::Named(title.to_owned()),
         };

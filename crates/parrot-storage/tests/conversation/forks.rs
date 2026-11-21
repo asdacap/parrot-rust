@@ -879,6 +879,24 @@ async fn fallback_only_for_absent_effective_history_and_empty_selection_is_noop(
 }
 
 #[tokio::test]
+async fn none_fork_selects_empty_history_like_empty() {
+    let fixture = Fixture::new();
+    let repo = fixture.repository();
+    append(&repo, "parent", message(MessageRole::User, "old")).await;
+    fork(
+        &repo,
+        "parent",
+        "none-child",
+        HistoryForkBoundary::AfterCompletedHistory,
+        "none",
+    )
+    .await
+    .unwrap();
+    assert!(items(&repo, "none-child").await.is_empty());
+    repo.events().database().close().await.unwrap();
+}
+
+#[tokio::test]
 async fn full_fork_remaps_effective_snapshot_status_and_never_duplicates_status_in_tail() {
     let fixture = Fixture::new();
     let repo = fixture.repository();

@@ -74,11 +74,11 @@ impl HistoryForkSelection {
     pub fn parse(value: &str) -> Self {
         Self {
             kind: match value {
-                "" | "empty" => HistoryForkKind::Empty,
+                "" | "empty" | "none" => HistoryForkKind::Empty,
                 "full" => HistoryForkKind::Full,
                 _ => HistoryForkKind::Named,
             },
-            title: if matches!(value, "" | "empty" | "full") {
+            title: if matches!(value, "" | "empty" | "none" | "full") {
                 String::new()
             } else {
                 value.into()
