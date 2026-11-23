@@ -930,6 +930,7 @@ mod fixture_support {
 }
 #[allow(dead_code)]
 mod fixture_binding {
+    use super::fixture_support::{Security as SecurityAlias, Selection as SelectionAlias};
     use std::{
         collections::BTreeMap,
         io,
@@ -1175,7 +1176,7 @@ mod fixture_binding {
                 &definitions,
             )
             .unwrap();
-            let catalog = Catalog::new(
+            let base_catalog = Catalog::new(
                 process,
                 agents,
                 files,
@@ -1183,8 +1184,20 @@ mod fixture_binding {
                 tasks,
                 web_factory,
                 clipboard,
-            )
-            .with_factories(Vec::new());
+            );
+            let codemode_factory = crate::composition::catalog::codemode_factory(
+                &definitions,
+                Arc::new(parrot_codemode::CodemodeTool::<SecurityAlias>::new(
+                    Arc::new(parrot_codemode::CodemodeStore::new()),
+                )),
+                base_catalog
+                    .factories()
+                    .iter()
+                    .map(super::handle::<SecurityAlias>)
+                    .collect(),
+                |selection: &catalog::Selection<SelectionAlias>| selection.scoped.turn.clone(),
+            );
+            let catalog = base_catalog.with_factories(codemode_factory);
             Self {
                 catalog,
                 configuration,
@@ -1199,7 +1212,7 @@ mod fixture_binding {
 }
 
 use fixture_binding::Fixture;
-use fixture_support::{NoCancel, Security};
+use fixture_support::{NoCancel, Security, Selection as TestSelection};
 use parrot_domain::{
     contracts::async_ops::{BoxFuture, Cancellation},
     values::tools::ToolCycleImageBudget,
@@ -1320,10 +1333,11 @@ async fn all_real_catalog_handles_order_schemas_support_and_aliases_survive_mate
             "request_write_permission",
             "progress",
             "clipboard_copy",
+            "codemode",
         ]
     );
-    assert_eq!(first.tools.len(), 29);
-    assert_eq!(first.supported.iter().filter(|value| **value).count(), 27);
+    assert_eq!(first.tools.len(), 30);
+    assert_eq!(first.supported.iter().filter(|value| **value).count(), 28);
     for (index, (left, right)) in first.tools.iter().zip(&second.tools).enumerate() {
         match (left, right) {
             (ToolHandle::Ordinary(left), ToolHandle::Ordinary(right)) => {
@@ -1666,4 +1680,84 @@ async fn retained_operation_cancellation_is_not_rendered_as_success() {
     assert!(services.calls().is_empty());
     owner.dispose().await.unwrap();
     artifacts.close().await;
+}
+
+#[test]
+fn codemode_registers_with_the_config_key_and_hides_without_it() {
+    let with_key = BTreeMap::from([(
+        "codemode".to_owned(),
+        parrot_domain::values::tools::ConfiguredToolDefinition::new(
+            "Run JavaScript that calls other tools.",
+            r#"{"type":"object","properties":{"code":{"type":"string"}},"required":["code"]}"#,
+        ),
+    )]);
+    let definitions = crate::composition::catalog::definitions_from(with_key);
+    let tool: Arc<parrot_codemode::CodemodeTool<Security>> = Arc::new(
+        parrot_codemode::CodemodeTool::new(Arc::new(parrot_codemode::CodemodeStore::new())),
+    );
+    assert!(
+        crate::composition::catalog::codemode_factory::<Security, fixture_support::Selection>(
+            &definitions,
+            tool.clone(),
+            Vec::new(),
+            |selection: &catalog::Selection<TestSelection>| selection.scoped.turn.clone(),
+        )
+        .is_some(),
+        "the factory registers when the config declares codemode"
+    );
+
+    let definitions = crate::composition::catalog::definitions_from(BTreeMap::new());
+    assert!(
+        crate::composition::catalog::codemode_factory::<Security, fixture_support::Selection>(
+            &definitions,
+            tool,
+            Vec::new(),
+            |selection: &catalog::Selection<TestSelection>| selection.scoped.turn.clone(),
+        )
+        .is_none(),
+        "the factory hides codemode when the config omits it"
+    );
+}
+
+#[tokio::test]
+async fn codemode_runner_receives_siblings_but_not_codemode() {
+    let fixture = Fixture::new(
+        "tools:\n  read:\n    description: Configured read.\n    parameters:\n      properties:\n        path:\n          type: integer\n          minimum: 7\n  codemode:\n    description: Run JavaScript that calls other tools.\n    parameters:\n      type: object\n      properties:\n        code:\n          type: string\n      required:\n      - code\n",
+        false,
+        1,
+    );
+    // The assembled definition embeds the sibling declarations, not
+    // codemode's own. Read it before the adapter consumes the catalog.
+    let codemode_definition = fixture
+        .catalog
+        .factories()
+        .iter()
+        .find(|factory| factory.name() == "codemode")
+        .expect("the factory registers")
+        .definition()
+        .clone();
+    let adapter = CatalogAdapter::new(fixture.catalog).unwrap();
+    let inventory = adapter.materialize().unwrap();
+    let names: Vec<String> = inventory
+        .tools
+        .iter()
+        .map(|tool| tool.definition().name.clone())
+        .collect();
+    // The runner is built from the base catalog's factories, which precede
+    // the codemode factory: every sibling, never codemode itself.
+    assert!(names.contains(&"codemode".to_string()), "{names:?}");
+    assert!(
+        names.iter().filter(|name| *name == "codemode").count() == 1,
+        "exactly one codemode entry: {names:?}"
+    );
+    assert!(
+        codemode_definition.description.contains("### `read`"),
+        "{}",
+        codemode_definition.description
+    );
+    assert!(
+        !codemode_definition.description.contains("### `codemode`"),
+        "codemode must not declare itself: {}",
+        codemode_definition.description
+    );
 }

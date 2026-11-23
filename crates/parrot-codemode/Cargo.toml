@@ -1,0 +1,38 @@
+[package]
+name = "parrot-codemode"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+parrot-domain = { path = "../parrot-domain" }
+parrot-foundation = { path = "../parrot-foundation" }
+parrot-runtime = { path = "../parrot-runtime" }
+parrot-storage = { path = "../parrot-storage" }
+rquickjs = { version = "0.14.0", default-features = false, features = ["bindgen", "std"] }
+serde = { version = "1.0.229", default-features = false, features = ["std", "derive"] }
+serde_json = { version = "1.0.138", default-features = false, features = ["std"] }
+tokio = { version = "1.43", default-features = false, features = ["rt", "sync", "time", "macros"] }
+
+[dev-dependencies]
+parrot-provider = { path = "../parrot-provider" }
+tokio = { version = "1.43", default-features = false, features = ["rt-multi-thread", "test-util", "sync", "time"] }
+
+[[test]]
+name = "sandbox"
+path = "tests/sandbox/main.rs"
+
+[[test]]
+name = "runner"
+path = "tests/runner/main.rs"
+
+[[test]]
+name = "declarations"
+path = "tests/declarations/main.rs"
+
+[[test]]
+name = "tool"
+path = "tests/tool/main.rs"
+
+[lints]
+workspace = true

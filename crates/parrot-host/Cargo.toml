@@ -11,6 +11,7 @@ parrot-foundation = { path = "../parrot-foundation" }
 parrot-fs = { path = "../parrot-fs" }
 parrot-mcp = { path = "../parrot-mcp" }
 parrot-provider = { path = "../parrot-provider" }
+parrot-codemode = { path = "../parrot-codemode" }
 parrot-runtime = { path = "../parrot-runtime" }
 parrot-storage = { path = "../parrot-storage" }
 parrot-tools = { path = "../parrot-tools" }

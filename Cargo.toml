@@ -14,6 +14,7 @@ members = [
     "crates/parrot-tools-process",
     "crates/parrot-host",
     "crates/parrot-cli",
+    "crates/parrot-codemode",
     "tests/fuzz",
 ]
 default-members = ["crates/parrot-cli"]

@@ -1754,12 +1754,36 @@ where
                             &definitions,
                         )
                         .map_err(child)?;
+                        // Codemode builds its runner from the other factories'
+                        // handles before it joins the catalog: the only
+                        // direction of reference is codemode to siblings.
+                        let base_catalog: catalog::Catalog<
+                            SharedSecurity<S>,
+                            InvocationSelection<S>,
+                        > = catalog::Catalog::new(
+                            process, agents, files, services, tasks, web, clipboard,
+                        );
+                        let codemode_factory = {
+                            let codemode_store = Arc::new(parrot_codemode::CodemodeStore::new());
+                            let codemode_tool =
+                                Arc::new(parrot_codemode::CodemodeTool::<S>::new(codemode_store));
+                            crate::composition::catalog::codemode_factory(
+                                &definitions,
+                                codemode_tool,
+                                base_catalog
+                                    .factories()
+                                    .iter()
+                                    .map(super::catalog::handle::<S>)
+                                    .collect(),
+                                |selection: &catalog::Selection<InvocationSelection<S>>| {
+                                    selection.scoped.turn.clone()
+                                },
+                            )
+                        };
                         catalog_cells.bind(
                             CatalogAdapter::new(
-                                catalog::Catalog::new(
-                                    process, agents, files, services, tasks, web, clipboard,
-                                )
-                                .with_factories(mcp),
+                                base_catalog
+                                    .with_factories(mcp.into_iter().chain(codemode_factory)),
                             )
                             .map_err(child)?,
                         )
