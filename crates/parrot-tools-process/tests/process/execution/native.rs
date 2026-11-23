@@ -316,6 +316,54 @@ async fn explicit_signal_targets_the_owned_child_and_wait_is_joined() {
 }
 
 #[tokio::test]
+async fn explicit_signal_reaches_owned_descendants() {
+    let mut process = NativeProcess::start_pipe(&shell("sleep 30 | sleep 40")).unwrap();
+    let shell_pid = process.id();
+    // Foreground pipeline members keep the default SIGINT disposition, unlike
+    // background jobs which inherit SIG_IGN.
+    let mut children = String::new();
+    for _ in 0..100 {
+        children = std::fs::read_to_string(format!("/proc/{shell_pid}/task/{shell_pid}/children"))
+            .unwrap_or_default();
+        if children.split_ascii_whitespace().count() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let pids: Vec<i32> = children
+        .split_ascii_whitespace()
+        .map(|value| value.parse().unwrap())
+        .collect();
+    assert_eq!(pids.len(), 2, "unexpected pipeline shape: {children}");
+    let stdout = drain(process.take_stdout().unwrap());
+    let stderr = drain(process.take_stderr().unwrap());
+    process.send_signal(libc::SIGINT).unwrap();
+    // The wrapper may handle SIGINT while waiting for the pipeline; the leak
+    // contract is that the pipeline members do not survive it.
+    let mut alive = Vec::new();
+    for round in 0..100 {
+        alive.clear();
+        for pid in pids.iter().copied() {
+            if unsafe { libc::kill(pid, 0) } == 0 {
+                let cmdline =
+                    std::fs::read_to_string(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+                alive.push((pid, cmdline.trim_end_matches('\0').to_owned()));
+            }
+        }
+        if alive.is_empty() {
+            stdout.join().unwrap();
+            stderr.join().unwrap();
+            return;
+        }
+        if round % 20 == 19 {
+            eprintln!("descendants still alive at round {round}: {alive:?}");
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("descendants survived the signal: {pids:?} still alive: {alive:?}");
+}
+
+#[tokio::test]
 async fn cancel_kills_background_group_and_releases_inherited_pipe_handles() {
     let mut process = NativeProcess::start_pipe(&shell("sleep 30 & printf ready; wait")).unwrap();
     let pid = process.id();

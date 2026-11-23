@@ -2,8 +2,9 @@
 //!
 //! Callers take and concurrently drain the raw output handles before waiting,
 //! and join their finite drain threads before publishing a result. No output is
-//! accumulated in this layer. Cancellation snapshots and terminates owned
-//! descendants before reaping the direct child. Like process-tree termination,
+//! accumulated in this layer. Explicit signals reach the direct child and its
+//! owned descendants. Cancellation snapshots and terminates owned descendants
+//! before reaping the direct child. Like process-tree termination,
 //! this is best effort against concurrent forks, not universal containment.
 
 use super::LaunchSpec;
@@ -242,11 +243,20 @@ impl NativeProcess {
         }
     }
 
+    /// Signals the direct child and its owned descendants. Descendants are
+    /// captured before the child is signaled, so a child that exits on the
+    /// signal cannot orphan its own subtree.
     pub fn send_signal(&self, signal: i32) -> io::Result<()> {
         if self.status.is_some() {
             return Err(io::Error::from_raw_os_error(libc::ESRCH));
         }
-        self.signals.send(signal)
+        let (descendants, discovery) = OwnedDescendants::capture(self.child.id());
+        self.signals.send(signal)?;
+        let mut result = descendants.signal(signal);
+        if result.is_ok() {
+            result = discovery;
+        }
+        result
     }
 
     /// Polls exit without holding a composing owner's lock across an await.
@@ -295,7 +305,11 @@ impl NativeProcess {
             let result = self.child.kill();
             self.record_cleanup(result);
         }
-        if let Some(result) = self.descendants.as_ref().map(OwnedDescendants::terminate) {
+        if let Some(result) = self
+            .descendants
+            .as_ref()
+            .map(|owned| owned.signal(libc::SIGKILL))
+        {
             self.record_cleanup(result);
         }
         if let Some(result) = self.descendants.as_ref().map(OwnedDescendants::wait) {
