@@ -151,7 +151,7 @@ async fn skill_session(
         prompt: Box::new(StaticSystemPrompt(instructions)),
         skills,
         context: fixture.controller(),
-        filter: Arc::new(parrot_provider::filtering::ReasoningSkipFilter::new(
+        filter: Arc::new(parrot_runtime::filtering::ReasoningSkipFilter::new(
             &Default::default(),
         )),
         filter_settings: disabled_filter_settings(),

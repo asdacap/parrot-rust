@@ -1,9 +1,8 @@
-use super::{
-    estimate_input_tokens,
-    test_support::{Script, finish},
-};
-use crate::filtering::ReasoningSkipFilter;
-use parrot_core::{CancellationToken, FilterProvider, FilterRequest, Message, Role, ToolCall};
+use super::{estimate_input_tokens, test_support::Script};
+use crate::filtering::anthropic::AnthropicReasoningFilter;
+use crate::filtering::chat_completions::ChatCompletionsReasoningFilter;
+use crate::filtering::responses::ResponsesReasoningFilter;
+use parrot_core::{Message, ReasoningFilter, ReasoningKind, Role, ToolCall};
 use parrot_domain::values::context::TokenEstimator;
 
 fn assistant(replay: String) -> Message {
@@ -30,20 +29,18 @@ fn estimate(message: &Message) -> i64 {
     .unwrap()
 }
 
-fn assert_reasoning_savings(replay: String, expected: i64) {
+fn assert_reasoning_savings(filter: &dyn ReasoningFilter, replay: String, expected: i64) {
     let message = assistant(replay);
     let before = estimate(&message);
-    let replacements = finish(ReasoningSkipFilter::new(&Default::default()).filter(
-        FilterRequest {
-            messages: vec![message.clone()],
-        },
-        CancellationToken::uncancelled(),
-    ))
-    .unwrap()
-    .expect("reasoning removed");
-    assert_eq!(before - estimate(&replacements[0]), expected);
-    assert_eq!(replacements[0].contents, message.contents);
-    assert_eq!(replacements[0].tool_calls, message.tool_calls);
+    assert_eq!(
+        filter.kind(&message),
+        ReasoningKind::Plain,
+        "expected strippable reasoning"
+    );
+    let replacement = filter.strip(&message).expect("reasoning removed");
+    assert_eq!(before - estimate(&replacement), expected);
+    assert_eq!(replacement.contents, message.contents);
+    assert_eq!(replacement.tool_calls, message.tool_calls);
 }
 
 #[test]
@@ -56,6 +53,7 @@ fn chat_reasoning_filter_saves_both_reasoning_fields() {
         serde_json::to_string(other).unwrap(),
     );
     assert_reasoning_savings(
+        &ChatCompletionsReasoningFilter,
         replay,
         TokenEstimator::estimate_tokens(&thought) + TokenEstimator::estimate_tokens(other),
     );
@@ -65,6 +63,7 @@ fn chat_reasoning_filter_saves_both_reasoning_fields() {
 fn responses_reasoning_filter_saves_summary_and_content_text() {
     let replay = r#"{"Version":1,"Protocol":"responses","Output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"summary reasoning"}],"content":[{"type":"reasoning_text","text":"detailed reasoning"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]},{"type":"function_call","call_id":"call","name":"read","arguments":"{}"}]}"#;
     assert_reasoning_savings(
+        &ResponsesReasoningFilter,
         replay.into(),
         TokenEstimator::estimate_tokens("summary reasoning")
             + TokenEstimator::estimate_tokens("detailed reasoning"),
@@ -77,7 +76,11 @@ fn anthropic_reasoning_filter_saves_thinking_without_counting_signature() {
         r#"[{{"type":"thinking","thinking":"visible thought","signature":"{}"}},{{"type":"text","text":"answer"}}]"#,
         "opaque".repeat(500)
     );
-    assert_reasoning_savings(replay, TokenEstimator::estimate_tokens("visible thought"));
+    assert_reasoning_savings(
+        &AnthropicReasoningFilter,
+        replay,
+        TokenEstimator::estimate_tokens("visible thought"),
+    );
 }
 
 #[test]

@@ -54,3 +54,26 @@ pub trait FilterProvider: Send + Sync {
         Box::pin(async { Err(Error::unsupported("FilterProvider.filter")) })
     }
 }
+
+/// The provider's classification of one message's raw provider content.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReasoningKind {
+    /// No reasoning members, or nothing this provider can remove.
+    Absent,
+    /// Reasoning members the provider can strip from the message.
+    Plain,
+    /// Reasoning members that must be replayed intact and block the batch.
+    Protected,
+}
+
+/// Provider-side reasoning classification and stripping for one protocol.
+/// Implementations own their raw provider content format; the filter only
+/// reads `kind` and delegates the rewrite to `strip`.
+pub trait ReasoningFilter: Send + Sync {
+    /// Classifies the reasoning members carried by this message.
+    fn kind(&self, message: &Message) -> ReasoningKind;
+
+    /// The message with its strippable reasoning removed, or `None` when the
+    /// message is unchanged.
+    fn strip(&self, message: &Message) -> Option<Message>;
+}

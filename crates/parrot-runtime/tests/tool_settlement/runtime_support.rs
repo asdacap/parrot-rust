@@ -1,5 +1,5 @@
 use super::*;
-use parrot_provider::filtering::ReasoningSkipFilter;
+use parrot_runtime::filtering::ReasoningSkipFilter;
 use parrot_runtime::{
     active_work::exit_reminders::ExitReminders,
     agent_turn::{

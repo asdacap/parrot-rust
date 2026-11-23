@@ -294,7 +294,7 @@ impl BudgetRuntime {
             }),
             skills: Arc::new(Skills(trace.clone())),
             context,
-            filter: Arc::new(parrot_provider::filtering::ReasoningSkipFilter::new(
+            filter: Arc::new(parrot_runtime::filtering::ReasoningSkipFilter::new(
                 &Default::default(),
             )),
             filter_settings: disabled_filter_settings(),

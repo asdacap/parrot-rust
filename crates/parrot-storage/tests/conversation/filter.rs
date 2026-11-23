@@ -3,8 +3,8 @@ use parrot_core::FilterAmendment;
 use parrot_domain::protocol::messages::parrot::Event;
 use parrot_storage::conversation::forks::ForkError;
 use parrot_storage::conversation::*;
-use rusqlite::params;
 use parrot_storage::events::{EventError, ToolExecutionStatus, ToolExecutionTerminal, tools};
+use rusqlite::params;
 
 fn event(id: &str, agent: &str) -> Event {
     Event {

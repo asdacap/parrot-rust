@@ -731,7 +731,7 @@ mod fixture {
                 prompt: Box::new(Prompt),
                 skills: Arc::new(Skills),
                 context: self.histories.controller(prepared.history.clone()),
-                filter: Arc::new(parrot_provider::filtering::ReasoningSkipFilter::new(
+                filter: Arc::new(parrot_runtime::filtering::ReasoningSkipFilter::new(
                     &Default::default(),
                 )),
                 filter_settings: parrot_core::FilterSettings {

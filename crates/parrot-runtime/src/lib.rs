@@ -5,6 +5,7 @@ pub mod agent_turn;
 pub mod children;
 pub mod compaction;
 pub mod event_broker;
+pub mod filtering;
 pub mod interactions;
 pub mod plan_mode;
 pub mod policy;

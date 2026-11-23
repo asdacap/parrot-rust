@@ -1582,7 +1582,7 @@ where
                         prompt,
                         skills: skills.skills,
                         context: ContextController::new(compactor, prepared.history.clone()),
-                        filter: Arc::new(parrot_provider::filtering::ReasoningSkipFilter::new(
+                        filter: Arc::new(parrot_runtime::filtering::ReasoningSkipFilter::new(
                             &self.config.configuration.models.providers,
                         )),
                         filter_settings,

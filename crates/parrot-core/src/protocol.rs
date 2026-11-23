@@ -33,7 +33,9 @@ pub use conversation::{
 };
 pub use error::{Error, ErrorCode, ErrorDetail, ErrorKind};
 pub use event::EventPublisher;
-pub use filter::{FilterAmendment, FilterProvider, FilterRequest, FilterSettings};
+pub use filter::{
+    FilterAmendment, FilterProvider, FilterRequest, FilterSettings, ReasoningFilter, ReasoningKind,
+};
 pub use message::{
     Content, ConversationTurn, FinishReason, InputAdmission, Message, PromotedInput,
     ProviderRequest, ProviderResponse, Reasoning, Role,

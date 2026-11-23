@@ -36,6 +36,7 @@ fn public_traits_are_limited_to_services_and_cancellation() {
             "EventPublisher",
             "FilterProvider",
             "Provider",
+            "ReasoningFilter",
             "SkillProvider",
             "States",
             "Tools",

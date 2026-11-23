@@ -19,8 +19,8 @@ use parrot_domain::{
     },
 };
 use parrot_foundation::clock::SystemClock;
-use parrot_provider::filtering::ReasoningSkipFilter;
 use parrot_provider::sessions;
+use parrot_runtime::filtering::ReasoningSkipFilter;
 use parrot_runtime::{
     active_work::{
         blockers::{

@@ -18,7 +18,6 @@ use parrot_domain::{
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::compaction::{CompactionSettings, Compactor};
-use parrot_provider::filtering::ReasoningSkipFilter;
 use parrot_provider::{
     catalogs::Model,
     routing::{
@@ -27,6 +26,7 @@ use parrot_provider::{
     },
     sessions::{self, Completion, Error, EventStream, Provider, Request, Session},
 };
+use parrot_runtime::filtering::ReasoningSkipFilter;
 use parrot_runtime::task_scheduler::*;
 use parrot_runtime::tool_settlement::{ToolFactory, ToolInventory};
 use parrot_runtime::{

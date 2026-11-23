@@ -1,5 +1,11 @@
-//! Conversation history filtering without model invocation.
-mod reasoning_skip;
+//! Provider-side reasoning classification and stripping of raw provider
+//! content, one implementation per wire protocol.
+
+pub(crate) mod anthropic;
+pub(crate) mod chat_completions;
 #[cfg(test)]
-mod reasoning_skip_tests;
-pub use reasoning_skip::ReasoningSkipFilter;
+mod filter_tests;
+mod registry;
+pub(crate) mod responses;
+
+pub use registry::reasoning_filters;
