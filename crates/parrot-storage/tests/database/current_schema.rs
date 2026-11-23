@@ -99,7 +99,7 @@ async fn empty_unversioned_file_initializes_the_current_format() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (11, 5));
+    assert_eq!(state, (12, 5));
     database.close().await.unwrap();
 }
 
@@ -128,7 +128,7 @@ async fn current_format_reopens_without_schema_repair() {
         .unwrap()
         .into_value()
         .into_output();
-    assert_eq!(state, (11, 5, false));
+    assert_eq!(state, (12, 5, false));
     reopened.close().await.unwrap();
 }
 

@@ -153,10 +153,12 @@ impl parrot_core::TurnLifecycle for MemoryTurnLifecycle<'_> {
                 .await?;
             let skills = MemorySkills::new(self.states);
             self.opened = true;
+            let filter = MemoryFilter(self.states.filter.clone());
             Ok(Box::new(MemoryTurn {
                 states: self.states,
                 tools: self.tools,
                 provider: self.provider,
+                filter,
                 event_publisher: self.event_publisher,
                 hooks,
                 skills,
@@ -169,6 +171,7 @@ struct MemoryTurn<'a> {
     states: &'a mut MemoryState,
     tools: &'a dyn Tools,
     provider: &'a dyn Provider,
+    filter: MemoryFilter,
     event_publisher: &'a MemoryEventPublisher,
     hooks: MemoryTurnHooks,
     skills: MemorySkills,
@@ -181,6 +184,7 @@ impl parrot_core::Turn for MemoryTurn<'_> {
             skills: &self.skills,
             tools: self.tools,
             provider: self.provider,
+            filter: &self.filter,
             event_publisher: self.event_publisher,
             hooks: &self.hooks,
         }
@@ -602,7 +606,56 @@ struct MemoryState {
     budget_write_error_after: usize,
     budget_writes: usize,
     compaction: Arc<Mutex<MemoryCompaction>>,
+    filter: Arc<Mutex<MemoryFilterState>>,
 }
+
+struct MemoryFilterState {
+    requests: Vec<Vec<Message>>,
+    reply: Option<Result<Option<Vec<Message>>, Error>>,
+    amendments: Vec<parrot_core::FilterAmendment>,
+    watermark: i64,
+    settings: parrot_core::FilterSettings,
+}
+
+impl Default for MemoryFilterState {
+    fn default() -> Self {
+        Self {
+            requests: Vec::new(),
+            reply: None,
+            amendments: Vec::new(),
+            watermark: 0,
+            settings: disabled_filter_settings(),
+        }
+    }
+}
+
+struct MemoryFilter(Arc<Mutex<MemoryFilterState>>);
+
+impl parrot_core::FilterProvider for MemoryFilter {
+    fn filter<'a, 'c>(
+        &'a self,
+        request: parrot_core::FilterRequest,
+        _: parrot_core::CancellationToken<'c>,
+    ) -> BoxFuture<'a, Result<Option<Vec<Message>>, Error>>
+    where
+        'c: 'a,
+    {
+        Box::pin(async move {
+            let mut state = self.0.lock().unwrap();
+            state.requests.push(request.messages);
+            state.reply.take().unwrap_or(Ok(None))
+        })
+    }
+}
+
+fn disabled_filter_settings() -> parrot_core::FilterSettings {
+    parrot_core::FilterSettings {
+        enabled: false,
+        max_unfiltered_token_window: 0,
+        filter_batch_size: 0,
+    }
+}
+
 impl MemoryState {
     fn compact_with(&mut self, text: &str) {
         self.compaction
@@ -645,6 +698,10 @@ impl MemoryState {
         }));
         let cancellation = Arc::new(CancellationSource::default());
         let compaction = Arc::new(Mutex::new(MemoryCompaction::default()));
+        let filter = Arc::new(Mutex::new(MemoryFilterState {
+            settings: disabled_filter_settings(),
+            ..MemoryFilterState::default()
+        }));
         let mut state = Self {
             events: Arc::default(),
             started_turns: Arc::default(),
@@ -738,6 +795,7 @@ impl MemoryState {
             budget_write_error_after: 0,
             budget_writes: 0,
             compaction,
+            filter,
         };
         state.enqueue_message(Delivery::Queue, "question");
         state
@@ -1013,6 +1071,7 @@ impl States for MemoryState {
                         self.request().model.configuration.clone(),
                     ))
                 }
+                ConfigKey::Filter => Ok(ConfigValue::Filter(self.filter.lock().unwrap().settings)),
                 key => {
                     self.trace.step("render_template", self.fail_at)?;
                     let templates = self.skill_templates.lock().unwrap();
@@ -1188,7 +1247,31 @@ impl States for MemoryState {
             Ok(parrot_core::ConversationState {
                 summary: None,
                 history,
+                filter_watermark: self.filter.lock().unwrap().watermark,
             })
+        })
+    }
+    fn commit_filter_amendment(
+        &mut self,
+        amendment: parrot_core::FilterAmendment,
+    ) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async move {
+            let mut state = self.filter.lock().unwrap();
+            state.amendments.push(amendment.clone());
+            state.watermark = amendment.watermark;
+            let mut request = self.request.lock().unwrap();
+            let replacements = amendment
+                .messages
+                .iter()
+                .map(|message| message.provider_content.clone());
+            for (stored, provider_content) in request.messages
+                [amendment.start_sequence as usize - 1..amendment.end_sequence as usize]
+                .iter_mut()
+                .zip(replacements)
+            {
+                stored.provider_content = provider_content;
+            }
+            Ok(())
         })
     }
 }
@@ -2288,4 +2371,168 @@ impl SkillProvider for MemorySkills {
                 .clone())
         })
     }
+}
+fn responses_reasoning(encrypted: bool) -> String {
+    let encrypted_field = if encrypted {
+        ",\"encrypted_content\":\"cipher\"".to_owned()
+    } else {
+        String::new()
+    };
+    format!("{{\"type\":\"reasoning\",\"summary\":[{encrypted_field}]}}")
+}
+
+fn responses_envelope(items: &[String]) -> String {
+    format!(
+        "{{\"Version\":1,\"Protocol\":\"responses\",\"Output\":[{}]}}",
+        items.join(",")
+    )
+}
+
+fn read_call() -> ToolCall {
+    ToolCall {
+        id: "call-1".into(),
+        name: "read".into(),
+        arguments_json: "{}".into(),
+    }
+}
+
+fn reasoning_history(encrypted: bool) -> Vec<Message> {
+    vec![
+        Message::text(Role::User, "question"),
+        Message {
+            role: Role::Assistant,
+            contents: vec![Content::Text("thinking".into())],
+            tool_calls: vec![read_call()],
+            provider_content: responses_envelope(&[
+                responses_reasoning(encrypted),
+                "{\"type\":\"function_call\",\"call_id\":\"call-1\",\"name\":\"read\",\"arguments\":\"{}\"}"
+                    .into(),
+            ]),
+            ..Message::default()
+        },
+        Message {
+            role: Role::Tool,
+            tool_call_id: "call-1".into(),
+            contents: vec![Content::Text("result".into())],
+            ..Message::default()
+        },
+    ]
+}
+
+fn enable_filter(state: &MemoryState, window: i64, batch: i64) {
+    let mut filter = state.filter.lock().unwrap();
+    filter.settings = parrot_core::FilterSettings {
+        enabled: true,
+        max_unfiltered_token_window: window,
+        filter_batch_size: batch,
+    };
+}
+
+fn seed_reasoning_history(state: &mut MemoryState, encrypted: bool) {
+    state.request().messages = reasoning_history(encrypted);
+    state.request().estimate_script = VecDeque::from([40000, 8, 5]);
+}
+
+#[test]
+fn an_enabled_filter_strips_reasoning_from_the_oldest_whole_batch() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    seed_reasoning_history(&mut state, false);
+    enable_filter(&state, 10, 10);
+    state.filter.lock().unwrap().reply = Some(Ok(Some(vec![
+        Message::text(Role::User, "question"),
+        Message {
+            role: Role::Assistant,
+            contents: vec![Content::Text("thinking".into())],
+            tool_calls: vec![read_call()],
+            provider_content: responses_envelope(&[
+                "{\"type\":\"function_call\",\"call_id\":\"call-1\",\"name\":\"read\",\"arguments\":\"{}\"}"
+                    .into(),
+            ]),
+            ..Message::default()
+        },
+        Message {
+            role: Role::Tool,
+            tool_call_id: "call-1".into(),
+            contents: vec![Content::Text("result".into())],
+            ..Message::default()
+        },
+    ])));
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+
+    let filter = state.filter.lock().unwrap();
+    assert_eq!(filter.requests.len(), 1);
+    let batch = &filter.requests[0];
+    assert_eq!(batch.len(), 3);
+    assert!(batch[0].provider_content.is_empty());
+    assert_eq!(batch[1].tool_calls.len(), 1);
+    assert_eq!(batch[2].tool_call_id, "call-1");
+    assert_eq!(filter.amendments.len(), 1);
+    assert_eq!(filter.amendments[0].start_sequence, 1);
+    assert_eq!(filter.amendments[0].end_sequence, 3);
+    assert_eq!(filter.amendments[0].watermark, 3);
+
+    let requests = state.provider.requests.lock().unwrap();
+    let assistant = requests[0]
+        .messages
+        .iter()
+        .find(|message| message.role == Role::Assistant)
+        .expect("the request replays the assistant message");
+    assert_eq!(
+        assistant.provider_content,
+        responses_envelope(&[
+            "{\"type\":\"function_call\",\"call_id\":\"call-1\",\"name\":\"read\",\"arguments\":\"{}\"}"
+                .into()
+        ])
+    );
+    assert_eq!(assistant.tool_calls.len(), 1);
+    let result = requests[0]
+        .messages
+        .iter()
+        .find(|message| message.role == Role::Tool)
+        .expect("the request replays the tool result");
+    assert_eq!(result.tool_call_id, "call-1");
+}
+
+#[test]
+fn an_encrypted_batch_keeps_its_reasoning_and_never_retriggers() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    seed_reasoning_history(&mut state, true);
+    enable_filter(&state, 10, 10);
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+
+    let filter = state.filter.lock().unwrap();
+    assert_eq!(filter.requests.len(), 1);
+    assert_eq!(filter.amendments.len(), 1);
+    assert_eq!(filter.amendments[0].watermark, 3);
+    let amended = &filter.amendments[0].messages;
+    assert_eq!(amended.len(), 3);
+    assert!(amended[1].provider_content.contains("encrypted_content"));
+
+    let requests = state.provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    let assistant = requests[0]
+        .messages
+        .iter()
+        .find(|message| message.role == Role::Assistant)
+        .expect("the request replays the assistant message");
+    assert!(assistant.provider_content.contains("encrypted_content"));
+}
+
+#[test]
+fn a_disabled_filter_never_touches_history() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    seed_reasoning_history(&mut state, true);
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+
+    let filter = state.filter.lock().unwrap();
+    assert!(filter.requests.is_empty());
+    assert!(filter.amendments.is_empty());
+    assert_eq!(filter.watermark, 0);
+    let requests = state.provider.requests.lock().unwrap();
+    let assistant = requests[0]
+        .messages
+        .iter()
+        .find(|message| message.role == Role::Assistant)
+        .expect("the request replays the assistant message");
+    assert!(assistant.provider_content.contains("encrypted_content"));
 }

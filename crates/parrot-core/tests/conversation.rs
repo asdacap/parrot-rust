@@ -27,6 +27,7 @@ fn assembly_preserves_the_complete_summary_and_selects_its_associated_status() {
             status_sequence: Some(13),
         }),
         history: vec![tail.clone(), old_status, status.clone()],
+        filter_watermark: 0,
     };
     assert_eq!(
         state.assemble_messages(),
@@ -45,6 +46,7 @@ fn a_summary_without_status_does_not_inherit_an_older_status() {
             status_sequence: None,
         }),
         history: vec![tail.clone(), item(12, "old status", true)],
+        filter_watermark: 0,
     };
     assert_eq!(state.assemble_messages(), [summary, tail.message]);
 }
@@ -57,6 +59,7 @@ fn uncompacted_history_retains_every_message_in_order() {
     let state = ConversationState {
         summary: None,
         history: vec![first.clone(), status.clone(), last.clone()],
+        filter_watermark: 0,
     };
     assert_eq!(
         state.assemble_messages(),

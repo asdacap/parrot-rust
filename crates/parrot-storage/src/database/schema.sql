@@ -31,10 +31,16 @@ CREATE TABLE IF NOT EXISTS conversation_item (
     tool_owner_sequence INTEGER REFERENCES conversation_item(sequence) ON DELETE SET NULL,
     compaction_watermark INTEGER CHECK (compaction_watermark >= 0),
     compaction_status_sequence INTEGER UNIQUE REFERENCES conversation_item(sequence) ON DELETE SET NULL,
+    filter_watermark INTEGER CHECK (filter_watermark >= 0),
     CHECK (
         (kind = 'compaction' AND compaction_watermark IS NOT NULL)
         OR
         (kind <> 'compaction' AND compaction_watermark IS NULL AND compaction_status_sequence IS NULL)
+    ),
+    CHECK (
+        (kind = 'filter' AND filter_watermark IS NOT NULL)
+        OR
+        (kind <> 'filter' AND filter_watermark IS NULL)
     ),
     CHECK (
         (tool_result_name IS NULL AND tool_result_status IS NULL)
@@ -99,6 +105,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS conversation_compaction
 
 CREATE INDEX IF NOT EXISTS conversation_latest_compaction
     ON conversation_item (agent_session, sequence DESC) WHERE kind = 'compaction';
+
+CREATE UNIQUE INDEX IF NOT EXISTS conversation_filter
+    ON conversation_item (agent_session, filter_watermark) WHERE kind = 'filter';
+
+CREATE INDEX IF NOT EXISTS conversation_latest_filter
+    ON conversation_item (agent_session, sequence DESC) WHERE kind = 'filter';
 
 CREATE TABLE IF NOT EXISTS conversation_part (
     item_sequence INTEGER NOT NULL REFERENCES conversation_item(sequence) ON DELETE CASCADE,

@@ -871,3 +871,63 @@ fn mcp_servers_reject_unsupported_transport_inconsistent_and_invalid_entries() {
         "mcp.fs.call_timeout_ms must be a non-negative integer"
     );
 }
+
+#[test]
+fn filter_defaults_apply_when_section_missing() {
+    let settings = read(&root()).unwrap();
+    assert_eq!(
+        settings.filter,
+        parrot_foundation::config::runtime::FilterConfig::default()
+    );
+}
+
+#[test]
+fn filter_parses_explicit_section_values_and_wire_snapshot() {
+    let mut node = root();
+    node.set(
+        "filter",
+        map(&[
+            ("enabled", scalar("true")),
+            ("max_unfiltered_token_window", scalar("65536")),
+            ("filter_batch_size", scalar("8192")),
+        ]),
+    );
+    let settings = read(&node).unwrap();
+    assert!(settings.filter.enabled);
+    assert_eq!(settings.filter.max_unfiltered_token_window, 65536);
+    assert_eq!(settings.filter.filter_batch_size, 8192);
+    let snapshot = settings.snapshot();
+    assert_eq!(snapshot["filter"]["enabled"], serde_json::json!(true));
+    assert_eq!(
+        snapshot["filter"]["maxUnfilteredTokenWindow"],
+        serde_json::json!(65536)
+    );
+    assert_eq!(
+        snapshot["filter"]["filterBatchSize"],
+        serde_json::json!(8192)
+    );
+
+    let mut node = root();
+    node.set("filter", map(&[("enabled", scalar("true"))]));
+    let filter = read(&node).unwrap().filter;
+    assert!(filter.enabled);
+    assert_eq!(filter.max_unfiltered_token_window, 32768);
+    assert_eq!(filter.filter_batch_size, 16384);
+}
+
+#[test]
+fn filter_rejects_non_positive_token_values_and_unknown_keys() {
+    for key in ["max_unfiltered_token_window", "filter_batch_size"] {
+        for value in ["0", "-1", "1.5", "true", "null"] {
+            let mut node = root();
+            node.set("filter", map(&[(key, scalar(value))]));
+            assert!(
+                read(&node).is_err(),
+                "{key} {value} must be rejected as a positive integer"
+            );
+        }
+    }
+    let mut node = root();
+    node.set("filter", map(&[("unknown", scalar("1"))]));
+    assert_eq!(error(&node), "filter contains an unsupported key");
+}

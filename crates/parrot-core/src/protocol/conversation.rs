@@ -8,6 +8,9 @@ pub struct ConversationState {
     /// Persisted messages after the summary watermark, in chronological order.
     /// Includes sequence and tool ownership metadata for compaction grouping.
     pub history: Vec<ConversationHistoryItem>,
+    /// History rows with a sequence at or below this watermark are already
+    /// filtered. The unfiltered window is the history rows after it.
+    pub filter_watermark: i64,
 }
 
 impl ConversationState {

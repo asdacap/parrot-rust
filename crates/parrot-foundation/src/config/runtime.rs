@@ -117,6 +117,23 @@ pub struct CompactionConfig {
     pub summary_output_tokens: i32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FilterConfig {
+    pub enabled: bool,
+    pub max_unfiltered_token_window: i64,
+    pub filter_batch_size: i64,
+}
+
+impl Default for FilterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_unfiltered_token_window: 32 * 1024,
+            filter_batch_size: 16 * 1024,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AgentTaskForkHistoryMode {
     Dependency,
@@ -207,6 +224,7 @@ pub struct RuntimeSettings {
     pub sandbox_dev_bind: ReadOnlyCollection<String>,
     pub inline_diff: bool,
     pub compaction: CompactionConfig,
+    pub filter: FilterConfig,
     pub agent_tasks: AgentTaskConfig,
     pub agent_send_to_parent: bool,
     pub agent_spawn_model_whitelist: Vec<String>,
@@ -300,6 +318,7 @@ impl RuntimeSettings {
         };
         let live_buffer_rows = positive_integer(root, "live_buffer_rows", "live_buffer_rows")?;
         let compaction = read_compaction(root)?;
+        let filter = read_filter(root)?;
         let agent_tasks = read_agent_tasks(root)?;
         let agent_send_to_parent =
             boolean(root.get("agent_send_to_parent"), "agent_send_to_parent")?;
@@ -326,6 +345,7 @@ impl RuntimeSettings {
             sandbox_dev_bind: ReadOnlyCollection::new(sandbox_dev_bind),
             inline_diff,
             compaction,
+            filter,
             agent_tasks,
             agent_send_to_parent,
             agent_spawn_model_whitelist,
@@ -399,6 +419,7 @@ impl RuntimeSettings {
             "readOnlyExecCommandPrefixes":self.read_only_exec_command_prefixes.as_slice(),"disabledTools":self.disabled_tools,
             "sandboxRules":rules(&self.sandbox_rules),"sandboxEnabled":self.sandbox_enabled,"sandboxDevBind":self.sandbox_dev_bind.as_slice(),
             "inlineDiff":self.inline_diff,"compaction":{"triggerPercent":self.compaction.trigger_percent,"targetPercent":self.compaction.target_percent,"maximumInputTokens":self.compaction.maximum_input_tokens,"maximumOutputTokens":self.compaction.maximum_output_tokens,"summaryOutputTokens":self.compaction.summary_output_tokens},
+            "filter":{"enabled":self.filter.enabled,"maxUnfilteredTokenWindow":self.filter.max_unfiltered_token_window,"filterBatchSize":self.filter.filter_batch_size},
             "agentTasks":{"maximumAttempts":self.agent_tasks.maximum_attempts,"maximumResponseRepairs":self.agent_tasks.maximum_response_repairs,"forkHistoryMode":format!("{:?}",self.agent_tasks.fork_history_mode)},
             "agentSend":{"toParent":self.agent_send_to_parent,"spawnModelWhitelist":self.agent_spawn_model_whitelist},"toolDefinitions":tools,
             "agentLimits":{"disableRecursionLimit":self.agent_limits.disable_recursion_limit},
@@ -792,6 +813,56 @@ fn read_compaction(root: &Node) -> Result<CompactionConfig> {
             "compaction.summary_output_tokens",
         )?,
     })
+}
+
+fn read_filter(root: &Node) -> Result<FilterConfig> {
+    let Some(node) = root
+        .get("filter")
+        .filter(|value| value.as_mapping().is_some())
+    else {
+        return Ok(FilterConfig::default());
+    };
+    validate_keys(
+        node,
+        "filter",
+        &[
+            "enabled",
+            "max_unfiltered_token_window",
+            "filter_batch_size",
+        ],
+    )?;
+    let enabled = match node.get("enabled") {
+        Some(value) => boolean(Some(value), "filter.enabled")?,
+        None => false,
+    };
+    Ok(FilterConfig {
+        enabled,
+        max_unfiltered_token_window: optional_positive_i64(
+            node,
+            "max_unfiltered_token_window",
+            "filter.max_unfiltered_token_window",
+        )?
+        .unwrap_or(32 * 1024),
+        filter_batch_size: optional_positive_i64(
+            node,
+            "filter_batch_size",
+            "filter.filter_batch_size",
+        )?
+        .unwrap_or(16 * 1024),
+    })
+}
+
+fn optional_positive_i64(parent: &Node, key: &str, path: &str) -> Result<Option<i64>> {
+    let Some(node) = parent.get(key) else {
+        return Ok(None);
+    };
+    let text = node
+        .as_str()
+        .filter(|text| !text.is_empty() && text.bytes().all(|digit| digit.is_ascii_digit()))
+        .and_then(|text| text.parse::<i64>().ok())
+        .filter(|value| *value > 0);
+    text.map(Some)
+        .ok_or_else(|| ConfigError::invalid_data(format!("{path} must be a positive integer")))
 }
 
 fn read_agent_tasks(root: &Node) -> Result<AgentTaskConfig> {

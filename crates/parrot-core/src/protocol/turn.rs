@@ -1,6 +1,7 @@
 use super::message::ProviderResponse;
 use super::{
-    BoxFuture, CancellationToken, Error, EventPublisher, Provider, SkillProvider, States, Tools,
+    BoxFuture, CancellationToken, Error, EventPublisher, FilterProvider, Provider, SkillProvider,
+    States, Tools,
 };
 
 /// Drives turn execution and records turn lifecycle effects through core contracts.
@@ -125,6 +126,7 @@ pub struct TurnServices<'a> {
     pub skills: &'a dyn SkillProvider,
     pub tools: &'a dyn Tools,
     pub provider: &'a dyn Provider,
+    pub filter: &'a dyn FilterProvider,
     pub event_publisher: &'a dyn EventPublisher,
     pub hooks: &'a dyn TurnHooks,
 }

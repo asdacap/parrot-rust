@@ -68,7 +68,7 @@ pub fn read_conversation_item(
 ) -> Result<ConversationItem, EventError> {
     let item = tx
         .query_row(
-            "SELECT origin, role, tool_call_id, final_phase, provider_id, provider_content FROM conversation_item WHERE sequence = ?1 AND kind <> 'compaction';",
+            "SELECT origin, role, tool_call_id, final_phase, provider_id, provider_content FROM conversation_item WHERE sequence = ?1 AND kind NOT IN ('compaction', 'filter');",
             [sequence],
             |row| {
                 Ok((
@@ -129,7 +129,7 @@ pub(super) fn read_durable_tail(
     watermark: i64,
     include_compaction_statuses: bool,
 ) -> Result<Vec<ConversationHistoryItem>, EventError> {
-    let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM conversation_item AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.compaction_status_sequence = item.sequence), item.final_phase, item.provider_id, item.provider_content, item.tool_owner_sequence FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.kind <> 'compaction' AND item.sequence > ?2 ORDER BY item.sequence;")?;
+    let mut read = tx.prepare("SELECT item.sequence, item.origin, item.role, item.tool_call_id, EXISTS (SELECT 1 FROM conversation_item AS status WHERE status.agent_session = item.agent_session AND status.kind = 'compaction' AND status.compaction_status_sequence = item.sequence), item.final_phase, item.provider_id, item.provider_content, item.tool_owner_sequence FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.kind NOT IN ('compaction', 'filter') AND item.sequence > ?2 ORDER BY item.sequence;")?;
     let mut rows = read.query(params![agent, watermark])?;
     let mut items = Vec::new();
     while let Some(row) = rows.next()? {
@@ -221,7 +221,7 @@ impl ConversationRepository {
     ) -> Result<Option<ConversationItem>, EventError> {
         self.events.transaction(move |tx| {
             let owned: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM conversation_item WHERE agent_session = ?1 AND kind <> 'compaction' AND sequence = ?2);",
+                "SELECT EXISTS(SELECT 1 FROM conversation_item WHERE agent_session = ?1 AND kind NOT IN ('compaction', 'filter') AND sequence = ?2);",
                 params![agent, sequence], |row| row.get(0),
             )?;
             if owned { read_conversation_item(tx, sequence).map(Some) } else { Ok(None) }

@@ -736,6 +736,8 @@ impl Harness {
             prompt: Box::new(Prompt),
             skills: Arc::new(Skills),
             context,
+            filter: Arc::new(parrot_provider::filtering::ReasoningSkipFilter),
+            filter_settings: disabled_filter_settings(),
             status: Arc::new(Status),
             completion_sources: vec![],
             templates: templates.clone(),
@@ -829,5 +831,13 @@ pub(super) fn done_completion() -> Completion {
         finish_reason: "stop".into(),
         assistant_text: "done".into(),
         ..Completion::default()
+    }
+}
+
+fn disabled_filter_settings() -> parrot_core::FilterSettings {
+    parrot_core::FilterSettings {
+        enabled: false,
+        max_unfiltered_token_window: 0,
+        filter_batch_size: 0,
     }
 }

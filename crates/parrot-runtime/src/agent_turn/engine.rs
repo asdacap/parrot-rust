@@ -73,6 +73,8 @@ pub struct RuntimeConfig<S: AccessSnapshot + 'static> {
     pub prompt: Box<dyn SystemPrompt>,
     pub skills: Arc<dyn TurnSkills>,
     pub context: ContextController,
+    pub filter: Arc<dyn parrot_core::FilterProvider>,
+    pub filter_settings: parrot_core::FilterSettings,
     pub status: Arc<dyn TurnStatus<S>>,
     pub completion_sources: Vec<Arc<dyn CompletionStateSource>>,
     pub templates: Arc<PromptTemplateCatalog>,
@@ -123,6 +125,8 @@ pub struct RuntimeBackend<S: AccessSnapshot + 'static> {
     conversation: ConversationReadView,
     materialized_tools: std::sync::Mutex<Option<ToolSnapshot<S>>>,
     compactor: parrot_provider::compaction::Compactor,
+    filter: Arc<dyn parrot_core::FilterProvider>,
+    filter_settings: parrot_core::FilterSettings,
     notices: Notices,
     execution_activity: std::sync::Mutex<Option<i64>>,
 }
@@ -194,6 +198,8 @@ where
             conversation: conversation.read_view(),
             materialized_tools: std::sync::Mutex::new(None),
             compactor: config.context.compactor().clone(),
+            filter: config.filter,
+            filter_settings: config.filter_settings,
             state: Mutex::new(State {
                 agent_state: parrot_core::AgentState::default(),
                 persisted_agent_state: None,

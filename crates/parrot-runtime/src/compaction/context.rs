@@ -314,7 +314,17 @@ impl ContextController {
         let summary = self.read_conversation_summary().await?;
         let watermark = summary.as_ref().map_or(0, |summary| summary.watermark);
         let history = self.read_conversation_tail(conversation, watermark).await?;
-        Ok(parrot_core::ConversationState { summary, history })
+        let filter_watermark = self
+            .history
+            .repository()
+            .filter_watermark(self.history.agent_session_id().into())
+            .await
+            .map_err(ContextError::History)?;
+        Ok(parrot_core::ConversationState {
+            summary,
+            history,
+            filter_watermark,
+        })
     }
 
     async fn read_conversation_summary(

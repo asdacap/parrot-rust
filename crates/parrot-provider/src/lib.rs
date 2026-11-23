@@ -11,6 +11,7 @@ pub mod anthropic;
 pub mod catalogs;
 pub mod chat_completions;
 pub mod compaction;
+pub mod filtering;
 pub mod http_stream;
 pub mod image_generation;
 pub mod image_inspection;

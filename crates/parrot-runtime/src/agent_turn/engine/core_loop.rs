@@ -220,6 +220,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::TurnLifecycle for CoreLoopLifecyc
                 hooks,
                 event_publisher,
                 provider,
+                filter: backend.filter.as_ref(),
                 skills,
             }) as Box<dyn parrot_core::Turn>)
         })
@@ -234,6 +235,7 @@ struct RuntimeTurn<'a, S: AccessSnapshot + 'static> {
     hooks: RuntimeTurnHooks<'a, S>,
     event_publisher: RuntimeEventPublisher<'a, S>,
     provider: RuntimeProvider<'a, S>,
+    filter: &'a dyn parrot_core::FilterProvider,
     skills: RuntimeSkillProvider<'a>,
 }
 
@@ -244,6 +246,7 @@ impl<S: AccessSnapshot + 'static> parrot_core::Turn for RuntimeTurn<'_, S> {
             skills: &self.skills,
             tools: &self.tools,
             provider: &self.provider,
+            filter: self.filter,
             event_publisher: &self.event_publisher,
             hooks: &self.hooks,
         }

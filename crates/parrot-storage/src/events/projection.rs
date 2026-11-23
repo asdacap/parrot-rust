@@ -6,7 +6,7 @@ use rusqlite::{OptionalExtension, Row, ToSql, Transaction, params};
 pub fn read_latest_final_phase(tx: &Transaction<'_>, agent: &str) -> Result<bool, EventError> {
     Ok(tx
         .query_row(
-            "SELECT final_phase FROM conversation_item WHERE agent_session = ?1 AND kind <> 'compaction' ORDER BY sequence DESC LIMIT 1;",
+            "SELECT final_phase FROM conversation_item WHERE agent_session = ?1 AND kind NOT IN ('compaction', 'filter') ORDER BY sequence DESC LIMIT 1;",
             [agent],
             |row| row.get(0),
         )

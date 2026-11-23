@@ -19,6 +19,7 @@ use parrot_domain::{
     },
 };
 use parrot_foundation::clock::SystemClock;
+use parrot_provider::filtering::ReasoningSkipFilter;
 use parrot_provider::sessions;
 use parrot_runtime::{
     active_work::{
@@ -506,6 +507,8 @@ impl ScopeFactory<Security> for Factory {
                 prompt: Box::new(Prompt),
                 skills: Arc::new(Skills),
                 context: self.histories.controller(history.clone()),
+                filter: Arc::new(ReasoningSkipFilter),
+                filter_settings: disabled_filter_settings(),
                 status: Arc::new(Status),
                 completion_sources: vec![callback.clone()],
                 templates: templates(),
@@ -1653,4 +1656,12 @@ async fn actual_wait_timeout_includes_process_work_sections() {
     );
     assert_eq!(root.processes.active().len(), 1);
     h.close().await;
+}
+
+fn disabled_filter_settings() -> parrot_core::FilterSettings {
+    parrot_core::FilterSettings {
+        enabled: false,
+        max_unfiltered_token_window: 0,
+        filter_batch_size: 0,
+    }
 }

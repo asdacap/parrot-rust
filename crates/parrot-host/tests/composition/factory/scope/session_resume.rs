@@ -1792,7 +1792,7 @@ async fn json_identity_lineage_and_status_survive_retirement_name_reuse_and_root
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!((version, tables), (11, 5));
+    assert_eq!((version, tables), (12, 5));
     let status_messages = database
         .prepare(
             "SELECT count(*) FROM conversation_item WHERE agent_session=?1 AND role='system' ORDER BY sequence",

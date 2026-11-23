@@ -294,6 +294,8 @@ impl BudgetRuntime {
             }),
             skills: Arc::new(Skills(trace.clone())),
             context,
+            filter: Arc::new(parrot_provider::filtering::ReasoningSkipFilter),
+            filter_settings: disabled_filter_settings(),
             status: status(trace.clone()),
             completion_sources: vec![],
             templates,
@@ -1136,4 +1138,12 @@ async fn core_context_preparation_persists_one_reminder_across_later_native_invo
             .any(|event| event.has_compaction_started() || event.has_turn_failed())
     );
     runtime.close().await;
+}
+
+fn disabled_filter_settings() -> parrot_core::FilterSettings {
+    parrot_core::FilterSettings {
+        enabled: false,
+        max_unfiltered_token_window: 0,
+        filter_batch_size: 0,
+    }
 }

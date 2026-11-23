@@ -6,6 +6,7 @@ use parrot_domain::values::agent_state::AgentStateUpdate;
 pub(super) struct RuntimeStates<'a, S: AccessSnapshot + 'static> {
     pub(super) history: &'a AgentHistoryView,
     pub(super) stall_steps: i32,
+    pub(super) filter_settings: parrot_core::FilterSettings,
     pub(super) agent_state: &'a dyn AgentStateStore,
     pub(super) activity: &'a dyn SessionActivity,
     pub(super) state: &'a Mutex<State>,
@@ -33,6 +34,7 @@ impl<'a, S: AccessSnapshot + 'static> RuntimeStates<'a, S> {
         Self {
             history: &backend.history,
             stall_steps: backend.stall_steps,
+            filter_settings: backend.filter_settings,
             agent_state: backend.agent_state.as_ref(),
             activity: backend.activity.as_ref(),
             state: &backend.state,
@@ -281,6 +283,7 @@ where
                             .capture_context_configuration(&selection.model),
                     ))
                 }
+                ConfigKey::Filter => Ok(ConfigValue::Filter(self.filter_settings)),
                 key => self
                     .templates
                     .get_template(
@@ -295,6 +298,42 @@ where
                         ))
                     }),
             }
+        })
+    }
+    fn commit_filter_amendment(
+        &mut self,
+        amendment: parrot_core::FilterAmendment,
+    ) -> BoxFuture<'_, Result<(), CoreError>> {
+        adapt_operation(async move {
+            let mut event = self.events.event();
+            event.set_agent_notice(protocol::AgentNotice {
+                kind: "filter".into(),
+                notice: format!("Filter committed\nwatermark {}", amendment.watermark),
+                ..Default::default()
+            });
+            let mut guard = self.state.lock().await;
+            let committed = self
+                .history
+                .repository()
+                .commit_filter_amendment(
+                    self.history.agent_session_id().to_owned(),
+                    event.clone(),
+                    amendment,
+                )
+                .await
+                .map_err(|error| TurnError::Service(error.to_string()))?;
+            if committed {
+                guard
+                    .conversation
+                    .reload()
+                    .await
+                    .map_err(|error| TurnError::Service(error.to_string()))?;
+                self.publisher
+                    .publish_committed(&Committed::after_commit(event), self.cancellation)
+                    .await
+                    .map_err(TurnError::Publication)?;
+            }
+            Ok(())
         })
     }
 

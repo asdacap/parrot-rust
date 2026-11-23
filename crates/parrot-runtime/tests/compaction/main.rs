@@ -49,6 +49,7 @@ pub(crate) fn raw_conversation(messages: &[Message]) -> parrot_core::Conversatio
     parrot_core::ConversationState {
         summary: None,
         history,
+        filter_watermark: 0,
     }
 }
 

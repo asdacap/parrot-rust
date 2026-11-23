@@ -1,6 +1,7 @@
 //! Structured authoritative SQLite history, with optional derived-file refresh.
 mod agent;
 pub mod compaction;
+pub mod filter;
 pub mod forks;
 pub mod history;
 pub mod prompts;

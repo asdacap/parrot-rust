@@ -8,6 +8,7 @@ use std::sync::Arc;
 pub enum ConfigKey {
     Turn,
     Context,
+    Filter,
     SkillUnavailableTemplate,
     SkillSelectedTemplate,
     SkillTooLargeTemplate,
@@ -25,6 +26,7 @@ pub enum ConfigKey {
 pub enum ConfigValue {
     Turn(TurnOptions),
     Context(ContextConfiguration),
+    Filter(super::filter::FilterSettings),
     PromptTemplate(Arc<PromptTemplate>),
 }
 
@@ -39,6 +41,12 @@ impl ConfigValue {
         match self {
             Self::Context(value) => Ok(value),
             _ => Err(Error::failed("expected context configuration")),
+        }
+    }
+    pub fn into_filter(self) -> Result<super::filter::FilterSettings, Error> {
+        match self {
+            Self::Filter(value) => Ok(value),
+            _ => Err(Error::failed("expected filter configuration")),
         }
     }
     pub fn into_prompt_template(self) -> Result<Arc<PromptTemplate>, Error> {

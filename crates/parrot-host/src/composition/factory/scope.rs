@@ -1435,6 +1435,12 @@ where
                     summary_instructions: String::new(),
                     summary_prefix: String::new(),
                 };
+                let filter_config = &self.config.configuration.runtime.filter;
+                let filter_settings = parrot_core::FilterSettings {
+                    enabled: filter_config.enabled,
+                    max_unfiltered_token_window: filter_config.max_unfiltered_token_window,
+                    filter_batch_size: filter_config.filter_batch_size,
+                };
                 let compactor = Compactor::new(
                     settings,
                     self.config.profiles.clone(),
@@ -1552,6 +1558,8 @@ where
                         prompt,
                         skills: skills.skills,
                         context: ContextController::new(compactor, prepared.history.clone()),
+                        filter: Arc::new(parrot_provider::filtering::ReasoningSkipFilter),
+                        filter_settings,
                         status: status.clone(),
                         completion_sources: vec![completion, leaf_response_blocker],
                         templates: self.user.templates.clone(),

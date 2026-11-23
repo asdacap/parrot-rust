@@ -1,6 +1,7 @@
 mod agent;
 mod compaction;
 mod embedded_metadata;
+mod filter;
 mod forks;
 mod reads;
 mod reload_cancellation;

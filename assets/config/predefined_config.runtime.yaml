@@ -220,6 +220,13 @@ compaction:
   maximum_output_tokens: 100000
   summary_output_tokens: 12000
 
+# Filters reasoning payloads out of older conversation history once the unfiltered
+# window reaches its token limit. Off by default.
+filter:
+  enabled: false
+  max_unfiltered_token_window: 32768
+  filter_batch_size: 16384
+
 # Complete model-facing definitions for built-in tools. User configuration may override
 # descriptions or structural JSON Schema members while inheriting remaining entries.
 # Parameters use standard JSON Schema represented as YAML.

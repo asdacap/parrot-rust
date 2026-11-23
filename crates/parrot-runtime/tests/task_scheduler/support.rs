@@ -18,6 +18,7 @@ use parrot_domain::{
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::compaction::{CompactionSettings, Compactor};
+use parrot_provider::filtering::ReasoningSkipFilter;
 use parrot_provider::{
     catalogs::Model,
     routing::{
@@ -600,6 +601,8 @@ impl Factory {
             prompt: Box::new(Prompt(name.clone())),
             skills: Arc::new(Skills),
             context: histories.controller(history.clone()),
+            filter: Arc::new(ReasoningSkipFilter),
+            filter_settings: disabled_filter_settings(),
             status: Arc::new(Status(tools.captures.clone())),
             completion_sources: vec![],
             templates,
@@ -1086,4 +1089,12 @@ pub async fn send_text<B: DrainBackend>(
         )?
         .wait(caller.as_ref())
         .await
+}
+
+fn disabled_filter_settings() -> parrot_core::FilterSettings {
+    parrot_core::FilterSettings {
+        enabled: false,
+        max_unfiltered_token_window: 0,
+        filter_batch_size: 0,
+    }
 }

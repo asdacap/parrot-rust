@@ -252,6 +252,8 @@ async fn runtime(
         }),
         skills: Arc::new(Skills(trace.clone())),
         context: fixture.controller(),
+        filter: Arc::new(parrot_provider::filtering::ReasoningSkipFilter),
+        filter_settings: disabled_filter_settings(),
         status: Arc::new(Status),
         completion_sources: vec![],
         templates,
@@ -553,5 +555,13 @@ async fn hard_kill_after_durable_terminal_before_publication_recovers_pending_in
         run_child(Path::new(&root)).await;
     } else {
         parent().await;
+    }
+}
+
+fn disabled_filter_settings() -> parrot_core::FilterSettings {
+    parrot_core::FilterSettings {
+        enabled: false,
+        max_unfiltered_token_window: 0,
+        filter_batch_size: 0,
     }
 }

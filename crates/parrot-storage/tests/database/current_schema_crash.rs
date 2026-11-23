@@ -172,7 +172,7 @@ fn interrupted_initialization_rolls_back_schema_and_version_then_reopens() {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!((version, tables), (11, 5));
+        assert_eq!((version, tables), (12, 5));
         drop(reopened);
     }
     std::fs::remove_dir_all(workspace).unwrap();
@@ -226,9 +226,9 @@ fn current_format_recovers_spilled_transactions_and_unsupported_formats_stay_unc
         use std::os::unix::ffi::OsStringExt;
 
         let mut cases = cases;
-        cases.push((11, std::ffi::OsString::from("native ?#%2F-é.db")));
+        cases.push((12, std::ffi::OsString::from("native ?#%2F-é.db")));
         cases.push((
-            11,
+            12,
             std::ffi::OsString::from_vec(b"native-\xff?#%.db".to_vec()),
         ));
         cases
@@ -282,7 +282,7 @@ fn current_format_recovers_spilled_transactions_and_unsupported_formats_stay_unc
         let journal_before = std::fs::read(&journal_path).unwrap();
         assert!(journal_before.len() > 100_000);
 
-        if version == 11 {
+        if version == 12 {
             let recovered = super::open(&path).unwrap();
             let retained: i64 = recovered
                 .query_row(

@@ -106,6 +106,8 @@ impl EdgeRuntime {
             }),
             skills: Arc::new(Skills(trace.clone())),
             context: fixture.controller(),
+            filter: Arc::new(parrot_provider::filtering::ReasoningSkipFilter),
+            filter_settings: disabled_filter_settings(),
             status: Arc::new(Status),
             completion_sources: vec![],
             templates,
@@ -446,4 +448,12 @@ async fn four_settlement_extensions_allow_exact_six_provider_requests_then_fail_
     );
     assert!(!fixture.jsonl().contains("never reached"));
     runtime.close().await;
+}
+
+fn disabled_filter_settings() -> parrot_core::FilterSettings {
+    parrot_core::FilterSettings {
+        enabled: false,
+        max_unfiltered_token_window: 0,
+        filter_batch_size: 0,
+    }
 }

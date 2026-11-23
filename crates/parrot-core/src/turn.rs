@@ -3,12 +3,14 @@
 use crate::{
     AgentState, CancellationToken, CompactionRequest, CompletionBlockerFeedback, ConfigKey,
     ContextCompaction, ContextSnapshot, ConversationAddition, ConversationEvent,
-    ConversationOrigin, ConversationPersistence, ConversationTurn, Error, ErrorKind,
-    EventPublisher, FinishReason, InputAdmission, Message, Outcome, PromotedInput, Provider,
-    ProviderRequest, Role, SkillProvider, States, ToolCallReceipt, ToolDefinition, Tools,
-    TurnEngine, TurnHooks, TurnLifecycle, rendering, skills, stall, status::steer_status,
+    ConversationHistoryItem, ConversationOrigin, ConversationPersistence, ConversationTurn, Error,
+    ErrorKind, EventPublisher, FilterAmendment, FilterProvider, FilterRequest, FinishReason,
+    HistoryGroupMember, InputAdmission, Message, Outcome, PromotedInput, Provider, ProviderRequest,
+    Role, SkillProvider, States, ToolCallReceipt, ToolDefinition, Tools, TurnEngine, TurnHooks,
+    TurnLifecycle, assemble_history_groups, rendering, skills, stall, status::steer_status,
     tool_settlement::execute_tools,
 };
+use std::collections::BTreeMap;
 
 /// Drives one opened turn with its runtime services, per-turn budget state and
 /// skill preparation.
@@ -18,6 +20,7 @@ struct AgentTurn<'a> {
     hooks: &'a dyn TurnHooks,
     skill_provider: &'a dyn SkillProvider,
     provider: &'a dyn Provider,
+    filter: &'a dyn FilterProvider,
     event_publisher: &'a dyn EventPublisher,
     agent_state: AgentState,
     skill_preparation: skills::SkillPreparation,
@@ -119,6 +122,7 @@ impl AgentTurn<'_> {
                 self.add_phase_prompt(&content, true).await?;
             }
 
+            self.filter_history(cancellation).await?;
             let prepared = self.prepare_request(definitions, cancellation).await?;
 
             let attempt = self.agent_state.count_request();
@@ -481,6 +485,103 @@ impl AgentTurn<'_> {
         Ok(instructions)
     }
 
+    /// Sizes the unfiltered history tail and filters one causal-group batch
+    /// when the tail has reached the configured token window. The batch is
+    /// taken from the oldest end, rounded up to the group that crosses the
+    /// batch boundary, and never splits or includes an incomplete group. Every
+    /// batch advances the durable filter watermark, including a batch the
+    /// filter skipped, so no batch is ever re-offered.
+    async fn filter_history(&mut self, cancellation: CancellationToken<'_>) -> Result<(), Error> {
+        let settings = self
+            .states
+            .get_config(ConfigKey::Filter)
+            .await?
+            .into_filter()?;
+        if !settings.enabled || cancellation.is_cancelled() {
+            return Ok(());
+        }
+        let state = self.states.read_conversation_state().await?;
+        let window: Vec<ConversationHistoryItem> = state
+            .history
+            .iter()
+            .filter(|item| item.sequence > state.filter_watermark)
+            .cloned()
+            .collect();
+        if window.is_empty() {
+            return Ok(());
+        }
+        let window_messages: Vec<Message> =
+            window.iter().map(|item| item.message.clone()).collect();
+        let window_tokens = self
+            .provider
+            .estimate_input_tokens("", &[], &window_messages)?;
+        if window_tokens < settings.max_unfiltered_token_window {
+            return Ok(());
+        }
+        let members: Vec<HistoryGroupMember> = window
+            .iter()
+            .map(|item| HistoryGroupMember {
+                sequence: item.sequence,
+                tool_owner_sequence: item.tool_owner_sequence,
+                is_compaction_status: item.is_compaction_status,
+                is_assistant: item.message.role == Role::Assistant,
+                tool_call_ids: item
+                    .message
+                    .tool_calls
+                    .iter()
+                    .map(|call| call.id.clone())
+                    .collect(),
+                tool_result_call_id: (item.message.role == Role::Tool)
+                    .then(|| item.message.tool_call_id.clone()),
+            })
+            .collect();
+        let items: BTreeMap<i64, &ConversationHistoryItem> =
+            window.iter().map(|item| (item.sequence, item)).collect();
+        let mut batch_tokens = 0;
+        let (mut batch_start, mut batch_end) = (None, None);
+        for group in assemble_history_groups(&members) {
+            if !group.is_complete {
+                break;
+            }
+            let messages: Vec<Message> = group
+                .member_sequences
+                .iter()
+                .map(|sequence| items[sequence].message.clone())
+                .collect();
+            batch_tokens += self.provider.estimate_input_tokens("", &[], &messages)?;
+            batch_start.get_or_insert(group.member_sequences[0]);
+            batch_end = group.member_sequences.last().copied();
+            if batch_tokens >= settings.filter_batch_size {
+                break;
+            }
+        }
+        let Some(end_sequence) = batch_end else {
+            return Ok(());
+        };
+        let start_sequence = batch_start.expect("a selected group has a first member");
+        let messages: Vec<Message> = items
+            .range(start_sequence..=end_sequence)
+            .map(|(_, item)| item.message.clone())
+            .collect();
+        let replacements = self
+            .filter
+            .filter(
+                FilterRequest {
+                    messages: messages.clone(),
+                },
+                cancellation,
+            )
+            .await?;
+        self.states
+            .commit_filter_amendment(FilterAmendment {
+                start_sequence,
+                end_sequence,
+                messages: replacements.unwrap_or(messages),
+                watermark: end_sequence,
+            })
+            .await
+    }
+
     /// Requests provider-owned compaction and reloads its state effects before
     /// returning.
     async fn compact_context(
@@ -544,6 +645,7 @@ impl TurnEngine {
                     hooks: services.hooks,
                     skill_provider: services.skills,
                     provider: services.provider,
+                    filter: services.filter,
                     event_publisher: services.event_publisher,
                     agent_state,
                     skill_preparation: skills::SkillPreparation::default(),
@@ -621,6 +723,7 @@ mod tests {
             hooks: &UnusedHooks,
             skill_provider: &UnusedSkills,
             provider: &UnusedProvider,
+            filter: &UnusedFilter,
             event_publisher: &UnusedPublisher,
             agent_state: AgentState::default(),
             skill_preparation: crate::skills::SkillPreparation::default(),
@@ -664,6 +767,9 @@ mod tests {
 
     struct UnusedProvider;
     impl Provider for UnusedProvider {}
+
+    struct UnusedFilter;
+    impl crate::FilterProvider for UnusedFilter {}
 
     struct UnusedSkills;
     impl SkillProvider for UnusedSkills {}
@@ -779,6 +885,7 @@ mod tests {
                 hooks: &UnusedHooks,
                 skill_provider: &UnusedSkills,
                 provider: &compactor,
+                filter: &UnusedFilter,
                 event_publisher: &UnusedPublisher,
                 agent_state,
                 skill_preparation: crate::skills::SkillPreparation::default(),
@@ -819,6 +926,7 @@ mod tests {
             hooks: &UnusedHooks,
             skill_provider: &UnusedSkills,
             provider: &compactor,
+            filter: &UnusedFilter,
             event_publisher: &UnusedPublisher,
             agent_state,
             skill_preparation: crate::skills::SkillPreparation::default(),

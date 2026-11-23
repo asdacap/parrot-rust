@@ -1,4 +1,5 @@
 use super::*;
+use parrot_provider::filtering::ReasoningSkipFilter;
 use parrot_runtime::{
     active_work::exit_reminders::ExitReminders,
     agent_turn::{
@@ -182,6 +183,8 @@ pub(super) async fn runtime_with_publisher(
         prompt: Box::new(Prompt),
         skills: Arc::new(Skills),
         context: fixture.controller(),
+        filter: Arc::new(ReasoningSkipFilter),
+        filter_settings: disabled_filter_settings(),
         status: Arc::new(Status),
         completion_sources: vec![],
         templates,
@@ -220,4 +223,12 @@ pub(super) async fn send(
     ))
     .await
     .unwrap()
+}
+
+fn disabled_filter_settings() -> parrot_core::FilterSettings {
+    parrot_core::FilterSettings {
+        enabled: false,
+        max_unfiltered_token_window: 0,
+        filter_batch_size: 0,
+    }
 }

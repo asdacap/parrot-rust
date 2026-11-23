@@ -83,6 +83,8 @@ async fn root_runtime(
         }),
         skills: Arc::new(Skills(trace.clone())),
         context: fixture.controller(),
+        filter: Arc::new(parrot_provider::filtering::ReasoningSkipFilter),
+        filter_settings: disabled_filter_settings(),
         status: Arc::new(Status),
         completion_sources: callbacks,
         templates,
@@ -381,4 +383,12 @@ async fn owned_fifo_send_and_wait_reservations_wait_for_blocked_retry_callback_a
     second_answer_provider.open();
     assert_eq!(bounded(second).await.unwrap().unwrap(), "second answer");
     runtime.close().await;
+}
+
+fn disabled_filter_settings() -> parrot_core::FilterSettings {
+    parrot_core::FilterSettings {
+        enabled: false,
+        max_unfiltered_token_window: 0,
+        filter_batch_size: 0,
+    }
 }

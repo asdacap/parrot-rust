@@ -23,6 +23,7 @@ fn history(effects: &mut Effects) {
                 message: message.clone(),
             })
             .collect(),
+        filter_watermark: 0,
     };
 }
 
@@ -82,6 +83,7 @@ async fn noncontiguous_owned_results_reach_summary_together_without_status_messa
             },
         )
         .collect(),
+        filter_watermark: 0,
     };
     let original = effects.capture.conversation.clone();
     assert!(
@@ -148,6 +150,7 @@ async fn orphaned_results_do_not_make_an_incomplete_history_prefix_compactable()
                 is_compaction_status: false,
             },
         ],
+        filter_watermark: 0,
     };
     let original = effects.capture.conversation.clone();
     assert_eq!(

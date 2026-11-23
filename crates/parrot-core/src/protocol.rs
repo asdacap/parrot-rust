@@ -9,6 +9,7 @@ mod context;
 mod conversation;
 mod error;
 mod event;
+mod filter;
 mod message;
 mod provider;
 mod skill;
@@ -32,6 +33,7 @@ pub use conversation::{
 };
 pub use error::{Error, ErrorCode, ErrorDetail, ErrorKind};
 pub use event::EventPublisher;
+pub use filter::{FilterAmendment, FilterProvider, FilterRequest, FilterSettings};
 pub use message::{
     Content, ConversationTurn, FinishReason, InputAdmission, Message, PromotedInput,
     ProviderRequest, ProviderResponse, Reasoning, Role,

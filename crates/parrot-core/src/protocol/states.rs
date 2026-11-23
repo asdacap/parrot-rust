@@ -76,4 +76,13 @@ pub trait States: Send + Sync {
     fn read_conversation_state(&self) -> BoxFuture<'_, Result<ConversationState, Error>> {
         Box::pin(async { Err(Error::unsupported("States.read_conversation_state")) })
     }
+    /// Atomically commits one filter batch: replaces the amendment's history
+    /// span with its replacement messages and advances the filter watermark.
+    /// A failed commit leaves both unchanged.
+    fn commit_filter_amendment(
+        &mut self,
+        _amendment: crate::FilterAmendment,
+    ) -> BoxFuture<'_, Result<(), Error>> {
+        Box::pin(async { Err(Error::unsupported("States.commit_filter_amendment")) })
+    }
 }

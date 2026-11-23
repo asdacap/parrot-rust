@@ -13,6 +13,7 @@ use parrot_domain::{
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_provider::compaction::{CompactionSettings, Compactor};
+use parrot_provider::filtering::ReasoningSkipFilter;
 use parrot_provider::{
     catalogs::Model,
     routing::{
@@ -305,6 +306,8 @@ impl Fixture {
             }),
             skills: Arc::new(Skills(trace.clone())),
             context: self.controller(),
+            filter: Arc::new(ReasoningSkipFilter),
+            filter_settings: disabled_filter_settings(),
             status: overrides.status.unwrap_or_else(|| Arc::new(Status)),
             completion_sources: callbacks,
             templates,
@@ -1109,3 +1112,11 @@ async fn epoch_status_and_skill_input_order_is_awaited_in_actual_turn() {
 
 #[path = "engine/owned_recovery.rs"]
 mod owned_recovery;
+
+fn disabled_filter_settings() -> parrot_core::FilterSettings {
+    parrot_core::FilterSettings {
+        enabled: false,
+        max_unfiltered_token_window: 0,
+        filter_batch_size: 0,
+    }
+}
