@@ -380,6 +380,75 @@ async fn model_presets_save_and_select_exact_names_and_authoritative_result() {
 }
 
 #[tokio::test]
+async fn missing_preset_name_opens_dialog_and_saves_entered_name() {
+    let mut session = Session::new("high_llm");
+    let activity = Activity::default();
+    let mut dialog = Dialog::default().texts([Some(" Work ")]);
+    run_with_session(
+        &ModelPresetSetCommand,
+        "",
+        &mut session,
+        &mut dialog,
+        &activity,
+        &NEVER,
+    )
+    .await
+    .unwrap();
+    assert_eq!(session.saved_presets, ["Work"]);
+    assert_eq!(session.current.model, "high_llm");
+    assert_eq!(dialog.text_prompts, ["Model preset name"]);
+    assert!(dialog.errors.is_empty());
+    assert_eq!(dialog.shown, ["Model preset saved: Work = high_llm"]);
+    assert_eq!(activity.waits(), 0);
+}
+
+#[tokio::test]
+async fn dismissed_preset_name_dialog_saves_nothing() {
+    let mut session = Session::new("provider/model");
+    let activity = Activity::default();
+    let mut dialog = Dialog::default().texts([None]);
+    run_with_session(
+        &ModelPresetSetCommand,
+        "   ",
+        &mut session,
+        &mut dialog,
+        &activity,
+        &NEVER,
+    )
+    .await
+    .unwrap();
+    assert!(session.saved_presets.is_empty());
+    assert_eq!(dialog.text_prompts, ["Model preset name"]);
+    assert!(dialog.errors.is_empty());
+    assert!(dialog.shown.is_empty());
+    assert_eq!(activity.waits(), 0);
+}
+
+#[tokio::test]
+async fn invalid_preset_name_entered_in_dialog_shows_usage() {
+    let mut session = Session::new("provider/model");
+    let activity = Activity::default();
+    let mut dialog = Dialog::default().texts([Some("two words")]);
+    run_with_session(
+        &ModelPresetSetCommand,
+        "",
+        &mut session,
+        &mut dialog,
+        &activity,
+        &NEVER,
+    )
+    .await
+    .unwrap();
+    assert!(session.saved_presets.is_empty());
+    assert_eq!(dialog.text_prompts, ["Model preset name"]);
+    assert!(dialog.shown.is_empty());
+    assert_eq!(
+        dialog.errors,
+        ["usage: /model-preset-set <name>; name must be one token without whitespace or '/'"]
+    );
+}
+
+#[tokio::test]
 async fn rpc_slash_session_uses_authoritative_preset_response_without_writing_client_config() {
     use super::support::Temp;
     use parrot_cli::slash_sessions::{RpcSlashSession, SlashSession};
