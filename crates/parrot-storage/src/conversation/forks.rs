@@ -1,5 +1,5 @@
 //! Checkpoints and fork copies execute inside one selected-session transaction.
-use super::{ConversationRepository, EventError, compaction, reads, types::*};
+use super::{ConversationRepository, EventError, compaction, filter, reads, types::*};
 use crate::events::{projection, timestamp};
 use parrot_core::{HistoryGroupMember, assemble_history_groups};
 use rusqlite::{Transaction, params};
@@ -436,6 +436,10 @@ fn initialize_fork(
                 ],
             )?;
         }
+    }
+    let source_watermark = filter::read_watermark(tx, &source)?;
+    if let Some((_, &watermark)) = sequences.range(..=source_watermark).next_back() {
+        filter::save_watermark(tx, destination, watermark, &clock())?;
     }
     Ok(())
 }

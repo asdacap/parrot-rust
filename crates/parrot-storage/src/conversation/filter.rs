@@ -5,7 +5,7 @@ use parrot_core::FilterAmendment;
 use parrot_domain::protocol::messages::parrot::Event;
 use rusqlite::{Transaction, params};
 
-fn read_watermark(tx: &Transaction<'_>, agent: &str) -> Result<i64, EventError> {
+pub(super) fn read_watermark(tx: &Transaction<'_>, agent: &str) -> Result<i64, EventError> {
     Ok(tx
         .query_row(
             "SELECT COALESCE((SELECT filter_watermark FROM conversation_item WHERE agent_session = ?1 AND kind = 'filter' ORDER BY sequence DESC LIMIT 1), 0);",
@@ -26,7 +26,7 @@ fn already_committed(
     )?)
 }
 
-fn save_watermark(
+pub(super) fn save_watermark(
     tx: &Transaction<'_>,
     agent: &str,
     watermark: i64,

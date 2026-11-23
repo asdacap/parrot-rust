@@ -63,8 +63,12 @@ async fn commit(
         from_tokens: 0,
         to_tokens: 0,
     };
-    repo.commit_filter_amendment("agent".into(), event("filter-audit", "agent"), amendment)
-        .await
+    repo.commit_filter_amendment(
+        "agent".into(),
+        event(&format!("filter-audit-{watermark}"), "agent"),
+        amendment,
+    )
+    .await
 }
 
 async fn contents(repo: &ConversationRepository, agent: &str) -> Vec<String> {
@@ -269,7 +273,7 @@ async fn fork(
 }
 
 #[tokio::test]
-async fn full_fork_copies_amended_rows_and_resets_the_watermark() {
+async fn full_fork_copies_amended_rows_and_preserves_filter_progress() {
     let fixture = super::Fixture::new();
     let repo = fixture.repository();
     let first = append(&repo, "first", envelope(r#"{"type":"reasoning"}"#)).await;
@@ -288,14 +292,17 @@ async fn full_fork_copies_amended_rows_and_resets_the_watermark() {
     .unwrap();
     let forked = contents(&repo, "fork").await;
     assert_eq!(forked, vec!["[]".to_owned(), "[]".to_owned()]);
-    assert_eq!(watermark(&repo, "fork").await, 0);
+    let copied = repo.conversation("fork".into()).await.unwrap();
+    let copied_end = copied.last().unwrap().sequence;
+    assert_ne!(copied_end, second);
+    assert_eq!(watermark(&repo, "fork").await, copied_end);
 }
 
 #[tokio::test]
-async fn checkpoint_fork_copies_amended_rows_and_resets_the_watermark() {
+async fn checkpoint_fork_copies_amended_rows_and_preserves_filter_progress() {
     let fixture = super::Fixture::new();
     let repo = fixture.repository();
-    append(
+    let covered = append(
         &repo,
         "covered",
         envelope(r#"{"type":"reasoning","encrypted_content":"sealed"}"#),
@@ -330,6 +337,26 @@ async fn checkpoint_fork_copies_amended_rows_and_resets_the_watermark() {
         .last()
         .unwrap()
         .sequence;
+    commit(&repo, covered, covered, covered, &["[]"])
+        .await
+        .unwrap();
+    fork(
+        &repo,
+        "agent",
+        "unfiltered-fork",
+        HistoryForkBoundary::AfterCompletedHistory,
+        "handoff",
+    )
+    .await
+    .unwrap();
+    assert_eq!(watermark(&repo, "unfiltered-fork").await, 0);
+    assert_eq!(
+        repo.conversation("unfiltered-fork".into())
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
     commit(
         &repo,
         assistant_sequence,
@@ -339,6 +366,21 @@ async fn checkpoint_fork_copies_amended_rows_and_resets_the_watermark() {
     )
     .await
     .unwrap();
+    fork(
+        &repo,
+        "agent",
+        "bounded-fork",
+        HistoryForkBoundary::BeforeToolBatch {
+            assistant_sequence,
+            tool_call_id: "checkpoint-1".into(),
+        },
+        "full",
+    )
+    .await
+    .unwrap();
+    let bounded = repo.conversation("bounded-fork".into()).await.unwrap();
+    assert_eq!(bounded.len(), 1);
+    assert_eq!(watermark(&repo, "bounded-fork").await, bounded[0].sequence);
     fork(
         &repo,
         "agent",
@@ -353,10 +395,105 @@ async fn checkpoint_fork_copies_amended_rows_and_resets_the_watermark() {
         forked,
         vec!["[]".to_owned(), r#"[{"type":"message"}]"#.to_owned()]
     );
-    assert_eq!(watermark(&repo, "fork").await, 0);
+    let copied = repo.conversation("fork".into()).await.unwrap();
+    assert_eq!(
+        watermark(&repo, "fork").await,
+        copied.last().unwrap().sequence
+    );
+    assert_ne!(watermark(&repo, "fork").await, end);
     assert_eq!(
         repo.conversation("fork".into()).await.unwrap().len(),
         2,
         "the covered pre-checkpoint row stays out of a checkpoint fork"
     );
+}
+
+#[tokio::test]
+async fn fork_preserves_partial_filter_progress_and_independent_unfiltered_tail() {
+    let fixture = super::Fixture::new();
+    let repo = fixture.repository();
+    let first = append(&repo, "first", envelope(r#"{"type":"reasoning"}"#)).await;
+    let second = append(&repo, "second", envelope(r#"{"type":"message"}"#)).await;
+    let third = append(&repo, "third", envelope(r#"{"type":"message"}"#)).await;
+    commit(&repo, first, second, second, &["[]", "[]"])
+        .await
+        .unwrap();
+    for (destination, boundary) in [
+        ("full", HistoryForkBoundary::AfterCompletedHistory),
+        ("safe", HistoryForkBoundary::AfterSafeHistoryPrefix),
+    ] {
+        fork(&repo, "agent", destination, boundary, "full")
+            .await
+            .unwrap();
+        let copied = repo.conversation(destination.into()).await.unwrap();
+        assert_eq!(copied.len(), 3);
+        assert_eq!(watermark(&repo, destination).await, copied[1].sequence);
+        let unfiltered: Vec<_> = copied
+            .iter()
+            .filter(|item| item.sequence > copied[1].sequence)
+            .collect();
+        assert_eq!(unfiltered.len(), 1);
+        assert_eq!(
+            unfiltered[0].message.provider_content.content,
+            contents(&repo, "agent").await[2]
+        );
+        repo.commit_filter_amendment(
+            destination.into(),
+            event(&format!("filter-{destination}"), destination),
+            FilterAmendment {
+                start_sequence: copied[2].sequence,
+                end_sequence: copied[2].sequence,
+                messages: vec![replacement("[]")],
+                watermark: copied[2].sequence,
+                from_tokens: 0,
+                to_tokens: 0,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(watermark(&repo, destination).await, copied[2].sequence);
+        assert_eq!(watermark(&repo, "agent").await, second);
+        assert_ne!(copied[2].sequence, third);
+    }
+}
+
+#[tokio::test]
+async fn fork_without_source_filter_progress_keeps_all_messages_unfiltered() {
+    let fixture = super::Fixture::new();
+    let repo = fixture.repository();
+    append(&repo, "first", envelope(r#"{"type":"reasoning"}"#)).await;
+    fork(
+        &repo,
+        "agent",
+        "fork",
+        HistoryForkBoundary::AfterCompletedHistory,
+        "full",
+    )
+    .await
+    .unwrap();
+    assert_eq!(watermark(&repo, "fork").await, 0);
+    assert_eq!(repo.conversation("fork".into()).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn fork_inherits_filter_progress_from_its_actual_fallback_source() {
+    let fixture = super::Fixture::new();
+    let repo = fixture.repository();
+    let first = append(&repo, "first", envelope(r#"{"type":"reasoning"}"#)).await;
+    commit(&repo, first, first, first, &["[]"]).await.unwrap();
+    repo.initialize_forked_agent_history(
+        "empty-source".into(),
+        "fork".into(),
+        HistoryForkBoundary::AfterSafeHistoryPrefix,
+        HistoryForkSelection::parse("full"),
+        Some(HistoryForkSource {
+            agent_session_id: "agent".into(),
+            boundary: HistoryForkBoundary::AfterCompletedHistory,
+        }),
+    )
+    .await
+    .unwrap();
+    let copied = repo.conversation("fork".into()).await.unwrap();
+    assert_eq!(copied.len(), 1);
+    assert_eq!(watermark(&repo, "fork").await, copied[0].sequence);
 }
