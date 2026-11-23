@@ -57,6 +57,15 @@ pub trait ProcessResolver: Send + Sync {
     fn resolve(&self, address: &str) -> io::Result<ResolvedProcess>;
 }
 
+/// Completes when a steer (incoming input) reaches the owning agent session
+/// during the current tool call. A source that cannot observe steers never
+/// completes, so the caller's configured yield timeout remains the fallback.
+/// The caller races the future against its own cancellation and timeout.
+pub trait SteerSignal: Send + Sync {
+    /// Returns a future that completes when a steer arrives.
+    fn wait<'c>(&self, cancellation: &'c dyn Cancellation) -> BoxFuture<'c, ()>;
+}
+
 pub struct ProcessToolServices<L: CapturedProcessLauncher<Request = CommandRequest>> {
     pub owner: Arc<ShellProcessOwner>,
     pub agent: ProcessAgent,
@@ -65,6 +74,7 @@ pub struct ProcessToolServices<L: CapturedProcessLauncher<Request = CommandReque
     pub workspace: Arc<dyn ProcessWorkspace>,
     pub read_only_prefixes: Vec<String>,
     pub exec_command_yield_after: Duration,
+    pub steer: Arc<dyn SteerSignal>,
     pub monitor_sink: Arc<dyn MonitorSink>,
 }
 
@@ -275,6 +285,7 @@ where
                         Arc::clone(&report),
                     )
                     .await?;
+                let steer = self.services.steer.wait(cancellation);
                 let outcome = process
                     .wait(
                         Some(if input.run_async {
@@ -282,6 +293,7 @@ where
                         } else {
                             self.services.exec_command_yield_after
                         }),
+                        steer,
                         cancellation,
                     )
                     .await?;

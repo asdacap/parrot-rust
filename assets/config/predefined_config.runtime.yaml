@@ -195,7 +195,7 @@ user_input_timeout_ms: 1200000
 agent_ask_timeout_ms: 300000
 
 # Milliseconds exec_command waits before yielding when run_async is false or omitted.
-exec_command_yield_after_ms: 10000
+exec_command_yield_after_ms: 300000
 
 # Byte limit above which a rendered tool result spills to a saved file with a
 # first/last-lines preview instead of staying inline.
@@ -412,7 +412,7 @@ tools:
         run_async:
           type: boolean
           default: false
-          description: Yield immediately if true. Otherwise wait for completion up to the configured automatic yield time, which defaults to 10 seconds.
+          description: Yield immediately if true. Otherwise wait for completion up to the configured automatic yield time, which defaults to 5 minutes. A steer to the agent yields immediately.
         tty:
           type: boolean
           default: false

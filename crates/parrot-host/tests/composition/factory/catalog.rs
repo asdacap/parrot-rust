@@ -71,7 +71,8 @@ mod fixture_support {
             owner::{ProcessAgent, ShellProcessOwner},
         },
         tools::{
-            CommandRequest, ProcessResolver, ProcessToolServices, ProcessWorkspace, ResolvedProcess,
+            CommandRequest, ProcessResolver, ProcessToolServices, ProcessWorkspace,
+            ResolvedProcess, SteerSignal,
         },
     };
 
@@ -876,8 +877,16 @@ mod fixture_support {
                 workspace: Arc::new(self.clone()),
                 read_only_prefixes: vec!["printf".into()],
                 exec_command_yield_after: std::time::Duration::from_secs(10),
+                steer: Arc::new(NeverSteer),
                 monitor_sink: Arc::new(self.clone()),
             })
+        }
+    }
+
+    struct NeverSteer;
+    impl SteerSignal for NeverSteer {
+        fn wait<'c>(&self, _: &'c dyn Cancellation) -> BoxFuture<'c, ()> {
+            Box::pin(std::future::pending())
         }
     }
 

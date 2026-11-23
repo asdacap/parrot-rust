@@ -85,8 +85,11 @@ async fn original_blob_directory_fault_keeps_real_error_source_and_elapsedless_t
     std::fs::write(&blobs, []).unwrap();
     std::fs::write(marker, []).unwrap();
 
-    let waited =
-        tokio::time::timeout(Duration::from_secs(10), claimed.wait(None, &NeverCancelled)).await;
+    let waited = tokio::time::timeout(
+        Duration::from_secs(10),
+        claimed.wait(None, Box::pin(std::future::pending()), &NeverCancelled),
+    )
+    .await;
     let completed = subscription.recv().await.unwrap();
     let resumed = owner.capture_inventory();
     let mut reconnected = owner.subscribe_inventory();

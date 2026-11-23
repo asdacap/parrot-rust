@@ -115,6 +115,7 @@ use parrot_tools_process::process::{
     },
     tools::{
         CommandRequest, ProcessResolver, ProcessToolServices, ProcessWorkspace, ResolvedProcess,
+        SteerSignal,
     },
 };
 use std::{
@@ -450,6 +451,29 @@ impl<S: RestrictableAccessSnapshot + 'static> ProcessResolver for ScopeLink<S> {
                 .get_service::<ShellProcessOwner>()
                 .map_err(io::Error::other)?,
             name,
+        })
+    }
+}
+/// Watches the scoped agent session for steers during a process tool call.
+/// The configured yield timeout stays the fallback, so a failed lookup or
+/// watch is silent by contract and adds no error surface.
+struct ScopedSteer<S: RestrictableAccessSnapshot + 'static> {
+    link: Arc<ScopeLink<S>>,
+}
+impl<S: RestrictableAccessSnapshot + 'static> SteerSignal for ScopedSteer<S> {
+    fn wait<'c>(&self, cancellation: &'c dyn Cancellation) -> BoxFuture<'c, ()> {
+        let link = Arc::clone(&self.link);
+        Box::pin(async move {
+            let session = match link.session() {
+                Ok(session) => session,
+                Err(_) => return,
+            };
+            let _ = session
+                .wait_for_incoming_input(
+                    std::time::Duration::from_millis(u32::MAX as u64 - 1),
+                    cancellation,
+                )
+                .await;
         })
     }
 }
@@ -1623,6 +1647,7 @@ where
                             .runtime
                             .exec_command_yield_after_ms as u64,
                     ),
+                    steer: Arc::new(ScopedSteer { link: link.clone() }),
                     monitor_sink: Arc::new(ScopedMonitor {
                         link: link.clone(),
                         templates: self.user.templates.clone(),

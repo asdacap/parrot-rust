@@ -301,7 +301,10 @@ async fn real_owner_observer_preserves_blocking_retirement_order_and_scope() {
 
     for (claim, execution) in claims {
         execution.complete();
-        claim.wait(None, &NeverCancelled).await.unwrap();
+        claim
+            .wait(None, Box::pin(std::future::pending()), &NeverCancelled)
+            .await
+            .unwrap();
     }
     assert!(
         observer.active().is_empty(),
@@ -310,10 +313,18 @@ async fn real_owner_observer_preserves_blocking_retirement_order_and_scope() {
     assert_eq!(observer.snapshot().len(), 1);
     assert!(blocker.observe().await.unwrap().is_none());
     nonblocking.1.complete();
-    nonblocking.0.wait(None, &NeverCancelled).await.unwrap();
+    nonblocking
+        .0
+        .wait(None, Box::pin(std::future::pending()), &NeverCancelled)
+        .await
+        .unwrap();
     assert!(observer.snapshot().is_empty());
     foreign.1.complete();
-    foreign.0.wait(None, &NeverCancelled).await.unwrap();
+    foreign
+        .0
+        .wait(None, Box::pin(std::future::pending()), &NeverCancelled)
+        .await
+        .unwrap();
     owner.dispose().await.unwrap();
     foreign_owner.dispose().await.unwrap();
 }
@@ -339,7 +350,10 @@ async fn completed_undelivered_work_remains_running_until_actual_delivery_and_na
         0,
         "initial claim retains delivery ownership"
     );
-    claim.wait(None, &NeverCancelled).await.unwrap();
+    claim
+        .wait(None, Box::pin(std::future::pending()), &NeverCancelled)
+        .await
+        .unwrap();
     assert!(observer.snapshot().is_empty());
     assert!(observer.active().is_empty());
     let (replacement, replacement_execution) =
@@ -349,7 +363,10 @@ async fn completed_undelivered_work_remains_running_until_actual_delivery_and_na
     assert_ne!(after[0].process_id, before[0].process_id);
     assert_eq!(after[0].id(), "owner/work");
     replacement_execution.complete();
-    replacement.wait(None, &NeverCancelled).await.unwrap();
+    replacement
+        .wait(None, Box::pin(std::future::pending()), &NeverCancelled)
+        .await
+        .unwrap();
     owner.dispose().await.unwrap();
     assert!(execution.settled.load(Ordering::Acquire) > 0);
     assert!(replacement_execution.settled.load(Ordering::Acquire) > 0);

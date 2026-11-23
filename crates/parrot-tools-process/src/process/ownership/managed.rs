@@ -589,9 +589,12 @@ impl ClaimedProcess {
         self.active = false;
         visible
     }
-    pub async fn wait(
+    /// Waits for completion up to the optional timeout. A fired steer future
+    /// yields the running process early, exactly like an elapsed timeout.
+    pub async fn wait<'s>(
         mut self,
         yield_after: Option<Duration>,
+        steer: BoxFuture<'s, ()>,
         cancellation: &dyn Cancellation,
     ) -> io::Result<ShellWaitResult> {
         cancellation.check().map_err(|_| cancelled())?;
@@ -603,6 +606,7 @@ impl ClaimedProcess {
                 biased;
                 () = cancellation.cancelled() => return Err(cancelled()),
                 () = completion => true,
+                () = steer => false,
                 () = tokio::time::sleep(delay) => false,
             }
         } else {
@@ -637,7 +641,12 @@ impl ClaimedProcess {
             () = cancellation.cancelled() => return Err(cancelled()),
             result = execution.write_stdin(input) => result?,
         }
-        self.wait(Some(yield_after), cancellation).await
+        self.wait(
+            Some(yield_after),
+            Box::pin(std::future::pending()),
+            cancellation,
+        )
+        .await
     }
     pub fn send_signal(self, signal: i32, cancellation: &dyn Cancellation) -> io::Result<()> {
         let result = cancellation

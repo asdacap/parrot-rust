@@ -357,7 +357,13 @@ async fn synchronous_observation_keeps_claimed_completion_until_retirement_and_r
     assert!(sink.calls.lock().unwrap().is_empty());
     assert_eq!(owner.observe_snapshot(), before);
     assert_eq!(owner.observe_active()[0].state, ActiveWorkState::Running);
-    assert!(!claimed.wait(None, &NeverCancelled).await.unwrap().running);
+    assert!(
+        !claimed
+            .wait(None, Box::pin(std::future::pending()), &NeverCancelled)
+            .await
+            .unwrap()
+            .running
+    );
     assert!(old.retired());
     assert!(owner.observe_active().is_empty());
     assert!(owner.observe_snapshot().is_empty());
@@ -581,7 +587,11 @@ async fn actual_t40_pipe_yield_keeps_live_files_and_terminal_wait_uses_same_inst
         .unwrap();
     let process = Arc::clone(claimed.process());
     let yielded = claimed
-        .wait(Some(Duration::ZERO), &NeverCancelled)
+        .wait(
+            Some(Duration::ZERO),
+            Box::pin(std::future::pending()),
+            &NeverCancelled,
+        )
         .await
         .unwrap();
     assert!(yielded.running);
@@ -593,11 +603,13 @@ async fn actual_t40_pipe_yield_keeps_live_files_and_terminal_wait_uses_same_inst
     let claimed = owner.claim("work").await.unwrap();
     assert_eq!(claimed.process().state.process_id, process.state.process_id);
     std::fs::write(marker, "go").unwrap();
-    let completed =
-        tokio::time::timeout(Duration::from_secs(5), claimed.wait(None, &NeverCancelled))
-            .await
-            .unwrap()
-            .unwrap();
+    let completed = tokio::time::timeout(
+        Duration::from_secs(5),
+        claimed.wait(None, Box::pin(std::future::pending()), &NeverCancelled),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let result = completed.result.unwrap();
     assert_eq!(result.exit_code, 7);
     assert_eq!(result.stdout, "earlylate");
@@ -709,7 +721,11 @@ async fn actual_t40_pty_claims_consume_ready_and_input_suffix_once() {
         .await
         .unwrap();
     let first = claimed
-        .wait(Some(Duration::ZERO), &NeverCancelled)
+        .wait(
+            Some(Duration::ZERO),
+            Box::pin(std::future::pending()),
+            &NeverCancelled,
+        )
         .await
         .unwrap();
     assert_eq!(first.output, "ready".encode_utf16().collect::<Vec<_>>());
@@ -788,7 +804,13 @@ async fn reservation_waits_for_retirement_and_old_instance_never_targets_success
             .await
             .is_err()
     );
-    assert!(!claimed.wait(None, &NeverCancelled).await.unwrap().running);
+    assert!(
+        !claimed
+            .wait(None, Box::pin(std::future::pending()), &NeverCancelled)
+            .await
+            .unwrap()
+            .running
+    );
     let successor = Arc::new(FakeExecution::default());
     let new = start(&owner, Some("shared"), successor.clone()).await;
     assert_ne!(old.state.process_id, new.process().state.process_id);
@@ -806,7 +828,10 @@ async fn generated_names_skip_retired_history_and_failed_start_consumes_counter(
     let first = Arc::new(FakeExecution::default());
     let claimed = start(&owner, Some("shell-1"), first.clone()).await;
     first.complete(0);
-    claimed.wait(None, &NeverCancelled).await.unwrap();
+    claimed
+        .wait(None, Box::pin(std::future::pending()), &NeverCancelled)
+        .await
+        .unwrap();
     let generated = start(&owner, None, Arc::new(FakeExecution::default())).await;
     assert_eq!(generated.process().name(), "shell-2");
     generated.yield_now();
@@ -844,14 +869,21 @@ async fn cancelled_or_dropped_observation_releases_claim_without_cancelling_proc
     let cancelled = ProcessLifetime::default();
     cancelled.cancel();
     assert_eq!(
-        claim.wait(None, &cancelled).await.unwrap_err().kind(),
+        claim
+            .wait(None, Box::pin(std::future::pending()), &cancelled)
+            .await
+            .unwrap_err()
+            .kind(),
         io::ErrorKind::Interrupted
     );
     let claim = owner.claim("work").await.unwrap();
     assert!(
-        tokio::time::timeout(Duration::from_millis(10), claim.wait(None, &NeverCancelled))
-            .await
-            .is_err()
+        tokio::time::timeout(
+            Duration::from_millis(10),
+            claim.wait(None, Box::pin(std::future::pending()), &NeverCancelled)
+        )
+        .await
+        .is_err()
     );
     drop(owner.claim("work").await.unwrap());
     assert_eq!(execution.cancel_count.load(Ordering::Acquire), 0);
@@ -884,7 +916,11 @@ async fn cursor_segments_are_committed_once_and_terminal_wait_retires() {
     execution.append("first");
     let claim = start(&owner, Some("work"), execution.clone()).await;
     let first = claim
-        .wait(Some(Duration::ZERO), &NeverCancelled)
+        .wait(
+            Some(Duration::ZERO),
+            Box::pin(std::future::pending()),
+            &NeverCancelled,
+        )
         .await
         .unwrap();
     assert_eq!(first.output, "first".encode_utf16().collect::<Vec<_>>());
@@ -894,14 +930,21 @@ async fn cursor_segments_are_committed_once_and_terminal_wait_retires() {
         .claim("work")
         .await
         .unwrap()
-        .wait(Some(Duration::ZERO), &NeverCancelled)
+        .wait(
+            Some(Duration::ZERO),
+            Box::pin(std::future::pending()),
+            &NeverCancelled,
+        )
         .await
         .unwrap();
     assert_eq!(second.output, "second".encode_utf16().collect::<Vec<_>>());
     let claim = owner.claim("work").await.unwrap();
     execution.append("final");
     execution.complete(7);
-    let completed = claim.wait(None, &NeverCancelled).await.unwrap();
+    let completed = claim
+        .wait(None, Box::pin(std::future::pending()), &NeverCancelled)
+        .await
+        .unwrap();
     assert_eq!(completed.result.unwrap().stdout, "final");
     assert!(owner.observe_active().is_empty());
     assert!(owner.claim("work").await.is_err());
@@ -1066,7 +1109,11 @@ async fn diagnostics_follow_completion_without_process_payloads() {
     execution.append("secret-output");
     let claim = start(&owner, Some("secret-name"), execution.clone()).await;
     claim
-        .wait(Some(Duration::ZERO), &NeverCancelled)
+        .wait(
+            Some(Duration::ZERO),
+            Box::pin(std::future::pending()),
+            &NeverCancelled,
+        )
         .await
         .unwrap();
     owner
@@ -1121,7 +1168,7 @@ async fn faulted_completion_retains_tombstone_without_elapsed_time() {
     );
     assert_eq!(
         claim
-            .wait(None, &NeverCancelled)
+            .wait(None, Box::pin(std::future::pending()), &NeverCancelled)
             .await
             .unwrap_err()
             .to_string(),
@@ -1191,7 +1238,11 @@ async fn actual_t40_parent_cancellation_records_cancelled_without_command_payloa
         .unwrap();
     let process = Arc::clone(claim.process());
     claim
-        .wait(Some(Duration::ZERO), &NeverCancelled)
+        .wait(
+            Some(Duration::ZERO),
+            Box::pin(std::future::pending()),
+            &NeverCancelled,
+        )
         .await
         .unwrap();
     parent.cancel();
@@ -1342,7 +1393,10 @@ async fn retired_near_limit_pipes_release_execution_despite_retained_name_histor
         history.push(Arc::clone(claim.process()));
         execution.complete(0);
         drop(execution);
-        let result = claim.wait(None, &NeverCancelled).await.unwrap();
+        let result = claim
+            .wait(None, Box::pin(std::future::pending()), &NeverCancelled)
+            .await
+            .unwrap();
         assert_eq!(result.result.as_ref().unwrap().stdout.len(), 64_000);
         drop(result);
         until(|| weak.upgrade().is_none()).await;
@@ -1377,10 +1431,13 @@ async fn actual_retired_pipe_releases_cached_output_while_owner_retains_metadata
         .await
         .unwrap();
     let process = Arc::clone(claim.process());
-    let result = tokio::time::timeout(Duration::from_secs(5), claim.wait(None, &NeverCancelled))
-        .await
-        .unwrap()
-        .unwrap();
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        claim.wait(None, Box::pin(std::future::pending()), &NeverCancelled),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(result.result.as_ref().unwrap().stdout.len(), 2_000);
     assert!(result.result.as_ref().unwrap().blob_path.is_none());
     drop(result);

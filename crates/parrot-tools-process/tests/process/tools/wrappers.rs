@@ -35,8 +35,10 @@ use parrot_tools_process::process::ownership::owner::{ProcessAgent, ShellProcess
 use parrot_tools_process::process::tools::{
     CommandRequest, ProcessInvocation, ProcessResolver, ProcessTool, ProcessToolFactory,
     ProcessToolKind, ProcessToolResult, ProcessToolServices, ProcessWorkspace, ResolvedProcess,
+    SteerSignal,
 };
 use serde_json::{Value, json};
+use tokio::sync::Notify;
 
 const LIMIT: Duration = Duration::from_secs(20);
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
@@ -44,6 +46,23 @@ static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 struct NoProcessDiagnostics;
 impl ProcessDiagnostics for NoProcessDiagnostics {
     fn write(&self, _: ProcessDiagnostic) {}
+}
+
+struct NeverSteer;
+impl SteerSignal for NeverSteer {
+    fn wait<'c>(&self, _: &'c dyn Cancellation) -> BoxFuture<'c, ()> {
+        Box::pin(std::future::pending())
+    }
+}
+
+struct ManualSteer {
+    fired: Arc<Notify>,
+}
+impl SteerSignal for ManualSteer {
+    fn wait<'c>(&self, _: &'c dyn Cancellation) -> BoxFuture<'c, ()> {
+        let fired = Arc::clone(&self.fired);
+        Box::pin(async move { fired.notified().await })
+    }
 }
 
 struct Directory(PathBuf);
@@ -340,10 +359,18 @@ impl Fixture {
     }
 
     fn with_configuration(content: &str) -> Self {
-        Self::with_configuration_and_spill_limit(content, MAX_OUTPUT_CHARACTERS)
+        Self::with_configuration_and_steer(content, Arc::new(NeverSteer))
+    }
+
+    fn with_configuration_and_steer(content: &str, steer: Arc<dyn SteerSignal>) -> Self {
+        Self::build(content, MAX_OUTPUT_CHARACTERS, steer)
     }
 
     fn with_configuration_and_spill_limit(content: &str, spill_limit: usize) -> Self {
+        Self::build(content, spill_limit, Arc::new(NeverSteer))
+    }
+
+    fn build(content: &str, spill_limit: usize, steer: Arc<dyn SteerSignal>) -> Self {
         let directory = Directory::new();
         let environment =
             BTreeMap::from([("HOME".into(), directory.0.to_string_lossy().into_owned())]);
@@ -446,6 +473,7 @@ impl Fixture {
             exec_command_yield_after: Duration::from_millis(
                 configuration.runtime.exec_command_yield_after_ms as u64,
             ),
+            steer: Arc::clone(&steer),
             monitor_sink: sink.clone(),
         });
         Self {
@@ -586,8 +614,8 @@ async fn exec_default_waits_for_completion_beyond_one_second() {
 }
 
 #[tokio::test]
-async fn exec_default_yields_after_ten_seconds() {
-    let fixture = Fixture::new();
+async fn exec_yields_after_a_ten_second_configured_wait() {
+    let fixture = Fixture::with_configuration("exec_command_yield_after_ms: 10000\n");
     let started = tokio::time::Instant::now();
     let result = tokio::time::timeout(
         Duration::from_secs(15),
@@ -625,6 +653,48 @@ async fn exec_run_async_false_uses_the_configured_wait() {
         assert!(started.elapsed() >= Duration::from_millis(150));
         assert!(result.yielded_process.is_some());
     }
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn exec_run_async_false_yields_as_soon_as_a_steer_arrives() {
+    let fired = Arc::new(Notify::new());
+    let fixture = Fixture::with_configuration_and_steer(
+        "exec_command_yield_after_ms: 10000\n",
+        Arc::new(ManualSteer {
+            fired: Arc::clone(&fired),
+        }),
+    );
+    let trigger = Arc::clone(&fired);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        trigger.notify_one();
+    });
+    let started = tokio::time::Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        fixture.exec(json!({
+            "command":"while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.05; done"
+        })),
+    )
+    .await
+    .expect("exec did not yield on steer");
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(result.yielded_process.is_some());
+    let name = result.yielded_process.unwrap().name;
+
+    fs::write(fixture.directory.0.join("release"), "").unwrap();
+    let claim = fixture.owner.claim(&name).await.unwrap();
+    let complete = tokio::time::timeout(
+        LIMIT,
+        claim.wait(None, Box::pin(std::future::pending()), &NeverCancelled),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(!complete.running);
+    completed(&complete.format(&fixture.templates).unwrap(), 0, "s");
+    assert!(fixture.owner.observe_active().is_empty());
     fixture.finish().await;
 }
 
@@ -1187,7 +1257,11 @@ async fn pipe_yield_live_paths_metadata_claim_duplicate_and_reuse_are_real_owner
         .claim("live-pipe")
         .await
         .unwrap()
-        .wait(Some(Duration::ZERO), &NeverCancelled)
+        .wait(
+            Some(Duration::ZERO),
+            Box::pin(std::future::pending()),
+            &NeverCancelled,
+        )
         .await
         .unwrap();
     assert_eq!(repeated.format(&fixture.templates).unwrap(), initial.text);
@@ -1197,10 +1271,13 @@ async fn pipe_yield_live_paths_metadata_claim_duplicate_and_reuse_are_real_owner
     );
     let claim = fixture.owner.claim("live-pipe").await.unwrap();
     fs::write(fixture.directory.0.join("release"), "").unwrap();
-    let complete = tokio::time::timeout(LIMIT, claim.wait(None, &NeverCancelled))
-        .await
-        .unwrap()
-        .unwrap();
+    let complete = tokio::time::timeout(
+        LIMIT,
+        claim.wait(None, Box::pin(std::future::pending()), &NeverCancelled),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     completed(
         &complete.format(&fixture.templates).unwrap(),
         0,
@@ -1336,10 +1413,13 @@ async fn environment_survives_yield_and_the_completed_name_can_be_reused() {
     assert!(initial.text.contains("\nstderr: "));
     let claim = fixture.owner.claim("later").await.unwrap();
     fs::write(fixture.directory.0.join("release"), "").unwrap();
-    let waited = tokio::time::timeout(LIMIT, claim.wait(None, &NeverCancelled))
-        .await
-        .unwrap()
-        .unwrap();
+    let waited = tokio::time::timeout(
+        LIMIT,
+        claim.wait(None, Box::pin(std::future::pending()), &NeverCancelled),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     completed(
         &waited.format(&fixture.templates).unwrap(),
         0,
@@ -1881,10 +1961,13 @@ async fn cancelling_an_active_exec_wait_releases_claim_without_detaching_ownersh
     assert_eq!(fixture.owner.observe_active().len(), 1);
     let claim = fixture.owner.claim("active-wait").await.unwrap();
     fs::write(fixture.directory.0.join("release-active"), "").unwrap();
-    let outcome = tokio::time::timeout(LIMIT, claim.wait(None, &NeverCancelled))
-        .await
-        .unwrap()
-        .unwrap();
+    let outcome = tokio::time::timeout(
+        LIMIT,
+        claim.wait(None, Box::pin(std::future::pending()), &NeverCancelled),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     completed(
         &outcome.format(&fixture.templates).unwrap(),
         0,
@@ -1906,10 +1989,13 @@ async fn precancelled_exec_keeps_the_started_process_owned_until_observed() {
     assert_eq!(fixture.owner.observe_active().len(), 1);
     let claim = fixture.owner.claim("precancelled").await.unwrap();
     fs::write(fixture.directory.0.join("release-pre"), "").unwrap();
-    let outcome = tokio::time::timeout(LIMIT, claim.wait(None, &NeverCancelled))
-        .await
-        .unwrap()
-        .unwrap();
+    let outcome = tokio::time::timeout(
+        LIMIT,
+        claim.wait(None, Box::pin(std::future::pending()), &NeverCancelled),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     completed(
         &outcome.format(&fixture.templates).unwrap(),
         0,
@@ -2033,10 +2119,13 @@ async fn completed_pty_spilled_suffix_survives_incremental_transcript_cleanup() 
     assert!(initial.yielded_process.is_some());
     let claim = fixture.owner.claim("spill").await.unwrap();
     fs::write(fixture.directory.0.join("release-spill"), "").unwrap();
-    let outcome = tokio::time::timeout(LIMIT, claim.wait(None, &NeverCancelled))
-        .await
-        .unwrap()
-        .unwrap();
+    let outcome = tokio::time::timeout(
+        LIMIT,
+        claim.wait(None, Box::pin(std::future::pending()), &NeverCancelled),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let result = outcome.result.unwrap();
     let path = result.blob_path.unwrap();
     let durable = fs::read_to_string(&path).unwrap();
