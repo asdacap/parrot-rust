@@ -108,6 +108,11 @@ impl Dialog {
             .extend(values.into_iter().map(|value| value.map(str::to_owned)));
         self
     }
+    pub fn texts<'a>(mut self, values: impl IntoIterator<Item = Option<&'a str>>) -> Self {
+        self.text_values
+            .extend(values.into_iter().map(|value| value.map(str::to_owned)));
+        self
+    }
     pub fn confirmations(mut self, values: impl IntoIterator<Item = bool>) -> Self {
         self.confirmations.extend(values);
         self

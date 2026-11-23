@@ -226,7 +226,19 @@ impl SlashCommand for ModelPresetSetCommand {
     ) -> BoxFuture<'a, Result<(), SlashFailure>> {
         Box::pin(async move {
             check_cancelled(cancellation)?;
-            if validate_preset_name(arguments).is_err() {
+            let requested = if arguments.trim().is_empty() {
+                match environment
+                    .dialog
+                    .read_text("Model preset name", cancellation)
+                    .await?
+                {
+                    Some(name) => name.trim().to_owned(),
+                    None => return Ok(()),
+                }
+            } else {
+                arguments.to_owned()
+            };
+            if validate_preset_name(&requested).is_err() {
                 environment
                     .dialog
                     .show_error(&preset_usage(self.name()), cancellation)
@@ -235,7 +247,7 @@ impl SlashCommand for ModelPresetSetCommand {
             }
             match environment
                 .session
-                .set_model_preset(arguments, cancellation)
+                .set_model_preset(&requested, cancellation)
                 .await
             {
                 Ok(preset) => {
