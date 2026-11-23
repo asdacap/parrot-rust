@@ -28,6 +28,27 @@ pub struct CatalogAdapter<S: AccessSnapshot + 'static> {
     catalog: ScopedCatalog<S>,
     tools: Vec<ToolHandle<S>>,
 }
+/// Builds one catalog tool handle from a factory. Every retained handle
+/// comes through here, so the metadata shape has a single enforcement point.
+pub(crate) fn handle<S>(
+    factory: &catalog::Factory<SharedSecurity<S>, InvocationSelection<S>>,
+) -> ToolHandle<S>
+where
+    S: AccessSnapshot + 'static,
+{
+    ToolHandle::Ordinary(Arc::new(CatalogTool {
+        metadata: ToolMetadata {
+            name: factory.name().into(),
+            aliases: factory
+                .aliases()
+                .iter()
+                .map(|name| (*name).into())
+                .collect(),
+        },
+        tool: factory.create(),
+    }))
+}
+
 impl<S: AccessSnapshot + 'static> CatalogAdapter<S> {
     pub fn new(catalog: ScopedCatalog<S>) -> Result<Self, TurnError> {
         let tools = catalog
@@ -43,17 +64,7 @@ impl<S: AccessSnapshot + 'static> CatalogAdapter<S> {
                     tool.map(|tool| ToolHandle::Borrowed(Arc::new(tool)))
                         .map_err(|error| TurnError::Service(error.to_string()))
                 } else {
-                    Ok(ToolHandle::Ordinary(Arc::new(CatalogTool {
-                        metadata: ToolMetadata {
-                            name: factory.name().into(),
-                            aliases: factory
-                                .aliases()
-                                .iter()
-                                .map(|name| (*name).into())
-                                .collect(),
-                        },
-                        tool: factory.create(),
-                    })))
+                    Ok(handle(factory))
                 }
             })
             .collect::<Result<_, _>>()?;
@@ -243,6 +254,7 @@ fn error_to_runtime(error: catalog::Error) -> ToolFailure {
                     FailureKind::InvalidOperation
                 }
             },
+            catalog::Error::Codemode(error) => error.kind,
             catalog::Error::TaskQueue(error) => match error.kind {
                 tasks_queues::FailureKind::Json
                 | tasks_queues::FailureKind::Format

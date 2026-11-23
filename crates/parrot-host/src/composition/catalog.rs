@@ -135,6 +135,7 @@ pub enum Error {
     WebFetch(parrot_tools::web_fetch::FetchError),
     Definition(MissingToolDefinition),
     Mcp(parrot_mcp::McpToolError),
+    Codemode(parrot_runtime::tool_settlement::ToolFailure),
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -148,6 +149,7 @@ impl fmt::Display for Error {
             Self::WebFetch(e) => e.fmt(f),
             Self::Definition(e) => e.fmt(f),
             Self::Mcp(e) => e.fmt(f),
+            Self::Codemode(e) => e.fmt(f),
         }
     }
 }
@@ -170,6 +172,7 @@ family_error!(TaskQueue, ToolFailure);
 family_error!(WebFetch, parrot_tools::web_fetch::FetchError);
 family_error!(Definition, MissingToolDefinition);
 family_error!(Mcp, parrot_mcp::McpToolError);
+family_error!(Codemode, parrot_runtime::tool_settlement::ToolFailure);
 
 // MCP family seam. The feature crate stays catalog-free, so the host provides
 // the conversions its adapter needs, in this one place.
@@ -418,6 +421,144 @@ where
 {
     bind(name.into(), aliases, supported, tool, selection)
 }
+use parrot_runtime::agent_turn::services::TurnSelection as RuntimeTurnSelection;
+/// Binds a [`parrot_codemode::CodemodeTool`] into the family catalog. The
+/// description and input schema come from the configuration; the codemode
+/// runner injection happens after materialization, in the scope factory.
+use parrot_runtime::tool_settlement::{SharedSecurity as RuntimeSharedSecurity, ToolHandle};
+
+pub struct CodemodeBinding<S: AccessSnapshot + 'static> {
+    tool: Arc<parrot_codemode::CodemodeTool<S>>,
+    /// The assembled definition: the config schema plus the description built
+    /// from the injected siblings. Set once, before the factory registers.
+    definition: ConfiguredToolDefinition,
+}
+
+impl<S: AccessSnapshot + 'static> CodemodeBinding<S> {
+    pub fn new(
+        tool: Arc<parrot_codemode::CodemodeTool<S>>,
+        definition: ConfiguredToolDefinition,
+    ) -> Self {
+        Self { tool, definition }
+    }
+}
+
+impl<S: AccessSnapshot + 'static> Tool for CodemodeBinding<S> {
+    type Definition = ConfiguredToolDefinition;
+    type Invocation = Invocation;
+    type Selection = RuntimeTurnSelection<S>;
+    type Security = RuntimeSharedSecurity<S>;
+    type Output = Output;
+    type Error = Error;
+
+    fn definition(&self) -> &ConfiguredToolDefinition {
+        &self.definition
+    }
+
+    fn parallel_safety(&self, _invocation: &Invocation) -> ParallelSafety {
+        ParallelSafety::Sequential
+    }
+
+    fn enabled_after_interruption(&self) -> bool {
+        false
+    }
+
+    fn invoke<'a>(
+        &'a self,
+        invocation: Invocation,
+        scope: InvocationScope<'a, RuntimeSharedSecurity<S>, RuntimeTurnSelection<S>>,
+    ) -> BoxFuture<'a, Result<Output, OperationError<Error>>> {
+        let runtime_invocation = parrot_runtime::tool_settlement::ToolInvocation {
+            call_id: invocation.call_id,
+            assistant_sequence: invocation.assistant_sequence,
+            arguments_json: invocation.arguments_json,
+            prompt_templates: invocation.prompt_templates,
+            image_budget: invocation
+                .image_budget
+                .map(|budget| Arc::clone(&budget.budget)),
+        };
+        Box::pin(async move {
+            self.tool
+                .invoke(runtime_invocation, scope)
+                .await
+                .map(|output| Output {
+                    text: output.text,
+                    image_artifacts: output.image_artifacts,
+                    outcome: files::FileToolOutcome::Finished,
+                    yielded_process: None,
+                    display_result: output.display_result,
+                })
+                .map_err(|error| match error {
+                    OperationError::Cancelled => OperationError::Cancelled,
+                    OperationError::Failed(failure) => {
+                        OperationError::Failed(Error::Codemode(failure))
+                    }
+                })
+        })
+    }
+}
+
+/// Builds the codemode factory when the configuration declares the tool.
+/// `None` hides codemode entirely: no definition means the catalog omits it.
+/// Injects the runner from `handles` before registering, so construction
+/// order is one-way: the other factories exist first, codemode references
+/// them, nothing references codemode back. `handles` must be every catalog
+/// tool except codemode itself.
+pub fn codemode_factory<S, T>(
+    definitions: &ToolDefinitionCatalog,
+    tool: Arc<parrot_codemode::CodemodeTool<S>>,
+    handles: Vec<ToolHandle<S>>,
+    selection: fn(&Selection<T>) -> RuntimeTurnSelection<S>,
+) -> Option<Factory<RuntimeSharedSecurity<S>, T>>
+where
+    S: AccessSnapshot + 'static,
+    T: Send + Sync + 'static,
+{
+    let definition = definitions.describe("codemode").ok()?.clone();
+    let siblings: Vec<parrot_codemode::DeclaredTool> = definitions
+        .definitions()
+        .iter()
+        .filter(|(name, _)| name.as_str() != parrot_codemode::CODEMODE_TOOL_NAME)
+        .filter_map(|(name, configured)| {
+            Some(parrot_codemode::DeclaredTool {
+                name: name.clone(),
+                description: configured.description.clone(),
+                parameters_json: serde_json::from_str(&configured.parameters_json).ok()?,
+                output_schema: None,
+            })
+        })
+        .collect();
+    let description = parrot_codemode::build_description(&siblings, None);
+    tool.inject(parrot_codemode::RunnerInjection {
+        runner: Arc::new(parrot_codemode::SiblingToolRunner::new(handles)),
+        siblings,
+        inline_budget: None,
+    });
+    Some(extension::<CodemodeBinding<S>, T>(
+        "codemode",
+        &[],
+        true,
+        CodemodeBinding::new(
+            tool,
+            ConfiguredToolDefinition {
+                description,
+                parameters_json: definition.parameters_json,
+            },
+        ),
+        selection,
+    ))
+}
+
+/// Builds a definition catalog the way configuration loads one, for callers
+/// that construct tool families from inline definitions.
+pub fn definitions_from(
+    definitions: impl IntoIterator<Item = (String, ConfiguredToolDefinition)>,
+) -> ToolDefinitionCatalog {
+    let mut catalog = ToolDefinitionCatalog::new(&std::collections::BTreeMap::new());
+    catalog.merge(definitions);
+    catalog
+}
+
 pub fn unit<T>(_: &Selection<T>) {}
 pub fn scoped<T: Clone>(selection: &Selection<T>) -> T {
     selection.scoped.clone()

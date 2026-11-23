@@ -4,6 +4,7 @@ mod fixture;
 use fixture::*;
 mod common;
 use common::*;
+mod codemode;
 mod runtime;
 mod runtime_ordinary;
 

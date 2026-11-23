@@ -43,7 +43,7 @@ async fn native_configuration_and_retained_factories_preserve_evolved_source_ord
             .map(|f| f.name())
             .collect::<Vec<_>>()
     );
-    assert_eq!(definitions.definitions().len(), 29);
+    assert_eq!(definitions.definitions().len(), 30);
     for factory in fixture.catalog.factories() {
         let configured = &fixture.configuration.runtime.tools[factory.name()];
         assert_eq!(factory.definition().description, configured.description);
