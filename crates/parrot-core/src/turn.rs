@@ -565,6 +565,7 @@ impl AgentTurn<'_> {
             .range(start_sequence..=end_sequence)
             .map(|(_, item)| item.message.clone())
             .collect();
+        let from_tokens = self.provider.estimate_input_tokens("", &[], &messages)?;
         let replacements = self
             .filter
             .filter(
@@ -582,8 +583,8 @@ impl AgentTurn<'_> {
                     end_sequence,
                     messages,
                     watermark: end_sequence,
-                    from_tokens: batch_tokens,
-                    to_tokens: batch_tokens,
+                    from_tokens,
+                    to_tokens: from_tokens,
                 })
                 .await;
         };
@@ -596,14 +597,14 @@ impl AgentTurn<'_> {
                 end_sequence,
                 messages: replacements,
                 watermark: end_sequence,
-                from_tokens: batch_tokens,
+                from_tokens,
                 to_tokens,
             })
             .await?;
         self.event_publisher
             .publish(
                 ConversationEvent::FilterTriggered {
-                    from_tokens: batch_tokens,
+                    from_tokens,
                     to_tokens,
                 },
                 cancellation,

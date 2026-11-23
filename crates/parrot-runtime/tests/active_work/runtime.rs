@@ -507,7 +507,7 @@ impl ScopeFactory<Security> for Factory {
                 prompt: Box::new(Prompt),
                 skills: Arc::new(Skills),
                 context: self.histories.controller(history.clone()),
-                filter: Arc::new(ReasoningSkipFilter),
+                filter: Arc::new(ReasoningSkipFilter::new(&Default::default())),
                 filter_settings: disabled_filter_settings(),
                 status: Arc::new(Status),
                 completion_sources: vec![callback.clone()],

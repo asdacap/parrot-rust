@@ -1,16 +1,31 @@
+use crate::routing::factory::ProviderImplementation;
 use parrot_core::{BoxFuture, CancellationToken, Error, FilterProvider, FilterRequest, Message};
+use parrot_foundation::config::models::ProviderConfig;
 use serde_json::value::RawValue;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Strips reasoning payloads from replayable provider content without any
 /// model request. Responses envelopes lose their `reasoning` output items,
 /// Anthropic replay blocks lose their `thinking` blocks, and chat-completions
 /// envelopes lose their `ReasoningContent` and `Reasoning` fields; every other
-/// payload passes through unchanged. A batch that carries any encrypted
-/// reasoning, meaning a Responses reasoning item with `encrypted_content` or an
-/// Anthropic `redacted_thinking` block, is a whole-batch no-op because the
-/// provider must replay it intact.
-pub struct ReasoningSkipFilter;
+/// payload passes through unchanged. Batches containing OpenAI or ChatGPT
+/// history retain all reasoning. A batch that carries any encrypted reasoning,
+/// meaning a Responses reasoning item with `encrypted_content` or an Anthropic
+/// `redacted_thinking` block, is also a whole-batch no-op.
+pub struct ReasoningSkipFilter {
+    providers: BTreeMap<String, ProviderImplementation>,
+}
+
+impl ReasoningSkipFilter {
+    pub fn new(providers: &BTreeMap<String, ProviderConfig>) -> Self {
+        Self {
+            providers: providers
+                .iter()
+                .map(|(id, config)| (id.clone(), ProviderImplementation::resolve(id, config)))
+                .collect(),
+        }
+    }
+}
 
 impl FilterProvider for ReasoningSkipFilter {
     fn filter<'a, 'c>(
@@ -21,7 +36,17 @@ impl FilterProvider for ReasoningSkipFilter {
     where
         'c: 'a,
     {
-        Box::pin(async move { Ok(filter_batch(request.messages)) })
+        Box::pin(async move {
+            if request.messages.iter().any(|message| {
+                matches!(
+                    self.providers.get(&message.provider_id),
+                    Some(ProviderImplementation::OpenAi | ProviderImplementation::ChatGpt)
+                )
+            }) {
+                return Ok(None);
+            }
+            Ok(filter_batch(request.messages))
+        })
     }
 }
 
@@ -118,8 +143,9 @@ fn chat_completions_replay(mut fields: HashMap<String, Box<RawValue>>) -> Option
         .map(|(name, value)| format!("{name:?}:{value}"))
         .collect::<Vec<_>>()
         .join(",");
+    let separator = if body.is_empty() { "" } else { "," };
     Some(ReplayEdit::Rewritten(format!(
-        "{{\"Version\":1,\"Protocol\":\"chat-completions\",{body}}}"
+        "{{\"Version\":1,\"Protocol\":\"chat-completions\"{separator}{body}}}"
     )))
 }
 

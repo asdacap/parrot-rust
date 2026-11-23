@@ -580,7 +580,7 @@ impl Factory {
             prompt: Box::new(Prompt),
             skills: Arc::new(Skills),
             context: histories.controller(history.clone()),
-            filter: Arc::new(ReasoningSkipFilter),
+            filter: Arc::new(ReasoningSkipFilter::new(&Default::default())),
             filter_settings: disabled_filter_settings(),
             status: Arc::new(Status(tools.captures.clone())),
             completion_sources: vec![],
