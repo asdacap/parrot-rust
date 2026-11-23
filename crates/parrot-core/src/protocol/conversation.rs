@@ -81,6 +81,10 @@ pub enum ConversationEvent {
     SkillLoaded {
         path: String,
     },
+    FilterTriggered {
+        from_tokens: i64,
+        to_tokens: i64,
+    },
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

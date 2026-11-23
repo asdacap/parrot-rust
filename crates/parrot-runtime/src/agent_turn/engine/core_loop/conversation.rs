@@ -40,6 +40,14 @@ pub(super) fn render_event(mut event: Event, content: ConversationEvent) -> Even
                 ..Default::default()
             })
         }
+        ConversationEvent::FilterTriggered {
+            from_tokens,
+            to_tokens,
+        } => event.set_agent_notice(protocol::AgentNotice {
+            kind: "history_filter".into(),
+            notice: format!("Filtered {from_tokens} → {to_tokens} tokens"),
+            ..Default::default()
+        }),
     }
     event
 }

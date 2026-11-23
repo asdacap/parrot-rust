@@ -490,7 +490,9 @@ impl AgentTurn<'_> {
     /// taken from the oldest end, rounded up to the group that crosses the
     /// batch boundary, and never splits or includes an incomplete group. Every
     /// batch advances the durable filter watermark, including a batch the
-    /// filter skipped, so no batch is ever re-offered.
+    /// filter skipped, so no batch is ever re-offered. A batch whose
+    /// replacement differs from the original publishes a FilterTriggered event
+    /// with the batch's before and after token estimates.
     async fn filter_history(&mut self, cancellation: CancellationToken<'_>) -> Result<(), Error> {
         let settings = self
             .states
@@ -572,13 +574,36 @@ impl AgentTurn<'_> {
                 cancellation,
             )
             .await?;
+        let Some(replacements) = replacements else {
+            return self
+                .states
+                .commit_filter_amendment(FilterAmendment {
+                    start_sequence,
+                    end_sequence,
+                    messages,
+                    watermark: end_sequence,
+                })
+                .await;
+        };
+        let to_tokens = self
+            .provider
+            .estimate_input_tokens("", &[], &replacements)?;
         self.states
             .commit_filter_amendment(FilterAmendment {
                 start_sequence,
                 end_sequence,
-                messages: replacements.unwrap_or(messages),
+                messages: replacements,
                 watermark: end_sequence,
             })
+            .await?;
+        self.event_publisher
+            .publish(
+                ConversationEvent::FilterTriggered {
+                    from_tokens: batch_tokens,
+                    to_tokens,
+                },
+                cancellation,
+            )
             .await
     }
 

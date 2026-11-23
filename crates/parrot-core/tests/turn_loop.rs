@@ -2433,10 +2433,27 @@ fn seed_reasoning_history(state: &mut MemoryState, encrypted: bool) {
     state.request().estimate_script = VecDeque::from([40000, 8, 5]);
 }
 
+fn filtered_token_reports(state: &MemoryState) -> Vec<(i64, i64)> {
+    state
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|event| match event {
+            ConversationEvent::FilterTriggered {
+                from_tokens,
+                to_tokens,
+            } => Some((*from_tokens, *to_tokens)),
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn an_enabled_filter_strips_reasoning_from_the_oldest_whole_batch() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     seed_reasoning_history(&mut state, false);
+    state.request().estimate_script.push_back(7);
     enable_filter(&state, 10, 10);
     state.filter.lock().unwrap().reply = Some(Ok(Some(vec![
         Message::text(Role::User, "question"),
@@ -2470,6 +2487,7 @@ fn an_enabled_filter_strips_reasoning_from_the_oldest_whole_batch() {
     assert_eq!(filter.amendments[0].start_sequence, 1);
     assert_eq!(filter.amendments[0].end_sequence, 3);
     assert_eq!(filter.amendments[0].watermark, 3);
+    assert_eq!(filtered_token_reports(&state), vec![(13, 7)]);
 
     let requests = state.provider.requests.lock().unwrap();
     let assistant = requests[0]
@@ -2507,6 +2525,7 @@ fn an_encrypted_batch_keeps_its_reasoning_and_never_retriggers() {
     let amended = &filter.amendments[0].messages;
     assert_eq!(amended.len(), 3);
     assert!(amended[1].provider_content.contains("encrypted_content"));
+    assert!(filtered_token_reports(&state).is_empty());
 
     let requests = state.provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
