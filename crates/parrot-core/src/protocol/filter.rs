@@ -10,6 +10,9 @@ pub struct FilterSettings {
     /// The smallest batch the core submits, rounded up to the next conversation
     /// boundary.
     pub filter_batch_size: i64,
+    /// The estimated token saving a batch must reach, as a percentage of the
+    /// batch's original size, for the core to apply the filter's replacements.
+    pub min_saving_percent: i32,
 }
 
 /// One filter batch the core submits from the unfiltered history window.

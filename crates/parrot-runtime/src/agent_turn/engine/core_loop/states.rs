@@ -305,15 +305,7 @@ where
         amendment: parrot_core::FilterAmendment,
     ) -> BoxFuture<'_, Result<(), CoreError>> {
         adapt_operation(async move {
-            let mut event = self.events.event();
-            event.set_agent_notice(protocol::AgentNotice {
-                kind: "filter".into(),
-                notice: format!(
-                    "Filter committed\nwatermark {}\ntokens {} → {}",
-                    amendment.watermark, amendment.from_tokens, amendment.to_tokens
-                ),
-                ..Default::default()
-            });
+            let event = self.events.event();
             let mut guard = self.state.lock().await;
             let committed = self
                 .history

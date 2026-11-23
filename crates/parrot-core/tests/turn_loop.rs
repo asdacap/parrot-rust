@@ -653,6 +653,7 @@ fn disabled_filter_settings() -> parrot_core::FilterSettings {
         enabled: false,
         max_unfiltered_token_window: 0,
         filter_batch_size: 0,
+        min_saving_percent: 10,
     }
 }
 
@@ -2425,6 +2426,7 @@ fn enable_filter(state: &MemoryState, window: i64, batch: i64) {
         enabled: true,
         max_unfiltered_token_window: window,
         filter_batch_size: batch,
+        min_saving_percent: 10,
     };
 }
 
@@ -2512,14 +2514,51 @@ fn an_enabled_filter_strips_reasoning_from_the_oldest_whole_batch() {
 }
 
 #[test]
-fn an_unchanged_replacement_batch_reports_no_token_savings() {
+fn a_replacement_batch_without_enough_saving_is_committed_unchanged() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     seed_reasoning_history(&mut state, false);
     state.request().estimate_script.extend([11, 11]);
     enable_filter(&state, 10, 10);
     state.filter.lock().unwrap().reply = Some(Ok(Some(reasoning_history(false))));
     assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
-    assert_eq!(filtered_token_reports(&state), vec![(11, 11)]);
+
+    let filter = state.filter.lock().unwrap();
+    assert_eq!(filter.requests.len(), 1);
+    assert_eq!(filter.amendments.len(), 1);
+    assert_eq!(filter.amendments[0].watermark, 3);
+    let amended = &filter.amendments[0].messages;
+    assert_eq!(amended.len(), 3);
+    assert!(amended[1].provider_content.contains("reasoning"));
+    assert!(filtered_token_reports(&state).is_empty());
+}
+
+#[test]
+fn a_replacement_batch_meeting_the_saving_threshold_filters() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    seed_reasoning_history(&mut state, false);
+    state.request().estimate_script.extend([100, 90]);
+    enable_filter(&state, 10, 10);
+    state.filter.lock().unwrap().reply = Some(Ok(Some(vec![
+        Message::text(Role::User, "question"),
+        Message {
+            role: Role::Assistant,
+            contents: vec![Content::Text("thinking".into())],
+            tool_calls: vec![read_call()],
+            provider_content: responses_envelope(&[
+                "{\"type\":\"function_call\",\"call_id\":\"call-1\",\"name\":\"read\",\"arguments\":\"{}\"}"
+                    .into(),
+            ]),
+            ..Message::default()
+        },
+        Message {
+            role: Role::Tool,
+            tool_call_id: "call-1".into(),
+            contents: vec![Content::Text("result".into())],
+            ..Message::default()
+        },
+    ])));
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(filtered_token_reports(&state), vec![(100, 90)]);
 }
 
 #[test]

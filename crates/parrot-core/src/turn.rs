@@ -490,7 +490,9 @@ impl AgentTurn<'_> {
     /// taken from the oldest end, rounded up to the group that crosses the
     /// batch boundary, and never splits or includes an incomplete group. Every
     /// batch advances the durable filter watermark, including a batch the
-    /// filter skipped, so no batch is ever re-offered. A batch whose
+    /// filter skipped, so no batch is ever re-offered. Replacements whose
+    /// estimated saving falls below the configured minimum saving percentage
+    /// are discarded and the batch is committed unchanged. A batch whose
     /// replacement differs from the original publishes a FilterTriggered event
     /// with the batch's before and after token estimates.
     async fn filter_history(&mut self, cancellation: CancellationToken<'_>) -> Result<(), Error> {
@@ -591,6 +593,19 @@ impl AgentTurn<'_> {
         let to_tokens = self
             .provider
             .estimate_input_tokens("", &[], &replacements)?;
+        if (from_tokens - to_tokens) * 100 < from_tokens * i64::from(settings.min_saving_percent) {
+            return self
+                .states
+                .commit_filter_amendment(FilterAmendment {
+                    start_sequence,
+                    end_sequence,
+                    messages,
+                    watermark: end_sequence,
+                    from_tokens,
+                    to_tokens: from_tokens,
+                })
+                .await;
+        }
         self.states
             .commit_filter_amendment(FilterAmendment {
                 start_sequence,

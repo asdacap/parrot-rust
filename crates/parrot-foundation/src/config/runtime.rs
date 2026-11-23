@@ -122,6 +122,7 @@ pub struct FilterConfig {
     pub enabled: bool,
     pub max_unfiltered_token_window: i64,
     pub filter_batch_size: i64,
+    pub min_saving_percent: i32,
 }
 
 impl Default for FilterConfig {
@@ -130,6 +131,7 @@ impl Default for FilterConfig {
             enabled: false,
             max_unfiltered_token_window: 32 * 1024,
             filter_batch_size: 16 * 1024,
+            min_saving_percent: 10,
         }
     }
 }
@@ -419,7 +421,7 @@ impl RuntimeSettings {
             "readOnlyExecCommandPrefixes":self.read_only_exec_command_prefixes.as_slice(),"disabledTools":self.disabled_tools,
             "sandboxRules":rules(&self.sandbox_rules),"sandboxEnabled":self.sandbox_enabled,"sandboxDevBind":self.sandbox_dev_bind.as_slice(),
             "inlineDiff":self.inline_diff,"compaction":{"triggerPercent":self.compaction.trigger_percent,"targetPercent":self.compaction.target_percent,"maximumInputTokens":self.compaction.maximum_input_tokens,"maximumOutputTokens":self.compaction.maximum_output_tokens,"summaryOutputTokens":self.compaction.summary_output_tokens},
-            "filter":{"enabled":self.filter.enabled,"maxUnfilteredTokenWindow":self.filter.max_unfiltered_token_window,"filterBatchSize":self.filter.filter_batch_size},
+            "filter":{"enabled":self.filter.enabled,"maxUnfilteredTokenWindow":self.filter.max_unfiltered_token_window,"filterBatchSize":self.filter.filter_batch_size,"minSavingPercent":self.filter.min_saving_percent},
             "agentTasks":{"maximumAttempts":self.agent_tasks.maximum_attempts,"maximumResponseRepairs":self.agent_tasks.maximum_response_repairs,"forkHistoryMode":format!("{:?}",self.agent_tasks.fork_history_mode)},
             "agentSend":{"toParent":self.agent_send_to_parent,"spawnModelWhitelist":self.agent_spawn_model_whitelist},"toolDefinitions":tools,
             "agentLimits":{"disableRecursionLimit":self.agent_limits.disable_recursion_limit},
@@ -829,6 +831,7 @@ fn read_filter(root: &Node) -> Result<FilterConfig> {
             "enabled",
             "max_unfiltered_token_window",
             "filter_batch_size",
+            "min_saving_percent",
         ],
     )?;
     let enabled = match node.get("enabled") {
@@ -849,6 +852,10 @@ fn read_filter(root: &Node) -> Result<FilterConfig> {
             "filter.filter_batch_size",
         )?
         .unwrap_or(16 * 1024),
+        min_saving_percent: match node.get("min_saving_percent") {
+            Some(_) => positive_integer(node, "min_saving_percent", "filter.min_saving_percent")?,
+            None => 10,
+        },
     })
 }
 

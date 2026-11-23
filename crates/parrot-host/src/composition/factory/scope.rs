@@ -1464,6 +1464,7 @@ where
                     enabled: filter_config.enabled,
                     max_unfiltered_token_window: filter_config.max_unfiltered_token_window,
                     filter_batch_size: filter_config.filter_batch_size,
+                    min_saving_percent: filter_config.min_saving_percent,
                 };
                 let compactor = Compactor::new(
                     settings,

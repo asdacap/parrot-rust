@@ -922,5 +922,6 @@ fn disabled_filter_settings() -> parrot_core::FilterSettings {
         enabled: false,
         max_unfiltered_token_window: 0,
         filter_batch_size: 0,
+        min_saving_percent: 10,
     }
 }

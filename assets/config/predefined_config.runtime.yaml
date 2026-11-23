@@ -226,6 +226,9 @@ filter:
   enabled: false
   max_unfiltered_token_window: 32768
   filter_batch_size: 16384
+  # A batch is committed unchanged when the filter's replacements save less
+  # than this percentage of the batch's original token estimate.
+  min_saving_percent: 10
 
 # Complete model-facing definitions for built-in tools. User configuration may override
 # descriptions or structural JSON Schema members while inheriting remaining entries.
