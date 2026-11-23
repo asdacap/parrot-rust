@@ -246,6 +246,10 @@ pub fn estimate_input_tokens(
         tokens = add(tokens, 12)?;
     }
     for message in messages {
+        tokens = add(
+            tokens,
+            super::reasoning::estimate_tokens(message, selected.provider.id()),
+        )?;
         for content in &message.contents {
             tokens = add(
                 tokens,

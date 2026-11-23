@@ -118,8 +118,9 @@ fn chat_completions_replay(mut fields: HashMap<String, Box<RawValue>>) -> Option
         .map(|(name, value)| format!("{name:?}:{value}"))
         .collect::<Vec<_>>()
         .join(",");
+    let separator = if body.is_empty() { "" } else { "," };
     Some(ReplayEdit::Rewritten(format!(
-        "{{\"Version\":1,\"Protocol\":\"chat-completions\",{body}}}"
+        "{{\"Version\":1,\"Protocol\":\"chat-completions\"{separator}{body}}}"
     )))
 }
 

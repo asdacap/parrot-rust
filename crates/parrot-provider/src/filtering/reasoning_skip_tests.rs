@@ -118,6 +118,23 @@ fn chat_completions_reasoning_fields_are_stripped() {
 }
 
 #[test]
+fn chat_completions_reasoning_only_envelope_remains_valid_json() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Envelope {
+        version: i32,
+        protocol: String,
+    }
+    let raw = "{\"Version\":1,\"Protocol\":\"chat-completions\",\"Reasoning\":\"thought\"}";
+    let filtered = filter_batch(vec![assistant(raw)]).expect("batch changed");
+    let envelope: Envelope = serde_json::from_str(&filtered[0].provider_content)
+        .expect("filtered replay must remain valid JSON");
+    assert_eq!(envelope.version, 1);
+    assert_eq!(envelope.protocol, "chat-completions");
+    assert_eq!(filtered[0].contents, assistant(raw).contents);
+}
+
+#[test]
 fn chat_completions_null_reasoning_fields_are_unchanged() {
     let raw = "{\"Version\":1,\"Protocol\":\"chat-completions\",\"ReasoningContent\":null,\"ToolCalls\":[]}";
     let batch = vec![user("hello"), assistant(raw)];

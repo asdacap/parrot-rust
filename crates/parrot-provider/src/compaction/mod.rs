@@ -5,6 +5,7 @@ mod fitting;
 mod model;
 mod planning;
 mod preparation;
+mod reasoning;
 mod service;
 use execution::Execution;
 pub use service::{Compactor, estimate_input_tokens};
@@ -17,6 +18,8 @@ mod fitting_tests;
 mod operation_tests;
 #[cfg(test)]
 mod planning_tests;
+#[cfg(test)]
+mod reasoning_estimate_tests;
 #[cfg(test)]
 mod test_support;
 use parrot_core::{ContextSnapshot, ConversationState, Error, Message, StatusOffering};

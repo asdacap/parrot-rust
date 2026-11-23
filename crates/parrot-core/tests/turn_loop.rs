@@ -2453,7 +2453,7 @@ fn filtered_token_reports(state: &MemoryState) -> Vec<(i64, i64)> {
 fn an_enabled_filter_strips_reasoning_from_the_oldest_whole_batch() {
     let mut state = MemoryState::new([Reply::final_response("answer")]);
     seed_reasoning_history(&mut state, false);
-    state.request().estimate_script.push_back(7);
+    state.request().estimate_script.extend([13, 7]);
     enable_filter(&state, 10, 10);
     state.filter.lock().unwrap().reply = Some(Ok(Some(vec![
         Message::text(Role::User, "question"),
@@ -2509,6 +2509,17 @@ fn an_enabled_filter_strips_reasoning_from_the_oldest_whole_batch() {
         .find(|message| message.role == Role::Tool)
         .expect("the request replays the tool result");
     assert_eq!(result.tool_call_id, "call-1");
+}
+
+#[test]
+fn an_unchanged_replacement_batch_reports_no_token_savings() {
+    let mut state = MemoryState::new([Reply::final_response("answer")]);
+    seed_reasoning_history(&mut state, false);
+    state.request().estimate_script.extend([11, 11]);
+    enable_filter(&state, 10, 10);
+    state.filter.lock().unwrap().reply = Some(Ok(Some(reasoning_history(false))));
+    assert_eq!(state.run(), Ok(Outcome::Completed("answer".into())));
+    assert_eq!(filtered_token_reports(&state), vec![(11, 11)]);
 }
 
 #[test]
