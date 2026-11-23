@@ -3,12 +3,13 @@ use serde_json::value::RawValue;
 use std::collections::HashMap;
 
 /// Strips reasoning payloads from replayable provider content without any
-/// model request. Responses envelopes lose their `reasoning` output items and
-/// Anthropic replay blocks lose their `thinking` blocks; every other payload
-/// passes through unchanged. A batch that carries any encrypted reasoning,
-/// meaning a Responses reasoning item with `encrypted_content` or an Anthropic
-/// `redacted_thinking` block, is a whole-batch no-op because the provider must
-/// replay it intact.
+/// model request. Responses envelopes lose their `reasoning` output items,
+/// Anthropic replay blocks lose their `thinking` blocks, and chat-completions
+/// envelopes lose their `ReasoningContent` and `Reasoning` fields; every other
+/// payload passes through unchanged. A batch that carries any encrypted
+/// reasoning, meaning a Responses reasoning item with `encrypted_content` or an
+/// Anthropic `redacted_thinking` block, is a whole-batch no-op because the
+/// provider must replay it intact.
 pub struct ReasoningSkipFilter;
 
 impl FilterProvider for ReasoningSkipFilter {
@@ -58,18 +59,26 @@ fn strip_reasoning(message: &Message) -> Option<ReplayEdit> {
     if raw.trim_start().starts_with('[') {
         anthropic_replay(raw)
     } else {
-        responses_replay(raw)
+        envelope_replay(raw)
     }
 }
 
-fn responses_replay(raw: &str) -> Option<ReplayEdit> {
+fn envelope_replay(raw: &str) -> Option<ReplayEdit> {
     let fields: HashMap<String, Box<RawValue>> = serde_json::from_str(raw).ok()?;
     let version: i32 = serde_json::from_str(fields.get("Version")?.get()).ok()?;
-    let protocol: String = serde_json::from_str(fields.get("Protocol")?.get()).ok()?;
-    if version != 1 || protocol != "responses" {
+    if version != 1 {
         return None;
     }
-    let output: Vec<Box<RawValue>> = serde_json::from_str(fields.get("Output")?.get()).ok()?;
+    let protocol: String = serde_json::from_str(fields.get("Protocol")?.get()).ok()?;
+    match protocol.as_str() {
+        "responses" => responses_replay(fields),
+        "chat-completions" => chat_completions_replay(fields),
+        _ => None,
+    }
+}
+
+fn responses_replay(mut fields: HashMap<String, Box<RawValue>>) -> Option<ReplayEdit> {
+    let output: Vec<Box<RawValue>> = serde_json::from_str(fields.remove("Output")?.get()).ok()?;
     let mut kept = Vec::with_capacity(output.len());
     for item in output {
         match responses_item(item.get()) {
@@ -84,6 +93,33 @@ fn responses_replay(raw: &str) -> Option<ReplayEdit> {
             .map(|item| item.get())
             .collect::<Vec<_>>()
             .join(",")
+    )))
+}
+
+/// Drops the reasoning fields from a chat-completions replay envelope and
+/// returns `None` when neither field carries reasoning text. Every other
+/// field, including `ToolCalls`, is preserved verbatim.
+fn chat_completions_replay(mut fields: HashMap<String, Box<RawValue>>) -> Option<ReplayEdit> {
+    let mut stripped = false;
+    let mut kept = Vec::with_capacity(fields.len());
+    for (name, value) in fields.drain() {
+        match name.as_str() {
+            "ReasoningContent" | "Reasoning" if value.get() != "null" => stripped = true,
+            "Version" | "Protocol" => {}
+            _ => kept.push((name, value.get().to_owned())),
+        }
+    }
+    if !stripped {
+        return None;
+    }
+    kept.sort_by(|left, right| left.0.cmp(&right.0));
+    let body = kept
+        .iter()
+        .map(|(name, value)| format!("{name:?}:{value}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(ReplayEdit::Rewritten(format!(
+        "{{\"Version\":1,\"Protocol\":\"chat-completions\",{body}}}"
     )))
 }
 
