@@ -408,3 +408,34 @@ async fn current_rich_receipts_survive_storage_reopen_and_unrelated_section_save
     assert_eq!(saved.tasks.accepted_calls, expected.tasks.accepted_calls);
     assert_eq!(fixture.store().await.load().await.unwrap(), Some(saved));
 }
+
+#[tokio::test]
+async fn version_two_load_drops_retired_repair_state_and_readmits_repair_prompts_as_fresh() {
+    let fixture = Fixture::new();
+    let store = fixture.store().await;
+    let mut value = serde_json::to_value(snapshot()).unwrap();
+    value["schema_version"] = json!(2);
+    let runner = value["tasks"]["entries"][1]["execution"]["worker"]["runner"]
+        .as_object_mut()
+        .unwrap();
+    runner.insert("repair_attempt".into(), json!(1));
+    runner.insert("maximum_response_repairs".into(), json!(3));
+    runner.insert("phase".into(), json!("repairing_response"));
+    let bytes = serde_json::to_vec(&value).unwrap();
+    fs::write(fixture.path(), &bytes).unwrap();
+    let actual = store.load().await.unwrap().unwrap();
+    assert_eq!(actual.schema_version, AGENT_STATE_VERSION);
+    assert_eq!(actual.owner_session_id, snapshot().owner_session_id);
+    assert_eq!(actual.revision, snapshot().revision);
+    let runner = match &actual.tasks.entries[1].execution {
+        TaskExecutionSnapshot::RetiringLegacy { worker }
+        | TaskExecutionSnapshot::Dedicated { worker } => worker.runner.as_ref().unwrap(),
+        other => panic!("version two provenance must keep its execution tag: {other:?}"),
+    };
+    assert_eq!(runner.phase, TaskRunnerPhase::PromptIntent);
+    assert_eq!(runner.prompt, "saved prompt");
+    assert_eq!(runner.prompt_message_id, "prompt-1");
+    assert_eq!(runner.attempt, 2);
+    assert_eq!(runner.maximum_attempts, 5);
+    assert_eq!(fs::read(fixture.path()).unwrap(), bytes);
+}

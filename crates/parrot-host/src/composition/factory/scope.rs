@@ -59,6 +59,7 @@ use parrot_runtime::{
         },
         completion::SessionCompletion,
         exit_reminders::{ExitReminders, ReminderError},
+        leaf_responses::LeafResponseBlocker,
         progress::{AgentProgress, ProgressBlocker, ProgressSnapshotPublisher},
         runtime_tree::{RegistryRuntimeTreeSource, RuntimeTreeStatusProvider},
         status::{
@@ -1519,6 +1520,23 @@ where
                     identity.session.session_id.clone(),
                     self.user.provider_session_ids.clone(),
                 );
+                let selection_source = Arc::new(RoutedSelection {
+                    source: prepared.selection.clone(),
+                    router: self.config.router.clone(),
+                });
+                let leaf_response_blocker = Arc::new(LeafResponseBlocker::new(
+                    selection_source.clone(),
+                    Arc::new(TaskArtifactParserAdapter),
+                    self.user.templates.clone(),
+                    u64::try_from(
+                        self.config
+                            .configuration
+                            .runtime
+                            .agent_tasks
+                            .maximum_response_repairs,
+                    )
+                    .map_err(child)?,
+                ));
                 let backend = RuntimeBackend::with_sessions(
                     RuntimeConfig {
                         agent_limits: self.config.configuration.runtime.agent_limits,
@@ -1528,17 +1546,14 @@ where
                         history: prepared.history.clone(),
                         broker: self.user.broker.clone(),
                         publisher,
-                        selection: Arc::new(RoutedSelection {
-                            source: prepared.selection.clone(),
-                            router: self.config.router.clone(),
-                        }),
+                        selection: selection_source.clone(),
                         tools: settlement,
                         tool_execution,
                         prompt,
                         skills: skills.skills,
                         context: ContextController::new(compactor, prepared.history.clone()),
                         status: status.clone(),
-                        completion_sources: vec![completion],
+                        completion_sources: vec![completion, leaf_response_blocker],
                         templates: self.user.templates.clone(),
                         reminders,
                         output: output.clone(),

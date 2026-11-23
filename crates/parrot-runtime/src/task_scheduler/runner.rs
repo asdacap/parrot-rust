@@ -48,13 +48,11 @@ impl<P: TaskArtifactParser + 'static> TaskRunner<P> {
             feedback: Vec::new(),
             carried_result: None,
             attempt: 1,
-            repair_attempt: 0,
             phase: TaskRunnerPhase::PromptIntent,
             generation_id: Identifier::event_id().map_err(identifier_error)?,
             prompt_message_id: Identifier::message_id().map_err(identifier_error)?,
             prompt,
             maximum_attempts: self.configuration.maximum_attempts as u64,
-            maximum_response_repairs: self.configuration.maximum_response_repairs as u64,
             assignment_header,
             outcome: None,
             response_reference: None,
@@ -142,7 +140,6 @@ impl<P: TaskArtifactParser + 'static> TaskRunner<P> {
                 checkpoint.current_task.payload = TaskPayload::Instruction(instruction);
             }
             checkpoint.attempt += 1;
-            checkpoint.repair_attempt = 0;
             checkpoint.prompt = self.build_assignment(
                 &checkpoint.current_task,
                 checkpoint.assignment_header.clone(),
@@ -173,77 +170,62 @@ impl<P: TaskArtifactParser + 'static> TaskRunner<P> {
         progress: &RunProgress<S, P>,
         cancellation: Arc<dyn Cancellation>,
     ) -> ChildResult<Result<LeafResponse, String>> {
-        loop {
+        if cancellation.is_cancelled() {
+            return Err(ChildError::Cancelled);
+        }
+        let claim = progress.claim(&checkpoint.prompt_message_id);
+        let execution = if let Some(reference) = &checkpoint.response_reference {
+            let execution = session.restore_response(reference).await?;
+            session.acknowledge_result(reference, &claim).await?;
+            progress.reserve();
+            execution
+        } else {
+            let lease = progress.acquire(checkpoint, session).await?;
+            let handles = self
+                .reserve_prompt(session, checkpoint, progress, cancellation.clone())
+                .await?;
+            handles.reservation.join().await?;
+            progress.reserve();
+            checkpoint.phase = TaskRunnerPhase::AwaitingResponse;
+            progress.save(checkpoint.clone()).await?;
+            let execution = handles.execution.join().await?;
             if cancellation.is_cancelled() {
                 return Err(ChildError::Cancelled);
             }
-            let claim = progress.claim(&checkpoint.prompt_message_id);
-            let execution = if let Some(reference) = &checkpoint.response_reference {
-                let execution = session.restore_response(reference).await?;
-                session.acknowledge_result(reference, &claim).await?;
-                progress.reserve();
-                execution
-            } else {
-                let lease = progress.acquire(checkpoint, session).await?;
-                let handles = self
-                    .reserve_prompt(session, checkpoint, progress, cancellation.clone())
-                    .await?;
-                handles.reservation.join().await?;
-                progress.reserve();
-                checkpoint.phase = TaskRunnerPhase::AwaitingResponse;
-                progress.save(checkpoint.clone()).await?;
-                let execution = handles.execution.join().await?;
-                if cancellation.is_cancelled() {
-                    return Err(ChildError::Cancelled);
-                }
-                let reference = session
-                    .capture_result(&checkpoint.prompt_message_id, &claim)
-                    .await?;
-                checkpoint.phase = TaskRunnerPhase::AssessingResponse;
-                checkpoint.response_reference = Some(reference.clone());
-                progress.save(checkpoint.clone()).await?;
-                session.acknowledge_result(&reference, &claim).await?;
-                drop(lease);
-                execution
-            };
-            if cancellation.is_cancelled() {
-                return Err(ChildError::Cancelled);
-            }
-            if execution.status != SessionStatus::Succeeded {
-                return Ok(Err(render(
-                    &self.configuration,
-                    "agent-task.role-failure",
-                    &[
-                        ("role", "execute"),
-                        (
-                            "status",
-                            match execution.status {
-                                SessionStatus::Failed => "failed",
-                                SessionStatus::Canceled => "canceled",
-                                SessionStatus::Succeeded => "succeeded",
-                            },
-                        ),
-                        ("error", &execution.error),
-                    ],
-                )?));
-            }
-            match self.parser.parse_leaf_response(&execution.output) {
-                Ok(response) => return Ok(Ok(response)),
-                Err(error) if checkpoint.repair_attempt < checkpoint.maximum_response_repairs => {
-                    checkpoint.repair_attempt += 1;
-                    checkpoint.prompt = render(
-                        &self.configuration,
-                        "agent-task.response-repair",
-                        &[("error", &error.to_string())],
-                    )?;
-                    checkpoint.prompt_message_id =
-                        Identifier::message_id().map_err(identifier_error)?;
-                    checkpoint.phase = TaskRunnerPhase::RepairingResponse;
-                    checkpoint.response_reference = None;
-                    progress.save(checkpoint.clone()).await?;
-                }
-                Err(error) => return Ok(Err(format!("leaf response invalid: {error}"))),
-            }
+            let reference = session
+                .capture_result(&checkpoint.prompt_message_id, &claim)
+                .await?;
+            checkpoint.phase = TaskRunnerPhase::AssessingResponse;
+            checkpoint.response_reference = Some(reference.clone());
+            progress.save(checkpoint.clone()).await?;
+            session.acknowledge_result(&reference, &claim).await?;
+            drop(lease);
+            execution
+        };
+        if cancellation.is_cancelled() {
+            return Err(ChildError::Cancelled);
+        }
+        if execution.status != SessionStatus::Succeeded {
+            return Ok(Err(render(
+                &self.configuration,
+                "agent-task.role-failure",
+                &[
+                    ("role", "execute"),
+                    (
+                        "status",
+                        match execution.status {
+                            SessionStatus::Failed => "failed",
+                            SessionStatus::Canceled => "canceled",
+                            SessionStatus::Succeeded => "succeeded",
+                        },
+                    ),
+                    ("error", &execution.error),
+                ],
+            )?));
+        }
+        match self.parser.parse_leaf_response(&execution.output) {
+            Ok(response) => Ok(Ok(response)),
+            Err(error) => Ok(Err(format!("leaf response invalid: {error}"))),
         }
     }
     async fn reserve_prompt<S: RestrictableAccessSnapshot + 'static>(

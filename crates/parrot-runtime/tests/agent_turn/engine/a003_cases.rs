@@ -13,6 +13,13 @@ struct ReminderCompletion {
     calls: AtomicUsize,
 }
 impl CompletionStateSource for ReminderCompletion {
+    fn get_leaf_response_reminder<'a>(
+        &'a self,
+        _candidate: &'a str,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
     fn get_pending_ask_reminder<'a>(
         &'a self,
         _: &'a dyn Cancellation,

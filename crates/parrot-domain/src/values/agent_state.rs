@@ -4,7 +4,7 @@ use super::agent_tasks::{Task, TaskCallIdentity};
 use super::image_artifact::ImageArtifactMetadata;
 use serde::{Deserialize, Serialize};
 
-pub const AGENT_STATE_VERSION: u64 = 2;
+pub const AGENT_STATE_VERSION: u64 = 3;
 pub const AGENT_STATE_FILE_NAME: &str = "agent-state.json";
 pub const AGENT_STATE_STAGING_FILE_NAME: &str = "agent-state.json.tmp";
 
@@ -274,13 +274,11 @@ pub struct TaskRunnerCheckpoint {
     pub feedback: Vec<String>,
     pub carried_result: Option<String>,
     pub attempt: u64,
-    pub repair_attempt: u64,
     pub phase: TaskRunnerPhase,
     pub generation_id: String,
     pub prompt_message_id: String,
     pub prompt: String,
     pub maximum_attempts: u64,
-    pub maximum_response_repairs: u64,
     pub assignment_header: String,
     pub outcome: Option<Task>,
     pub response_reference: Option<TaskResponseReference>,
@@ -291,7 +289,6 @@ pub struct TaskRunnerCheckpoint {
 pub enum TaskRunnerPhase {
     PromptIntent,
     AwaitingResponse,
-    RepairingResponse,
     AssessingResponse,
     RetryIntent,
     Completed,

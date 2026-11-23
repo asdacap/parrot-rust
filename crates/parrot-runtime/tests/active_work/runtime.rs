@@ -299,6 +299,23 @@ impl CompletionStateSource for CallbackBinding {
             Ok(reminder)
         })
     }
+    fn get_leaf_response_reminder<'a>(
+        &'a self,
+        candidate: &'a str,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move {
+            let source = self
+                .source
+                .lock()
+                .unwrap()
+                .clone()
+                .expect("fixture completion source must bind before admission");
+            source
+                .get_leaf_response_reminder(candidate, cancellation)
+                .await
+        })
+    }
 }
 type Backend = RuntimeBackend<Security>;
 struct Built {

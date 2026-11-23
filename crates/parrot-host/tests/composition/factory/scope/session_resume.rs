@@ -1515,7 +1515,6 @@ async fn actual_nested_running_graphs_suspend_together_and_reopen_without_duplic
         .as_ref()
         .unwrap();
     assert_eq!(runner.attempt, 1);
-    assert_eq!(runner.repair_attempt, 0);
     for execution in [&outer_execution, &inner_execution] {
         assert_eq!(
             events

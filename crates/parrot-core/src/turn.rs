@@ -252,7 +252,10 @@ impl AgentTurn<'_> {
                 continue;
             }
 
-            let messages = self.states.collect_completion_blockers().await?;
+            let messages = self
+                .states
+                .collect_completion_blockers(&response.assistant_text)
+                .await?;
 
             if !messages.is_empty() {
                 let mut additions = vec![Message::from_response(&response)];

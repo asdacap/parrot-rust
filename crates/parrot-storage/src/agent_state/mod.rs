@@ -2,6 +2,7 @@
 
 mod files;
 mod v1;
+mod v2;
 
 use files::AgentStateDirectory;
 use parrot_domain::{
@@ -155,6 +156,9 @@ impl State {
         let version: Version = serde_json::from_slice(&bytes).map_err(corrupt)?;
         let snapshot = match version.schema_version {
             1 => serde_json::from_slice::<v1::V1AgentStateSnapshot>(&bytes)
+                .map_err(corrupt)?
+                .normalize(),
+            2 => serde_json::from_slice::<v2::V2AgentStateSnapshot>(&bytes)
                 .map_err(corrupt)?
                 .normalize(),
             AGENT_STATE_VERSION => serde_json::from_slice(&bytes).map_err(corrupt)?,

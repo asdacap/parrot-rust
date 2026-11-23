@@ -26,6 +26,14 @@ The `mcp__<server>__<tool>` name pattern that keeps MCP tool names distinct from
 Agent Client Protocol, the JSON-RPC protocol an editor client uses to drive a coding agent over stdio. Parrot serves it to external editors through the `parrot acp` subcommand. See ADR 0003.
 _Avoid_: Editor integration, Zed protocol
 
+## Agent tasks
+
+**Leaf response**:
+The strict JSON object a dedicated task worker must end its final response with. It carries `result` and a `verdict` of `accept`, `reject-and-retry`, or `reject-and-halt`. `TaskArtifactParser::parse_leaf_response` accepts it. See ADR 0004.
+
+**Leaf response blocker**:
+A completion blocker that validates the candidate final response of a task payload session against the leaf response contract. An unparseable candidate blocks the worker's exit once per failure, up to the configured repair budget per turn, and injects the rendered parse error.
+
 ## Conversation language
 
 **Context**:

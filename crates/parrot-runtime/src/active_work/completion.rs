@@ -56,4 +56,11 @@ where
                 .map_err(|error| TurnError::Service(error.to_string()))
         })
     }
+    fn get_leaf_response_reminder<'a>(
+        &'a self,
+        _candidate: &'a str,
+        _cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>> {
+        Box::pin(async move { Ok(None) })
+    }
 }

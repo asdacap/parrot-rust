@@ -52,7 +52,7 @@ impl Provider for UnavailableProvider {}
 #[test]
 fn unsupported_state_operations_return_errors_instead_of_empty_or_successful_results() {
     let mut states = UnavailableState;
-    let blockers = finish(states.collect_completion_blockers()).unwrap_err();
+    let blockers = finish(states.collect_completion_blockers("candidate")).unwrap_err();
     assert_eq!(blockers.code, ErrorCode::InvalidOperation);
     assert!(blockers.message.contains("collect_completion_blockers"));
     let state = finish(states.get_agent_state()).unwrap_err();

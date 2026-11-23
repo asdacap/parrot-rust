@@ -298,7 +298,11 @@ where
         })
     }
 
-    fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, CoreError>> {
+    fn collect_completion_blockers(
+        &mut self,
+        candidate: &str,
+    ) -> BoxFuture<'_, Result<Vec<String>, CoreError>> {
+        let candidate = candidate.to_owned();
         adapt_operation(async move {
             let _guard = self.state.lock().await;
             self.work
@@ -318,6 +322,14 @@ where
             }
             for source in self.completion_sources {
                 if let Some(reminder) = source.get_exit_reminder(self.cancellation).await? {
+                    blockers.push(reminder);
+                }
+            }
+            for source in self.completion_sources {
+                if let Some(reminder) = source
+                    .get_leaf_response_reminder(&candidate, self.cancellation)
+                    .await?
+                {
                     blockers.push(reminder);
                 }
             }

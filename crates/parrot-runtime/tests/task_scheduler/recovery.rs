@@ -570,11 +570,10 @@ async fn graph_load_round_trips_definitions_outcomes_visibility_without_activati
 }
 
 #[tokio::test]
-async fn suspended_retry_and_repair_continue_same_prompt_and_original_budgets() {
+async fn suspended_retry_continues_same_prompt_and_original_attempt_budget() {
     let first = Harness::new();
     let mut config = TaskConfiguration::defaults(templates());
     config.maximum_attempts = 2;
-    config.maximum_response_repairs = 1;
     *first.factory.configuration.lock().unwrap() = Some(config);
     first.factory.parser.answer(
         "retry",
@@ -594,7 +593,6 @@ async fn suspended_retry_and_repair_continue_same_prompt_and_original_budgets() 
             Reply::text("retry"),
             Reply::held("invalid", &held),
             Reply::text("invalid"),
-            Reply::text("invalid-two"),
         ],
     );
     let root = first.root("owner").await;
@@ -623,16 +621,11 @@ async fn suspended_retry_and_repair_continue_same_prompt_and_original_budgets() 
     let second = Harness::with_history(32, first.histories.clone(), first.provider.clone());
     let mut config = TaskConfiguration::defaults(templates());
     config.maximum_attempts = 9;
-    config.maximum_response_repairs = 9;
     *second.factory.configuration.lock().unwrap() = Some(config);
     second
         .factory
         .parser
         .error("invalid", "first invalid envelope");
-    second
-        .factory
-        .parser
-        .error("invalid-two", "second invalid envelope");
     let restored = second.reopen_root(identity).await;
     assert_eq!(
         second.factory.get("a").history.agent_session_id(),
@@ -659,7 +652,7 @@ async fn suspended_retry_and_repair_continue_same_prompt_and_original_budgets() 
     assert_eq!(done[0].result.as_deref(), Some("replacement"));
     assert_eq!(
         done[0].failure.as_deref(),
-        Some("leaf response invalid: second invalid envelope")
+        Some("leaf response invalid: first invalid envelope")
     );
     let saved = restored.agent_state().load().await.unwrap().unwrap();
     let runner = saved.tasks.entries[0]
@@ -667,22 +660,14 @@ async fn suspended_retry_and_repair_continue_same_prompt_and_original_budgets() 
         .runner
         .as_ref()
         .unwrap();
-    assert_eq!(
-        (
-            runner.attempt,
-            runner.repair_attempt,
-            runner.maximum_attempts,
-            runner.maximum_response_repairs
-        ),
-        (2, 1, 2, 1)
-    );
+    assert_eq!((runner.attempt, runner.maximum_attempts), (2, 2));
     let events = second.histories.repository.events().replay().await.unwrap();
     assert_eq!(
         events
             .iter()
             .filter(|event| event.agent_session_id == worker_id && event.has_input_admitted())
             .count(),
-        3
+        2
     );
     let history = second
         .factory

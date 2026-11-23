@@ -1083,7 +1083,10 @@ impl States for MemoryState {
             Ok(())
         })
     }
-    fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
+    fn collect_completion_blockers(
+        &mut self,
+        _candidate: &str,
+    ) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async move {
             self.step("exit_blockers")?;
             Ok(self.prompts().exit_blockers.pop_front().unwrap_or_default())

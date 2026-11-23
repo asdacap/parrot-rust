@@ -37,8 +37,12 @@ pub trait States: Send + Sync {
     fn set_agent_state(&mut self, _state: AgentState) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async { Err(Error::unsupported("States.set_agent_state")) })
     }
-    /// Joins accepted mutations and reads ordered completion blockers.
-    fn collect_completion_blockers(&mut self) -> BoxFuture<'_, Result<Vec<String>, Error>> {
+    /// Joins accepted mutations and reads ordered completion blockers for the
+    /// candidate final response text.
+    fn collect_completion_blockers(
+        &mut self,
+        _candidate: &str,
+    ) -> BoxFuture<'_, Result<Vec<String>, Error>> {
         Box::pin(async { Err(Error::unsupported("States.collect_completion_blockers")) })
     }
     /// Captures the complete provider-rendered system prompt and native request bindings.

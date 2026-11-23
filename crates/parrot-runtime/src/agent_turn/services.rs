@@ -94,6 +94,14 @@ pub trait CompletionStateSource: Send + Sync {
         &'a self,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Option<String>, TurnError>>;
+    /// Reads the leaf response reminder for the candidate final response text.
+    fn get_leaf_response_reminder<'a>(
+        &'a self,
+        candidate: &'a str,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<Option<String>, TurnError>>;
+    /// Signals a newly opened conversation turn so per-turn observation budgets reset.
+    fn begin_turn(&self) {}
 }
 
 /// Exposes agent-local skill records and authorized content without preparing prompts.

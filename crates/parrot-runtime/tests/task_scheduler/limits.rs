@@ -6,19 +6,14 @@ use parrot_runtime::task_scheduler::{TaskConfiguration, TaskRunner};
 use std::sync::Arc;
 
 #[tokio::test]
-async fn response_repairs_reset_for_each_rejected_attempt_and_preserve_carried_result_on_repair_exhaustion()
+async fn rejected_attempt_carries_replacement_result_and_unparseable_second_attempt_fails_preserving_it()
  {
     let h = Harness::new();
     let mut configuration = TaskConfiguration::defaults(templates());
     configuration.maximum_attempts = 3;
-    configuration.maximum_response_repairs = 1;
     *h.factory.configuration.lock().unwrap() = Some(configuration);
     let root = h.root("owner").await;
-    h.factory.parser.error("bad-one", "bad first attempt");
     h.factory.parser.error("bad-two", "bad second attempt");
-    h.factory
-        .parser
-        .error("bad-three", "still bad second attempt");
     h.factory.parser.answer(
         "retry",
         LeafResponse {
@@ -30,31 +25,22 @@ async fn response_repairs_reset_for_each_rejected_attempt_and_preserve_carried_r
             },
         },
     );
-    h.provider.script(
-        "a",
-        [
-            Reply::text("bad-one"),
-            Reply::text("retry"),
-            Reply::text("bad-two"),
-            Reply::text("bad-three"),
-        ],
-    );
+    h.provider
+        .script("a", [Reply::text("retry"), Reply::text("bad-two")]);
     set(&root, vec![dedicated(task("a"))]).await;
     let done = wait_tasks(&root, |tasks| tasks[0].state == Failed).await;
     assert_eq!(done[0].result.as_deref(), Some("carried replacement"));
     assert_eq!(
         done[0].failure.as_deref(),
-        Some("leaf response invalid: still bad second attempt")
+        Some("leaf response invalid: bad second attempt")
     );
     let calls = requests(&h.provider, "a");
-    assert_eq!(calls.len(), 4);
-    assert!(prompt(&calls[1]).contains("bad first attempt"));
-    assert!(prompt(&calls[2]).contains("carried replacement"));
-    assert!(prompt(&calls[2]).contains("retry feedback"));
-    assert!(prompt(&calls[3]).contains("bad second attempt"));
+    assert_eq!(calls.len(), 2);
+    assert!(prompt(&calls[1]).contains("carried replacement"));
+    assert!(prompt(&calls[1]).contains("retry feedback"));
     assert_eq!(
         h.factory.parser.leaf_inputs.lock().unwrap().as_slice(),
-        ["bad-one", "retry", "bad-two", "bad-three"]
+        ["retry", "bad-two"]
     );
     h.close().await;
 }

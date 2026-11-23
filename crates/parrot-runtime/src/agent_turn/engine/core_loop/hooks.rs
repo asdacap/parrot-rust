@@ -29,6 +29,9 @@ impl<S: AccessSnapshot + 'static> TurnHooks for RuntimeTurnHooks<'_, S> {
                 .ensure_epoch(&self.backend.prompt, self.cancellation)
                 .await?;
             self.backend.skills.begin_turn(self.cancellation).await?;
+            for source in &self.backend.completion_sources {
+                source.begin_turn();
+            }
             Ok(())
         })
     }

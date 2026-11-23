@@ -50,52 +50,29 @@ async fn retry_attempt_limit_replacement_instruction_carried_result_and_feedback
 }
 
 #[tokio::test]
-async fn parser_repair_limit_is_separate_from_attempt_limit_and_invalid_responses_are_not_accepted()
-{
-    for succeeds in [false, true] {
-        let h = Harness::new();
-        let mut configuration = TaskConfiguration::defaults(templates());
-        configuration.maximum_attempts = 1;
-        configuration.maximum_response_repairs = 1;
-        *h.factory.configuration.lock().unwrap() = Some(configuration);
-        let root = h.root("owner").await;
-        h.factory
-            .parser
-            .error("invalid-one", "scripted invalid first envelope");
-        h.factory
-            .parser
-            .error("invalid-two", "scripted invalid second envelope");
-        h.provider.script(
-            "a",
-            [
-                Reply::text("invalid-one"),
-                Reply::text(if succeeds { "answer" } else { "invalid-two" }),
-            ],
-        );
-        set(&root, vec![dedicated(task("a"))]).await;
-        let done = wait_tasks(&root, |tasks| tasks[0].state != Running).await;
-        assert_eq!(done[0].state, if succeeds { Succeeded } else { Failed });
-        assert_eq!(
-            done[0].failure.as_deref(),
-            if succeeds {
-                None
-            } else {
-                Some("leaf response invalid: scripted invalid second envelope")
-            }
-        );
-        let calls = requests(&h.provider, "a");
-        assert_eq!(calls.len(), 2);
-        assert!(prompt(&calls[1]).contains("Your previous response was not accepted"));
-        assert!(prompt(&calls[1]).contains("scripted invalid first envelope"));
-        assert_eq!(
-            h.factory.parser.leaf_inputs.lock().unwrap().as_slice(),
-            [
-                "invalid-one",
-                if succeeds { "answer" } else { "invalid-two" }
-            ]
-        );
-        h.close().await;
-    }
+async fn unparseable_leaf_response_fails_the_task_directly_after_the_blocker_budget() {
+    let h = Harness::new();
+    let mut configuration = TaskConfiguration::defaults(templates());
+    configuration.maximum_attempts = 1;
+    *h.factory.configuration.lock().unwrap() = Some(configuration);
+    let root = h.root("owner").await;
+    h.factory
+        .parser
+        .error("invalid-one", "scripted invalid first envelope");
+    h.provider.script("a", [Reply::text("invalid-one")]);
+    set(&root, vec![dedicated(task("a"))]).await;
+    let done = wait_tasks(&root, |tasks| tasks[0].state != Running).await;
+    assert_eq!(done[0].state, Failed);
+    assert_eq!(
+        done[0].failure.as_deref(),
+        Some("leaf response invalid: scripted invalid first envelope")
+    );
+    assert_eq!(requests(&h.provider, "a").len(), 1);
+    assert_eq!(
+        h.factory.parser.leaf_inputs.lock().unwrap().as_slice(),
+        ["invalid-one"]
+    );
+    h.close().await;
 }
 
 #[tokio::test]

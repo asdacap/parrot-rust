@@ -12,6 +12,7 @@ use super::{
     status_name,
 };
 use crate::{
+    active_work::leaf_responses::TASK_PAYLOAD_PROFILE,
     agent_turn::{
         lifecycle::{Completion, IncomingActivity, Signal},
         services::TurnSelection,
@@ -1414,7 +1415,7 @@ impl<S: RestrictableAccessSnapshot + 'static, P: TaskArtifactParser + 'static> T
                 Ok(LaunchRequest {
                     parent,
                     requested_name: task.name.clone(),
-                    requested_profile: "agent-task-payload".into(),
+                    requested_profile: TASK_PAYLOAD_PROFILE.into(),
                     model,
                     requested_scope: render(
                         &scheduler.config.configuration,
