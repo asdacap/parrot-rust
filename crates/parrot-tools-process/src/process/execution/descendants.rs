@@ -23,21 +23,25 @@ impl OwnedDescendants {
         }
     }
 
-    /// Attempt every target even if an earlier signal fails. This can be retried.
-    pub(super) fn terminate(&self) -> io::Result<()> {
+    /// Sends one signal to every captured target, continuing past failures.
+    /// This can be retried.
+    pub(super) fn signal(&self, signal: i32) -> io::Result<()> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             let mut result = Ok(());
             for target in &self.targets {
-                remember(&mut result, target.terminate());
+                remember(&mut result, target.signal(signal));
             }
             result
         }
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-        Err(unsupported())
+        {
+            let _ = signal;
+            Err(unsupported())
+        }
     }
 
-    /// Call after terminating the direct child/group as well. Failed signals are
+    /// Call after signaling the direct child/group as well. Failed signals are
     /// reported, rather than waiting indefinitely for an unsignaled process.
     pub(super) fn wait(&self) -> io::Result<()> {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -135,14 +139,14 @@ mod platform {
     }
 
     impl Target {
-        pub(super) fn terminate(&self) -> io::Result<()> {
+        pub(super) fn signal(&self, signal: i32) -> io::Result<()> {
             loop {
                 // SAFETY: the owned pidfd binds this signal to the captured process.
                 let result = unsafe {
                     libc::syscall(
                         libc::SYS_pidfd_send_signal,
                         self.descriptor.as_raw_fd(),
-                        libc::SIGKILL,
+                        signal,
                         std::ptr::null::<libc::siginfo_t>(),
                         0_u32,
                     )
@@ -449,7 +453,7 @@ mod platform {
     }
 
     impl Target {
-        pub(super) fn terminate(&self) -> io::Result<()> {
+        pub(super) fn signal(&self, signal: i32) -> io::Result<()> {
             let current = identity(self.identity.pid)?;
             if current.is_none_or(|now| !self.identity.same_process(now) || now.zombie) {
                 self.signaled.store(true, Ordering::Relaxed);
@@ -457,7 +461,7 @@ mod platform {
             }
             // macOS has no pidfd: birth validation makes numeric signaling best
             // effort, but cannot eliminate reuse between this check and kill.
-            if unsafe { libc::kill(self.identity.pid as libc::pid_t, libc::SIGKILL) } < 0 {
+            if unsafe { libc::kill(self.identity.pid as libc::pid_t, signal) } < 0 {
                 let error = io::Error::last_os_error();
                 if !vanished(&error) {
                     return Err(error);
