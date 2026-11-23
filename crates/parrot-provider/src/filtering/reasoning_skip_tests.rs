@@ -108,8 +108,25 @@ fn one_encrypted_message_blocks_the_whole_batch() {
 }
 
 #[test]
+fn chat_completions_reasoning_fields_are_stripped() {
+    let raw = "{\"Version\":1,\"Protocol\":\"chat-completions\",\"ReasoningContent\":\"thought\",\"Reasoning\":\"other\",\"ToolCalls\":[],\"unknown\":1}";
+    let filtered = filter_batch(vec![assistant(raw)]).expect("batch changed");
+    assert_eq!(
+        filtered[0].provider_content,
+        "{\"Version\":1,\"Protocol\":\"chat-completions\",\"ToolCalls\":[],\"unknown\":1}"
+    );
+}
+
+#[test]
+fn chat_completions_null_reasoning_fields_are_unchanged() {
+    let raw = "{\"Version\":1,\"Protocol\":\"chat-completions\",\"ReasoningContent\":null,\"ToolCalls\":[]}";
+    let batch = vec![user("hello"), assistant(raw)];
+    assert_eq!(filter_batch(batch), None);
+}
+
+#[test]
 fn messages_without_reasoning_are_unchanged_and_unchanged_batches_are_none() {
-    let chat_replay = "{\"Version\":1,\"Protocol\":\"chat-completions\",\"Reasoning\":\"thought\",\"ToolCalls\":[]}";
+    let chat_replay = "{\"Version\":1,\"Protocol\":\"chat-completions\",\"ToolCalls\":[]}";
     let batch = vec![
         user("hello"),
         assistant(""),
