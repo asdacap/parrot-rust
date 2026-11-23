@@ -3,6 +3,7 @@ use parrot_core::FilterAmendment;
 use parrot_domain::protocol::messages::parrot::Event;
 use parrot_storage::conversation::forks::ForkError;
 use parrot_storage::conversation::*;
+use rusqlite::params;
 use parrot_storage::events::{EventError, ToolExecutionStatus, ToolExecutionTerminal, tools};
 
 fn event(id: &str, agent: &str) -> Event {
@@ -79,6 +80,21 @@ async fn contents(repo: &ConversationRepository, agent: &str) -> Vec<String> {
         .unwrap()
 }
 
+async fn kinds(repo: &ConversationRepository, agent: &str) -> Vec<String> {
+    let agent = agent.to_owned();
+    repo.events()
+        .transaction(move |tx| {
+            let mut read = tx.prepare(
+                "SELECT kind FROM conversation_item WHERE agent_session = ?1 AND kind IN ('message', 'filtered_message') ORDER BY sequence;",
+            )?;            let rows = read
+                .query_map(params![agent], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .await
+        .unwrap()
+}
+
 async fn watermark(repo: &ConversationRepository, agent: &str) -> i64 {
     repo.filter_watermark(agent.into()).await.unwrap()
 }
@@ -100,6 +116,10 @@ async fn amendment_rewrites_replay_payloads_and_advances_the_watermark() {
     .unwrap();
     assert!(committed);
     assert_eq!(watermark(&repo, "agent").await, second);
+    assert_eq!(
+        kinds(&repo, "agent").await,
+        vec!["filtered_message".to_owned(), "filtered_message".to_owned()]
+    );
     let rows = contents(&repo, "agent").await;
     assert_eq!(
         rows,
@@ -186,6 +206,10 @@ async fn skipped_batch_advances_the_watermark_without_touching_rows() {
     assert!(committed);
     assert_eq!(watermark(&repo, "agent").await, second);
     assert_eq!(contents(&repo, "agent").await, originals);
+    assert_eq!(
+        kinds(&repo, "agent").await,
+        vec!["filtered_message".to_owned(), "filtered_message".to_owned()]
+    );
     let duplicate = commit(&repo, first, second, second, &["", ""])
         .await
         .unwrap();

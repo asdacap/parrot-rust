@@ -78,7 +78,7 @@ impl ConversationRepository {
                     return Ok(false);
                 }
                 let mut read = tx.prepare(
-                    "SELECT sequence FROM conversation_item WHERE agent_session = ?1 AND kind NOT IN ('compaction', 'filter') AND sequence BETWEEN ?2 AND ?3 ORDER BY sequence;",
+                    "SELECT sequence FROM conversation_item WHERE agent_session = ?1 AND kind IN ('message', 'filtered_message') AND sequence BETWEEN ?2 AND ?3 ORDER BY sequence;",
                 )?;
                 let rows = read
                     .query_map(
@@ -100,7 +100,7 @@ impl ConversationRepository {
                         message.provider_id.as_str()
                     };
                     tx.execute(
-                        "UPDATE conversation_item SET provider_id = ?1, provider_content = ?2 WHERE sequence = ?3;",
+                        "UPDATE conversation_item SET kind = 'filtered_message', provider_id = ?1, provider_content = ?2 WHERE sequence = ?3;",
                         params![provider_id, message.provider_content, sequence],
                     )?;
                 }

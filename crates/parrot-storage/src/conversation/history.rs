@@ -68,7 +68,7 @@ impl ConversationRepository {
         request_event_sequence: i64,
     ) -> Result<Vec<AgentHistoryEntry>, EventError> {
         self.events.transaction(move |tx| {
-            let mut read = tx.prepare("SELECT item.sequence, item.kind, COALESCE((SELECT text FROM conversation_part WHERE item_sequence = item.sequence AND position = 0 AND kind = 'text'), ''), item.compaction_watermark FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.kind <> 'filter' AND item.sequence > ?2 ORDER BY item.sequence;")?;
+            let mut read = tx.prepare("SELECT item.sequence, item.kind, COALESCE((SELECT text FROM conversation_part WHERE item_sequence = item.sequence AND position = 0 AND kind = 'text'), ''), item.compaction_watermark FROM conversation_item AS item WHERE item.agent_session = ?1 AND item.kind IN ('message', 'compaction', 'filtered_message') AND item.sequence > ?2 ORDER BY item.sequence;")?;
             let mut rows = read.query(params![agent, history_sequence])?;
             let mut entries = Vec::new();
             while let Some(row) = rows.next()? {
