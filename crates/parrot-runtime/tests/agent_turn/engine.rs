@@ -306,7 +306,7 @@ impl Fixture {
             }),
             skills: Arc::new(Skills(trace.clone())),
             context: self.controller(),
-            filter: Arc::new(ReasoningSkipFilter),
+            filter: Arc::new(ReasoningSkipFilter::new(&Default::default())),
             filter_settings: disabled_filter_settings(),
             status: overrides.status.unwrap_or_else(|| Arc::new(Status)),
             completion_sources: callbacks,

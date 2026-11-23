@@ -183,7 +183,7 @@ pub(super) async fn runtime_with_publisher(
         prompt: Box::new(Prompt),
         skills: Arc::new(Skills),
         context: fixture.controller(),
-        filter: Arc::new(ReasoningSkipFilter),
+        filter: Arc::new(ReasoningSkipFilter::new(&Default::default())),
         filter_settings: disabled_filter_settings(),
         status: Arc::new(Status),
         completion_sources: vec![],

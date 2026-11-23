@@ -33,7 +33,7 @@ fn estimate(message: &Message) -> i64 {
 fn assert_reasoning_savings(replay: String, expected: i64) {
     let message = assistant(replay);
     let before = estimate(&message);
-    let replacements = finish(ReasoningSkipFilter.filter(
+    let replacements = finish(ReasoningSkipFilter::new(&Default::default()).filter(
         FilterRequest {
             messages: vec![message.clone()],
         },

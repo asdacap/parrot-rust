@@ -153,13 +153,106 @@ fn messages_without_reasoning_are_unchanged_and_unchanged_batches_are_none() {
     assert_eq!(filter_batch(batch), None);
 }
 
+fn filter_provider_batch(messages: Vec<Message>) -> Option<Vec<Message>> {
+    use parrot_foundation::config::{models::ModelSettings, node::Node};
+
+    let root = Node::mapping(vec![
+        (
+            Node::scalar("provider_model_alias_defaults"),
+            Node::mapping(vec![]),
+        ),
+        (
+            Node::scalar("providers"),
+            Node::mapping(
+                [
+                    ("openai", "chat-completions"),
+                    ("chatgpt", "responses"),
+                    ("other", "responses"),
+                ]
+                .into_iter()
+                .map(|(id, protocol)| {
+                    (
+                        Node::scalar(id),
+                        Node::mapping(vec![(Node::scalar("protocol"), Node::scalar(protocol))]),
+                    )
+                })
+                .collect(),
+            ),
+        ),
+    ]);
+    let settings = ModelSettings::read(&root).expect("provider settings are valid");
+    let filter = ReasoningSkipFilter::new(&settings.providers);
+    let mut future = filter.filter(FilterRequest { messages }, CancellationToken::uncancelled());
+    match future
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()))
+    {
+        std::task::Poll::Ready(result) => result.expect("filter succeeded"),
+        std::task::Poll::Pending => panic!("filter never yields"),
+    }
+}
+
+fn provider_assistant(provider_id: &str, content: &str) -> Message {
+    Message {
+        provider_id: provider_id.into(),
+        ..assistant(content)
+    }
+}
+
+#[test]
+fn openai_and_chatgpt_history_retains_reasoning_in_every_representation() {
+    let responses = responses_envelope(&[responses_reasoning(false).as_str(), RESPONSES_MESSAGE]);
+    let encrypted = responses_envelope(&[responses_reasoning(true).as_str(), RESPONSES_MESSAGE]);
+    let chat = "{\"Version\":1,\"Protocol\":\"chat-completions\",\"ReasoningContent\":\"thought\",\"Reasoning\":\"other\",\"ToolCalls\":[]}";
+    let thinking = "[{\"type\":\"thinking\",\"thinking\":\"thought\",\"signature\":\"sig\"}]";
+    for provider_id in ["openai", "chatgpt"] {
+        for content in [
+            responses.as_str(),
+            encrypted.as_str(),
+            chat,
+            thinking,
+            "unknown replay",
+        ] {
+            assert_eq!(
+                filter_provider_batch(vec![provider_assistant(provider_id, content)]),
+                None,
+                "reasoning from {provider_id} must remain intact"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_openai_origin_keeps_a_mixed_history_batch_intact() {
+    let responses = responses_envelope(&[responses_reasoning(false).as_str(), RESPONSES_MESSAGE]);
+    let chat = "{\"Version\":1,\"Protocol\":\"chat-completions\",\"Reasoning\":\"thought\"}";
+    let messages = vec![
+        user("switch to another provider"),
+        provider_assistant("other", chat),
+        provider_assistant("openai", &responses),
+    ];
+    assert_eq!(filter_provider_batch(messages), None);
+}
+
+#[test]
+fn other_compatible_provider_history_still_loses_plain_reasoning() {
+    let raw = responses_envelope(&[responses_reasoning(false).as_str(), RESPONSES_MESSAGE]);
+    let filtered = filter_provider_batch(vec![provider_assistant("other", &raw)])
+        .expect("other provider reasoning is removable");
+    assert_eq!(
+        filtered[0].provider_content,
+        responses_envelope(&[RESPONSES_MESSAGE])
+    );
+}
+
 #[test]
 fn filter_trait_reports_the_replacement_batch() {
     let raw = responses_envelope(&[responses_reasoning(false).as_str(), RESPONSES_MESSAGE]);
     let request = FilterRequest {
         messages: vec![assistant(&raw)],
     };
-    let mut future = ReasoningSkipFilter.filter(request, CancellationToken::uncancelled());
+    let filter = ReasoningSkipFilter::new(&Default::default());
+    let mut future = filter.filter(request, CancellationToken::uncancelled());
     let outcome = match future
         .as_mut()
         .poll(&mut Context::from_waker(Waker::noop()))

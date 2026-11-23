@@ -252,7 +252,9 @@ async fn runtime(
         }),
         skills: Arc::new(Skills(trace.clone())),
         context: fixture.controller(),
-        filter: Arc::new(parrot_provider::filtering::ReasoningSkipFilter),
+        filter: Arc::new(parrot_provider::filtering::ReasoningSkipFilter::new(
+            &Default::default(),
+        )),
         filter_settings: disabled_filter_settings(),
         status: Arc::new(Status),
         completion_sources: vec![],
