@@ -60,6 +60,8 @@ async fn commit(
             .map(|content| replacement(content))
             .collect(),
         watermark,
+        from_tokens: 0,
+        to_tokens: 0,
     };
     repo.commit_filter_amendment("agent".into(), event("filter-audit", "agent"), amendment)
         .await
@@ -198,6 +200,8 @@ async fn skipped_batch_advances_the_watermark_without_touching_rows() {
             .map(|content| replacement(content))
             .collect(),
         watermark: second,
+        from_tokens: 0,
+        to_tokens: 0,
     };
     let committed = repo
         .commit_filter_amendment("agent".into(), event("filter-audit", "agent"), amendment)

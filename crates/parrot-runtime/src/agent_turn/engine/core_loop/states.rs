@@ -308,7 +308,10 @@ where
             let mut event = self.events.event();
             event.set_agent_notice(protocol::AgentNotice {
                 kind: "filter".into(),
-                notice: format!("Filter committed\nwatermark {}", amendment.watermark),
+                notice: format!(
+                    "Filter committed\nwatermark {}\ntokens {} → {}",
+                    amendment.watermark, amendment.from_tokens, amendment.to_tokens
+                ),
                 ..Default::default()
             });
             let mut guard = self.state.lock().await;

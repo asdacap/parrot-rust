@@ -582,6 +582,8 @@ impl AgentTurn<'_> {
                     end_sequence,
                     messages,
                     watermark: end_sequence,
+                    from_tokens: batch_tokens,
+                    to_tokens: batch_tokens,
                 })
                 .await;
         };
@@ -594,6 +596,8 @@ impl AgentTurn<'_> {
                 end_sequence,
                 messages: replacements,
                 watermark: end_sequence,
+                from_tokens: batch_tokens,
+                to_tokens,
             })
             .await?;
         self.event_publisher

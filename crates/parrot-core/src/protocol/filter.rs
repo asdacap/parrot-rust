@@ -33,6 +33,10 @@ pub struct FilterAmendment {
     /// The durable filter watermark after this commit. Every batch advances it,
     /// including a batch the filter skipped, so no batch is ever re-offered.
     pub watermark: i64,
+    /// Estimated token count of the superseded span before filtering.
+    pub from_tokens: i64,
+    /// Estimated token count of the replacement messages after filtering.
+    pub to_tokens: i64,
 }
 
 /// Filters one batch of conversation history and returns its replacement messages.
