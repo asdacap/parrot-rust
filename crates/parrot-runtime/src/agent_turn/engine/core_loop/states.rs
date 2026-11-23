@@ -327,7 +327,7 @@ where
             }
             for source in self.completion_sources {
                 if let Some(reminder) = source
-                    .get_leaf_response_reminder(&candidate, self.cancellation)
+                    .get_task_leaf_reminder(&candidate, self.cancellation)
                     .await?
                 {
                     blockers.push(reminder);

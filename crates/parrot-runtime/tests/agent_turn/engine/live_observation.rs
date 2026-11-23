@@ -141,7 +141,7 @@ async fn live_context_does_not_wait_for_held_tool_execution() {
 
 struct RetryOnce(AtomicBool);
 impl CompletionStateSource for RetryOnce {
-    fn get_leaf_response_reminder<'a>(
+    fn get_task_leaf_reminder<'a>(
         &'a self,
         _candidate: &'a str,
         _: &'a dyn Cancellation,

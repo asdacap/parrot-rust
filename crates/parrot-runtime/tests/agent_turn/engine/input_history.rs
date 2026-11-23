@@ -234,7 +234,7 @@ struct GatedRetryCompletion {
     calls: AtomicUsize,
 }
 impl CompletionStateSource for GatedRetryCompletion {
-    fn get_leaf_response_reminder<'a>(
+    fn get_task_leaf_reminder<'a>(
         &'a self,
         _candidate: &'a str,
         _: &'a dyn Cancellation,

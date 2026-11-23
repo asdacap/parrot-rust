@@ -56,7 +56,7 @@ where
                 .map_err(|error| TurnError::Service(error.to_string()))
         })
     }
-    fn get_leaf_response_reminder<'a>(
+    fn get_task_leaf_reminder<'a>(
         &'a self,
         _candidate: &'a str,
         _cancellation: &'a dyn Cancellation,

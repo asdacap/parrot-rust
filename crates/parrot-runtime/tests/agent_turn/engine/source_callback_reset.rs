@@ -2,7 +2,7 @@ use super::*;
 use parrot_runtime::agent_turn::lifecycle::DrainBackend;
 struct RetryOnce(AtomicBool);
 impl CompletionStateSource for RetryOnce {
-    fn get_leaf_response_reminder<'a>(
+    fn get_task_leaf_reminder<'a>(
         &'a self,
         _candidate: &'a str,
         _: &'a dyn Cancellation,
@@ -99,7 +99,7 @@ struct BlockOnce {
     first: AtomicBool,
 }
 impl CompletionStateSource for BlockOnce {
-    fn get_leaf_response_reminder<'a>(
+    fn get_task_leaf_reminder<'a>(
         &'a self,
         _candidate: &'a str,
         _: &'a dyn Cancellation,

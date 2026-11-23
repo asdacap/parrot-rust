@@ -94,8 +94,11 @@ pub trait CompletionStateSource: Send + Sync {
         &'a self,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<Option<String>, TurnError>>;
-    /// Reads the leaf response reminder for the candidate final response text.
-    fn get_leaf_response_reminder<'a>(
+    /// Reads the task leaf reminder for the candidate final response text. A
+    /// dedicated task worker must end its final response with the task's leaf
+    /// response contract, so a reminder here blocks the worker's exit until the
+    /// candidate satisfies it.
+    fn get_task_leaf_reminder<'a>(
         &'a self,
         candidate: &'a str,
         cancellation: &'a dyn Cancellation,

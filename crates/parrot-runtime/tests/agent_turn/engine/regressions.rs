@@ -2,7 +2,7 @@ use super::*;
 
 struct CancelBeforeClose(Arc<Signal>);
 impl CompletionStateSource for CancelBeforeClose {
-    fn get_leaf_response_reminder<'a>(
+    fn get_task_leaf_reminder<'a>(
         &'a self,
         _candidate: &'a str,
         _: &'a dyn Cancellation,
@@ -211,7 +211,7 @@ struct CheckReminder {
     calls: AtomicUsize,
 }
 impl CompletionStateSource for CheckReminder {
-    fn get_leaf_response_reminder<'a>(
+    fn get_task_leaf_reminder<'a>(
         &'a self,
         _candidate: &'a str,
         _: &'a dyn Cancellation,

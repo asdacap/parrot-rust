@@ -29,7 +29,7 @@ struct ArmAfterCallback {
     watch: Arc<AdmissionWatch>,
 }
 impl CompletionStateSource for ArmAfterCallback {
-    fn get_leaf_response_reminder<'a>(
+    fn get_task_leaf_reminder<'a>(
         &'a self,
         _candidate: &'a str,
         _: &'a dyn Cancellation,

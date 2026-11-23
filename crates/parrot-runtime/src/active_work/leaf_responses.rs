@@ -44,7 +44,7 @@ impl<S: AccessSnapshot + 'static, P: TaskArtifactParser + 'static> LeafResponseB
 impl<S: AccessSnapshot + 'static, P: TaskArtifactParser + 'static> CompletionStateSource
     for LeafResponseBlocker<S, P>
 {
-    fn get_leaf_response_reminder<'a>(
+    fn get_task_leaf_reminder<'a>(
         &'a self,
         candidate: &'a str,
         cancellation: &'a dyn Cancellation,

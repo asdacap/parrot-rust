@@ -103,7 +103,7 @@ async fn unparseable_candidate_blocks_with_the_rendered_repair_error() {
         &provider,
     );
     let reminder = blocker
-        .get_leaf_response_reminder("not json", &NeverCancelled)
+        .get_task_leaf_reminder("not json", &NeverCancelled)
         .await
         .unwrap();
     assert_eq!(
@@ -118,7 +118,7 @@ async fn parseable_candidate_passes_without_reminder() {
     let blocker = blocker("agent-task-payload", None, 3, &provider);
     assert_eq!(
         blocker
-            .get_leaf_response_reminder("leaf", &NeverCancelled)
+            .get_task_leaf_reminder("leaf", &NeverCancelled)
             .await
             .unwrap(),
         None
@@ -135,12 +135,12 @@ async fn budget_exhaustion_stops_blocking_but_parseable_candidates_still_consume
         &provider,
     );
     let first = blocker
-        .get_leaf_response_reminder("bad", &NeverCancelled)
+        .get_task_leaf_reminder("bad", &NeverCancelled)
         .await
         .unwrap();
     assert!(first.is_some());
     let spent = blocker
-        .get_leaf_response_reminder("bad again", &NeverCancelled)
+        .get_task_leaf_reminder("bad again", &NeverCancelled)
         .await
         .unwrap();
     assert_eq!(spent, None);
@@ -157,14 +157,14 @@ async fn new_turn_resets_the_budget() {
     );
     assert!(
         blocker
-            .get_leaf_response_reminder("bad", &NeverCancelled)
+            .get_task_leaf_reminder("bad", &NeverCancelled)
             .await
             .unwrap()
             .is_some()
     );
     assert_eq!(
         blocker
-            .get_leaf_response_reminder("bad again", &NeverCancelled)
+            .get_task_leaf_reminder("bad again", &NeverCancelled)
             .await
             .unwrap(),
         None
@@ -172,7 +172,7 @@ async fn new_turn_resets_the_budget() {
     blocker.begin_turn();
     assert!(
         blocker
-            .get_leaf_response_reminder("bad after reset", &NeverCancelled)
+            .get_task_leaf_reminder("bad after reset", &NeverCancelled)
             .await
             .unwrap()
             .is_some()
@@ -185,7 +185,7 @@ async fn non_task_profiles_are_inert() {
     let blocker = blocker("build", Some("expected verdict accept"), 3, &provider);
     assert_eq!(
         blocker
-            .get_leaf_response_reminder("not json", &NeverCancelled)
+            .get_task_leaf_reminder("not json", &NeverCancelled)
             .await
             .unwrap(),
         None

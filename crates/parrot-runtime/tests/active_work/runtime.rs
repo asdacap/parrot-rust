@@ -299,7 +299,7 @@ impl CompletionStateSource for CallbackBinding {
             Ok(reminder)
         })
     }
-    fn get_leaf_response_reminder<'a>(
+    fn get_task_leaf_reminder<'a>(
         &'a self,
         candidate: &'a str,
         cancellation: &'a dyn Cancellation,
@@ -311,9 +311,7 @@ impl CompletionStateSource for CallbackBinding {
                 .unwrap()
                 .clone()
                 .expect("fixture completion source must bind before admission");
-            source
-                .get_leaf_response_reminder(candidate, cancellation)
-                .await
+            source.get_task_leaf_reminder(candidate, cancellation).await
         })
     }
 }
