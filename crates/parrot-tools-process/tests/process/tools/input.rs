@@ -594,6 +594,35 @@ fn exec_accepts_run_async_and_rejects_removed_yield_after_ms() {
 }
 
 #[test]
+fn exec_accepts_optional_timeout_ms() {
+    assert_eq!(
+        ExecInput::parse(r#"{"command":"true"}"#)
+            .unwrap()
+            .timeout_ms,
+        None
+    );
+    for (value, expected) in [
+        ("null", None),
+        ("0", Some(0)),
+        ("150", Some(150)),
+        ("4294967294", Some(4_294_967_294)),
+    ] {
+        let input =
+            ExecInput::parse(&format!(r#"{{"command":"true","timeout_ms":{value}}}"#)).unwrap();
+        assert_eq!(input.timeout_ms, expected);
+    }
+}
+
+#[test]
+fn exec_rejects_invalid_timeout_ms() {
+    for value in ["-1", "4294967295", "1.5", "1e3", "true", r#""150""#] {
+        assert!(
+            ExecInput::parse(&format!(r#"{{"command":"true","timeout_ms":{value}}}"#)).is_err()
+        );
+    }
+}
+
+#[test]
 fn malformed_json_is_rejected() {
     for json in [
         "",

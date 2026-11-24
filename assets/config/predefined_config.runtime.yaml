@@ -416,6 +416,11 @@ tools:
           type: boolean
           default: false
           description: Yield immediately if true. Otherwise wait for completion up to the configured automatic yield time, which defaults to 5 minutes. A steer to the agent yields immediately.
+        timeout_ms:
+          type: integer
+          minimum: 0
+          maximum: 4294967294
+          description: Milliseconds to wait before yielding instead of the configured automatic yield time. Does not stop the process. Ignored when run_async is true.
         tty:
           type: boolean
           default: false

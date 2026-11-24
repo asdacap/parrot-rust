@@ -657,6 +657,57 @@ async fn exec_run_async_false_uses_the_configured_wait() {
 }
 
 #[tokio::test]
+async fn exec_timeout_overrides_the_configured_wait_without_stopping_the_process() {
+    let fixture = Fixture::with_configuration("exec_command_yield_after_ms: 10000\n");
+    let started = tokio::time::Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        fixture.exec(json!({
+            "command":"while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.02; done; printf done",
+            "timeout_ms":150,
+            "run_async":false
+        })),
+    )
+    .await
+    .expect("exec ignored the explicit timeout");
+    assert!(started.elapsed() >= Duration::from_millis(150));
+    let name = result.yielded_process.expect("exec did not yield").name;
+    fs::write(fixture.directory.0.join("release"), "").unwrap();
+    let claim = fixture.owner.claim(&name).await.unwrap();
+    let complete = tokio::time::timeout(
+        LIMIT,
+        claim.wait(None, Box::pin(std::future::pending()), &NeverCancelled),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(!complete.running);
+    completed(
+        &complete.format(&fixture.templates).unwrap(),
+        0,
+        "s\n[stdout]\ndone",
+    );
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn exec_run_async_takes_precedence_over_timeout() {
+    let fixture = Fixture::new();
+    let result = tokio::time::timeout(
+        Duration::from_secs(2),
+        fixture.exec(json!({
+            "command":"while [ ! -f \"$WORKDIR/release\" ]; do sleep 0.02; done",
+            "timeout_ms":10000,
+            "run_async":true
+        })),
+    )
+    .await
+    .expect("exec waited despite run_async");
+    assert!(result.yielded_process.is_some());
+    fixture.finish().await;
+}
+
+#[tokio::test]
 async fn exec_run_async_false_yields_as_soon_as_a_steer_arrives() {
     let fired = Arc::new(Notify::new());
     let fixture = Fixture::with_configuration_and_steer(

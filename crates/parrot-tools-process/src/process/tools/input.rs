@@ -31,6 +31,7 @@ pub struct ExecInput {
     pub name: Option<String>,
     pub description: Option<String>,
     pub run_async: bool,
+    pub timeout_ms: Option<u64>,
     pub tty: bool,
 }
 
@@ -42,6 +43,7 @@ impl ExecInput {
         let mut name = None;
         let mut description = None;
         let mut run_async = false;
+        let mut timeout_ms = None;
         let mut tty = false;
         for (property, value) in object(json, "command")?.0 {
             match property.as_str() {
@@ -50,6 +52,7 @@ impl ExecInput {
                 "env" => environment = environment_value(&value)?,
                 "name" => name = optional_string(&value, &property)?,
                 "description" => description = optional_string(&value, &property)?,
+                "timeout_ms" => timeout_ms = optional_integer(&value, &property)?,
                 "run_async" => {
                     run_async = serde_json::from_str::<bool>(value.get())
                         .map_err(|_| argument_type("run_async", "a boolean"))?;
@@ -69,6 +72,7 @@ impl ExecInput {
             name,
             description,
             run_async,
+            timeout_ms: delay(timeout_ms, "timeout_ms")?,
             tty,
         })
     }
@@ -97,7 +101,7 @@ impl WriteStdinInput {
         Ok(Self {
             name: name.ok_or_else(|| required("name"))?,
             input: input.ok_or_else(|| required("input"))?,
-            yield_after_ms: delay(milliseconds)?.unwrap_or(250),
+            yield_after_ms: delay(milliseconds, "yield_after_ms")?.unwrap_or(250),
         })
     }
 }
@@ -251,14 +255,13 @@ fn optional_signal(value: &RawValue) -> Result<Option<i32>, InputError> {
         .ok_or_else(|| argument_type("signal", "an integer"))
 }
 
-fn delay(milliseconds: Option<i64>) -> Result<Option<u64>, InputError> {
+fn delay(milliseconds: Option<i64>, name: &str) -> Result<Option<u64>, InputError> {
     match milliseconds {
         None => Ok(None),
         Some(value) if (0..=4_294_967_294).contains(&value) => Ok(Some(value as u64)),
-        Some(_) => Err(InputError(
-            "Tool argument 'yield_after_ms' must be a non-negative integer no greater than 4294967294."
-                .into(),
-        )),
+        Some(_) => Err(InputError(format!(
+            "Tool argument '{name}' must be a non-negative integer no greater than 4294967294."
+        ))),
     }
 }
 

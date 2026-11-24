@@ -291,7 +291,10 @@ where
                         Some(if input.run_async {
                             Duration::ZERO
                         } else {
-                            self.services.exec_command_yield_after
+                            input
+                                .timeout_ms
+                                .map(Duration::from_millis)
+                                .unwrap_or(self.services.exec_command_yield_after)
                         }),
                         steer,
                         cancellation,
