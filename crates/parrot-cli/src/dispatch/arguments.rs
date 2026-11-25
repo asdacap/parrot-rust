@@ -86,6 +86,7 @@ pub struct ChatOptions {
     pub take_over: bool,
     pub prompt: String,
     pub jsonl_log: String,
+    pub jsonl_input: bool,
 }
 impl Default for ChatOptions {
     fn default() -> Self {
@@ -102,6 +103,7 @@ impl Default for ChatOptions {
             take_over: false,
             prompt: String::new(),
             jsonl_log: String::new(),
+            jsonl_input: false,
         }
     }
 }
@@ -256,6 +258,7 @@ fn parse_chat(arguments: &[String]) -> Result<ChatOptions, UsageError> {
             ("--jsonl", _) => {
                 return Err(UsageError::usage("usage: parrot chat --jsonl <file>"));
             }
+            ("--jsonl-input", _) => options.jsonl_input = true,
             _ => words.push(argument.clone()),
         }
         index += 1;

@@ -200,6 +200,7 @@ pub struct BasicCli<R: DialogInput + 'static> {
     version: String,
     prepare: PreparePrompt,
     jsonl_log: String,
+    jsonl_input: bool,
 }
 impl<R: DialogInput + 'static> BasicCli<R> {
     #[allow(clippy::too_many_arguments)]
@@ -215,6 +216,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         version: String,
         prepare: PreparePrompt,
         jsonl_log: String,
+        jsonl_input: bool,
     ) -> Self {
         Self {
             client,
@@ -228,6 +230,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             version,
             prepare,
             jsonl_log,
+            jsonl_input,
         }
     }
 
@@ -250,7 +253,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
     async fn run_inner(&mut self, application: Arc<Signal>) -> Result<i32, ChatLoopFailure> {
         check(application.as_ref())?;
         let mut prompt = self.request.prompt.clone();
-        if prompt.is_empty() && self.request.input_redirected {
+        if prompt.is_empty() && self.request.input_redirected && !self.jsonl_input {
             let mut bytes = Vec::new();
             while let Some(byte) = self.input.read_byte(application.as_ref()).await? {
                 bytes.push(byte);
@@ -268,9 +271,9 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             Some(session) => session,
             None => {
                 let mut request = self.request.session.clone();
-                // The REPL loop answers pending questions and permissions; once() renders
-                // the turn without offering them.
-                request.interactive_permissions = prompt.is_empty();
+                // The REPL loop answers pending questions and permissions; once() and the
+                // jsonl input loop render the turn without offering them.
+                request.interactive_permissions = prompt.is_empty() && !self.jsonl_input;
                 match native_call(self.client.create_session(request), application.as_ref()).await {
                     Ok(session) => session,
                     Err(SlashFailure::Rpc(status)) if status.code() == Code::InvalidArgument => {
@@ -283,6 +286,9 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         };
         for warning in model_alias::warnings(&self.client, application.as_ref()).await? {
             writeln!(self.error, "{warning}")?;
+        }
+        if self.jsonl_input {
+            return self.run_jsonl(&initial, &prompt, application).await;
         }
         if !prompt.is_empty() {
             return self.once(&initial, &prompt, application).await;
@@ -348,6 +354,145 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         } else {
             EXIT_FAILURE
         })
+    }
+
+    /// One JSON command per stdin line: `{"text": "..."}`. A line sent while a
+    /// turn runs steers it; a line sent while idle starts the next turn. The
+    /// event log covers every turn. The loop ends at stdin EOF once the
+    /// running turn settles.
+    async fn run_jsonl(
+        &mut self,
+        session: &wire::UserSession,
+        prompt: &str,
+        application: Arc<Signal>,
+    ) -> Result<i32, ChatLoopFailure> {
+        let client = self.client.clone();
+        let prepare = self.prepare.clone();
+        let mut output = self.output.clone();
+        let mut error = self.error.clone();
+        let input = &mut self.input;
+        let mut stream = PreparedSessionStream::open_live(
+            client.clone(),
+            &session.id,
+            application.clone(),
+            application.as_ref(),
+        )
+        .await?;
+        let mut jsonl = super::jsonl_log::JsonlEventLog::create(&self.jsonl_log)
+            .map_err(ChatLoopFailure::Io)?;
+        let busy = Arc::new(AtomicBool::new(false));
+        let mut renderer = BasicRenderer::new();
+        let mut failed = false;
+        let mut eof = false;
+        let mut line = Vec::new();
+        let mut pending = false;
+        if !prompt.is_empty() {
+            admit_prompt(
+                &mut JsonlAdmission {
+                    client: &client,
+                    prepare: &prepare,
+                    output: &mut output,
+                    error: &mut error,
+                },
+                session,
+                prompt,
+                &busy,
+                application.as_ref(),
+            )
+            .await?;
+        }
+        loop {
+            if eof && !busy.load(Ordering::Acquire) {
+                break;
+            }
+            if pending {
+                pending = false;
+                if line.is_empty() {
+                    continue;
+                }
+                let text = match jsonl_text(&line) {
+                    Ok(text) => text,
+                    Err(reason) => {
+                        writeln!(error, "parrot: {reason}")?;
+                        stream.close();
+                        return Ok(EXIT_FAILURE);
+                    }
+                };
+                line.clear();
+                if !text.is_empty()
+                    && !admit_prompt(
+                        &mut JsonlAdmission {
+                            client: &client,
+                            prepare: &prepare,
+                            output: &mut output,
+                            error: &mut error,
+                        },
+                        session,
+                        &text,
+                        &busy,
+                        application.as_ref(),
+                    )
+                    .await?
+                {
+                    stream.close();
+                    return Ok(EXIT_FAILURE);
+                }
+                continue;
+            }
+            let mut received: Option<Option<Result<wire::Event, tonic::Status>>> = None;
+            tokio::select! {
+                biased;
+                () = application.cancelled() => break,
+                byte = input.read_byte(application.as_ref()), if !eof => match byte {
+                    Err(error) => return Err(error.into()),
+                    Ok(None) => {
+                        eof = true;
+                        pending = !line.is_empty();
+                    }
+                    Ok(Some(b'\n' | b'\r')) => pending = true,
+                    Ok(Some(byte)) => line.push(byte),
+                },
+                event = stream.next() => received = Some(event),
+            }
+            let Some(event) = received else { continue };
+            match event {
+                None => {
+                    failed = true;
+                    break;
+                }
+                Some(Err(status))
+                    if application.is_cancelled() && status.code() == Code::Cancelled =>
+                {
+                    break;
+                }
+                Some(Err(status)) => return Err(ChatLoopFailure::Rpc(status)),
+                Some(Ok(event)) => {
+                    jsonl.write(&event).map_err(ChatLoopFailure::Io)?;
+                    if let Some(wire::event::Payload::TurnStarted(_)) = &event.payload {
+                        busy.store(true, Ordering::Release);
+                    }
+                    match renderer.render_event(
+                        &event,
+                        false,
+                        &mut output.clone(),
+                        &mut error.clone(),
+                    )? {
+                        RenderOutcome::Continue => {}
+                        RenderOutcome::Completed => {
+                            busy.store(false, Ordering::Release);
+                            renderer = BasicRenderer::new();
+                        }
+                        RenderOutcome::Failed => {
+                            busy.store(false, Ordering::Release);
+                            failed = true;
+                            renderer = BasicRenderer::new();
+                        }
+                    }
+                }
+            }
+        }
+        stream.close();
+        Ok(if failed { EXIT_FAILURE } else { EXIT_SUCCESS })
     }
 
     async fn run_loop(
@@ -644,6 +789,58 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             shared.start_rendering();
         }
     }
+}
+
+/// The single command field of one JSONL input line.
+fn jsonl_text(line: &[u8]) -> Result<String, String> {
+    let value: serde_json::Value =
+        serde_json::from_slice(line).map_err(|error| format!("invalid jsonl input: {error}"))?;
+    match value.get("text").and_then(|text| text.as_str()) {
+        Some(text) => Ok(text.trim().to_owned()),
+        None => Err("invalid jsonl input: expected a \"text\" string".to_owned()),
+    }
+}
+
+/// The shared handles one JSONL admission needs. Keeps the admission helper
+/// below the clippy argument limit.
+struct JsonlAdmission<'a> {
+    client: &'a WebClient,
+    prepare: &'a PreparePrompt,
+    output: &'a mut SharedWriter,
+    error: &'a mut SharedWriter,
+}
+
+/// Echoes the text, delivers it as a steer while a turn runs and as a queued
+/// prompt while idle, and reports whether the host admitted it.
+async fn admit_prompt(
+    admission: &mut JsonlAdmission<'_>,
+    session: &wire::UserSession,
+    text: &str,
+    busy: &AtomicBool,
+    cancellation: &dyn Cancellation,
+) -> Result<bool, ChatLoopFailure> {
+    writeln!(*admission.output, "{text}")?;
+    let delivery = if busy.load(Ordering::Acquire) {
+        wire::Delivery::DELIVERY_STEER
+    } else {
+        wire::Delivery::DELIVERY_QUEUE
+    };
+    busy.store(true, Ordering::Release);
+    let Some(message) = (admission.prepare)(
+        admission.client.clone(),
+        &session.id,
+        &session.mode,
+        text,
+        delivery,
+        &mut *admission.error,
+        cancellation,
+    )
+    .await?
+    else {
+        return Ok(false);
+    };
+    native_call(admission.client.clone().send_message(message), cancellation).await?;
+    Ok(true)
 }
 
 struct ReadCancellation<'a>(&'a dyn Cancellation, &'a Signal);
@@ -1654,6 +1851,7 @@ mod tests {
                 "initial-live-test".into(),
                 prepare,
                 String::new(),
+                false,
             );
             let running = basic.run_loop(initial, application.clone(), true);
             tokio::pin!(running);
@@ -1767,6 +1965,297 @@ mod tests {
             );
         }
 
+        struct JsonlSteerState {
+            events: Mutex<Option<tokio::sync::mpsc::UnboundedSender<Result<wire::Event, Status>>>>,
+            messages: Mutex<Vec<wire::SendMessageRequest>>,
+            listening: Signal,
+            release_first_turn: Signal,
+            steer_received: Signal,
+            next_received: Signal,
+        }
+        impl JsonlSteerState {
+            fn publish(&self, payload: wire::event::Payload) {
+                self.events
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .send(Ok(wire::Event {
+                        payload: Some(payload),
+                        ..Default::default()
+                    }))
+                    .unwrap();
+            }
+            fn first_text(message: &wire::SendMessageRequest) -> String {
+                message
+                    .parts
+                    .iter()
+                    .find_map(|part| match part.content.as_ref() {
+                        Some(wire::message_content_part::Content::Text(text)) => Some(text.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default()
+            }
+        }
+        struct JsonlSteerEndpoint(Arc<JsonlSteerState>);
+
+        macro_rules! jsonl_endpoint {
+            ($($method:ident($request:ident) -> $response:ident),* $(,)?) => {
+                #[tonic::async_trait]
+                impl Parrot for JsonlSteerEndpoint {
+                    $(async fn $method(&self, _: Request<wire::$request>) -> Result<Response<wire::$response>, Status> {
+                        Err(Status::unimplemented(stringify!($method)))
+                    })*
+
+                    async fn send_message(&self, request: Request<wire::SendMessageRequest>) -> Result<Response<wire::SendMessageResponse>, Status> {
+                        let message = request.into_inner();
+                        let text = JsonlSteerState::first_text(&message);
+                        self.0.messages.lock().unwrap().push(message);
+                        match text.as_str() {
+                            "first" => {
+                                self.0.publish(wire::event::Payload::TurnStarted(Default::default()));
+                                let state = self.0.clone();
+                                tokio::spawn(async move {
+                                    state.release_first_turn.cancelled().await;
+                                    state.publish(wire::event::Payload::TextChunk(wire::TextChunk {
+                                        fragment: "TURN-ONE-DONE".into(),
+                                        ..Default::default()
+                                    }));
+                                    state.publish(wire::event::Payload::ModeTurnCompleted(Default::default()));
+                                });
+                            }
+                            "steer" => self.0.steer_received.cancel(),
+                            "next" => {
+                                self.0.publish(wire::event::Payload::TurnStarted(Default::default()));
+                                self.0.publish(wire::event::Payload::ModeTurnCompleted(Default::default()));
+                                self.0.next_received.cancel();
+                            }
+                            other => return Err(Status::invalid_argument(other.to_string())),
+                        }
+                        Ok(Response::new(wire::SendMessageResponse::default()))
+                    }
+
+                    async fn upload_attachment(&self, _: Request<tonic::Streaming<wire::AttachmentUploadFrame>>) -> Result<Response<wire::AttachmentUploadResponse>, Status> {
+                        Err(Status::unimplemented("upload_attachment"))
+                    }
+                    async fn interrupt(&self, _: Request<wire::InterruptRequest>) -> Result<Response<wire::InterruptResponse>, Status> {
+                        Err(Status::unimplemented("interrupt"))
+                    }
+                    async fn list_pending_questions(&self, _: Request<wire::ListPendingQuestionsRequest>) -> Result<Response<wire::ListPendingQuestionsResponse>, Status> {
+                        Ok(Response::new(wire::ListPendingQuestionsResponse::default()))
+                    }
+                    async fn list_pending_permissions(&self, _: Request<wire::ListPendingPermissionsRequest>) -> Result<Response<wire::ListPendingPermissionsResponse>, Status> {
+                        Ok(Response::new(wire::ListPendingPermissionsResponse::default()))
+                    }
+
+                    type ListenStream = std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<wire::Event, Status>> + Send + 'static>>;
+                    async fn listen(&self, _: Request<wire::ListenRequest>) -> Result<Response<Self::ListenStream>, Status> {
+                        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+                        *self.0.events.lock().unwrap() = Some(sender);
+                        self.0.listening.cancel();
+                        Ok(Response::new(Box::pin(
+                            tokio_stream::wrappers::UnboundedReceiverStream::new(receiver),
+                        )))
+                    }
+                }
+            };
+        }
+        jsonl_endpoint! {
+            list_models(ListModelsRequest) -> ListModelsResponse,
+            list_model_aliases(ListModelAliasesRequest) -> ListModelAliasesResponse,
+            configure_model_alias(ConfigureModelAliasRequest) -> ConfigureModelAliasResponse,
+            list_provider_model_alias_defaults(ListProviderModelAliasDefaultsRequest) -> ListProviderModelAliasDefaultsResponse,
+            apply_provider_model_alias_defaults(ApplyProviderModelAliasDefaultsRequest) -> ApplyProviderModelAliasDefaultsResponse,
+            set_model_preset(SetModelPresetRequest) -> SetModelPresetResponse,
+            select_model_preset(SelectModelPresetRequest) -> SelectModelPresetResponse,
+            list_model_presets(ListModelPresetsRequest) -> ListModelPresetsResponse,
+            list_modes(ListModesRequest) -> ListModesResponse,
+            list_skills(ListSkillsRequest) -> ListSkillsResponse,
+            configure_skill(ConfigureSkillRequest) -> ConfigureSkillResponse,
+            list_sessions(ListSessionsRequest) -> ListSessionsResponse,
+            create_session(CreateSessionRequest) -> UserSession,
+            resume_session(ResumeSessionRequest) -> UserSession,
+            attach_session(AttachSessionRequest) -> UserSession,
+            update_session(UpdateSessionRequest) -> UserSession,
+            set_goal(SetGoalRequest) -> SetGoalResponse,
+            set_standing_instruction(SetStandingInstructionRequest) -> SetStandingInstructionResponse,
+            compact(CompactRequest) -> CompactResponse,
+            set_context_limit(SetContextLimitRequest) -> SetContextLimitResponse,
+            sandbox_enable(SandboxEnableRequest) -> SandboxEnableResponse,
+            session_status(SessionStatusRequest) -> SessionStatusResponse,
+            reply_question(ReplyQuestionRequest) -> ReplyQuestionResponse,
+            reject_question(RejectQuestionRequest) -> RejectQuestionResponse,
+            reply_permission(ReplyPermissionRequest) -> ReplyPermissionResponse,
+        }
+
+        #[tokio::test]
+        async fn jsonl_input_steers_running_turn_and_queues_when_idle() {
+            use parrot_foundation::{
+                credentials::{CredentialPresets, CredentialStore},
+                oauth::{OpenAiOAuthClient, OpenAiOAuthOptions, SystemBrowserOpener},
+            };
+
+            let root = PathBuf::from("/tmp").join(format!(
+                "t65-jsonl-input-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            let diagnostics = Arc::new(
+                FileDiagnosticLog::open_global(root.join("logs"), "jsonl-input", |_| {}).unwrap(),
+            );
+            let address = TransportAddress::Unix(root.join("native.sock"));
+            let state = Arc::new(JsonlSteerState {
+                events: Mutex::new(None),
+                messages: Mutex::new(Vec::new()),
+                listening: Signal::new(),
+                release_first_turn: Signal::new(),
+                steer_received: Signal::new(),
+                next_received: Signal::new(),
+            });
+            let mut server = GrpcServer::start(
+                JsonlSteerEndpoint(state.clone()),
+                address.clone(),
+                None,
+                None,
+                diagnostics.clone(),
+            )
+            .await
+            .unwrap();
+            let mut owner =
+                GrpcTransportClient::connect(&address, None, None, diagnostics.clone()).unwrap();
+            let client = owner.client().unwrap().clone();
+            let application = Arc::new(Signal::new());
+            let interrupts = Arc::new(Interrupts::new(Arc::new({
+                let application = application.clone();
+                move || application.cancel()
+            })));
+            let configuration = Arc::new(Mutex::new(
+                Configuration::from_content(
+                    "{}",
+                    &std::collections::BTreeMap::from([(
+                        "HOME".to_owned(),
+                        root.to_string_lossy().into_owned(),
+                    )]),
+                    |_| Ok(()),
+                )
+                .unwrap(),
+            ));
+            let provider_ids =
+                parrot_provider::routing::builder::ProviderRegistryBuilder::buildable_provider_ids(
+                    &configuration.lock().unwrap(),
+                );
+            let auth = Arc::new(AuthServices {
+                credentials: Arc::new(CredentialStore::at_selected_path(
+                    root.join("credentials.json"),
+                )),
+                presets: Arc::new(CredentialPresets::at_selected_config_directory(
+                    root.join("config"),
+                )),
+                oauth: Arc::new(OpenAiOAuthClient::new(
+                    reqwest::Client::new(),
+                    Arc::new(SystemBrowserOpener::default()),
+                    OpenAiOAuthOptions::default(),
+                )),
+                provider_ids,
+                diagnostics,
+            });
+            let log = root.join("events.jsonl");
+            let (input, input_receiver) = tokio::sync::mpsc::unbounded_channel();
+            let output = Arc::new(PlanOutput {
+                bytes: Mutex::new(Vec::new()),
+                changed: tokio::sync::watch::channel(0).0,
+            });
+            let initial = wire::UserSession {
+                id: SESSION.into(),
+                loaded: true,
+                ..Default::default()
+            };
+            let mut basic = BasicCli::new(
+                client,
+                interrupts.clone(),
+                auth,
+                configuration,
+                BasicChatRequest {
+                    session: Default::default(),
+                    prompt: String::new(),
+                    initial_session: Some(initial.clone()),
+                    input_redirected: true,
+                    navigation: None,
+                },
+                ChannelInput(input_receiver, None),
+                Box::new(PlanWriter(output.clone())),
+                Box::new(Vec::<u8>::new()),
+                "jsonl-input-test".into(),
+                text_prompt(),
+                log.to_string_lossy().into_owned(),
+                true,
+            );
+            let running = basic.run_jsonl(&initial, "first", application.clone());
+            tokio::pin!(running);
+            let scenario: Result<(), String> = {
+                let driving = async {
+                    state.listening.cancelled().await;
+                    loop {
+                        if state.messages.lock().unwrap().len() == 1 {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    let first = state.messages.lock().unwrap()[0].clone();
+                    assert_eq!(first.delivery, wire::Delivery::DELIVERY_QUEUE.into());
+                    for byte in br#"{"text": "steer"}"# {
+                        input.send(*byte).unwrap();
+                    }
+                    input.send(b'\n').unwrap();
+                    state.steer_received.cancelled().await;
+                    let second = state.messages.lock().unwrap()[1].clone();
+                    assert_eq!(second.delivery, wire::Delivery::DELIVERY_STEER.into());
+                    state.release_first_turn.cancel();
+                    output
+                        .wait_for(|bytes| {
+                            bytes
+                                .windows(b"TURN-ONE-DONE".len())
+                                .any(|part| part == b"TURN-ONE-DONE")
+                        })
+                        .await;
+                    for byte in br#"{"text": "next"}"# {
+                        input.send(*byte).unwrap();
+                    }
+                    input.send(b'\n').unwrap();
+                    state.next_received.cancelled().await;
+                    let third = state.messages.lock().unwrap()[2].clone();
+                    assert_eq!(third.delivery, wire::Delivery::DELIVERY_QUEUE.into());
+                    drop(input);
+                };
+                tokio::select! {
+                    completed = &mut running => {
+                        Err(format!("jsonl loop ended early: {completed:?}"))
+                    },
+                    completed = tokio::time::timeout(Duration::from_secs(5), driving) => completed.map_err(|error| error.to_string()),
+                }
+            };
+            let exit = match scenario {
+                Ok(()) => match running.await {
+                    Ok(exit) => exit,
+                    Err(error) => {
+                        owner.close();
+                        server.close().await.unwrap();
+                        panic!("jsonl loop failed: {error}");
+                    }
+                },
+                Err(reason) => {
+                    panic!("steering scenario did not finish: {reason}");
+                }
+            };
+            owner.close();
+            server.close().await.unwrap();
+            assert_eq!(exit, EXIT_SUCCESS);
+            let logged = std::fs::read_to_string(&log).unwrap();
+            assert_eq!(logged.matches("turn_started").count(), 2);
+            assert_eq!(logged.matches("mode_turn_completed").count(), 2);
+        }
+
         #[tokio::test]
         async fn plan_send_fast_listen_completion_keeps_next_actual_prompt_queued() {
             use parrot_foundation::{
@@ -1877,6 +2366,7 @@ mod tests {
                 "plan-race-test".into(),
                 prepare,
                 String::new(),
+                false,
             );
             let running = basic.run_loop(initial, application.clone(), false);
             tokio::pin!(running);
