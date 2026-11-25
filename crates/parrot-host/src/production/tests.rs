@@ -632,3 +632,81 @@ async fn every_main_agent_turn_ends_with_mode_turn_completed_however_it_was_woke
         bounded(host.close()).await.unwrap();
     }
 }
+
+fn plain(text: &str) -> parrot_provider::sessions::Completion {
+    parrot_provider::sessions::Completion {
+        response_id: "production-test-response".into(),
+        provider_id: "local".into(),
+        finish_reason: "stop".into(),
+        assistant_text: text.into(),
+        input_tokens: 30,
+        output_tokens: 3,
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn output_schema_gate_blocks_a_nonconforming_response_until_it_conforms() {
+    let fixture = Fixture::new();
+    let scripts = Arc::new(Mutex::new(std::collections::VecDeque::from([
+        plain("not json"),
+        plain("{\"answer\":\"ok\"}"),
+    ])));
+    let host = fixture.host_with(Arc::new(ScriptedProvider(scripts.clone())));
+    let session = bounded(host.service().create_session(
+        &wire::CreateSessionRequest {
+            model: "local/test".into(),
+            mode: "build".into(),
+            interactive_permissions: true,
+            output_schema: r#"{"type":"object","required":["answer"]}"#.into(),
+            ..Default::default()
+        },
+        Arc::new(NeverCancelled),
+    ))
+    .await
+    .unwrap();
+    let mut stream = host
+        .service()
+        .listen(
+            &wire::ListenRequest {
+                user_session_id: session.id.clone(),
+                ..Default::default()
+            },
+            Arc::new(NeverCancelled),
+        )
+        .unwrap();
+    bounded(host.service().send_message(
+        &wire::SendMessageRequest {
+            user_session_id: session.id.clone(),
+            text: "produce the answer".into(),
+            delivery: wire::Delivery::DELIVERY_QUEUE.into(),
+            ..Default::default()
+        },
+        Arc::new(NeverCancelled),
+    ))
+    .await
+    .unwrap();
+    let notice = bounded(async {
+        loop {
+            let event = stream.next(&NeverCancelled).await.unwrap().unwrap();
+            assert!(
+                !event.has_mode_turn_completed(),
+                "turn completed despite the schema violation: {event:?}"
+            );
+            if event.has_agent_notice() && event.agent_notice().kind == "completion_blocker" {
+                break event.agent_notice().clone();
+            }
+        }
+    })
+    .await;
+    assert!(
+        notice.notice.contains("required"),
+        "the blocker notice should carry the validation error: {notice:?}"
+    );
+    await_turn(stream.as_mut()).await;
+    assert!(
+        scripts.lock().unwrap().is_empty(),
+        "the repair turn never consumed the conforming response"
+    );
+    bounded(host.close()).await.unwrap();
+}

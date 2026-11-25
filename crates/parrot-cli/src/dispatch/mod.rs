@@ -8,6 +8,7 @@ pub mod dialog;
 pub mod hierarchy;
 pub mod interrupts;
 pub mod jsonl_log;
+pub mod output_schema;
 pub mod prepared_stream;
 pub mod provider_catalog;
 pub mod session_list;
@@ -87,7 +88,7 @@ impl CommandDispatcher<'_> {
                 writeln!(self.output, "parrot {}", self.version)?;
                 Ok(EXIT_SUCCESS)
             }
-            Ok(Command::Runtime(command)) => backend.execute(command, cancellation).await,
+            Ok(Command::Runtime(command)) => backend.execute(*command, cancellation).await,
             Err(error) => {
                 writeln!(self.error, "{}", error.message)?;
                 if error.unknown_command {

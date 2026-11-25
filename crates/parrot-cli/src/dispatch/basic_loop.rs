@@ -60,6 +60,7 @@ pub struct BasicChatRequest {
     pub initial_session: Option<wire::UserSession>,
     pub input_redirected: bool,
     pub navigation: Option<Arc<dyn TerminalSessionNavigation>>,
+    pub output_schema: String,
 }
 
 /// A borrowed, sole-reader descriptor. Native reads use poll(0) and an async
@@ -330,11 +331,22 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         native_call(self.client.send_message(message), application.as_ref()).await?;
         let mut jsonl = super::jsonl_log::JsonlEventLog::create(&self.jsonl_log)
             .map_err(ChatLoopFailure::Io)?;
+        let mut capture = if self.request.output_schema.is_empty() {
+            None
+        } else {
+            Some(
+                super::output_schema::OutputSchemaCapture::new(&self.request.output_schema)
+                    .map_err(|error| ChatLoopFailure::Schema(error.to_string()))?,
+            )
+        };
         let completed = render_turn(
             &mut stream,
             &mut self.output,
             &mut self.error,
             |event, _| {
+                if let Some(capture) = &mut capture {
+                    capture.observe(event);
+                }
                 let written = jsonl.write(event);
                 Box::pin(async move { written.map_err(RenderStreamError::Output) })
             },
@@ -343,6 +355,16 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         )
         .await?;
         stream.close();
+        if completed
+            && let Some(capture) = capture
+            && let Err(error) = capture.validate()
+        {
+            writeln!(
+                self.error,
+                "parrot: the final response does not match the schema: {error}"
+            )?;
+            return Ok(EXIT_FAILURE);
+        }
         Ok(if completed {
             EXIT_SUCCESS
         } else {
@@ -1647,6 +1669,7 @@ mod tests {
                     initial_session: Some(initial.clone()),
                     input_redirected: false,
                     navigation: None,
+                    output_schema: String::new(),
                 },
                 ChannelInput(input, Some(input_pending.clone())),
                 Box::new(PlanWriter(output.clone())),
@@ -1870,6 +1893,7 @@ mod tests {
                     initial_session: Some(initial.clone()),
                     input_redirected: false,
                     navigation: None,
+                    output_schema: String::new(),
                 },
                 ChannelInput(input, None),
                 Box::new(PlanWriter(output.clone())),

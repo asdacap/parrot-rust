@@ -495,3 +495,8 @@ prompt_templates:
       </skill-too-large>
     allowed_arguments: [name, path, limit_bytes]
     required_arguments: [name, path, limit_bytes]
+  output-schema.repair:
+    template: >-
+      Your previous response does not satisfy the required JSON schema: {error} Reply again with only a single JSON document that satisfies this schema and nothing else. The required schema: {schema}
+    allowed_arguments: [error, schema]
+    required_arguments: [error, schema]

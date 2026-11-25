@@ -152,6 +152,11 @@ pub struct AgentTaskConfig {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OutputSchemaConfig {
+    pub maximum_response_repairs: i32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequestLimitsConfig {
     pub image_bytes_per_tool_cycle: i32,
     pub image_bytes_per_read: i32,
@@ -231,6 +236,7 @@ pub struct RuntimeSettings {
     pub compaction: CompactionConfig,
     pub filter: FilterConfig,
     pub agent_tasks: AgentTaskConfig,
+    pub output_schema: OutputSchemaConfig,
     pub agent_send_to_parent: bool,
     pub agent_spawn_model_whitelist: Vec<String>,
     pub agent_limits: AgentLimitsConfig,
@@ -325,6 +331,7 @@ impl RuntimeSettings {
         let compaction = read_compaction(root)?;
         let filter = read_filter(root)?;
         let agent_tasks = read_agent_tasks(root)?;
+        let output_schema = read_output_schema(root)?;
         let agent_send_to_parent =
             boolean(root.get("agent_send_to_parent"), "agent_send_to_parent")?;
         let path_variable_tips = root
@@ -358,6 +365,7 @@ impl RuntimeSettings {
             compaction,
             filter,
             agent_tasks,
+            output_schema,
             agent_send_to_parent,
             agent_spawn_model_whitelist,
             agent_limits,
@@ -432,6 +440,7 @@ impl RuntimeSettings {
             "inlineDiff":self.inline_diff,"compaction":{"triggerPercent":self.compaction.trigger_percent,"targetPercent":self.compaction.target_percent,"maximumInputTokens":self.compaction.maximum_input_tokens,"maximumOutputTokens":self.compaction.maximum_output_tokens,"summaryOutputTokens":self.compaction.summary_output_tokens},
             "filter":{"enabled":self.filter.enabled,"maxUnfilteredTokenWindow":self.filter.max_unfiltered_token_window,"filterBatchSize":self.filter.filter_batch_size,"minSavingPercent":self.filter.min_saving_percent},
             "agentTasks":{"maximumAttempts":self.agent_tasks.maximum_attempts,"maximumResponseRepairs":self.agent_tasks.maximum_response_repairs,"forkHistoryMode":format!("{:?}",self.agent_tasks.fork_history_mode)},
+            "outputSchema":{"maximumResponseRepairs":self.output_schema.maximum_response_repairs},
             "agentSend":{"toParent":self.agent_send_to_parent,"spawnModelWhitelist":self.agent_spawn_model_whitelist},"toolDefinitions":tools,
             "agentLimits":{"disableRecursionLimit":self.agent_limits.disable_recursion_limit},
             "liveBufferRows":self.live_buffer_rows,"userInputTimeoutMs":self.user_input_timeout_ms,
@@ -933,6 +942,29 @@ fn read_agent_tasks(root: &Node) -> Result<AgentTaskConfig> {
             "agent_tasks.maximum_response_repairs",
         )?,
         fork_history_mode,
+    })
+}
+
+fn read_output_schema(root: &Node) -> Result<OutputSchemaConfig> {
+    const DEFAULT_MAXIMUM_RESPONSE_REPAIRS: i32 = 3;
+    let Some(node) = root.get("output_schema") else {
+        return Ok(OutputSchemaConfig {
+            maximum_response_repairs: DEFAULT_MAXIMUM_RESPONSE_REPAIRS,
+        });
+    };
+    if node.as_mapping().is_none() {
+        return Err(error("output_schema must be a mapping"));
+    }
+    validate_keys(node, "output_schema", &["maximum_response_repairs"])?;
+    Ok(OutputSchemaConfig {
+        maximum_response_repairs: match node.get("maximum_response_repairs") {
+            Some(_) => positive_integer(
+                node,
+                "maximum_response_repairs",
+                "output_schema.maximum_response_repairs",
+            )?,
+            None => DEFAULT_MAXIMUM_RESPONSE_REPAIRS,
+        },
     })
 }
 

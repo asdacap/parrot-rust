@@ -42,6 +42,7 @@ pub enum ChatLoopFailure {
     Io(io::Error),
     Attachment(AttachmentError),
     Navigation(NavigationFailure),
+    Schema(String),
 }
 impl fmt::Display for ChatLoopFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -50,6 +51,7 @@ impl fmt::Display for ChatLoopFailure {
             Self::Slash(error) => error.fmt(f),
             Self::Io(error) => error.fmt(f),
             Self::Attachment(error) => error.fmt(f),
+            Self::Schema(message) => f.write_str(message),
             Self::Navigation(NavigationFailure::Rpc(error)) => error.fmt(f),
             Self::Navigation(
                 NavigationFailure::Recoverable(message) | NavigationFailure::Other(message),

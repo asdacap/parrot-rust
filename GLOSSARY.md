@@ -34,6 +34,9 @@ The strict JSON object a dedicated task worker must end its final response with.
 **Leaf response blocker**:
 A completion blocker that validates the candidate final response of a task payload session against the leaf response contract. An unparseable candidate blocks the worker's exit once per failure, up to the configured repair budget per turn, and injects the rendered parse error.
 
+**Output schema blocker**:
+A completion blocker that validates the root agent session's candidate final response against a caller-supplied JSON schema attached at session create or resume. A failing candidate blocks the exit once per failure, up to the configured repair budget per turn, and injects the rendered validation error and schema. See ADR 0005.
+
 ## Conversation language
 
 **Context**:

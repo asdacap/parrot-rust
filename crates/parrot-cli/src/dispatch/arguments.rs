@@ -13,7 +13,7 @@ pub const ACP_USAGE: &str = "usage: parrot acp";
 pub enum Command {
     Help,
     Version,
-    Runtime(RuntimeCommand),
+    Runtime(Box<RuntimeCommand>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -86,6 +86,8 @@ pub struct ChatOptions {
     pub take_over: bool,
     pub prompt: String,
     pub jsonl_log: String,
+    pub output_schema: String,
+    pub output_schema_file: String,
 }
 impl Default for ChatOptions {
     fn default() -> Self {
@@ -102,6 +104,8 @@ impl Default for ChatOptions {
             take_over: false,
             prompt: String::new(),
             jsonl_log: String::new(),
+            output_schema: String::new(),
+            output_schema_file: String::new(),
         }
     }
 }
@@ -180,7 +184,7 @@ pub fn parse(arguments: &[String]) -> Result<Command, UsageError> {
             });
         }
     };
-    Ok(Command::Runtime(runtime))
+    Ok(Command::Runtime(Box::new(runtime)))
 }
 
 fn parse_auth(arguments: &[String]) -> Result<AuthOptions, UsageError> {
@@ -255,6 +259,32 @@ fn parse_chat(arguments: &[String]) -> Result<ChatOptions, UsageError> {
             }
             ("--jsonl", _) => {
                 return Err(UsageError::usage("usage: parrot chat --jsonl <file>"));
+            }
+            ("--json-schema", Some(_value)) if !options.output_schema_file.is_empty() => {
+                return Err(UsageError::usage(
+                    "usage: --json-schema and --json-schema-file are mutually exclusive",
+                ));
+            }
+            ("--json-schema", Some(value)) => {
+                options.output_schema = value.clone();
+                index += 1;
+            }
+            ("--json-schema", _) => {
+                return Err(UsageError::usage("usage: parrot chat --json-schema <json>"));
+            }
+            ("--json-schema-file", Some(_value)) if !options.output_schema.is_empty() => {
+                return Err(UsageError::usage(
+                    "usage: --json-schema and --json-schema-file are mutually exclusive",
+                ));
+            }
+            ("--json-schema-file", Some(value)) => {
+                options.output_schema_file = value.clone();
+                index += 1;
+            }
+            ("--json-schema-file", _) => {
+                return Err(UsageError::usage(
+                    "usage: parrot chat --json-schema-file <path>",
+                ));
             }
             _ => words.push(argument.clone()),
         }
@@ -347,5 +377,54 @@ fn take_line(text: &str) -> (&str, &str) {
             (&text[..index], &text[next..])
         }
         None => (text, ""),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chat(arguments: &[&str]) -> Result<ChatOptions, UsageError> {
+        let owned: Vec<String> = std::iter::once("chat".to_owned())
+            .chain(arguments.iter().map(|argument| (*argument).to_owned()))
+            .collect();
+        match parse(&owned)? {
+            Command::Runtime(runtime) => match *runtime {
+                RuntimeCommand::Chat(options) => Ok(options),
+                _ => panic!("expected a chat command"),
+            },
+            _ => panic!("expected a runtime command"),
+        }
+    }
+
+    #[test]
+    fn inline_schema_reaches_chat_options() {
+        let options = chat(&["--json-schema", "{\"type\":\"object\"}", "hello"]).unwrap();
+        assert_eq!(options.output_schema, "{\"type\":\"object\"}");
+        assert!(options.output_schema_file.is_empty());
+        assert_eq!(options.prompt, "hello");
+    }
+
+    #[test]
+    fn schema_file_reaches_chat_options() {
+        let options = chat(&["--json-schema-file", "schema.json", "hello"]).unwrap();
+        assert_eq!(options.output_schema_file, "schema.json");
+        assert!(options.output_schema.is_empty());
+    }
+
+    #[test]
+    fn schema_flags_are_mutually_exclusive() {
+        for arguments in [
+            vec!["--json-schema", "{}", "--json-schema-file", "s.json"],
+            vec!["--json-schema-file", "s.json", "--json-schema", "{}"],
+        ] {
+            assert!(chat(&arguments).is_err());
+        }
+    }
+
+    #[test]
+    fn schema_flags_require_a_value() {
+        assert!(chat(&["--json-schema"]).is_err());
+        assert!(chat(&["--json-schema-file"]).is_err());
     }
 }

@@ -199,6 +199,7 @@ pub struct LocalChatStartup {
     take_over: bool,
     legacy_path_read_fallback: bool,
     allow_remote_attachment: bool,
+    output_schema: String,
 }
 impl LocalChatStartup {
     /// Use the same resolved workspace that is supplied to the composition
@@ -226,11 +227,17 @@ impl LocalChatStartup {
             take_over,
             legacy_path_read_fallback: true,
             allow_remote_attachment: true,
+            output_schema: String::new(),
         }
     }
 
     pub fn with_remote_attachment(mut self, enabled: bool) -> Self {
         self.allow_remote_attachment = enabled;
+        self
+    }
+
+    pub fn with_output_schema(mut self, schema: String) -> Self {
+        self.output_schema = schema;
         self
     }
 
@@ -356,6 +363,7 @@ impl LocalChatStartup {
                         working_directory: directory.to_string_lossy().into_owned(),
                         interactive_permissions,
                         take_over: self.take_over,
+                        output_schema: self.output_schema.clone(),
                         ..Default::default()
                     };
                     let resumed = tokio::select! {
@@ -488,6 +496,7 @@ impl LocalChatStartup {
                 wire::AttachSessionRequest {
                     user_session_id: id.value().into(),
                     working_directory: self.workspace.launch_directory().to_string_lossy().into(),
+                    output_schema: self.output_schema.clone(),
                     ..Default::default()
                 },
                 cancellation,

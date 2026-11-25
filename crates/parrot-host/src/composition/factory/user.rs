@@ -47,6 +47,7 @@ use parrot_runtime::{
         PermissionTargetDescription, PermissionTargetDescriptionKind, QuestionBroker,
         map_pending_permission,
     },
+    output_schema::{OutputSchema, OutputSchemaGate},
     plan_mode::{
         ModeCompletionOutcome, ModeRegistry, ModeWorkflowFactory, RetainedModePolicyMaterializer,
         SessionMode, UserSessionModes,
@@ -141,6 +142,9 @@ pub struct UserServices<S: RestrictableAccessSnapshot + 'static> {
     pub root_identity: Arc<AgentIdentity>,
     pub modes: Arc<UserSessionModes<S>>,
     pub mcp: Arc<McpServerManager>,
+    /// The session-wide output schema slot; the root agent session's blocker
+    /// reads the same slot, so a post-open install reaches it.
+    pub output_schema: Arc<OutputSchemaGate>,
     registry: OnceLock<Weak<AgentRegistry<S>>>,
 }
 impl<S: RestrictableAccessSnapshot + 'static> UserServices<S> {
@@ -700,6 +704,7 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             root_identity: identity.clone(),
             modes: modes.clone(),
             mcp,
+            output_schema: Arc::new(OutputSchemaGate::default()),
             registry: OnceLock::new(),
         });
         let mut cleanup_registry = None;
@@ -2102,6 +2107,15 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
         self.core.mutations.synchronous(|| {
             self.core.services.standing.update(instruction);
             Ok(())
+        })
+    }
+    fn install_output_schema(&self, schema: OutputSchema) -> protocol::Result<()> {
+        self.core.mutations.synchronous(|| {
+            self.core
+                .services
+                .output_schema
+                .install(schema)
+                .map_err(invalid)
         })
     }
     fn observe_status<'a>(

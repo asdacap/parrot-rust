@@ -7,6 +7,7 @@ use parrot_domain::{
 use parrot_provider::routing::aliases::ResolvedModelSelection;
 use parrot_runtime::{
     interactions::{InteractionError, PendingQuestion, QuestionReply},
+    output_schema::OutputSchema,
     prompt_assembly::{SkillMetadata, SkillSnapshot},
 };
 use parrot_storage::{
@@ -95,6 +96,10 @@ pub trait HostedSession: Send + Sync {
         cancellation: Arc<dyn Cancellation>,
     ) -> BoxFuture<'_, Result<()>>;
     fn set_standing_instruction(&self, instruction: String) -> Result<()>;
+    /// Installs the caller-supplied output schema on the session. The schema
+    /// gates the root agent session's final responses from the next turn on.
+    /// A different schema already installed rejects the install.
+    fn install_output_schema(&self, schema: OutputSchema) -> Result<()>;
     fn observe_status<'a>(
         &'a self,
         cancellation: &'a dyn Cancellation,

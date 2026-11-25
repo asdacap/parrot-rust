@@ -500,6 +500,12 @@ impl HostedSession for Hosted {
     fn set_standing_instruction(&self, _: String) -> protocol::Result<()> {
         panic!("not a T68 operation")
     }
+    fn install_output_schema(
+        &self,
+        _: parrot_runtime::output_schema::OutputSchema,
+    ) -> protocol::Result<()> {
+        panic!("not a T68 operation")
+    }
     fn observe_status<'a>(
         &'a self,
         _: &'a dyn Cancellation,

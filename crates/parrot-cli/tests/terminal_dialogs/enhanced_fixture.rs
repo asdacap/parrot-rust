@@ -654,6 +654,7 @@ impl Fixture {
                 prompt: prompt.into(),
                 initial_session: initial,
                 navigation,
+                output_schema: String::new(),
             },
             "test-version".into(),
             terminal,

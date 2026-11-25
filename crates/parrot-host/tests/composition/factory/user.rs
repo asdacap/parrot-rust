@@ -640,6 +640,7 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
             .unwrap(),
         ),
         mcp: McpServerManager::connect(&BTreeMap::new()).await,
+        output_schema: Arc::new(parrot_runtime::output_schema::OutputSchemaGate::default()),
         registry: OnceLock::new(),
     });
     Histories {

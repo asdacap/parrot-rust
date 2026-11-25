@@ -1095,6 +1095,11 @@ request_limits:
   image_bytes_per_read: 3145728
   provider_request_bytes: 67108864
 
+# JSON schema gate for one-shot command results.
+output_schema:
+  # Maximum re-prompts per turn when the final response fails the schema.
+  maximum_response_repairs: 3
+
 # Web fetch restrictions.
 web_fetch:
   # Allow fetching from private addresses; increases SSRF risk.

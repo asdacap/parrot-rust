@@ -650,6 +650,9 @@ impl HostedSession for FakeHostedSession {
     fn set_standing_instruction(&self, instruction: String) -> Result<()> {
         self.route(Call::Instruction(instruction), active().as_ref())
     }
+    fn install_output_schema(&self, _: parrot_runtime::output_schema::OutputSchema) -> Result<()> {
+        Ok(())
+    }
     fn observe_status<'a>(&'a self, c: &'a dyn Cancellation) -> BoxFuture<'a, Result<String>> {
         Box::pin(async move {
             self.route(Call::Status, c)?;

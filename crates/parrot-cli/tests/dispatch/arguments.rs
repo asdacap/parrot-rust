@@ -6,7 +6,10 @@ fn args(values: &[&str]) -> Vec<String> {
 }
 fn chat(values: &[&str]) -> ChatOptions {
     match parse(&args(values)).unwrap() {
-        Command::Runtime(RuntimeCommand::Chat(options)) => options,
+        Command::Runtime(runtime) => match *runtime {
+            RuntimeCommand::Chat(options) => options,
+            other => panic!("not chat: {other:?}"),
+        },
         other => panic!("not chat: {other:?}"),
     }
 }
@@ -15,7 +18,7 @@ fn chat(values: &[&str]) -> ChatOptions {
 fn bare_parrot_is_chat_not_help() {
     assert_eq!(
         parse(&[]).unwrap(),
-        Command::Runtime(RuntimeCommand::Chat(ChatOptions::default()))
+        Command::Runtime(Box::new(RuntimeCommand::Chat(ChatOptions::default())))
     );
     assert_eq!(chat(&["chat"]), ChatOptions::default());
 }
@@ -139,18 +142,18 @@ fn web_port_is_strict_unsigned_ushort_and_last_occurrence_wins() {
     for (value, expected) in [("0", 0), ("65535", 65535), ("007420", 7420)] {
         assert_eq!(
             parse(&args(&["web", "--port", value])).unwrap(),
-            Command::Runtime(RuntimeCommand::Web {
+            Command::Runtime(Box::new(RuntimeCommand::Web {
                 port: expected,
-                no_sandbox: false
-            })
+                no_sandbox: false,
+            })),
         );
     }
     assert_eq!(
         parse(&args(&["web", "--port", "12", "--port", "34"])).unwrap(),
-        Command::Runtime(RuntimeCommand::Web {
+        Command::Runtime(Box::new(RuntimeCommand::Web {
             port: 34,
-            no_sandbox: false
-        })
+            no_sandbox: false,
+        })),
     );
 }
 
@@ -171,14 +174,14 @@ fn serve_recognizes_native_tls_flags_without_reading_files() {
     .unwrap();
     assert_eq!(
         actual,
-        Command::Runtime(RuntimeCommand::Serve(ServeOptions {
+        Command::Runtime(Box::new(RuntimeCommand::Serve(ServeOptions {
             listen: Some("http://localhost:42".into()),
             token_file: "fixture".into(),
             tls_cert_file: "chain.pem".into(),
             tls_key_file: "key.pem".into(),
             unsafe_allow_external: true,
             no_sandbox: false,
-        }))
+        })))
     );
     for values in [
         vec!["serve", "--listen"],
@@ -206,17 +209,17 @@ fn auth_selects_stdin_or_oauth_without_executing_either() {
     }
     assert_eq!(
         parse(&args(&["auth", "login", "chatgpt", "--device"])).unwrap(),
-        Command::Runtime(RuntimeCommand::Authenticate(AuthOptions {
+        Command::Runtime(Box::new(RuntimeCommand::Authenticate(AuthOptions {
             provider: "chatgpt".into(),
             input: AuthInputKind::OAuth { device: true }
-        }))
+        })))
     );
     assert_eq!(
         parse(&args(&["auth", "login", "synthetic", "--api-key-stdin"])).unwrap(),
-        Command::Runtime(RuntimeCommand::Authenticate(AuthOptions {
+        Command::Runtime(Box::new(RuntimeCommand::Authenticate(AuthOptions {
             provider: "synthetic".into(),
             input: AuthInputKind::ApiKeyStdin
-        }))
+        })))
     );
     assert!(
         parse(&args(&["auth", "login", "synthetic"]))

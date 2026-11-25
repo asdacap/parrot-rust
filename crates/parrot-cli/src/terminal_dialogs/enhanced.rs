@@ -27,7 +27,8 @@ use crate::{
         check, interrupt_loop, reconcile_loop, stop_binding, terminal_commands,
     },
     dispatch::{
-        dialog::SlashDialog, interrupts::Interrupts, prepared_stream::PreparedSessionStream,
+        dialog::SlashDialog, interrupts::Interrupts, output_schema::OutputSchemaCapture,
+        prepared_stream::PreparedSessionStream,
     },
     presenters::{
         EnhancedSessionPresenter, PresentationUpdate, ToolPresenterRegistry,
@@ -74,6 +75,7 @@ pub struct EnhancedChatRequest {
     pub prompt: String,
     pub initial_session: Option<wire::UserSession>,
     pub navigation: Option<Arc<dyn TerminalSessionNavigation>>,
+    pub output_schema: String,
 }
 
 /// Direct adaptation of the actual T68 preparation boundary. The executable
@@ -242,6 +244,14 @@ impl EnhancedCli {
             error: self.terminal.error.clone(),
             output: self.terminal.output.clone(),
         });
+        let output_schema = if self.request.output_schema.is_empty() {
+            None
+        } else {
+            Some(
+                OutputSchemaCapture::new(&self.request.output_schema)
+                    .map_err(|error| ChatLoopFailure::Schema(error.to_string()))?,
+            )
+        };
         let shared = Arc::new(EnhancedSession {
             binding: tokio::sync::Mutex::new(Binding {
                 stream,
@@ -268,6 +278,7 @@ impl EnhancedCli {
             interrupt_pending: AtomicBool::new(false),
             completion: Mutex::new(None),
             interactions: Mutex::new(Interactions::default()),
+            output_schema: Mutex::new(output_schema),
             changed: Notify::new(),
             interrupted: Notify::new(),
         });
@@ -585,6 +596,17 @@ impl EnhancedInput {
             if exit_on_completion
                 && let Some(completed) = *shared.completion.lock().expect("completion poisoned")
             {
+                if completed
+                    && let Some(capture) = shared
+                        .output_schema
+                        .lock()
+                        .expect("output schema capture poisoned")
+                        .as_ref()
+                    && let Err(error) = capture.validate()
+                {
+                    eprintln!("parrot: the final response does not match the schema: {error}");
+                    return Ok(1);
+                }
                 return Ok(if completed { 0 } else { 1 });
             }
             let deadline = async {
@@ -1079,6 +1101,7 @@ struct EnhancedSession {
     interrupt_pending: AtomicBool,
     completion: Mutex<Option<bool>>,
     interactions: Mutex<Interactions>,
+    output_schema: Mutex<Option<OutputSchemaCapture>>,
     changed: Notify,
     interrupted: Notify,
 }
@@ -1217,6 +1240,13 @@ impl EnhancedSession {
             ) {
                 self.changed.notify_one();
             }
+        }
+        let mut schema_capture = self
+            .output_schema
+            .lock()
+            .expect("output schema capture poisoned");
+        if let Some(capture) = schema_capture.as_mut() {
+            capture.observe(event);
         }
     }
     async fn render_loop(&self) -> Result<(), ChatLoopFailure> {

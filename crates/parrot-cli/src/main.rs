@@ -537,6 +537,16 @@ impl Application {
     ) -> Result<i32, DispatchError> {
         let (configuration, templates) = self.configuration_and_templates()?;
         options.apply_configuration(&configuration.model, &configuration.runtime.default_profile);
+        if !options.output_schema_file.is_empty() {
+            options.output_schema =
+                std::fs::read_to_string(&options.output_schema_file).map_err(|failure| {
+                    DispatchError::Command(format!(
+                        "cannot read {}: {failure}",
+                        options.output_schema_file
+                    ))
+                })?;
+            options.output_schema_file.clear();
+        }
         let auth = self.auth_services(&configuration)?;
         let configuration = Arc::new(Mutex::new(configuration));
         let stdin_owner = io::stdin();
@@ -576,6 +586,7 @@ impl Application {
             let request = wire::CreateSessionRequest {
                 model: options.model.clone(),
                 mode: options.mode.clone(),
+                output_schema: options.output_schema.clone(),
                 ..Default::default()
             };
             let variant = options.variant.clone();
@@ -637,7 +648,8 @@ impl Application {
             )
             .with_restore_progress(restore_progress)
             .with_legacy_path_read_fallback(legacy)
-            .with_remote_attachment(!options.no_sandbox);
+            .with_remote_attachment(!options.no_sandbox)
+            .with_output_schema(options.output_schema.clone());
             // The enhanced renderer answers pending interactions; the basic renderer
             // answers them only in its REPL loop.
             let enhanced = !options.basic && io::stdout().is_terminal();
@@ -748,8 +760,9 @@ impl Application {
         cancellation: &dyn Cancellation,
     ) -> Result<i32, DispatchError> {
         let session = wire::CreateSessionRequest {
-            model: options.model,
-            mode: options.mode,
+            model: options.model.clone(),
+            mode: options.mode.clone(),
+            output_schema: options.output_schema.clone(),
             ..Default::default()
         };
         let workspace =
@@ -794,6 +807,7 @@ impl Application {
                     prompt: options.prompt,
                     initial_session,
                     navigation,
+                    output_schema: options.output_schema,
                 },
                 VERSION.into(),
                 EnhancedTerminal::new(
@@ -820,6 +834,7 @@ impl Application {
                     initial_session,
                     input_redirected,
                     navigation,
+                    output_schema: options.output_schema,
                 },
                 input,
                 Box::new(io::stdout()),
@@ -1052,6 +1067,7 @@ fn chat_failure(failure: parrot_cli::chat_loops::ChatLoopFailure) -> DispatchErr
         ChatLoopFailure::Io(failure) => DispatchError::Io(failure),
         ChatLoopFailure::Attachment(failure) => attachment_failure(failure),
         ChatLoopFailure::Navigation(failure) => navigation_failure(failure),
+        ChatLoopFailure::Schema(message) => command_failure(message),
     }
 }
 fn attachment_failure(failure: AttachmentError) -> DispatchError {

@@ -302,12 +302,17 @@ impl ParrotService {
             let factory = self.factory.clone();
             let mode = request.mode.clone();
             let interactive = request.interactive_permissions;
+            let schema = compile_output_schema(&request.output_schema)?;
             let opened = Box::pin(async move {
                 let opened = store
                     .create_fresh(model, &mode, interactive)
                     .await
                     .map_err(|error| store_error(error, false))?;
-                factory.bind_opened(opened).await
+                let hosted = factory.bind_opened(opened).await?;
+                if let Some(schema) = schema {
+                    hosted.install_output_schema(schema)?;
+                }
+                Ok(hosted)
             });
             let session = self
                 .sessions
@@ -352,12 +357,17 @@ impl ParrotService {
             let factory = self.factory.clone();
             let interactive = request.interactive_permissions;
             let takeover = request.take_over;
+            let schema = compile_output_schema(&request.output_schema)?;
             let opened = Box::pin(async move {
                 let opened = store
                     .resume(&id, interactive, takeover)
                     .await
                     .map_err(|error| store_error(error, true))?;
-                factory.bind_opened(opened).await
+                let hosted = factory.bind_opened(opened).await?;
+                if let Some(schema) = schema {
+                    hosted.install_output_schema(schema)?;
+                }
+                Ok(hosted)
             });
             let session = self
                 .sessions
@@ -388,6 +398,9 @@ impl ParrotService {
                 &request.working_directory,
                 &session.snapshot().working_directory,
             )?;
+            if let Some(schema) = compile_output_schema(&request.output_schema)? {
+                session.install_output_schema(schema)?;
+            }
             session.record_opened()?;
             Ok(map_session(session.as_ref(), false))
         })();
@@ -900,6 +913,17 @@ fn parse_id(value: &str) -> Result<UserSessionId> {
 fn limit(value: &str) -> String {
     String::from_utf16_lossy(&value.encode_utf16().take(4096).collect::<Vec<_>>())
 }
+fn compile_output_schema(
+    text: &str,
+) -> Result<Option<parrot_runtime::output_schema::OutputSchema>> {
+    if text.is_empty() {
+        return Ok(None);
+    }
+    parrot_runtime::output_schema::OutputSchema::compile(text)
+        .map(Some)
+        .map_err(invalid)
+}
+
 fn invalid(message: impl Into<String>) -> RpcError {
     RpcError::new(RpcCode::InvalidArgument, message)
 }

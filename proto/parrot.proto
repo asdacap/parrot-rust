@@ -67,6 +67,7 @@ message CreateSessionRequest {
   string model = 1;
   string mode  = 2;
   bool interactive_permissions = 3;
+  string output_schema = 4;
 }
 
 message ResumeSessionRequest {
@@ -74,11 +75,13 @@ message ResumeSessionRequest {
   string working_directory = 2;
   bool interactive_permissions = 3;
   bool take_over = 4;
+  string output_schema = 5;
 }
 
 message AttachSessionRequest {
   string user_session_id = 1;
   string working_directory = 2;
+  string output_schema = 3;
 }
 
 message UpdateSessionRequest {

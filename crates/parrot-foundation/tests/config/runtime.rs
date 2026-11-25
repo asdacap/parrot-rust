@@ -1,5 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use parrot_core::CancellationToken;
+use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation};
 
 use parrot_foundation::config::environment;
 use parrot_foundation::config::node::{Node, Style};
@@ -28,6 +31,17 @@ fn quoted(value: &str) -> Node {
     let mut value = scalar(value);
     value.style = Style::SingleQuoted;
     value
+}
+
+struct Active;
+
+impl Cancellation for Active {
+    fn is_cancelled(&self) -> bool {
+        false
+    }
+    fn cancelled(&self) -> BoxFuture<'_, ()> {
+        Box::pin(std::future::pending())
+    }
 }
 
 fn root() -> Node {
@@ -272,6 +286,73 @@ fn runtime_default_record_shapes_and_timeout_legacy_precedence_match_source() {
     assert_eq!(
         settings.snapshot()["agentTasks"]["forkHistoryMode"],
         "Dependency"
+    );
+}
+
+#[test]
+fn output_schema_defaults_and_section_values_parse_into_snapshot() {
+    let settings = read(&root()).unwrap();
+    assert_eq!(settings.output_schema.maximum_response_repairs, 3);
+
+    let mut node = root();
+    node.set(
+        "output_schema",
+        map(&[("maximum_response_repairs", scalar("5"))]),
+    );
+    let settings = read(&node).unwrap();
+    assert_eq!(settings.output_schema.maximum_response_repairs, 5);
+    assert_eq!(
+        settings.snapshot()["outputSchema"]["maximumResponseRepairs"],
+        5
+    );
+
+    let mut node = root();
+    node.set(
+        "output_schema",
+        map(&[
+            ("maximum_response_repairs", scalar("5")),
+            ("unknown", scalar("x")),
+        ]),
+    );
+    assert_eq!(error(&node), "output_schema contains an unsupported key");
+
+    let mut node = root();
+    node.set("output_schema", scalar("true"));
+    assert_eq!(error(&node), "output_schema must be a mapping");
+
+    let mut node = root();
+    node.set(
+        "output_schema",
+        map(&[("maximum_response_repairs", scalar("0"))]),
+    );
+    assert_eq!(
+        error(&node),
+        "output_schema.maximum_response_repairs must be a positive integer"
+    );
+}
+
+#[test]
+fn output_schema_repair_template_renders_error_and_schema_values() {
+    let templates = crate::fixtures::fixture_templates("").unwrap();
+    let spec = &templates["output-schema.repair"];
+    assert_eq!(spec.engine, "scalar");
+    assert_eq!(spec.required, ["error", "schema"]);
+    let allowed = spec.allowed.iter().cloned().collect::<BTreeSet<_>>();
+    let compiled =
+        parrot_core::ScalarPromptTemplateEngine::compile(&spec.path, &spec.text, &allowed).unwrap();
+    let arguments = [
+        ("error".to_owned(), "missing property result".to_owned()),
+        ("schema".to_owned(), r#"{"type":"object"}"#.to_owned()),
+    ]
+    .into_iter()
+    .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        compiled
+            .render(&arguments, CancellationToken::new(&Active))
+            .unwrap(),
+        "Your previous response does not satisfy the required JSON schema: missing property result \
+         Reply again with only a single JSON document that satisfies this schema and nothing else. \
+         The required schema: {\"type\":\"object\"}"
     );
 }
 

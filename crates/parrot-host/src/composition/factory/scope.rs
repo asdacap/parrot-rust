@@ -81,6 +81,7 @@ use parrot_runtime::{
     },
     compaction::ContextController,
     interactions::{AgentAskIdentity, AgentAsks},
+    output_schema::OutputSchemaBlocker,
     plan_mode::{ModeResult, UserSessionModes},
     prompt_assembly::{
         AgentIdentityDescription, AgentPathEnvironment, CompositeSystemPromptProvider,
@@ -1568,6 +1569,22 @@ where
                     )
                     .map_err(child)?,
                 ));
+                let output_schema_blocker = if identity.session.parent_session_id.is_empty() {
+                    Some(Arc::new(OutputSchemaBlocker::new(
+                        self.user.output_schema.clone(),
+                        self.user.templates.clone(),
+                        u64::try_from(
+                            self.config
+                                .configuration
+                                .runtime
+                                .output_schema
+                                .maximum_response_repairs,
+                        )
+                        .map_err(child)?,
+                    )))
+                } else {
+                    None
+                };
                 let backend = RuntimeBackend::with_sessions(
                     RuntimeConfig {
                         agent_limits: self.config.configuration.runtime.agent_limits,
@@ -1588,7 +1605,12 @@ where
                         )),
                         filter_settings,
                         status: status.clone(),
-                        completion_sources: vec![completion, leaf_response_blocker],
+                        completion_sources: match output_schema_blocker {
+                            Some(blocker) => {
+                                vec![completion, leaf_response_blocker, blocker]
+                            }
+                            None => vec![completion, leaf_response_blocker],
+                        },
                         templates: self.user.templates.clone(),
                         reminders,
                         output: output.clone(),
