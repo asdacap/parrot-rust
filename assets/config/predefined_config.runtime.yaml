@@ -111,6 +111,7 @@ cli_utilities:
     - tar
     - xargs
   optional:
+    - ast-grep
     - bat
     - bun
     - cal
@@ -153,6 +154,7 @@ cli_utilities:
     - timeout
     - touch
     - tree
+    - tree-sitter
     - yarn
 
 # Command prefixes whose exec activity is rendered as compact muted output.
