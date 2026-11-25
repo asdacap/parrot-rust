@@ -67,6 +67,31 @@ Payload values follow these rules:
   request token counts, costs, and tool call ids, which trajectory consumers
   use for context and cost metrics.
 
+## Steerable JSONL input
+
+Add `--jsonl-input` to feed the session one JSON command per stdin line instead
+of one whole prompt. Each line holds a single `text` field:
+
+```json
+{"text": "Fix the failing test"}
+```
+
+The first line starts a turn. A line that arrives while a turn is running is
+delivered as a steer and joins that turn. A line that arrives while the session
+is idle starts the next turn. Blank lines are ignored. A line without a `text`
+string ends the run with exit code 1. The run continues to stdin EOF and ends
+when the running turn settles. The exit code is 0 when every turn completed and
+1 otherwise. Use `--jsonl-input` with `--basic` or a non-terminal output.
+
+Use `--jsonl <file>` with `--jsonl-input` to log the events of every turn to
+one file. Without `--jsonl`, `--jsonl-input` still steers but writes no event
+log.
+
+```sh
+printf '%s\n' '{"text": "Fix the failing test"}' '{"text": "Also add a changelog entry"}' \
+    | parrot chat --basic --new-session --jsonl /logs/agent/parrot.jsonl --jsonl-input
+```
+
 ## Running DeepSWE with the Pier wrapper
 
 The `pier/` directory in this repository holds a small Python package with a

@@ -783,6 +783,10 @@ impl Application {
         } else {
             RawTerminal::open_stdin()?
         };
+        if options.jsonl_input && raw.is_some() {
+            eprintln!("parrot: --jsonl-input needs a non-terminal output; add --basic");
+            return Ok(dispatch::EXIT_USAGE);
+        }
         if let Some(raw) = raw {
             EnhancedCli::new(
                 client,
@@ -827,6 +831,7 @@ impl Application {
                 VERSION.into(),
                 prepare,
                 options.jsonl_log,
+                options.jsonl_input,
             )
             .run(cancellation)
             .await
