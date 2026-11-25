@@ -550,7 +550,9 @@ impl Application {
         let mut input = NativeLineInput::borrowed(descriptor);
         let mut redirected = !stdin_owner.is_terminal();
         if options.connect.is_empty() {
-            if options.prompt.is_empty() && redirected {
+            // The jsonl input loop owns redirected stdin, so the whole-stream
+            // prompt slurp must not consume it.
+            if options.prompt.is_empty() && redirected && !options.jsonl_input {
                 options.prompt = read_all(&mut input, cancellation).await?.trim().into();
                 if options.prompt.is_empty() {
                     return Ok(dispatch::EXIT_USAGE);

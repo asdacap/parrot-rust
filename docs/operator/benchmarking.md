@@ -76,12 +76,14 @@ of one whole prompt. Each line holds a single `text` field:
 {"text": "Fix the failing test"}
 ```
 
-The first line starts a turn. A line that arrives while a turn is running is
-delivered as a steer and joins that turn. A line that arrives while the session
-is idle starts the next turn. Blank lines are ignored. A line without a `text`
-string ends the run with exit code 1. The run continues to stdin EOF and ends
-when the running turn settles. The exit code is 0 when every turn completed and
-1 otherwise. Use `--jsonl-input` with `--basic` or a non-terminal output.
+The run is a sequence of turns. The first line starts the first turn. A line
+that arrives while a turn is running is delivered as a steer and joins that
+turn. A completed turn leaves the session idle, and a line that arrives while
+the session is idle is queued to start the next turn, because there is no
+running turn left to steer into. Blank lines are ignored. A line without a
+`text` string ends the run with exit code 1. The run continues to stdin EOF and
+ends when the running turn settles. The exit code is 0 when every turn completed
+and 1 otherwise. Use `--jsonl-input` with `--basic` or a non-terminal output.
 
 Use `--jsonl <file>` with `--jsonl-input` to log the events of every turn to
 one file. Without `--jsonl`, `--jsonl-input` still steers but writes no event
