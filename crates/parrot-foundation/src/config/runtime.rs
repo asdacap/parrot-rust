@@ -225,6 +225,9 @@ pub struct RuntimeSettings {
     pub sandbox_enabled: bool,
     pub sandbox_dev_bind: ReadOnlyCollection<String>,
     pub inline_diff: bool,
+    /// Whether file tools steer a short-path tip the first time a path under a
+    /// variable root is touched.
+    pub path_variable_tips: bool,
     pub compaction: CompactionConfig,
     pub filter: FilterConfig,
     pub agent_tasks: AgentTaskConfig,
@@ -324,6 +327,11 @@ impl RuntimeSettings {
         let agent_tasks = read_agent_tasks(root)?;
         let agent_send_to_parent =
             boolean(root.get("agent_send_to_parent"), "agent_send_to_parent")?;
+        let path_variable_tips = root
+            .get("path_variable_tips")
+            .map(|value| boolean(Some(value), "path_variable_tips"))
+            .transpose()?
+            .unwrap_or(true);
         let agent_spawn_model_whitelist = read_agent_spawn_model_whitelist(root)?;
         let agent_limits = AgentLimitsConfig {
             disable_recursion_limit: boolean(
@@ -346,6 +354,7 @@ impl RuntimeSettings {
             sandbox_enabled,
             sandbox_dev_bind: ReadOnlyCollection::new(sandbox_dev_bind),
             inline_diff,
+            path_variable_tips,
             compaction,
             filter,
             agent_tasks,

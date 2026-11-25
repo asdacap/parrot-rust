@@ -955,7 +955,7 @@ mod fixture_binding {
     use parrot_storage::events::EventRepository;
     use parrot_storage::history_files::{AgentHistoryFile, SessionIndex, SessionMeta};
     use parrot_tools::{
-        files::WorkspacePaths,
+        files::{PathTipLedger, WorkspacePaths},
         web_fetch::{
             self, FetchError, Options, Request, Resolver, Response, ResponseBody, Transport,
             TransportSession, WebFetcher,
@@ -1132,6 +1132,7 @@ mod fixture_binding {
             let files = catalog::FileFactories::new(
                 services.clone(),
                 WorkspacePaths::default(),
+                PathTipLedger::enabled(),
                 artifacts.repository.clone(),
                 configuration.runtime.request_limits.image_bytes_per_read,
                 &definitions,
@@ -1544,6 +1545,7 @@ fn output_conversion_preserves_artifacts_opaque_ids_optional_paths_and_activity(
         let output = output_to_runtime(catalog::Output {
             text: "body".into(),
             image_artifacts: vec![artifact.clone()],
+            steers: Vec::new(),
             outcome: files::FileToolOutcome::ImageBudgetExceeded,
             yielded_process: Some(YieldedShellProcess {
                 process_id: "00001-opaque".into(),

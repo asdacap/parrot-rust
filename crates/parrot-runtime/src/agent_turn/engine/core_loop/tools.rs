@@ -3,7 +3,9 @@ use crate::tool_settlement::*;
 use parrot_core::{ToolCall, ToolResult, ToolStatus};
 use parrot_domain::{
     contracts::{storage::Committed, tools::ParallelSafety},
-    protocol::messages::parrot::YieldedShellProcess,
+    protocol::messages::parrot::{
+        Delivery, Event, InputAdmitted, MessageContentPart, YieldedShellProcess,
+    },
     values::{
         activity::AgentSessionActivity, identifiers::Identifier, tools::ToolCycleImageBudget,
     },
@@ -233,6 +235,49 @@ where
             .publish_committed(&Committed::after_commit(event), &NeverCancelled)
             .await
             .map_err(TurnError::Publication)
+    }
+
+    /// Admits one tool-emitted advisory as a steer so it reaches the agent as
+    /// its own user input instead of riding inside a tool result.
+    async fn admit_steer_text(
+        &self,
+        history: &AgentHistoryView,
+        text: &str,
+    ) -> Result<(), TurnError> {
+        let parts = vec![ConversationPart::text(text)];
+        let mut event = self.event(history)?;
+        let admission = history
+            .admit_parts(
+                Identifier::message_id().map_err(|error| TurnError::Service(error.to_string()))?,
+                parts,
+                Delivery::DELIVERY_STEER,
+                move |input| {
+                    let text = input
+                        .parts
+                        .iter()
+                        .find_map(|part| match part {
+                            ConversationPart::Text(text) => Some(text.clone()),
+                            ConversationPart::ImageArtifact { .. } => None,
+                        })
+                        .unwrap_or_default();
+                    let mut message_part = MessageContentPart::new();
+                    message_part.set_text(text);
+                    event.set_input_admitted(InputAdmitted {
+                        input_id: input.id.clone(),
+                        message_id: input.message_id.clone(),
+                        content: input.content(),
+                        delivery: input.delivery.into(),
+                        parts: vec![message_part],
+                        ..InputAdmitted::new()
+                    });
+                    Ok(event)
+                },
+            )
+            .await?;
+        if let Some(event) = admission.published {
+            self.publish(event).await?;
+        }
+        Ok(())
     }
     fn parallel_safe(
         snapshot: &ToolSnapshot<S>,

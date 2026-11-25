@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, OperationError, OperationResult},
@@ -9,11 +11,12 @@ use parrot_domain::{
 };
 
 use super::{
-    FileToolError, FileToolInvocation, FileToolOutcome, FileToolResult, Formatter, WorkspacePaths,
-    append_short_path_note,
+    FileToolError, FileToolInvocation, FileToolOutcome, FileToolResult, Formatter, PathTipLedger,
+    WorkspacePaths,
     diff::{FileChange, ranges, render},
     file_error,
     input::{EditInput, WriteInput},
+    short_path_tip,
 };
 
 const NO_CHANGES: &str = "No changes made.";
@@ -22,14 +25,21 @@ const UTF8_PREAMBLE: &[u8] = &[0xef, 0xbb, 0xbf];
 pub struct WriteTool<S> {
     service: S,
     paths: WorkspacePaths,
+    tips: Arc<PathTipLedger>,
     definition: ConfiguredToolDefinition,
 }
 
 impl<S: AuthorizedMutationService> WriteTool<S> {
-    pub fn new(service: S, paths: WorkspacePaths, definition: ConfiguredToolDefinition) -> Self {
+    pub fn new(
+        service: S,
+        paths: WorkspacePaths,
+        tips: Arc<PathTipLedger>,
+        definition: ConfiguredToolDefinition,
+    ) -> Self {
         Self {
             service,
             paths,
+            tips,
             definition,
         }
     }
@@ -80,8 +90,9 @@ impl<S: AuthorizedMutationService> WriteTool<S> {
             .as_deref()
             .map_or(0, |bytes| String::from_utf8_lossy(bytes).lines().count());
         let after_lines = input.content.lines().count();
-        append_short_path_note(
+        short_path_tip(
             &self.paths,
+            &self.tips,
             &input.path,
             &formatter,
             FileToolResult::text(format!(
@@ -94,14 +105,21 @@ impl<S: AuthorizedMutationService> WriteTool<S> {
 pub struct EditTool<S> {
     service: S,
     paths: WorkspacePaths,
+    tips: Arc<PathTipLedger>,
     definition: ConfiguredToolDefinition,
 }
 
 impl<S: AuthorizedMutationService> EditTool<S> {
-    pub fn new(service: S, paths: WorkspacePaths, definition: ConfiguredToolDefinition) -> Self {
+    pub fn new(
+        service: S,
+        paths: WorkspacePaths,
+        tips: Arc<PathTipLedger>,
+        definition: ConfiguredToolDefinition,
+    ) -> Self {
         Self {
             service,
             paths,
+            tips,
             definition,
         }
     }
@@ -168,8 +186,9 @@ impl<S: AuthorizedMutationService> EditTool<S> {
             ));
         }
         if matches == 0 {
-            return append_short_path_note(
+            return short_path_tip(
                 &self.paths,
+                &self.tips,
                 &input.path,
                 &formatter,
                 FileToolResult::text(NO_CHANGES),
@@ -186,8 +205,9 @@ impl<S: AuthorizedMutationService> EditTool<S> {
         }
         after.extend_from_slice(replaced.as_bytes());
         if before == after {
-            return append_short_path_note(
+            return short_path_tip(
                 &self.paths,
+                &self.tips,
                 &input.path,
                 &formatter,
                 FileToolResult::text(NO_CHANGES),
@@ -206,13 +226,15 @@ impl<S: AuthorizedMutationService> EditTool<S> {
             before: Some(&before),
             after: Some(&after),
         }];
-        append_short_path_note(
+        short_path_tip(
             &self.paths,
+            &self.tips,
             &input.path,
             &formatter,
             FileToolResult {
                 text: ranges(&changes),
                 image_artifacts: Vec::new(),
+                steers: Vec::new(),
                 outcome: FileToolOutcome::Finished,
                 display_result: Some(render(&changes)),
             },

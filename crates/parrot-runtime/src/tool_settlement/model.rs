@@ -76,6 +76,7 @@ pub enum ToolOutcome {
 pub struct ToolOutput {
     pub text: String,
     pub image_artifacts: Vec<ImageArtifactMetadata>,
+    pub steers: Vec<String>,
     pub yielded_process: Option<YieldedShellProcess>,
     pub outcome: ToolOutcome,
     pub display_result: Option<String>,
@@ -85,6 +86,7 @@ impl ToolOutput {
         Self {
             text: text.into(),
             image_artifacts: Vec::new(),
+            steers: Vec::new(),
             yielded_process: None,
             outcome: ToolOutcome::Completed,
             display_result: None,

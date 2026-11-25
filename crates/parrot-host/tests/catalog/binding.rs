@@ -23,7 +23,7 @@ use parrot_storage::{
     history_files::{AgentHistoryFile, SessionIndex, SessionMeta},
 };
 use parrot_tools::{
-    files::WorkspacePaths,
+    files::{PathTipLedger, WorkspacePaths},
     web_fetch::{
         self, FetchError, Options, Request, Resolver, Response, ResponseBody, Transport,
         TransportSession, WebFetcher,
@@ -197,6 +197,7 @@ impl Fixture {
         let files = catalog::FileFactories::new(
             services.clone(),
             WorkspacePaths::default(),
+            PathTipLedger::enabled(),
             artifacts.repository.clone(),
             configuration.runtime.request_limits.image_bytes_per_read,
             &definitions,

@@ -187,6 +187,10 @@ inline_diff: true
 # allow children to message their parent in addition to their final message.
 agent_send_to_parent: false
 
+# Steer a tip naming the $VARIABLE shorthand the first time a tool touches a
+# path under a variable root in this agent session. Set to false to hide the tips.
+path_variable_tips: true
+
 # Number of rows retained in the live terminal buffer.
 live_buffer_rows: 20
 

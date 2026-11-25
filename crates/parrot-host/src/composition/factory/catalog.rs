@@ -162,6 +162,7 @@ fn output_to_runtime(output: catalog::Output) -> ToolOutput {
     ToolOutput {
         text: output.text,
         image_artifacts: output.image_artifacts,
+        steers: output.steers,
         yielded_process: output.yielded_process.map(|process| {
             use parrot_domain::protocol::messages::parrot::{
                 ShellProcessActivityKind, YieldedShellProcess,

@@ -78,6 +78,7 @@ pub struct Selection<T> {
 pub struct Output {
     pub text: String,
     pub image_artifacts: Vec<ImageArtifactMetadata>,
+    pub steers: Vec<String>,
     pub outcome: FileToolOutcome,
     pub yielded_process: Option<YieldedShellProcess>,
     pub display_result: Option<String>,
@@ -88,6 +89,7 @@ impl From<String> for Output {
         Self {
             text,
             image_artifacts: Vec::new(),
+            steers: Vec::new(),
             outcome: FileToolOutcome::Finished,
             yielded_process: None,
             display_result: None,
@@ -99,6 +101,7 @@ impl From<files::FileToolResult> for Output {
         Self {
             text: result.text,
             image_artifacts: result.image_artifacts,
+            steers: result.steers,
             outcome: result.outcome,
             yielded_process: None,
             display_result: result.display_result,
@@ -190,6 +193,7 @@ impl From<McpToolOutcome> for Output {
         Self {
             text: outcome.text,
             image_artifacts: Vec::new(),
+            steers: Vec::new(),
             outcome: FileToolOutcome::Finished,
             yielded_process: None,
             display_result: None,
@@ -484,6 +488,7 @@ impl<S: AccessSnapshot + 'static> Tool for CodemodeBinding<S> {
                 .map(|output| Output {
                     text: output.text,
                     image_artifacts: output.image_artifacts,
+                    steers: Vec::new(),
                     outcome: files::FileToolOutcome::Finished,
                     yielded_process: None,
                     display_result: output.display_result,
@@ -580,6 +585,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
     pub fn new<F>(
         filesystem: F,
         paths: WorkspacePaths,
+        tips: files::PathTipLedger,
         artifacts: Arc<ImageArtifactRepository>,
         maximum_image_bytes: i32,
         definitions: &ToolDefinitionCatalog,
@@ -590,6 +596,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
             + Clone
             + 'static,
     {
+        let tips = Arc::new(tips);
         Ok(Self {
             read: bind(
                 "read".to_owned(),
@@ -598,6 +605,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
                 ReadTool::new(
                     filesystem.clone(),
                     paths.clone(),
+                    tips.clone(),
                     definitions.describe("read")?.clone(),
                 ),
                 unit,
@@ -628,6 +636,7 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
                 WriteTool::new(
                     filesystem.clone(),
                     paths.clone(),
+                    tips.clone(),
                     definitions.describe("write")?.clone(),
                 ),
                 unit,
@@ -636,7 +645,12 @@ impl<S: AccessSnapshot + Clone + 'static, T: Send + Sync + 'static> FileFactorie
                 "edit".to_owned(),
                 &[],
                 true,
-                EditTool::new(filesystem, paths, definitions.describe("edit")?.clone()),
+                EditTool::new(
+                    filesystem,
+                    paths,
+                    tips,
+                    definitions.describe("edit")?.clone(),
+                ),
                 unit,
             ),
         })

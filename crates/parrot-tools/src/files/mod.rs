@@ -9,7 +9,11 @@ pub mod outline;
 mod read;
 mod workspace;
 
-use std::{fmt, sync::Arc};
+use std::{
+    collections::{HashSet, VecDeque},
+    fmt,
+    sync::{Arc, Mutex},
+};
 
 use parrot_core::NeverCancelled;
 use parrot_domain::{
@@ -88,6 +92,7 @@ pub enum FileToolOutcome {
 pub struct FileToolResult {
     pub text: String,
     pub image_artifacts: Vec<ImageArtifactMetadata>,
+    pub steers: Vec<String>,
     pub outcome: FileToolOutcome,
     pub display_result: Option<String>,
 }
@@ -97,6 +102,7 @@ impl FileToolResult {
         Self {
             text: text.into(),
             image_artifacts: Vec::new(),
+            steers: Vec::new(),
             outcome: FileToolOutcome::Finished,
             display_result: None,
         }
@@ -166,28 +172,84 @@ impl<'a> Formatter<'a> {
     }
 }
 
-/// Appends the path-variable advisory to a successful result when the input
-/// path sits under a variable root and the agent did not already use the
-/// `$NAME` shorthand for it.
-fn append_short_path_note(
+/// The number of paths one agent session's tip ledger remembers before evicting
+/// the least recently used one.
+const PATH_TIP_CAPACITY: usize = 256;
+
+/// Records the paths that already received a short-path tip within one agent
+/// session. Tips are advisory, so the ledger stays in memory and never persists.
+pub struct PathTipLedger {
+    enabled: bool,
+    state: Mutex<AdmittedPaths>,
+}
+
+struct AdmittedPaths {
+    paths: HashSet<String>,
+    order: VecDeque<String>,
+}
+
+impl PathTipLedger {
+    pub fn enabled() -> Self {
+        Self {
+            enabled: true,
+            state: Mutex::new(AdmittedPaths {
+                paths: HashSet::new(),
+                order: VecDeque::new(),
+            }),
+        }
+    }
+
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            state: Mutex::new(AdmittedPaths {
+                paths: HashSet::new(),
+                order: VecDeque::new(),
+            }),
+        }
+    }
+
+    /// Returns true only for the first admission of a path while enabled.
+    pub fn admit(&self, path: &str) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        let mut state = self.state.lock().expect("path tip ledger poisoned");
+        if state.paths.contains(path) {
+            state.order.retain(|seen| seen != path);
+        } else {
+            state.paths.insert(path.to_owned());
+        }
+        state.order.push_back(path.to_owned());
+        while state.paths.len() > PATH_TIP_CAPACITY {
+            let Some(evicted) = state.order.pop_front() else {
+                break;
+            };
+            state.paths.remove(&evicted);
+        }
+        true
+    }
+}
+
+/// Steers the path-variable advisory when the canonical shorthand for the input
+/// path exists and has not been tipped in this agent session before. A call that
+/// already used the `$NAME` shorthand records the path without tipping.
+fn short_path_tip(
     paths: &WorkspacePaths,
+    ledger: &PathTipLedger,
     input_path: &str,
     formatter: &Formatter<'_>,
-    result: FileToolResult,
+    mut result: FileToolResult,
 ) -> OperationResult<FileToolResult, FileToolError> {
-    if input_path.contains('$') {
-        return Ok(result);
-    }
-    let Some(short) = paths.shorten(input_path) else {
+    let canonical = paths.expand_path(input_path);
+    let Some(short) = paths.shorten(&canonical) else {
         return Ok(result);
     };
-    let note = formatter.note(&short)?;
-    let mut result = result;
-    if !result.text.is_empty() {
-        if !result.text.ends_with('\n') {
-            result.text.push('\n');
-        }
-        result.text.push_str(&note);
+    if !ledger.admit(&short) {
+        return Ok(result);
+    }
+    if !input_path.contains('$') {
+        result.steers.push(formatter.note(&short)?);
     }
     Ok(result)
 }

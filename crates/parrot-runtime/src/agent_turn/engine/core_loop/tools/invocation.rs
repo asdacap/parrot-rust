@@ -140,6 +140,8 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
             // boundary; a cancelled output is not normalized to a success.
             let rendered = async {
                 let result = result?;
+                let mut result = result;
+                let steers = std::mem::take(&mut result.steers);
                 if result.outcome == ToolOutcome::ImageBudgetExceeded {
                     let mut settlement = self.fail(call, result.text).map_err(turn_failure)?;
                     settlement.result.status = ToolStatus::ImageBudgetExceeded;
@@ -188,6 +190,11 @@ impl<S: AccessSnapshot + 'static> RuntimeTools<'_, S> {
                 text = self.config.output_blobs.substitute_process_notice(&text);
                 let yielded = result.yielded_process.is_some();
                 let yielded_process = result.yielded_process;
+                for steer in &steers {
+                    self.admit_steer_text(history, steer)
+                        .await
+                        .map_err(turn_failure)?;
+                }
                 for image in result.image_artifacts {
                     let parts = vec![
                         ConversationPart::text(&image.artifact_id),

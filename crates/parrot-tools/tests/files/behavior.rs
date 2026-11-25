@@ -11,7 +11,8 @@ use parrot_domain::contracts::{
     tools::{ParallelSafety, Tool},
 };
 use parrot_tools::files::{
-    EditTool, FileToolError, FileToolInvocation, GlobTool, ReadTool, WorkspacePaths, WriteTool,
+    EditTool, FileToolError, FileToolInvocation, GlobTool, PathTipLedger, ReadTool, WorkspacePaths,
+    WriteTool,
 };
 use serde_json::json;
 
@@ -21,8 +22,8 @@ use super::fixtures::*;
 async fn mutation_validates_expanded_empty_paths_before_cancellation_or_io() {
     let service = RecordingService::default();
     let paths = WorkspacePaths::new(&BTreeMap::from([("EMPTY".into(), String::new())]));
-    let write = WriteTool::new(service.clone(), paths.clone(), definition());
-    let edit = EditTool::new(service.clone(), paths, definition());
+    let write = WriteTool::new(service.clone(), paths.clone(), tips(), definition());
+    let edit = EditTool::new(service.clone(), paths, tips(), definition());
     let written = write
         .execute(
             &invocation(json!({"path":"$EMPTY", "content":"x"})),
@@ -61,7 +62,7 @@ async fn read_reports_requested_range_empty_and_total_after_byte_truncation() {
         "/actual/large.txt",
         format!("{}\n", "x".repeat(600)).repeat(2001).into_bytes(),
     );
-    let tool = ReadTool::new(service, WorkspacePaths::default(), definition());
+    let tool = ReadTool::new(service, WorkspacePaths::default(), tips(), definition());
     let range = tool
         .execute(
             &invocation(json!({"path":"lines.txt","offset":2,"limit":1})),
@@ -109,7 +110,7 @@ async fn read_markdown_outline_depends_on_bound_actual_extension_and_partial_ran
     ] {
         let service = RecordingService::default();
         service.file("alias.txt", physical, content.to_vec());
-        let tool = ReadTool::new(service, WorkspacePaths::default(), definition());
+        let tool = ReadTool::new(service, WorkspacePaths::default(), tips(), definition());
         let result = tool
             .execute(
                 &invocation(json!({"path":"alias.txt","offset":offset,"limit":limit})),
@@ -133,7 +134,7 @@ async fn read_dispatches_original_expanded_path_expected_target_and_captured_sna
         b"live output".to_vec(),
     );
     let paths = WorkspacePaths::new(&BTreeMap::from([("SCRATCH".into(), "/scratch".into())]));
-    let tool = ReadTool::new(service.clone(), paths, definition());
+    let tool = ReadTool::new(service.clone(), paths, tips(), definition());
     let result = tool
         .invoke(
             invocation(json!({"path":"${SCRATCH}/alias.txt"})),
@@ -172,7 +173,12 @@ async fn read_propagates_second_authorized_operation_failure_without_rendering_b
         "target changed on second authorization",
     );
     service.0.lock().unwrap().reject_read = Some(error.clone());
-    let tool = ReadTool::new(service.clone(), WorkspacePaths::default(), definition());
+    let tool = ReadTool::new(
+        service.clone(),
+        WorkspacePaths::default(),
+        tips(),
+        definition(),
+    );
     let result = tool
         .invoke(
             invocation(json!({"path":"alias"})),
@@ -200,7 +206,7 @@ async fn read_detects_nul_in_probe_and_decodes_stream_reader_bom_and_replacement
     ] {
         let service = RecordingService::default();
         service.file("file", "file", bytes);
-        let tool = ReadTool::new(service, WorkspacePaths::default(), definition());
+        let tool = ReadTool::new(service, WorkspacePaths::default(), tips(), definition());
         let result = tool
             .execute(&invocation(json!({"path":"file"})), &Snapshot(1), &NoCancel)
             .await
@@ -264,9 +270,24 @@ async fn strict_invalid_arguments_never_dispatch_to_services() {
     ];
     let service = RecordingService::default();
     service.0.lock().unwrap().mutation_bytes = Some(b"old".to_vec());
-    let read = ReadTool::new(service.clone(), WorkspacePaths::default(), definition());
-    let write = WriteTool::new(service.clone(), WorkspacePaths::default(), definition());
-    let edit = EditTool::new(service.clone(), WorkspacePaths::default(), definition());
+    let read = ReadTool::new(
+        service.clone(),
+        WorkspacePaths::default(),
+        tips(),
+        definition(),
+    );
+    let write = WriteTool::new(
+        service.clone(),
+        WorkspacePaths::default(),
+        tips(),
+        definition(),
+    );
+    let edit = EditTool::new(
+        service.clone(),
+        WorkspacePaths::default(),
+        tips(),
+        definition(),
+    );
     let glob = GlobTool::new(service.clone(), definition());
     for arguments in read_arguments {
         assert!(
@@ -349,13 +370,18 @@ async fn read_and_glob_preserve_rejected_root_errors_and_do_not_traverse() {
                 )
                 .await
         } else {
-            ReadTool::new(service.clone(), WorkspacePaths::default(), definition())
-                .execute(
-                    &invocation(json!({"path":"/alias"})),
-                    &Snapshot(1),
-                    &NoCancel,
-                )
-                .await
+            ReadTool::new(
+                service.clone(),
+                WorkspacePaths::default(),
+                tips(),
+                definition(),
+            )
+            .execute(
+                &invocation(json!({"path":"/alias"})),
+                &Snapshot(1),
+                &NoCancel,
+            )
+            .await
         }
         .unwrap();
         assert_eq!(result.text, "error: access denied");
@@ -377,7 +403,12 @@ async fn external_read_paths_and_filtered_directory_reports_are_not_reinterprete
         "/external/outside.txt",
         b"outside".to_vec(),
     );
-    let read = ReadTool::new(service.clone(), WorkspacePaths::default(), definition());
+    let read = ReadTool::new(
+        service.clone(),
+        WorkspacePaths::default(),
+        tips(),
+        definition(),
+    );
     for path in ["/external/outside.txt", "../external/outside.txt"] {
         assert_eq!(
             read.execute(&invocation(json!({"path":path})), &Snapshot(1), &NoCancel)
@@ -474,7 +505,12 @@ async fn directory_listing_sorts_ordinally_filters_failed_entries_and_marks_dire
         "dir/missing".into(),
         FileReadError::new(FileReadErrorKind::NotFound, "vanished"),
     );
-    let tool = ReadTool::new(service.clone(), WorkspacePaths::default(), definition());
+    let tool = ReadTool::new(
+        service.clone(),
+        WorkspacePaths::default(),
+        tips(),
+        definition(),
+    );
     let result = tool
         .invoke(
             invocation(json!({"path":"dir"})),
@@ -505,7 +541,7 @@ async fn directory_listing_cap_counts_utf16_units_not_utf8_bytes_and_allows_last
         })
         .collect();
     service.directory("dir", entries);
-    let tool = ReadTool::new(service, WorkspacePaths::default(), definition());
+    let tool = ReadTool::new(service, WorkspacePaths::default(), tips(), definition());
     let result = tool
         .execute(&invocation(json!({"path":"dir"})), &Snapshot(1), &NoCancel)
         .await
@@ -526,7 +562,7 @@ async fn directory_listing_line_cap_is_2000() {
             })
             .collect(),
     );
-    let tool = ReadTool::new(service, WorkspacePaths::default(), definition());
+    let tool = ReadTool::new(service, WorkspacePaths::default(), tips(), definition());
     let result = tool
         .execute(&invocation(json!({"path":"dir"})), &Snapshot(1), &NoCancel)
         .await
@@ -555,7 +591,12 @@ async fn write_emits_exact_utf8_without_bom_replaces_bom_and_skips_identical_byt
     ] {
         let service = RecordingService::default();
         service.0.lock().unwrap().mutation_bytes = before;
-        let tool = WriteTool::new(service.clone(), WorkspacePaths::default(), definition());
+        let tool = WriteTool::new(
+            service.clone(),
+            WorkspacePaths::default(),
+            tips(),
+            definition(),
+        );
         let result = tool
             .execute(
                 &invocation(json!({"path":"nested/unicode.txt","content":content})),
@@ -614,7 +655,7 @@ async fn write_counts_logical_lines_for_empty_and_newline_edges() {
     ] {
         let service = RecordingService::default();
         service.0.lock().unwrap().mutation_bytes = Some(before.to_vec());
-        let tool = WriteTool::new(service, WorkspacePaths::default(), definition());
+        let tool = WriteTool::new(service, WorkspacePaths::default(), tips(), definition());
         let result = tool
             .execute(
                 &invocation(json!({"path":"lines.txt","content":content})),
@@ -649,7 +690,7 @@ async fn mutations_repeat_original_requested_path_and_snapshot_and_edit_renders_
         }
         let paths = WorkspacePaths::new(&BTreeMap::from([("ROOT".into(), "/lexical".into())]));
         let result = if edit_mode {
-            EditTool::new(service.clone(), paths, definition())
+            EditTool::new(service.clone(), paths, tips(), definition())
                 .invoke(
                     invocation(
                         json!({"path":"$ROOT/alias","old_string":"before","new_string":"after"}),
@@ -658,7 +699,7 @@ async fn mutations_repeat_original_requested_path_and_snapshot_and_edit_renders_
                 )
                 .await
         } else {
-            WriteTool::new(service.clone(), paths, definition())
+            WriteTool::new(service.clone(), paths, tips(), definition())
                 .invoke(
                     invocation(json!({"path":"$ROOT/alias","content":"after\n"})),
                     InvocationScope::new(Snapshot(45), (), &NoCancel),
@@ -703,7 +744,12 @@ async fn mutations_repeat_original_requested_path_and_snapshot_and_edit_renders_
 #[tokio::test]
 async fn later_invocations_use_their_new_snapshot_and_preserve_bytes_after_reported_denial() {
     let service = RecordingService::default();
-    let tool = WriteTool::new(service.clone(), WorkspacePaths::default(), definition());
+    let tool = WriteTool::new(
+        service.clone(),
+        WorkspacePaths::default(),
+        tips(),
+        definition(),
+    );
     let first = tool
         .invoke(
             invocation(json!({"path":"/external/new.txt", "content":"new"})),
@@ -761,13 +807,23 @@ async fn first_mutation_validation_failures_are_formatted_without_any_write() {
                 json!({"path":"/synthetic/external/file", "content":"new"})
             };
             let result = if edit {
-                EditTool::new(service.clone(), WorkspacePaths::default(), definition())
-                    .execute(&invocation(request), &Snapshot(55), &NoCancel)
-                    .await
+                EditTool::new(
+                    service.clone(),
+                    WorkspacePaths::default(),
+                    tips(),
+                    definition(),
+                )
+                .execute(&invocation(request), &Snapshot(55), &NoCancel)
+                .await
             } else {
-                WriteTool::new(service.clone(), WorkspacePaths::default(), definition())
-                    .execute(&invocation(request), &Snapshot(55), &NoCancel)
-                    .await
+                WriteTool::new(
+                    service.clone(),
+                    WorkspacePaths::default(),
+                    tips(),
+                    definition(),
+                )
+                .execute(&invocation(request), &Snapshot(55), &NoCancel)
+                .await
             }
             .unwrap();
             assert_eq!(result.text, "error: fixture rejected actual target");
@@ -797,21 +853,31 @@ async fn second_mutation_service_authorization_failure_returns_error_and_preserv
             ));
         }
         let result = if edit_mode {
-            EditTool::new(service.clone(), WorkspacePaths::default(), definition())
-                .execute(
-                    &invocation(json!({"path":"x","old_string":"old","new_string":"new"})),
-                    &Snapshot(46),
-                    &NoCancel,
-                )
-                .await
+            EditTool::new(
+                service.clone(),
+                WorkspacePaths::default(),
+                tips(),
+                definition(),
+            )
+            .execute(
+                &invocation(json!({"path":"x","old_string":"old","new_string":"new"})),
+                &Snapshot(46),
+                &NoCancel,
+            )
+            .await
         } else {
-            WriteTool::new(service.clone(), WorkspacePaths::default(), definition())
-                .execute(
-                    &invocation(json!({"path":"x","content":"new"})),
-                    &Snapshot(46),
-                    &NoCancel,
-                )
-                .await
+            WriteTool::new(
+                service.clone(),
+                WorkspacePaths::default(),
+                tips(),
+                definition(),
+            )
+            .execute(
+                &invocation(json!({"path":"x","content":"new"})),
+                &Snapshot(46),
+                &NoCancel,
+            )
+            .await
         }
         .unwrap();
         assert_eq!(result.text, "error: second authorization denied");
@@ -847,7 +913,12 @@ async fn edit_match_counts_default_single_replace_all_zero_and_identical_output_
     ] {
         let service = RecordingService::default();
         service.0.lock().unwrap().mutation_bytes = Some(before.as_bytes().to_vec());
-        let tool = EditTool::new(service.clone(), WorkspacePaths::default(), definition());
+        let tool = EditTool::new(
+            service.clone(),
+            WorkspacePaths::default(),
+            tips(),
+            definition(),
+        );
         let mut arguments = json!({"path":"file","old_string":old,"new_string":new});
         if let Some(value) = replace_all {
             arguments["replace_all"] = json!(value);
@@ -893,7 +964,12 @@ async fn edit_ordinal_nonoverlapping_multiline_empty_replacement_and_bom_crlf_ar
     ] {
         let service = RecordingService::default();
         service.0.lock().unwrap().mutation_bytes = Some(before);
-        let tool = EditTool::new(service.clone(), WorkspacePaths::default(), definition());
+        let tool = EditTool::new(
+            service.clone(),
+            WorkspacePaths::default(),
+            tips(),
+            definition(),
+        );
         let result = tool
             .execute(
                 &invocation(
@@ -915,7 +991,12 @@ async fn edit_rejects_invalid_utf8_and_nul_without_dispatching_write() {
     for bytes in [vec![0xff, 0xfe, 0x41], vec![0x61, 0, 0x62]] {
         let service = RecordingService::default();
         service.0.lock().unwrap().mutation_bytes = Some(bytes.clone());
-        let tool = EditTool::new(service.clone(), WorkspacePaths::default(), definition());
+        let tool = EditTool::new(
+            service.clone(),
+            WorkspacePaths::default(),
+            tips(),
+            definition(),
+        );
         let result = tool
             .execute(
                 &invocation(
@@ -936,8 +1017,18 @@ async fn edit_rejects_invalid_utf8_and_nul_without_dispatching_write() {
 async fn cancelled_mutations_have_no_service_dispatch_or_effects() {
     let service = RecordingService::default();
     service.0.lock().unwrap().mutation_bytes = Some(b"old".to_vec());
-    let write = WriteTool::new(service.clone(), WorkspacePaths::default(), definition());
-    let edit = EditTool::new(service.clone(), WorkspacePaths::default(), definition());
+    let write = WriteTool::new(
+        service.clone(),
+        WorkspacePaths::default(),
+        tips(),
+        definition(),
+    );
+    let edit = EditTool::new(
+        service.clone(),
+        WorkspacePaths::default(),
+        tips(),
+        definition(),
+    );
     assert_eq!(
         write
             .execute(
@@ -1169,15 +1260,19 @@ fn short_paths() -> WorkspacePaths {
     WorkspacePaths::new(&BTreeMap::from([("SCRATCH".into(), "/scratch".into())]))
 }
 
+fn tips() -> Arc<PathTipLedger> {
+    Arc::new(PathTipLedger::enabled())
+}
+
 #[tokio::test]
-async fn read_appends_the_path_variable_note_only_when_the_shorthand_was_unused() {
+async fn read_steers_the_path_variable_note_only_when_the_shorthand_was_unused() {
     let service = RecordingService::default();
     service.file(
         "/scratch/notes.txt",
         "/actual/notes.txt",
         b"live output\n".to_vec(),
     );
-    let tool = ReadTool::new(service, short_paths(), definition());
+    let tool = ReadTool::new(service, short_paths(), tips(), definition());
     let note = "tip: the same path can be written as $SCRATCH/notes.txt. Use it in path arguments to shorten later tool calls.";
     let full = tool
         .execute(
@@ -1189,8 +1284,9 @@ async fn read_appends_the_path_variable_note_only_when_the_shorthand_was_unused(
         .unwrap();
     assert_eq!(
         full.text,
-        format!("1: live output\ntotal lines in file: 1\n{note}")
+        "1: live output\ntotal lines in file: 1\n".to_string()
     );
+    assert_eq!(full.steers, vec![note.to_owned()]);
     let shorthand = tool
         .execute(
             &invocation(json!({"path":"$SCRATCH/notes.txt"})),
@@ -1199,7 +1295,41 @@ async fn read_appends_the_path_variable_note_only_when_the_shorthand_was_unused(
         )
         .await
         .unwrap();
-    assert_eq!(shorthand.text, "1: live output\ntotal lines in file: 1\n");
+    assert_eq!(
+        shorthand.text,
+        "1: live output\ntotal lines in file: 1\n".to_string()
+    );
+    assert!(shorthand.steers.is_empty());
+}
+
+#[tokio::test]
+async fn read_tips_each_short_path_once_per_ledger() {
+    let service = RecordingService::default();
+    service.file(
+        "/scratch/notes.txt",
+        "/actual/notes.txt",
+        b"live\n".to_vec(),
+    );
+    let tool = ReadTool::new(service, short_paths(), tips(), definition());
+    let note = "tip: the same path can be written as $SCRATCH/notes.txt. Use it in path arguments to shorten later tool calls.";
+    let first = tool
+        .execute(
+            &invocation(json!({"path":"/scratch/notes.txt"})),
+            &Snapshot(1),
+            &NoCancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.steers, vec![note.to_owned()]);
+    let again = tool
+        .execute(
+            &invocation(json!({"path":"/scratch/notes.txt"})),
+            &Snapshot(1),
+            &NoCancel,
+        )
+        .await
+        .unwrap();
+    assert!(again.steers.is_empty());
 }
 
 #[tokio::test]
@@ -1219,29 +1349,26 @@ async fn read_renders_the_path_variable_note_through_the_configured_template() {
         .unwrap()
         .1,
     );
-    let tool = ReadTool::new(service, short_paths(), definition());
+    let tool = ReadTool::new(service, short_paths(), tips(), definition());
     let mut full = invocation(json!({"path":"/scratch/notes.txt"}));
     full.prompt_templates = templates.clone();
     let result = tool.execute(&full, &Snapshot(1), &NoCancel).await.unwrap();
-    assert!(
-        result.text.ends_with("\nSHORT<$SCRATCH/notes.txt>"),
-        "{}",
-        result.text
-    );
+    assert_eq!(result.steers, vec!["SHORT<$SCRATCH/notes.txt>".to_owned()]);
+    assert!(result.text.ends_with("total lines in file: 1\n"));
     let mut shorthand = invocation(json!({"path":"$SCRATCH/notes.txt"}));
     shorthand.prompt_templates = templates.clone();
     let result = tool
         .execute(&shorthand, &Snapshot(1), &NoCancel)
         .await
         .unwrap();
-    assert!(result.text.ends_with("total lines in file: 1\n"));
+    assert!(result.steers.is_empty());
 }
 
 #[tokio::test]
-async fn write_appends_the_path_variable_note_only_when_the_shorthand_was_unused() {
+async fn write_steers_the_path_variable_note_only_when_the_shorthand_was_unused() {
     let service = RecordingService::default();
     service.0.lock().unwrap().mutation_bytes = None;
-    let tool = WriteTool::new(service, short_paths(), definition());
+    let tool = WriteTool::new(service, short_paths(), tips(), definition());
     let note = "tip: the same path can be written as $SCRATCH/notes.txt. Use it in path arguments to shorten later tool calls.";
     let full = tool
         .execute(
@@ -1251,10 +1378,8 @@ async fn write_appends_the_path_variable_note_only_when_the_shorthand_was_unused
         )
         .await
         .unwrap();
-    assert_eq!(
-        full.text,
-        format!("Lines before: 0\nLines after: 1\n{note}")
-    );
+    assert_eq!(full.text, "Lines before: 0\nLines after: 1");
+    assert_eq!(full.steers, vec![note.to_owned()]);
     let shorthand = tool
         .execute(
             &invocation(json!({"path":"$SCRATCH/notes.txt","content":"x\n"})),
@@ -1264,16 +1389,17 @@ async fn write_appends_the_path_variable_note_only_when_the_shorthand_was_unused
         .await
         .unwrap();
     assert_eq!(shorthand.text, "Lines before: 1\nLines after: 1");
+    assert!(shorthand.steers.is_empty());
 }
 
 #[tokio::test]
-async fn edit_appends_the_path_variable_note_to_applied_diff_and_no_change_results() {
+async fn edit_steers_the_path_variable_note_to_applied_diff_and_no_change_results() {
     let note = "tip: the same path can be written as $SCRATCH/notes.txt. Use it in path arguments to shorten later tool calls.";
     let applied_call = json!({"path":"/scratch/notes.txt","old_string":"old","new_string":"new"});
     let tool_for = |bytes: Option<&[u8]>| {
         let service = RecordingService::default();
         service.0.lock().unwrap().mutation_bytes = bytes.map(<[u8]>::to_vec);
-        EditTool::new(service, short_paths(), definition())
+        EditTool::new(service, short_paths(), tips(), definition())
     };
     let applied = tool_for(Some(b"old\n"))
         .execute(&invocation(applied_call.clone()), &Snapshot(1), &NoCancel)
@@ -1288,7 +1414,7 @@ async fn edit_appends_the_path_variable_note_to_applied_diff_and_no_change_resul
         applied.display_result.as_deref(),
         Some("--- a//scratch/notes.txt\n+++ b//scratch/notes.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n")
     );
-    assert!(applied.text.ends_with(note), "{}", applied.text);
+    assert_eq!(applied.steers, vec![note.to_owned()]);
     let unchanged = tool_for(Some(b"old\n"))
         .execute(
             &invocation(json!({"path":"/scratch/notes.txt","old_string":"old","new_string":"old"})),
@@ -1297,7 +1423,8 @@ async fn edit_appends_the_path_variable_note_to_applied_diff_and_no_change_resul
         )
         .await
         .unwrap();
-    assert_eq!(unchanged.text, format!("No changes made.\n{note}"));
+    assert_eq!(unchanged.text, "No changes made.");
+    assert_eq!(unchanged.steers, vec![note.to_owned()]);
     let shorthand = tool_for(Some(b"old\n"))
         .execute(
             &invocation(json!({"path":"$SCRATCH/notes.txt","old_string":"old","new_string":"new"})),
@@ -1306,5 +1433,5 @@ async fn edit_appends_the_path_variable_note_to_applied_diff_and_no_change_resul
         )
         .await
         .unwrap();
-    assert!(!shorthand.text.contains("tip:"));
+    assert!(shorthand.steers.is_empty());
 }

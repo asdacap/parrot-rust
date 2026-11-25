@@ -265,6 +265,7 @@ async fn production_reader_streams_sparse_binary_without_consuming_the_tail() {
     let tool = parrot_tools::files::ReadTool::new(
         reader,
         parrot_tools::files::WorkspacePaths::default(),
+        std::sync::Arc::new(parrot_tools::files::PathTipLedger::enabled()),
         parrot_domain::values::tools::ConfiguredToolDefinition::new("read", "{}"),
     );
     let invocation = parrot_tools::files::FileToolInvocation::new(
@@ -294,6 +295,7 @@ async fn production_read_tool_scans_large_text_after_one_output_line() {
     let tool = parrot_tools::files::ReadTool::new(
         fixture.filesystem.clone(),
         parrot_tools::files::WorkspacePaths::default(),
+        std::sync::Arc::new(parrot_tools::files::PathTipLedger::enabled()),
         parrot_domain::values::tools::ConfiguredToolDefinition::new("read", "{}"),
     );
     let invocation = parrot_tools::files::FileToolInvocation::new(

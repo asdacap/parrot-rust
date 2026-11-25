@@ -98,7 +98,7 @@ use parrot_storage::{
     progress::FileProgressStore,
 };
 use parrot_tools::{
-    files::WorkspacePaths,
+    files::{PathTipLedger, WorkspacePaths},
     session::{Failure, FailureKind, ImageProvider, SessionServices},
     task_artifacts::TaskArtifactParserAdapter,
     web_fetch::WebFetcher,
@@ -1690,6 +1690,11 @@ where
                         let files = FileFactories::new(
                             config.filesystem.clone(),
                             WorkspacePaths::new(catalog_environment.materialize()),
+                            if config.configuration.runtime.path_variable_tips {
+                                PathTipLedger::enabled()
+                            } else {
+                                PathTipLedger::disabled()
+                            },
                             Arc::new(
                                 parrot_storage::artifacts::ImageArtifactRepository::new(
                                     user.lease.database.clone(),

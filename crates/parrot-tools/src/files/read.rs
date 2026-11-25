@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use parrot_domain::{
     contracts::{
@@ -14,8 +14,8 @@ use parrot_domain::{
 };
 
 use super::{
-    FileToolError, FileToolInvocation, FileToolResult, Formatter, WorkspacePaths,
-    append_short_path_note, file_error, input::ReadInput,
+    FileToolError, FileToolInvocation, FileToolResult, Formatter, PathTipLedger, WorkspacePaths,
+    file_error, input::ReadInput, short_path_tip,
 };
 
 mod stream;
@@ -28,14 +28,21 @@ const BINARY_PROBE_SIZE: usize = 8192;
 pub struct ReadTool<S> {
     service: S,
     paths: WorkspacePaths,
+    tips: Arc<PathTipLedger>,
     definition: ConfiguredToolDefinition,
 }
 
 impl<S: AuthorizedReadService> ReadTool<S> {
-    pub fn new(service: S, paths: WorkspacePaths, definition: ConfiguredToolDefinition) -> Self {
+    pub fn new(
+        service: S,
+        paths: WorkspacePaths,
+        tips: Arc<PathTipLedger>,
+        definition: ConfiguredToolDefinition,
+    ) -> Self {
         Self {
             service,
             paths,
+            tips,
             definition,
         }
     }
@@ -80,8 +87,9 @@ impl<S: AuthorizedReadService> ReadTool<S> {
                 .list_directory(&metadata, snapshot, cancellation, &formatter)
                 .await
                 .and_then(|text| {
-                    append_short_path_note(
+                    short_path_tip(
                         &self.paths,
+                        &self.tips,
                         &input.path,
                         &formatter,
                         FileToolResult::text(text),
@@ -106,8 +114,9 @@ impl<S: AuthorizedReadService> ReadTool<S> {
             .check()
             .map_err(|_| OperationError::Cancelled)?;
         renderer.finish(&formatter).and_then(|text| {
-            append_short_path_note(
+            short_path_tip(
                 &self.paths,
+                &self.tips,
                 &input.path,
                 &formatter,
                 FileToolResult::text(text),

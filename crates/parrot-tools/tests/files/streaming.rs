@@ -98,7 +98,12 @@ async fn early_binary_probe_stops_large_generated_input_after_one_chunk() {
         repeats: 1_000_000,
         consumed: Arc::new(AtomicUsize::new(0)),
     };
-    let tool = ReadTool::new(reader.clone(), WorkspacePaths::default(), definition());
+    let tool = ReadTool::new(
+        reader.clone(),
+        WorkspacePaths::default(),
+        std::sync::Arc::new(parrot_tools::files::PathTipLedger::enabled()),
+        definition(),
+    );
     let result = tool
         .execute(
             &invocation(json!({"path":"generated"})),
@@ -118,7 +123,12 @@ async fn one_line_output_still_consumes_all_generated_short_lines_in_bounded_chu
         repeats: 2000,
         consumed: Arc::new(AtomicUsize::new(0)),
     };
-    let tool = ReadTool::new(reader.clone(), WorkspacePaths::default(), definition());
+    let tool = ReadTool::new(
+        reader.clone(),
+        WorkspacePaths::default(),
+        std::sync::Arc::new(parrot_tools::files::PathTipLedger::enabled()),
+        definition(),
+    );
     let result = tool
         .execute(
             &invocation(json!({"path":"generated", "limit":1})),
