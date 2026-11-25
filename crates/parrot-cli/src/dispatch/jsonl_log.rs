@@ -6,8 +6,8 @@
 //! proto field names. Proto enums serialize as their integer value, except the
 //! compaction trigger, which serializes as its name so readers can tell the
 //! origins apart. Unset optional fields are omitted. Repeated message fields,
-//! nested message fields and bytes fields are omitted. Only the one-shot chat
-//! path writes the log.
+//! nested message fields and bytes fields are omitted. The one-shot chat path
+//! and the JSONL input loop write the log.
 
 use std::fs::{self, File};
 use std::io::{self, Write};

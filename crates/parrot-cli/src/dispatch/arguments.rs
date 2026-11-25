@@ -88,6 +88,7 @@ pub struct ChatOptions {
     pub jsonl_log: String,
     pub output_schema: String,
     pub output_schema_file: String,
+    pub jsonl_input: bool,
 }
 impl Default for ChatOptions {
     fn default() -> Self {
@@ -106,6 +107,7 @@ impl Default for ChatOptions {
             jsonl_log: String::new(),
             output_schema: String::new(),
             output_schema_file: String::new(),
+            jsonl_input: false,
         }
     }
 }
@@ -286,6 +288,7 @@ fn parse_chat(arguments: &[String]) -> Result<ChatOptions, UsageError> {
                     "usage: parrot chat --json-schema-file <path>",
                 ));
             }
+            ("--jsonl-input", _) => options.jsonl_input = true,
             _ => words.push(argument.clone()),
         }
         index += 1;

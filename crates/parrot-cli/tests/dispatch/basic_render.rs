@@ -130,11 +130,11 @@ fn tools_child_agents_and_compaction_render_plain_lines() {
             ..Default::default()
         })),
     ]);
+    assert_eq!(output, "checking\n");
     assert_eq!(
-        output,
-        "checking\n  tool started: read\n  tool finished: read\n    enhanced-only result\n  tool cancelled: write\n  tool error: shell: denied\n  agent started: explorer\n  agent finished: explorer (1m 05s)\n  agent failed: reviewer: boom\n  compaction started\n  compaction finished\n  compaction failed: boom\n"
+        error,
+        "  tool started: read\n  tool finished: read\n    enhanced-only result\n  tool cancelled: write\n  tool error: shell: denied\n  agent started: explorer\n  agent finished: explorer (1m 05s)\n  agent failed: reviewer: boom\n  compaction started\n  compaction finished\n  compaction failed: boom\n"
     );
-    assert!(error.is_empty());
 }
 
 #[test]
@@ -145,8 +145,8 @@ fn omitted_child_elapsed_time_uses_the_protobuf_scalar_default() {
         elapsed_ms: None,
         ..Default::default()
     }))]);
-    assert_eq!(output, "  agent finished: child (0s)\n");
-    assert!(error.is_empty());
+    assert_eq!(output, "");
+    assert_eq!(error, "  agent finished: child (0s)\n");
 }
 
 fn owned(mut event: wire::Event, owner: &str) -> wire::Event {
@@ -224,10 +224,10 @@ fn tool_lines_carry_arguments_results_and_child_agent_tags() {
         tool_started("ag1", "t1", "read"),
     ]);
     assert_eq!(
-        output,
+        error,
         "  agent started: explorer\n  [explorer] tool started: read {\"path\":\"x.rs\"}\n  tool started: glob {\"pattern\":\"*.rs\"}\n  [explorer] tool finished: read\n    line one\n    line two\n  [explorer] tool started: read\n"
     );
-    assert!(error.is_empty());
+    assert_eq!(output, "");
 }
 
 #[test]
@@ -247,21 +247,25 @@ fn child_agent_text_is_tagged_and_breaks_lines_on_owner_change() {
     ]);
     assert_eq!(
         output,
-        "  agent started: explorer\nthinking\n[explorer] searching\nmore\nback\npartial\n[explorer] child\n  [explorer] tool started: read {\"path\":\"x.rs\"}\n[explorer] after"
+        "thinking\n[explorer] searching\nmore\nback\npartial\n[explorer] child\n[explorer] after"
     );
-    assert!(error.is_empty());
+    assert_eq!(
+        error,
+        "  agent started: explorer\n  [explorer] tool started: read {\"path\":\"x.rs\"}\n"
+    );
 }
 
 #[test]
 fn main_agent_boundary_and_empty_fragment_match_source_state() {
-    let (output, _, _) = render(vec![
+    let (output, error, _) = render(vec![
         text("partial"),
         event(Payload::AgentStarted(wire::AgentStarted::new())),
         text("continued\n"),
         text(""),
         event(Payload::ToolStarted(wire::ToolStarted::new())),
     ]);
-    assert_eq!(output, "partial\ncontinued\n\n  tool started: \n");
+    assert_eq!(output, "partial\ncontinued\n\n");
+    assert_eq!(error, "  tool started: \n");
 }
 
 #[test]
@@ -272,7 +276,7 @@ fn admissions_only_print_after_start_and_keep_source_line_state() {
             ..Default::default()
         }))
     };
-    let (output, _, _) = render(vec![
+    let (output, error, _) = render(vec![
         admitted(),
         event(Payload::TurnStarted(wire::TurnStarted::new())),
         text("partial"),
@@ -282,7 +286,8 @@ fn admissions_only_print_after_start_and_keep_source_line_state() {
             ..Default::default()
         })),
     ]);
-    assert_eq!(output, "partial\n  queued: next\n\n↻ notice\n");
+    assert_eq!(output, "partial\n");
+    assert_eq!(error, "  queued: next\n↻ notice\n");
 }
 
 #[test]
@@ -309,11 +314,11 @@ fn notices_and_skill_loaded_are_separate_unindented_lines() {
                 ..Default::default()
             })),
         ]);
+        assert_eq!(output, "draft\n");
         assert_eq!(
-            output,
-            format!("draft\n↻ {notice}\n↻ Skill loaded: /skills/example/SKILL.md\n")
+            error,
+            format!("↻ {notice}\n↻ Skill loaded: /skills/example/SKILL.md\n")
         );
-        assert!(error.is_empty());
     }
     let (output, _, _) = render(vec![
         text("a"),
@@ -347,11 +352,11 @@ fn completion_reports_cumulative_totals_but_only_mode_completion_ends_rendering(
                 RenderOutcome::Completed
             ]
         );
+        assert_eq!(output, "");
         assert_eq!(
-            output,
-            format!("\n  turn ended ({reason}, {input} total in / {output_tokens} total out)\n")
+            error,
+            format!("  turn ended ({reason}, {input} total in / {output_tokens} total out)\n")
         );
-        assert!(error.is_empty());
     }
 }
 
@@ -430,7 +435,7 @@ fn snapshot_event(hidden: bool, status: i32) -> wire::Event {
 
 #[test]
 fn progress_snapshots_hide_succeeded_descendants_after_partial_text_and_flush() {
-    let (mut output, mut error) = (FlushWriter::default(), Vec::new());
+    let (mut output, mut error) = (Vec::new(), FlushWriter::default());
     let mut renderer = BasicRenderer::new();
     for event in [
         text("partial"),
@@ -441,25 +446,24 @@ fn progress_snapshots_hide_succeeded_descendants_after_partial_text_and_flush() 
             .render_event(&event, false, &mut output, &mut error)
             .unwrap();
     }
-    let first =
-        "partial\nAgent tasks:\n◐ root[2J    日本\n├── ○ 1\n├── ◐ 2\n├── ✓ 3\n├── ✗ 4\n└── ■ 6\n";
-    assert_eq!(output.flushes.len(), 2);
-    assert_eq!(output.flushes[0], first.as_bytes());
+    let first = "Agent tasks:\n◐ root[2J    日本\n├── ○ 1\n├── ◐ 2\n├── ✓ 3\n├── ✗ 4\n└── ■ 6\n";
+    assert_eq!(output, b"partial\n");
+    assert_eq!(error.flushes.len(), 2);
+    assert_eq!(error.flushes[0], first.as_bytes());
     assert_eq!(
-        output.flushes[1],
+        error.flushes[1],
         format!("{first}Agent tasks:\n✓ root[2J    日本\n").as_bytes()
     );
-    assert!(error.is_empty());
 }
 
 #[test]
 fn hidden_snapshots_still_flush_and_declarations_take_precedence_over_tree() {
-    let (mut output, mut error) = (FlushWriter::default(), Vec::new());
+    let (mut output, mut error) = (Vec::new(), FlushWriter::default());
     BasicRenderer::new()
         .render_event(&snapshot_event(true, 2), false, &mut output, &mut error)
         .unwrap();
-    assert!(output.bytes.is_empty());
-    assert_eq!(output.flushes, [Vec::<u8>::new()]);
+    assert!(output.is_empty());
+    assert_eq!(error.flushes, [Vec::<u8>::new()]);
     let plan = wire::PlanCompleted {
         markdown: "Approved plan".into(),
         task_tree: Some(wire::AgentTaskProgressSnapshot {
@@ -478,7 +482,7 @@ fn hidden_snapshots_still_flush_and_declarations_take_precedence_over_tree() {
         ..Default::default()
     };
     write_plan_report(&plan, &mut output).unwrap();
-    assert_eq!(output.bytes, b"Approved plan\n");
+    assert_eq!(output, b"Approved plan\n");
 }
 
 #[test]
@@ -555,7 +559,6 @@ fn malformed_task_snapshots_and_output_failures_are_not_swallowed() {
     );
     for event in [
         text("text"),
-        event(Payload::TurnEnded(wire::TurnEnded::new())),
         event(Payload::PlanCompleted(wire::PlanCompleted::new())),
     ] {
         assert_eq!(
@@ -569,10 +572,22 @@ fn malformed_task_snapshots_and_output_failures_are_not_swallowed() {
     assert_eq!(
         renderer
             .render_event(
+                &event(Payload::TurnEnded(wire::TurnEnded::new())),
+                true,
+                &mut Vec::new(),
+                &mut BrokenWriter
+            )
+            .unwrap_err()
+            .to_string(),
+        "output failed"
+    );
+    assert_eq!(
+        renderer
+            .render_event(
                 &snapshot_event(true, 2),
                 false,
-                &mut BrokenWriter,
-                &mut Vec::new()
+                &mut Vec::new(),
+                &mut BrokenWriter
             )
             .unwrap_err()
             .to_string(),
@@ -759,13 +774,13 @@ fn compaction_labels_distinguish_automatic_model_requested_and_user_requested() 
                 ..Default::default()
             })),
         ]);
+        assert_eq!(output, "");
         assert_eq!(
-            output,
+            error,
             format!(
                 "  compaction started{phrase}\n  compaction finished{phrase}\n  compaction started{phrase}\n  compaction failed{phrase}: boom\n"
             )
         );
-        assert!(error.is_empty());
     }
 }
 
@@ -785,9 +800,9 @@ fn compaction_progress_uses_its_own_readable_lines_after_streamed_text() {
         })),
         event(Payload::CompactionFinished(wire::CompactionFinished::new())),
     ]);
+    assert_eq!(output, "partial\n");
     assert_eq!(
-        output,
-        "partial\n  compaction: summarizing (2/5 groups)\n  compaction: saving summary\n  compaction finished\n"
+        error,
+        "  compaction: summarizing (2/5 groups)\n  compaction: saving summary\n  compaction finished\n"
     );
-    assert!(error.is_empty());
 }
