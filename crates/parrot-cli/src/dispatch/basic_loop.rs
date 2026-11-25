@@ -282,16 +282,16 @@ impl<R: DialogInput + 'static> BasicCli<R> {
             }
         };
         for warning in model_alias::warnings(&self.client, application.as_ref()).await? {
-            writeln!(self.output, "{warning}")?;
+            writeln!(self.error, "{warning}")?;
         }
         if !prompt.is_empty() {
             return self.once(&initial, &prompt, application).await;
         }
         if initial.loaded && !supplied {
-            writeln!(self.output, "Loaded session {}", initial.id)?;
+            writeln!(self.error, "Loaded session {}", initial.id)?;
         }
         writeln!(
-            self.output,
+            self.error,
             "parrot {} — /help for commands, /exit to leave",
             self.version
         )?;
@@ -306,7 +306,7 @@ impl<R: DialogInput + 'static> BasicCli<R> {
         prompt: &str,
         application: Arc<Signal>,
     ) -> Result<i32, ChatLoopFailure> {
-        writeln!(self.output, "{prompt}")?;
+        writeln!(self.error, "{prompt}")?;
         let mut stream = PreparedSessionStream::open_live(
             self.client.clone(),
             &session.id,

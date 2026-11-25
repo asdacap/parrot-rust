@@ -1,4 +1,8 @@
 //! The basic CLI's event rendering core, independent of session/transport ownership.
+//!
+//! The model's streamed text is the product on `output`. Every other rendered
+//! line (tool, agent, compaction, snapshot, admission, notice and turn summary)
+//! is progress and goes to `error`.
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};
@@ -60,6 +64,7 @@ impl BasicRenderer {
         let own_line = progress.is_some()
             || match &event.payload {
                 Some(Payload::AgentNotice(notice)) => !notice.notice.is_empty(),
+                Some(Payload::InputAdmitted(_)) | Some(Payload::TurnEnded(_)) => true,
                 Some(
                     Payload::ToolStarted(_)
                     | Payload::ToolFinished(_)
@@ -90,14 +95,13 @@ impl BasicRenderer {
                 self.text_owner.clear();
             }
             Some(Payload::InputAdmitted(admitted)) if self.started => {
-                writeln!(output)?;
-                writeln!(output, "  queued: {}", admitted.content)?;
+                writeln!(error, "  queued: {}", admitted.content)?;
             }
             Some(Payload::AgentNotice(notice)) if !notice.notice.is_empty() => {
-                writeln!(output, "{}↻ {}", self.tag(event), notice.notice)?
+                writeln!(error, "{}↻ {}", self.tag(event), notice.notice)?
             }
             Some(Payload::SkillLoaded(skill)) => {
-                writeln!(output, "{}↻ Skill loaded: {}", self.tag(event), skill.path)?
+                writeln!(error, "{}↻ Skill loaded: {}", self.tag(event), skill.path)?
             }
             Some(Payload::TextChunk(chunk)) => {
                 let owner = event.agent_session_id.as_str();
@@ -125,14 +129,14 @@ impl BasicRenderer {
                     .unwrap_or("");
                 if arguments.is_empty() {
                     writeln!(
-                        output,
+                        error,
                         "  {}tool started: {}",
                         self.tag(event),
                         tool.tool_name
                     )?
                 } else {
                     writeln!(
-                        output,
+                        error,
                         "  {}tool started: {} {}",
                         self.tag(event),
                         tool.tool_name,
@@ -142,48 +146,48 @@ impl BasicRenderer {
             }
             Some(Payload::ToolFinished(tool)) => {
                 writeln!(
-                    output,
+                    error,
                     "  {}tool finished: {}",
                     self.tag(event),
                     tool.tool_name
                 )?;
                 if let Some(result) = tool.result.as_deref() {
                     for line in result.trim().lines() {
-                        writeln!(output, "    {line}")?;
+                        writeln!(error, "    {line}")?;
                     }
                 }
             }
             Some(Payload::ToolCancelled(tool)) => writeln!(
-                output,
+                error,
                 "  {}tool cancelled: {}",
                 self.tag(event),
                 tool.tool_name
             )?,
             Some(Payload::ToolError(tool)) => writeln!(
-                output,
+                error,
                 "  {}tool error: {}: {}",
                 self.tag(event),
                 tool.tool_name,
                 tool.message
             )?,
             Some(Payload::AgentStarted(agent)) if !agent.parent_agent_session_id.is_empty() => {
-                writeln!(output, "  agent started: {}", agent.name)?;
+                writeln!(error, "  agent started: {}", agent.name)?;
             }
             Some(Payload::AgentFinished(agent)) if !agent.parent_agent_session_id.is_empty() => {
                 writeln!(
-                    output,
+                    error,
                     "  agent finished: {} ({})",
                     agent.name,
                     DurationFormatter::format(agent.elapsed_ms.unwrap_or_default())
                 )?;
             }
             Some(Payload::AgentFailed(agent)) if !agent.parent_agent_session_id.is_empty() => {
-                writeln!(output, "  agent failed: {}: {}", agent.name, agent.message)?;
+                writeln!(error, "  agent failed: {}: {}", agent.name, agent.message)?;
             }
             Some(Payload::CompactionStarted(started)) => {
                 self.compaction_trigger = Some(started.trigger.enum_value_or_default());
                 writeln!(
-                    output,
+                    error,
                     "  compaction started{}",
                     compaction_trigger_suffix(self.compaction_trigger)
                 )?
@@ -191,37 +195,32 @@ impl BasicRenderer {
             Some(Payload::CompactionProgress(progress)) => {
                 if progress.phase == wire::CompactionPhase::COMPACTION_PHASE_SUMMARIZING.into() {
                     writeln!(
-                        output,
+                        error,
                         "  compaction: summarizing ({}/{} groups)",
                         progress.completed_groups, progress.total_groups
                     )?;
                 } else if progress.phase == wire::CompactionPhase::COMPACTION_PHASE_SAVING.into() {
-                    writeln!(output, "  compaction: saving summary")?;
+                    writeln!(error, "  compaction: saving summary")?;
                 }
             }
             Some(Payload::CompactionFinished(_)) => {
                 let origin = compaction_trigger_suffix(self.compaction_trigger.take());
-                writeln!(output, "  compaction finished{origin}")?
+                writeln!(error, "  compaction finished{origin}")?
             }
             Some(Payload::CompactionFailed(compaction)) => {
                 let origin = compaction_trigger_suffix(self.compaction_trigger.take());
-                writeln!(
-                    output,
-                    "  compaction failed{origin}: {}",
-                    compaction.message
-                )?
+                writeln!(error, "  compaction failed{origin}: {}", compaction.message)?
             }
             Some(Payload::ToolSnapshot(_)) if progress.is_some() => {
                 for line in
                     ProgressFormatter::format(progress.as_ref().expect("matched task snapshot"))
                 {
-                    writeln!(output, "{line}")?;
+                    writeln!(error, "{line}")?;
                 }
-                output.flush()?;
+                error.flush()?;
             }
             Some(Payload::TurnEnded(ended)) => {
-                writeln!(output)?;
-                writeln!(output, "  {}", summarise(ended))?;
+                writeln!(error, "  {}", summarise(ended))?;
             }
             Some(Payload::PlanCompleted(plan)) if replaying => write_plan_report(plan, output)?,
             Some(Payload::ModeTurnCompleted(_)) if !replaying => {
