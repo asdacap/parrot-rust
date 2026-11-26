@@ -216,16 +216,16 @@ fn spill_preview_shows_all_lines_within_ten_and_first_last_five_above() {
 #[test]
 fn spill_preview_skips_assembled_candidates_over_the_byte_budget() {
     // A single wide line within the budget stays, and one more byte drops it.
-    let wide = format!("{}😀", "a".repeat(2044));
-    assert_eq!(wide.len(), 2048);
+    let wide = format!("{}😀", "a".repeat(4092));
+    assert_eq!(wide.len(), 4096);
     assert!(tool_output_preview(&wide).is_some());
     assert!(tool_output_preview(&(wide.clone() + "é")).is_none());
     // The omission marker counts toward the budget: these five-plus-five
-    // lines fit alone, but the candidate with the marker exceeds 2048 bytes.
-    let head_tail_bytes = 2 * (5 * 202 + 4);
-    assert!(head_tail_bytes <= 2048);
-    assert!(head_tail_bytes + "\n<1 lines omitted to save context>\n".len() > 2048);
-    let line = "a".repeat(200);
+    // lines fit alone, but the candidate with the marker exceeds 4096 bytes.
+    let head_tail_bytes = 2 * (5 * 407 + 4);
+    assert!(head_tail_bytes <= 4096);
+    assert!(head_tail_bytes + "\n<1 lines omitted to save context>\n".len() > 4096);
+    let line = "a".repeat(405);
     let lines = (0..11)
         .map(|index| format!("{line}-{index}"))
         .collect::<Vec<_>>()
@@ -238,8 +238,8 @@ fn spill_preview_skips_assembled_candidates_over_the_byte_budget() {
         .join("\n");
     assert!(tool_output_preview(&short).is_some());
     // Multibyte characters at the boundary count as whole characters.
-    let boundary = "é".repeat(1024);
-    assert_eq!(boundary.len(), 2048);
+    let boundary = "é".repeat(2048);
+    assert_eq!(boundary.len(), 4096);
     assert!(tool_output_preview(&boundary).is_some());
     assert!(tool_output_preview(&format!("{boundary}é")).is_none());
 }

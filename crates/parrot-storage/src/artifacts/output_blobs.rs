@@ -17,7 +17,7 @@ const MAXIMUM_NAME_ATTEMPTS: usize = 16;
 /// constructors at the bundled behavior.
 pub const DEFAULT_PROCESS_SPILL_LIMIT_BYTES: usize = 2 * 1024;
 const PREVIEW_LINES: usize = 5;
-const PREVIEW_MAXIMUM_BYTES: usize = 2048;
+const PREVIEW_MAXIMUM_BYTES: usize = 4096;
 
 /// A bounded preview of spilled tool output for the tool-result.spill-preview
 /// template.
