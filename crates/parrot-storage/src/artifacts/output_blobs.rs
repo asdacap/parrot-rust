@@ -15,7 +15,7 @@ const MAXIMUM_NAME_ATTEMPTS: usize = 16;
 /// The bundled default process output spill threshold in bytes. The runtime
 /// configuration supplies the actual value; this default keeps direct
 /// constructors at the bundled behavior.
-pub const DEFAULT_PROCESS_SPILL_LIMIT_BYTES: usize = 7 * 1024;
+pub const DEFAULT_PROCESS_SPILL_LIMIT_BYTES: usize = 15 * 1024;
 const PREVIEW_LINES: usize = 5;
 const PREVIEW_MAXIMUM_BYTES: usize = DEFAULT_PROCESS_SPILL_LIMIT_BYTES + 1024;
 

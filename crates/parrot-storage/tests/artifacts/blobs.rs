@@ -68,7 +68,7 @@ fn configured_spill_limits_drive_the_oversized_check_and_notice_prefixes() {
     );
     let process_notice =
         tool_notice.replace(&spill_limit_text(4 * 1024), &spill_limit_text(8 * 1024));
-    let foreign_notice = tool_notice.replace(&spill_limit_text(4 * 1024), "7 KiB");
+    let foreign_notice = tool_notice.replace(&spill_limit_text(4 * 1024), "15 KiB");
     let expected = "Process exited with code 0 after 0.01s\nTool output exceeded {} and was saved to $AGENT_DIR/agent/blobs/bold-river-arse.dat.";
     assert_eq!(
         custom.substitute_process_notice(&tool_notice),

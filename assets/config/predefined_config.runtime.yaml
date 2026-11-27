@@ -209,7 +209,7 @@ tool_output_spill_limit_bytes: 65536
 
 # Byte limit above which inline process output spills to a saved file with a
 # first/last-lines preview instead of staying inline.
-process_output_spill_limit_bytes: 7168
+process_output_spill_limit_bytes: 15360
 
 # Number of previous steps that must repeat exactly, with no user steer and no
 # wait or monitor tool call, before core steers a stall notice into the turn.
