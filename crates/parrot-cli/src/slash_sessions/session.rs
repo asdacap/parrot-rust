@@ -162,6 +162,85 @@ impl SlashSession for RpcSlashSession {
             Ok(self.current.fast_mode)
         })
     }
+    fn get_safety_classifier<'a>(
+        &'a mut self,
+        c: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(bool, String), SlashFailure>> {
+        Box::pin(async move {
+            self.current = native_call(
+                self.client.update_session(wire::UpdateSessionRequest {
+                    user_session_id: self.current.id.clone(),
+                    ..Default::default()
+                }),
+                c,
+            )
+            .await?;
+            Ok((
+                self.current.safety_classifier_enabled,
+                self.current.decision_model.clone(),
+            ))
+        })
+    }
+    fn set_safety_classifier_enabled<'a>(
+        &'a mut self,
+        enabled: bool,
+        c: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(bool, String), SlashFailure>> {
+        Box::pin(async move {
+            self.current = native_call(
+                self.client.update_session(wire::UpdateSessionRequest {
+                    user_session_id: self.current.id.clone(),
+                    safety_classifier_enabled: Some(enabled),
+                    ..Default::default()
+                }),
+                c,
+            )
+            .await?;
+            self.configuration
+                .lock()
+                .map_err(|_| SlashFailure::Command("configuration lock poisoned".into()))?
+                .set_safety_classifier(enabled, &self.current.decision_model)
+                .map_err(|failure| {
+                    SlashFailure::Command(format!(
+                        "Safety classifier changed for this session, but failed to save the default: {failure}"
+                    ))
+                })?;
+            Ok((
+                self.current.safety_classifier_enabled,
+                self.current.decision_model.clone(),
+            ))
+        })
+    }
+    fn set_decision_model<'a>(
+        &'a mut self,
+        model: &'a str,
+        c: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(bool, String), SlashFailure>> {
+        Box::pin(async move {
+            self.current = native_call(
+                self.client.update_session(wire::UpdateSessionRequest {
+                    user_session_id: self.current.id.clone(),
+                    decision_model: Some(model.into()),
+                    ..Default::default()
+                }),
+                c,
+            )
+            .await?;
+            self.configuration
+                .lock()
+                .map_err(|_| SlashFailure::Command("configuration lock poisoned".into()))?
+                .set_safety_classifier(self.current.safety_classifier_enabled, model)
+                .map_err(|failure| {
+                    SlashFailure::Command(format!(
+                        "Decision model changed for this session, but failed to save the default: {failure}"
+                    ))
+                })?;
+            Ok((
+                self.current.safety_classifier_enabled,
+                self.current.decision_model.clone(),
+            ))
+        })
+    }
     fn select_model<'a>(
         &'a mut self,
         model: &'a str,

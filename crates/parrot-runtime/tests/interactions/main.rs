@@ -1,4 +1,5 @@
 mod asks;
+mod command_safety;
 mod permission_async;
 mod protocol;
 

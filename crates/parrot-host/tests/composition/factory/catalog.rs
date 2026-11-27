@@ -879,6 +879,7 @@ mod fixture_support {
                 exec_command_yield_after: std::time::Duration::from_secs(10),
                 steer: Arc::new(NeverSteer),
                 monitor_sink: Arc::new(self.clone()),
+                safety_gate: None,
             })
         }
     }

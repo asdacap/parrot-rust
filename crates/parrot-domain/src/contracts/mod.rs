@@ -17,6 +17,7 @@ pub mod packaged_files;
 pub mod paths;
 pub mod progress;
 pub mod runtime;
+pub mod safety;
 pub mod security;
 pub mod status;
 pub mod storage;

@@ -17,7 +17,7 @@ use parrot_domain::protocol::messages::parrot as wire;
 use parrot_host::acp::AcpAgent;
 use parrot_runtime::interactions::{
     PermissionDecision, PermissionRequest, PermissionTargetDescription,
-    PermissionTargetDescriptionKind, map_pending_permission,
+    PermissionTargetDescriptionKind, PermissionTargetDescriptionScope, map_pending_permission,
 };
 use std::sync::{
     Arc,
@@ -115,6 +115,7 @@ async fn acp_permission_selection_grants_and_the_turn_continues() {
                         targets: vec![PermissionTargetDescription {
                             path: "/work/file.txt".into(),
                             kind: PermissionTargetDescriptionKind::File,
+                            scope: PermissionTargetDescriptionScope::Write,
                         }],
                         approval,
                     },

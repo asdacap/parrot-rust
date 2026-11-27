@@ -16,7 +16,7 @@ async fn fast_mode_updates_session_routing_without_selection_side_effects_or_ses
     assert!(!hosted.snapshot().fast_mode);
     for enabled in [true, false] {
         hosted
-            .update(None, None, None, Some(enabled))
+            .update(None, None, None, Some(enabled), None, None)
             .await
             .unwrap();
         assert_eq!(hosted.snapshot().fast_mode, enabled);
@@ -55,7 +55,7 @@ async fn fast_mode_persistence_failure_leaves_live_routing_unchanged() {
     let staging = path.with_file_name("meta.json.staging");
     std::fs::create_dir(&staging).unwrap();
     let error = hosted
-        .update(None, None, None, Some(true))
+        .update(None, None, None, Some(true), None, None)
         .await
         .unwrap_err();
     assert_eq!(error.code, RpcCode::Internal);
@@ -75,7 +75,7 @@ async fn fast_mode_override_survives_selection_updates_and_reopen_with_changed_d
         let root = fixture.root.clone();
         if let Some(enabled) = enabled {
             hosted
-                .update(None, None, None, Some(enabled))
+                .update(None, None, None, Some(enabled), None, None)
                 .await
                 .unwrap();
         }
@@ -83,6 +83,8 @@ async fn fast_mode_override_survives_selection_updates_and_reopen_with_changed_d
             .update(
                 Some(fixture.router.resolve("local/model-next").unwrap()),
                 Some("build".into()),
+                None,
+                None,
                 None,
                 None,
             )

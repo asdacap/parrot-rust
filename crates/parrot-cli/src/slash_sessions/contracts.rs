@@ -113,6 +113,23 @@ pub trait SlashSession: Send {
         enabled: bool,
         cancellation: &'a dyn Cancellation,
     ) -> BoxFuture<'a, Result<bool, SlashFailure>>;
+    /// Refresh the current session and return its safety classifier state.
+    fn get_safety_classifier<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(bool, String), SlashFailure>>;
+    /// Toggle the safety classifier for this session and future sessions.
+    fn set_safety_classifier_enabled<'a>(
+        &'a mut self,
+        enabled: bool,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(bool, String), SlashFailure>>;
+    /// Select the decision model for this session and future sessions.
+    fn set_decision_model<'a>(
+        &'a mut self,
+        model: &'a str,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(bool, String), SlashFailure>>;
     fn select_model<'a>(
         &'a mut self,
         model: &'a str,

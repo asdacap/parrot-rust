@@ -42,7 +42,7 @@ use parrot_host::composition::{
         user::{
             AgentFactoryParts, AgentFactorySource, AgentSkillBindings, CatalogUserSkills,
             RuntimeSession, UserServices, UserSessionFactory, UserSessionFactoryConfig, UserSkills,
-            durable_permission_factory,
+            durable_command_permission_factory, durable_permission_factory,
         },
     },
     invocation::InvocationSelection,
@@ -960,6 +960,12 @@ impl Fixture {
                 }))
             }),
             permissions: durable_permission_factory(None, Arc::new(Diagnostics)),
+            command_permissions: durable_command_permission_factory(None, Arc::new(Diagnostics)),
+            command_classifier: None,
+            safety_classifier_defaults: (
+                configuration.models.safety_classifier.enabled,
+                configuration.models.decision_model.clone(),
+            ),
             user_input_timeout: None,
             agent_ask_timeout: std::time::Duration::from_secs(300),
             mcp_servers: BTreeMap::new(),
@@ -1562,6 +1568,8 @@ async fn actual_hosted_selection_updates_preserve_open_metadata_and_record_opene
     bounded(hosted.update(
         Some(fixture.router.resolve("local/model-next").unwrap()),
         Some("build".into()),
+        None,
+        None,
         None,
         None,
     ))

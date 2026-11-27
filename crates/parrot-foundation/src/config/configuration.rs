@@ -181,6 +181,34 @@ impl Configuration {
         Ok(())
     }
 
+    /// Persists the safety classifier toggle under `safety_classifier` and the
+    /// globally selected decision model under `decision_model`; an empty model
+    /// argument keeps the configured model instead of clearing it.
+    pub fn set_safety_classifier(&mut self, enabled: bool, model: &str) -> Result<()> {
+        let lock = self.write_lock.clone();
+        let _guard = lock.enter()?;
+        let mut root = self.user_root()?;
+        let model = if model.is_empty() {
+            scalar_or_empty(&root, "decision_model")
+        } else {
+            model.to_owned()
+        };
+        root.set("safety_classifier", {
+            let mut section = Node::mapping(Vec::new());
+            section.set("enabled", Node::scalar(enabled.to_string()));
+            section
+        });
+        if !model.is_empty() {
+            root.set("decision_model", Node::scalar(model.clone()));
+        }
+        self.write(&root)?;
+        self.models.safety_classifier.enabled = enabled;
+        if !model.is_empty() {
+            self.models.decision_model = model;
+        }
+        Ok(())
+    }
+
     fn set_model_alias_unlocked(&mut self, name: &str, target: &str) -> Result<()> {
         if !self.models.model_aliases.contains_key(name) {
             return Err(ConfigError::invalid_data(format!(

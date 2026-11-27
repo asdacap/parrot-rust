@@ -325,6 +325,40 @@ impl SlashSession for Session {
             Ok(enabled)
         })
     }
+    fn get_safety_classifier<'a>(
+        &'a mut self,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(bool, String), SlashFailure>> {
+        Box::pin(async move {
+            self.boundary(cancellation)?;
+            Ok((
+                self.current.safety_classifier_enabled,
+                self.current.decision_model.clone(),
+            ))
+        })
+    }
+    fn set_safety_classifier_enabled<'a>(
+        &'a mut self,
+        enabled: bool,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(bool, String), SlashFailure>> {
+        Box::pin(async move {
+            self.boundary(cancellation)?;
+            self.current.safety_classifier_enabled = enabled;
+            Ok((enabled, self.current.decision_model.clone()))
+        })
+    }
+    fn set_decision_model<'a>(
+        &'a mut self,
+        model: &'a str,
+        cancellation: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(bool, String), SlashFailure>> {
+        Box::pin(async move {
+            self.boundary(cancellation)?;
+            self.current.decision_model = model.to_owned();
+            Ok((self.current.safety_classifier_enabled, model.to_owned()))
+        })
+    }
     fn select_model<'a>(
         &'a mut self,
         model: &'a str,

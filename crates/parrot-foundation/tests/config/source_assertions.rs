@@ -197,6 +197,8 @@ mod request_limits_layer_independent_overrides;
 mod requested_allow_write_rule_creates_missing_directories_recursively;
 #[path = "cases/retired_profile_status_is_ignored_at_the_configuration_boundary.rs"]
 mod retired_profile_status_is_ignored_at_the_configuration_boundary;
+#[path = "cases/safety_classifier_parses_provider_qualified_model_and_defaults_when_absent.rs"]
+mod safety_classifier_parses_provider_qualified_model_and_defaults_when_absent;
 #[path = "cases/sandbox_configuration_rejects_invalid_values.rs"]
 mod sandbox_configuration_rejects_invalid_values;
 #[path = "cases/sandbox_dev_bind_defaults_to_empty_and_replaces_inherited_list.rs"]

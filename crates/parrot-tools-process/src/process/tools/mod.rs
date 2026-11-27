@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
+use parrot_domain::contracts::safety::CommandSafetyGate;
 use parrot_domain::contracts::security::InvocationScope;
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::values::tools::{ConfiguredToolDefinition, ToolDefinitionCatalog};
@@ -76,6 +77,9 @@ pub struct ProcessToolServices<L: CapturedProcessLauncher<Request = CommandReque
     pub exec_command_yield_after: Duration,
     pub steer: Arc<dyn SteerSignal>,
     pub monitor_sink: Arc<dyn MonitorSink>,
+    /// Present only when the command safety classifier is enabled and
+    /// available; absent means commands start exactly as before.
+    pub safety_gate: Option<Arc<dyn CommandSafetyGate>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -263,6 +267,14 @@ where
                 }
                 if leading_sleep(&input.command) {
                     return self.error(invocation, "Do not start an exec_command command with 'sleep'. Use the wait tool to pause instead.");
+                }
+                if let Some(gate) = &self.services.safety_gate
+                    && let Err(refusal) = gate.check(&input.command, cancellation).await
+                {
+                    return self.error(
+                        invocation,
+                        &format!("the command was not approved: {}", refusal.reason),
+                    );
                 }
                 let report: Arc<dyn ProcessReport> = Arc::new(ExecCommandReport {
                     templates: Arc::clone(&invocation.prompt_templates),

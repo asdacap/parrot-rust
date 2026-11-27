@@ -38,6 +38,8 @@ pub trait HostedSession: Send + Sync {
         mode: Option<String>,
         extra_concurrent_tasks: Option<i32>,
         fast_mode: Option<bool>,
+        safety_classifier_enabled: Option<bool>,
+        decision_model: Option<String>,
     ) -> BoxFuture<'_, Result<()>>;
     fn update_selection(
         &self,

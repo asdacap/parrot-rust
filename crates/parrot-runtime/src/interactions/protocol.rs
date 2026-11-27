@@ -7,12 +7,20 @@ use super::{PendingPermission, PermissionDecision};
 pub struct PermissionTargetDescription {
     pub path: String,
     pub kind: PermissionTargetDescriptionKind,
+    pub scope: PermissionTargetDescriptionScope,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PermissionTargetDescriptionKind {
     File,
     Directory,
+    Command,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PermissionTargetDescriptionScope {
+    Write,
+    Execute,
 }
 
 /// Source `PendingPermissionMapping.Map`, without acquiring filesystem authority.
@@ -40,9 +48,20 @@ pub fn map_pending_permission<T>(
                 PermissionTargetDescriptionKind::Directory => {
                     wire::PermissionTargetKind::PERMISSION_TARGET_KIND_DIRECTORY
                 }
+                PermissionTargetDescriptionKind::Command => {
+                    wire::PermissionTargetKind::PERMISSION_TARGET_KIND_COMMAND
+                }
             }
             .into();
-            mapped.scope = wire::PermissionTargetScope::PERMISSION_TARGET_SCOPE_WRITE.into();
+            mapped.scope = match description.scope {
+                PermissionTargetDescriptionScope::Write => {
+                    wire::PermissionTargetScope::PERMISSION_TARGET_SCOPE_WRITE
+                }
+                PermissionTargetDescriptionScope::Execute => {
+                    wire::PermissionTargetScope::PERMISSION_TARGET_SCOPE_EXECUTE
+                }
+            }
+            .into();
             mapped.path = description.path;
             mapped
         })

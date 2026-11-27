@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError};
 use parrot_domain::contracts::paths::ResolvedRead;
+use parrot_domain::contracts::safety::{CommandSafetyGate, SafetyGateRefusal};
 use parrot_domain::contracts::security::{AccessSnapshot, InvocationScope};
 use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::protocol::messages::parrot::{Delivery, InputSource};
@@ -476,6 +477,7 @@ impl Fixture {
             ),
             steer: Arc::clone(&steer),
             monitor_sink: sink.clone(),
+            safety_gate: None,
         });
         Self {
             directory,
@@ -2229,4 +2231,109 @@ async fn completed_pty_spilled_suffix_survives_incremental_transcript_cleanup() 
             .to_string_lossy()
             .starts_with(".process-")
     }));
+}
+
+struct RefusingGate;
+impl CommandSafetyGate for RefusingGate {
+    fn check<'a>(
+        &'a self,
+        _: &'a str,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), SafetyGateRefusal>> {
+        Box::pin(async { Err(SafetyGateRefusal::new("blocked by test")) })
+    }
+}
+
+struct AllowingGate;
+impl CommandSafetyGate for AllowingGate {
+    fn check<'a>(
+        &'a self,
+        _: &'a str,
+        _: &'a dyn Cancellation,
+    ) -> BoxFuture<'a, Result<(), SafetyGateRefusal>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+fn services_with_gate(
+    fixture: &Fixture,
+    gate: Option<Arc<dyn CommandSafetyGate>>,
+) -> Arc<ProcessToolServices<PassThroughLauncher>> {
+    let services = &fixture.services;
+    Arc::new(ProcessToolServices {
+        owner: Arc::clone(&services.owner),
+        agent: services.agent.clone(),
+        launcher: Arc::clone(&services.launcher),
+        resolver: Arc::clone(&services.resolver),
+        workspace: Arc::clone(&services.workspace),
+        read_only_prefixes: services.read_only_prefixes.clone(),
+        exec_command_yield_after: services.exec_command_yield_after,
+        steer: Arc::clone(&services.steer),
+        monitor_sink: Arc::clone(&services.monitor_sink),
+        safety_gate: gate,
+    })
+}
+
+#[tokio::test]
+async fn exec_command_refuses_when_the_safety_gate_refuses() {
+    let fixture = Fixture::new();
+    let tool = ProcessToolFactory::new(
+        ProcessToolKind::ExecCommand,
+        services_with_gate(&fixture, Some(Arc::new(RefusingGate))),
+        &fixture.definitions,
+    )
+    .unwrap()
+    .create();
+    let result = tokio::time::timeout(
+        LIMIT,
+        tool.invoke(
+            ProcessInvocation::new(
+                "gated-call",
+                json!({"command": "printf ok"}).to_string(),
+                fixture.templates.clone(),
+            ),
+            InvocationScope::new(fixture.security.clone(), (), &NeverCancelled),
+        ),
+    )
+    .await
+    .expect("gated invocation timed out")
+    .unwrap();
+    assert!(
+        result.text.contains("blocked by test"),
+        "the refusal reason reaches the model: {}",
+        result.text
+    );
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn exec_command_runs_when_the_safety_gate_allows() {
+    let fixture = Fixture::new();
+    let tool = ProcessToolFactory::new(
+        ProcessToolKind::ExecCommand,
+        services_with_gate(&fixture, Some(Arc::new(AllowingGate))),
+        &fixture.definitions,
+    )
+    .unwrap()
+    .create();
+    let result = tokio::time::timeout(
+        LIMIT,
+        tool.invoke(
+            ProcessInvocation::new(
+                "gated-call",
+                json!({"command": "printf allowed"}).to_string(),
+                fixture.templates.clone(),
+            ),
+            InvocationScope::new(fixture.security.clone(), (), &NeverCancelled),
+        ),
+    )
+    .await
+    .expect("gated invocation timed out")
+    .unwrap();
+    assert!(
+        result.text.contains("allowed"),
+        "an approving gate lets the command run: {}",
+        result.text
+    );
+    fixture.finish().await;
 }

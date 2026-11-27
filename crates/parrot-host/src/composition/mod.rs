@@ -2,6 +2,7 @@
 
 pub mod agents;
 pub mod catalog;
+pub mod classifier;
 pub mod factory;
 pub mod invocation;
 pub mod processes;

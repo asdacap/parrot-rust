@@ -15,7 +15,10 @@ async fn actual_task_limit_updates_live_budget_without_selection_side_effects_or
     let events = user.lease.events.replay().await.unwrap();
     assert_eq!(hosted.snapshot().extra_concurrent_tasks, 2);
     for limit in [0, 5, 1] {
-        hosted.update(None, None, Some(limit), None).await.unwrap();
+        hosted
+            .update(None, None, Some(limit), None, None, None)
+            .await
+            .unwrap();
         assert_eq!(hosted.snapshot().extra_concurrent_tasks, limit);
         assert_eq!(user.task_concurrency.get_limit(), limit as usize);
         assert_eq!(other.snapshot().extra_concurrent_tasks, 2);
@@ -43,7 +46,7 @@ async fn actual_task_limit_persistence_failure_and_negative_value_leave_live_bud
     let before = std::fs::read(&path).unwrap();
     assert_eq!(
         hosted
-            .update(None, None, Some(-1), None)
+            .update(None, None, Some(-1), None, None, None)
             .await
             .unwrap_err()
             .code,
@@ -52,7 +55,10 @@ async fn actual_task_limit_persistence_failure_and_negative_value_leave_live_bud
     assert_eq!(std::fs::read(&path).unwrap(), before);
     let staging = path.with_file_name("meta.json.staging");
     std::fs::create_dir(&staging).unwrap();
-    let error = hosted.update(None, None, Some(0), None).await.unwrap_err();
+    let error = hosted
+        .update(None, None, Some(0), None, None, None)
+        .await
+        .unwrap_err();
     assert_eq!(error.code, RpcCode::Internal);
     assert!(error.message.contains("session metadata staging file"));
     assert_eq!(hosted.snapshot().extra_concurrent_tasks, 2);
@@ -70,12 +76,17 @@ async fn actual_task_limit_override_survives_selection_updates_and_reopen_with_c
         let id = UserSessionId::parse(&hosted.snapshot().id).unwrap();
         let root = fixture.root.clone();
         if let Some(limit) = limit {
-            hosted.update(None, None, Some(limit), None).await.unwrap();
+            hosted
+                .update(None, None, Some(limit), None, None, None)
+                .await
+                .unwrap();
         }
         hosted
             .update(
                 Some(fixture.router.resolve("local/model-next").unwrap()),
                 Some("build".into()),
+                None,
+                None,
                 None,
                 None,
             )
@@ -128,8 +139,10 @@ async fn actual_concurrent_task_limit_and_selection_updates_preserve_both_metada
             Some("build".into()),
             None,
             None,
+            None,
+            None,
         ),
-        hosted.update(None, None, Some(0), None),
+        hosted.update(None, None, Some(0), None, None, None),
     );
     selection.unwrap();
     limit.unwrap();

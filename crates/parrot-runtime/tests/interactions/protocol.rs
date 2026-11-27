@@ -1,7 +1,7 @@
 use parrot_domain::protocol::messages::parrot as wire;
 use parrot_runtime::interactions::{
     PERMISSION_CHOICES, PendingPermission, PermissionTargetDescription,
-    PermissionTargetDescriptionKind, map_pending_permission,
+    PermissionTargetDescriptionKind, PermissionTargetDescriptionScope, map_pending_permission,
 };
 
 fn pending() -> PendingPermission<PermissionTargetDescription> {
@@ -13,14 +13,17 @@ fn pending() -> PendingPermission<PermissionTargetDescription> {
             PermissionTargetDescription {
                 path: "/synthetic/missing/../literal-界".to_owned(),
                 kind: PermissionTargetDescriptionKind::File,
+                scope: PermissionTargetDescriptionScope::Write,
             },
             PermissionTargetDescription {
                 path: "/synthetic/directory/".to_owned(),
                 kind: PermissionTargetDescriptionKind::Directory,
+                scope: PermissionTargetDescriptionScope::Write,
             },
             PermissionTargetDescription {
                 path: "/synthetic/missing/../literal-界".to_owned(),
                 kind: PermissionTargetDescriptionKind::File,
+                scope: PermissionTargetDescriptionScope::Write,
             },
         ],
         choices: PERMISSION_CHOICES.to_vec(),

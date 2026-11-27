@@ -61,6 +61,8 @@ message UserSession {
   string working_directory = 5;
   int32 extra_concurrent_tasks = 6;
   bool fast_mode = 7;
+  bool safety_classifier_enabled = 8;
+  string decision_model = 9;
 }
 
 message CreateSessionRequest {
@@ -90,6 +92,8 @@ message UpdateSessionRequest {
   string mode            = 3;
   optional int32 extra_concurrent_tasks = 4;
   optional bool fast_mode = 5;
+  optional bool safety_classifier_enabled = 6;
+  optional string decision_model = 7;
 }
 
 message SetGoalRequest {
@@ -480,16 +484,19 @@ enum PermissionTargetKind {
   PERMISSION_TARGET_KIND_UNSPECIFIED = 0;
   PERMISSION_TARGET_KIND_FILE = 1;
   PERMISSION_TARGET_KIND_DIRECTORY = 2;
+  PERMISSION_TARGET_KIND_COMMAND = 3;
 }
 
 enum PermissionTargetScope {
   PERMISSION_TARGET_SCOPE_UNSPECIFIED = 0;
   PERMISSION_TARGET_SCOPE_WRITE = 1;
+  PERMISSION_TARGET_SCOPE_EXECUTE = 2;
 }
 
 message PermissionTarget {
   PermissionTargetKind kind = 1;
   PermissionTargetScope scope = 2;
+  // For command targets this carries the command text instead of a path.
   string path = 3;
 }
 

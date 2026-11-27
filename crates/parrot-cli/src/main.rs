@@ -941,6 +941,13 @@ impl LocalHost {
                 cancellation,
             )
             .await?;
+            let command_classifier =
+                match providers.decision_classifier_resolver(configuration.models.clone()) {
+                    Ok(classifier) => Some(classifier),
+                    Err(failure) => {
+                        return combine(Err(failure), providers.close().await);
+                    }
+                };
             let host = ProductionHost::with_event_load_progress(
                 ProductionHostConfig {
                     configuration,
@@ -948,6 +955,7 @@ impl LocalHost {
                     roots: self.roots.clone(),
                     launch_directory: self.directory.clone(),
                     providers: providers.shared_registry(),
+                    command_classifier,
                     diagnostics: self.diagnostics.clone(),
                     owner_runtime: tokio::runtime::Handle::current(),
                 },

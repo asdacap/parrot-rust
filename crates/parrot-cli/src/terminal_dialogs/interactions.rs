@@ -574,6 +574,7 @@ fn permission_description(pending: &wire::PendingPermission) -> String {
         .map(|target| {
             let scope = match target.scope.enum_value() {
                 Ok(wire::PermissionTargetScope::PERMISSION_TARGET_SCOPE_WRITE) => "write".into(),
+                Ok(wire::PermissionTargetScope::PERMISSION_TARGET_SCOPE_EXECUTE) => "run".into(),
                 Ok(wire::PermissionTargetScope::PERMISSION_TARGET_SCOPE_UNSPECIFIED) => {
                     "unspecified".into()
                 }
@@ -584,6 +585,7 @@ fn permission_description(pending: &wire::PendingPermission) -> String {
                 Ok(wire::PermissionTargetKind::PERMISSION_TARGET_KIND_DIRECTORY) => {
                     "directory".into()
                 }
+                Ok(wire::PermissionTargetKind::PERMISSION_TARGET_KIND_COMMAND) => "command".into(),
                 Ok(wire::PermissionTargetKind::PERMISSION_TARGET_KIND_UNSPECIFIED) => {
                     "unspecified".into()
                 }
