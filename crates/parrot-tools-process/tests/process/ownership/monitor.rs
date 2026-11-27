@@ -90,6 +90,7 @@ impl Execution for ScriptedExecution {
                     stderr: String::new(),
                     blob_path: None,
                     spill_preview: None,
+                    blob_metadata: None,
                     spill_limit: MAX_OUTPUT_CHARACTERS,
                 })
             }

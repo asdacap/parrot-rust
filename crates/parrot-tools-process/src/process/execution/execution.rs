@@ -9,7 +9,8 @@ use super::LaunchSpec;
 use super::filenames::HaikunatorNameGenerator;
 use super::native::NativeProcess;
 use super::output::{
-    self, PipeProcessOutputFiles, ProcessOutput, ProcessOutputBlobStore, Utf8Decoder, Utf16Writer,
+    self, BlobMetadata, PipeProcessOutputFiles, ProcessOutput, ProcessOutputBlobStore, Utf8Decoder,
+    Utf16Writer,
 };
 use super::pipe_decoder::PipeDecoder;
 use super::transcript::PtyTranscript;
@@ -36,6 +37,7 @@ pub struct ProcessResult {
     pub stderr: String,
     pub blob_path: Option<PathBuf>,
     pub spill_preview: Option<OutputPreview>,
+    pub blob_metadata: Option<BlobMetadata>,
     pub spill_limit: usize,
 }
 impl ProcessResult {
@@ -774,11 +776,12 @@ fn format_result(
         stderr: stderr.text(),
         blob_path: None,
         spill_preview: None,
+        blob_metadata: None,
         spill_limit,
     };
     if stdout.spilled() || stderr.spilled() || result.format().len() > spill_limit {
         let names = HaikunatorNameGenerator::default();
-        let (path, spill_preview) = ProcessOutputBlobStore::new(directory)
+        let (path, spill_preview, blob_metadata) = ProcessOutputBlobStore::new(directory)
             .persist_with(
                 exit,
                 elapsed,
@@ -790,6 +793,7 @@ fn format_result(
             .map_err(|error| blob_error(directory, error))?;
         result.blob_path = Some(path);
         result.spill_preview = spill_preview;
+        result.blob_metadata = Some(blob_metadata);
         result.stdout.clear();
         result.stderr.clear();
     }

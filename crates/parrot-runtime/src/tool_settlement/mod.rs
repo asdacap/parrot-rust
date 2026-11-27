@@ -11,7 +11,7 @@ use parrot_domain::{
 };
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
 use parrot_storage::{
-    artifacts::output_blobs::{ToolOutputBlobStore, tool_output_preview},
+    artifacts::output_blobs::{ToolOutputBlobStore, spill_limit_text, tool_output_preview},
     diagnostics::{DiagnosticEvent, FileDiagnosticLog},
 };
 use std::sync::Arc;
@@ -55,6 +55,14 @@ pub(crate) fn render_spill_notice(
                 (
                     "limit".to_owned(),
                     serde_json::Value::String(limit_text.to_owned()),
+                ),
+                (
+                    "size".to_owned(),
+                    serde_json::Value::String(spill_limit_text(output.len())),
+                ),
+                (
+                    "lines".to_owned(),
+                    serde_json::Value::from(output.lines().count()),
                 ),
             ],
             &parrot_storage::events::NeverCancelled,

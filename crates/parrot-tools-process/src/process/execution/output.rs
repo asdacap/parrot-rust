@@ -21,6 +21,13 @@ const NAME_ATTEMPTS: usize = 16;
 const PREVIEW_LINES: usize = 5;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+/// Exact byte size and line count of a persisted process output blob file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BlobMetadata {
+    pub bytes: u64,
+    pub lines: usize,
+}
+
 pub(crate) fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
@@ -489,6 +496,11 @@ pub fn format_result_with_templates(
 ) -> io::Result<String> {
     let mut text = format_completion(result.exit_code, result.elapsed_milliseconds);
     if let Some(path) = &result.blob_path {
+        let Some(metadata) = result.blob_metadata else {
+            return Err(io::Error::other(
+                "A spilled process result is missing its blob metadata.",
+            ));
+        };
         text.push('\n');
         text.push_str(&render(
             templates,
@@ -499,6 +511,15 @@ pub fn format_result_with_templates(
                     TemplateValue::from(spill_limit_text(result.spill_limit)),
                 ),
                 ("path", TemplateValue::from(path.display().to_string())),
+                (
+                    "size",
+                    TemplateValue::from(spill_limit_text(
+                        usize::try_from(metadata.bytes).map_err(|_| {
+                            io::Error::other("The blob size exceeds the platform range.")
+                        })?,
+                    )),
+                ),
+                ("lines", TemplateValue::from(metadata.lines)),
             ],
         )?);
         if let Some(preview) = &result.spill_preview {
@@ -620,9 +641,9 @@ impl ProcessOutputBlobStore {
         stderr: &ProcessOutput,
         mut next_name: impl FnMut() -> String,
         cancelled: impl Fn() -> bool,
-    ) -> io::Result<(PathBuf, Option<OutputPreview>)> {
-        let mut capture = (!stdout.is_empty() || !stderr.is_empty()).then(LineCapture::default);
-        let observes_stdout = !stdout.is_empty();
+    ) -> io::Result<(PathBuf, Option<OutputPreview>, BlobMetadata)> {
+        let mut stdout_capture = (!stdout.is_empty()).then(LineCapture::default);
+        let mut stderr_capture = (!stderr.is_empty()).then(LineCapture::default);
         let path = self.write_unique(&mut next_name, |writer| {
             if cancelled() {
                 return Err(io::Error::new(
@@ -631,7 +652,10 @@ impl ProcessOutputBlobStore {
                 ));
             }
             writer.write_all(format_completion(exit_code, elapsed_ms).as_bytes())?;
-            for (name, output) in [("stdout", stdout), ("stderr", stderr)] {
+            for (name, output, capture) in [
+                ("stdout", stdout, stdout_capture.as_mut()),
+                ("stderr", stderr, stderr_capture.as_mut()),
+            ] {
                 if !output.is_empty() {
                     if cancelled() {
                         return Err(io::Error::new(
@@ -640,15 +664,14 @@ impl ProcessOutputBlobStore {
                         ));
                     }
                     write!(writer, "\n[{name}]\n")?;
-                    match capture.as_mut() {
-                        Some(lines) if observes_stdout == (name == "stdout") => {
-                            let mut tee = TeeWriter {
-                                inner: &mut *writer,
-                                capture: lines,
-                            };
-                            output.copy_to_cancellable(&mut tee, &cancelled)?;
-                        }
-                        _ => output.copy_to_cancellable(writer, &cancelled)?,
+                    if let Some(lines) = capture {
+                        let mut tee = TeeWriter {
+                            inner: &mut *writer,
+                            capture: lines,
+                        };
+                        output.copy_to_cancellable(&mut tee, &cancelled)?;
+                    } else {
+                        output.copy_to_cancellable(writer, &cancelled)?;
                     }
                 }
             }
@@ -660,8 +683,35 @@ impl ProcessOutputBlobStore {
             }
             writer.flush()
         })?;
-        let preview = capture.and_then(LineCapture::into_preview);
-        Ok((path, preview))
+        let bytes = fs::metadata(&path)?.len();
+        if let Some(capture) = stdout_capture.as_mut() {
+            capture.finish();
+        }
+        if let Some(capture) = stderr_capture.as_mut() {
+            capture.finish();
+        }
+        let stdout_lines = stdout_capture.as_ref().map_or(0, |capture| capture.count);
+        let stderr_lines = stderr_capture.as_ref().map_or(0, |capture| capture.count);
+        let preview = if stdout.is_empty() {
+            stderr_capture.and_then(LineCapture::into_preview)
+        } else {
+            stdout_capture.and_then(LineCapture::into_preview)
+        };
+        let metadata = BlobMetadata {
+            bytes,
+            lines: 1
+                + if stdout.is_empty() {
+                    0
+                } else {
+                    1 + stdout_lines
+                }
+                + if stderr.is_empty() {
+                    0
+                } else {
+                    1 + stderr_lines
+                },
+        };
+        Ok((path, preview, metadata))
     }
     fn write_unique(
         &self,
@@ -868,7 +918,7 @@ pub(crate) mod tests {
         let store = ProcessOutputBlobStore::new(&dir.0);
         let stdout = ProcessOutput::inline("out");
         let stderr = ProcessOutput::inline("err");
-        let (path, preview) = store
+        let (path, preview, metadata) = store
             .persist_with(
                 7,
                 1234,
@@ -886,11 +936,17 @@ pub(crate) mod tests {
                 omitted: 0,
             })
         );
-        assert_eq!(fs::read_to_string(collision).unwrap(), "existing");
+        let expected_content =
+            "Process exited with code 7 after 1.23s\n[stdout]\nout\n[stderr]\nerr";
         assert_eq!(
-            fs::read_to_string(path).unwrap(),
-            "Process exited with code 7 after 1.23s\n[stdout]\nout\n[stderr]\nerr"
+            metadata,
+            BlobMetadata {
+                bytes: expected_content.len() as u64,
+                lines: expected_content.lines().count(),
+            }
         );
+        assert_eq!(fs::read_to_string(collision).unwrap(), "existing");
+        assert_eq!(fs::read_to_string(path).unwrap(), expected_content);
         let error = store
             .persist_with(
                 0,
@@ -972,11 +1028,15 @@ pub(crate) mod tests {
                 tail: "last".into(),
                 omitted: 3,
             }),
+            blob_metadata: Some(BlobMetadata {
+                bytes: 70 * 1024,
+                lines: 812,
+            }),
             spill_limit: MAX_OUTPUT_CHARACTERS,
         };
         assert_eq!(
             format_result_with_templates(&templates, &spilled).unwrap(),
-            "Process exited with code 0 after 1.23s\nTool output exceeded 15 KiB and was saved to /fixture/blob.dat.\nPreview of saved output:\nfirst\n<3 lines omitted to save context>\nlast"
+            "Process exited with code 0 after 1.23s\nTool output exceeded 15 KiB and was saved to /fixture/blob.dat.\nThe blob is 70 KiB with 812 lines; use the read tool to read it back.\nPreview of saved output:\nfirst\n<3 lines omitted to save context>\nlast"
         );
         let wide = ProcessResult {
             spill_preview: None,
@@ -984,7 +1044,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             format_result_with_templates(&templates, &wide).unwrap(),
-            "Process exited with code 0 after 1.23s\nTool output exceeded 15 KiB and was saved to /fixture/blob.dat."
+            "Process exited with code 0 after 1.23s\nTool output exceeded 15 KiB and was saved to /fixture/blob.dat.\nThe blob is 70 KiB with 812 lines; use the read tool to read it back."
         );
         let plain = ProcessResult {
             exit_code: 2,
@@ -993,6 +1053,7 @@ pub(crate) mod tests {
             stderr: "failure".into(),
             blob_path: None,
             spill_preview: None,
+            blob_metadata: None,
             spill_limit: MAX_OUTPUT_CHARACTERS,
         };
         assert_eq!(

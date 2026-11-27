@@ -19,6 +19,7 @@ use parrot_domain::contracts::tools::{ParallelSafety, Tool};
 use parrot_domain::protocol::messages::parrot::{Delivery, InputSource};
 use parrot_domain::values::tools::{ConfiguredToolDefinition, ToolDefinitionCatalog};
 use parrot_foundation::template_catalog::PromptTemplateCatalog;
+use parrot_storage::artifacts::output_blobs::spill_limit_text;
 use parrot_tools_process::process::execution::{LaunchSpec, ShellProcessExecution, TerminalMode};
 use parrot_tools_process::process::ownership::domain::CapturedProcessLauncher;
 use parrot_tools_process::process::ownership::execution::{
@@ -1024,11 +1025,17 @@ async fn exec_stderr_summary_preserves_combined_output_spill() {
         .clone();
     let raw = execution.wait().await.unwrap();
     let path = raw.blob_path.as_ref().unwrap();
+    let durable = fs::read_to_string(path).unwrap();
+    let metadata = format!(
+        "The blob is {} with {} lines; use the read tool to read it back.",
+        spill_limit_text(durable.len()),
+        durable.lines().count()
+    );
     completed(
         &result.text,
         0,
         &format!(
-            "s\nTool output exceeded 15 KiB and was saved to {}.",
+            "s\nTool output exceeded 15 KiB and was saved to {}.\n{metadata}",
             path.display()
         ),
     );
@@ -1730,18 +1737,26 @@ async fn oversized_exec_output_is_really_spilled_into_the_fixture_blob_directory
         .await;
     assert!(result.text.starts_with("Process exited with code 0 after "));
     let notice = "\nTool output exceeded 15 KiB and was saved to ";
-    let (_, path) = result
+    let (_, rest) = result
         .text
         .split_once(notice)
         .expect("missing real output-spill notice");
     // One 70k line exceeds the preview budget, so only the notice renders.
     assert!(!result.text.contains("Preview of saved output"));
-    let path = Path::new(path.strip_suffix('.').unwrap());
+    let path = Path::new(rest.lines().next().unwrap().strip_suffix('.').unwrap());
     assert!(path.is_absolute());
     assert_eq!(path.parent(), Some(fixture.launcher.blobs.as_path()));
     let durable = fs::read_to_string(path).unwrap();
     assert!(durable.starts_with("Process exited with code 0 after "));
     assert!(durable.ends_with(&format!("\n[stdout]\n{}", "x".repeat(70000))));
+    assert_eq!(
+        rest.lines().nth(1).unwrap(),
+        format!(
+            "The blob is {} with {} lines; use the read tool to read it back.",
+            spill_limit_text(durable.len()),
+            durable.lines().count()
+        )
+    );
     fixture.finish().await;
     assert!(path.is_file(), "settlement must retain durable output");
 }

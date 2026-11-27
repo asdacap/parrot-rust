@@ -17,7 +17,7 @@ use parrot_tools::{
     tasks_queues::tasks::{TaskQuery, TaskTool, TaskToolKind},
 };
 use parrot_tools_process::process::{
-    execution::output::format_result_with_templates,
+    execution::output::{BlobMetadata, format_result_with_templates},
     ownership::{
         execution::ProcessResult,
         inventory::{ActiveShellProcessState, ActivityKind},
@@ -484,6 +484,7 @@ pub(super) struct NaturalExecution {
     changed: tokio::sync::Notify,
     blob_path: Option<PathBuf>,
     spill_preview: Option<OutputPreview>,
+    blob_metadata: Option<BlobMetadata>,
 }
 impl NaturalExecution {
     pub(super) fn finish(&self) {
@@ -509,6 +510,7 @@ impl NaturalExecution {
             stderr: String::new(),
             blob_path: self.blob_path.clone(),
             spill_preview: self.spill_preview.clone(),
+            blob_metadata: self.blob_metadata,
             spill_limit: 2048,
         }
     }
@@ -697,6 +699,10 @@ async fn background_process_completion_uses_agent_variable_for_saved_output() {
         Arc::new(NaturalExecution {
             blob_path: Some(path.clone()),
             spill_preview: Some(preview),
+            blob_metadata: Some(BlobMetadata {
+                bytes: "saved process output".len() as u64,
+                lines: 1,
+            }),
             ..Default::default()
         }),
         delivery_templates(),
@@ -721,7 +727,7 @@ async fn background_process_completion_uses_agent_variable_for_saved_output() {
     .await;
     assert_eq!(
         completion,
-        "Shell process 'integrated-checks' completed.\nProcess exited with code 0 after 0.00s\nTool output exceeded 2 KiB and was saved to $AGENT_DIR/blobs/integrated-checks.dat.\nPreview of saved output:\nsaved first\n<2 lines omitted to save context>\nsaved last"
+        "Shell process 'integrated-checks' completed.\nProcess exited with code 0 after 0.00s\nTool output exceeded 2 KiB and was saved to $AGENT_DIR/blobs/integrated-checks.dat.\nThe blob is 19 B with 1 lines; use the read tool to read it back.\nPreview of saved output:\nsaved first\n<2 lines omitted to save context>\nsaved last"
     );
     assert_eq!(
         std::fs::read_to_string(path).unwrap(),

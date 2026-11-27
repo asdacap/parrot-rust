@@ -1,4 +1,14 @@
+use parrot_storage::artifacts::output_blobs::spill_limit_text;
+
 use super::*;
+
+fn path_argument(notice: &str) -> &str {
+    notice
+        .strip_prefix("Tool output exceeded 64 KiB and was saved to $AGENT_DIR/")
+        .expect("overflow notice must use the agent directory variable")
+        .strip_suffix('.')
+        .unwrap()
+}
 
 async fn terminals(fixture: &Fixture, ids: &[&str]) -> Vec<ToolExecutionTerminal> {
     fixture
@@ -456,16 +466,22 @@ async fn utf8_output_spills_only_above_64kib_and_preserves_actual_blob_bytes() {
         let content = terminal.content();
         if spilled {
             // The single huge line exceeds the preview budget, so only the
-            // notice line renders.
+            // notice and its metadata line render.
             assert!(content.starts_with("Tool output exceeded 64 KiB and was saved to "));
             assert!(!content.contains("Preview of saved output:"));
             let (notice, rest) = content.split_once('\n').unwrap_or((content.as_str(), ""));
-            assert_eq!(rest, "");
-            let path = notice
-                .strip_prefix("Tool output exceeded 64 KiB and was saved to $AGENT_DIR/")
-                .expect("overflow notice must use the agent directory variable")
-                .strip_suffix('.')
-                .unwrap();
+            assert_eq!(
+                rest,
+                format!(
+                    "The blob is {} with 1 lines; use the read tool to read it back.",
+                    spill_limit_text(text.len())
+                )
+            );
+            let path = path_argument(notice);
+            assert_eq!(
+                std::fs::metadata(fixture.path.join(path)).unwrap().len() as usize,
+                text.len()
+            );
             assert_eq!(
                 std::fs::read_to_string(fixture.path.join(path)).unwrap(),
                 text
@@ -493,16 +509,22 @@ async fn oversized_multiline_outputs_render_preview_lines_with_the_spill_notice(
     let terminal = terminals(&fixture, &["large"]).await.remove(0);
     let content = terminal.content();
     let (notice, rest) = content.split_once('\n').expect("notice line must exist");
-    let path = notice
-        .strip_prefix("Tool output exceeded 64 KiB and was saved to $AGENT_DIR/")
-        .expect("overflow notice must use the agent directory variable")
-        .strip_suffix('.')
-        .unwrap();
+    let path = path_argument(notice);
     assert_eq!(
         std::fs::read_to_string(fixture.path.join(path)).unwrap(),
         text
     );
     let mut lines = rest.lines();
+    assert_eq!(
+        lines.next(),
+        Some(
+            format!(
+                "The blob is {} with 9000 lines; use the read tool to read it back.",
+                spill_limit_text(text.len())
+            )
+            .as_str()
+        )
+    );
     assert_eq!(lines.next(), Some("Preview of saved output:"));
     for index in 0..5 {
         assert_eq!(lines.next(), Some(format!("line-{index}").as_str()));

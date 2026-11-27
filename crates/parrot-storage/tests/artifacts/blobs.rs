@@ -143,6 +143,13 @@ fn process_notices_substitute_paths_without_rewriting_inline_output_or_sibling_p
             );
         }
     }
+    let metadata = "The blob is 70 KiB with 812 lines; use the read tool to read it back.";
+    assert_eq!(
+        store.substitute_process_notice(&format!(
+            "Process exited with code 0 after 83.76s\nTool output exceeded 64 KiB and was saved to /session/main/blobs/output.dat.\n{metadata}"
+        )),
+        format!("Process exited with code 0 after 83.76s\nTool output exceeded 64 KiB and was saved to $AGENT_DIR/blobs/output.dat.\n{metadata}")
+    );
     for text in [
         "ordinary output /session/main/blobs/output.dat",
         "Tool output exceeded 64 KiB and was saved to /session/main/blobs/output.dat.",
@@ -263,11 +270,28 @@ fn spill_notice_and_preview_templates_render_the_documented_text() {
                 &[
                     ("path".to_owned(), "/x/output.dat".into()),
                     ("limit".to_owned(), "64 KiB".into()),
+                    ("size".to_owned(), "70 KiB".into()),
+                    ("lines".to_owned(), 812.into()),
                 ],
                 &NeverCancelled
             )
             .unwrap(),
-        "Tool output exceeded 64 KiB and was saved to /x/output.dat."
+        "Tool output exceeded 64 KiB and was saved to /x/output.dat.\nThe blob is 70 KiB with 812 lines; use the read tool to read it back."
+    );
+    assert_eq!(
+        catalog
+            .render(
+                "process-result.spill-notice",
+                &[
+                    ("path".to_owned(), "/x/output.dat".into()),
+                    ("limit".to_owned(), "64 KiB".into()),
+                    ("size".to_owned(), "70 KiB".into()),
+                    ("lines".to_owned(), 812.into()),
+                ],
+                &NeverCancelled
+            )
+            .unwrap(),
+        "Tool output exceeded 64 KiB and was saved to /x/output.dat.\nThe blob is 70 KiB with 812 lines; use the read tool to read it back."
     );
     assert_eq!(
         catalog
