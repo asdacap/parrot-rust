@@ -976,7 +976,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             format_result_with_templates(&templates, &spilled).unwrap(),
-            "Process exited with code 0 after 1.23s\nTool output exceeded 2 KiB and was saved to /fixture/blob.dat.\nPreview of saved output:\nfirst\n<3 lines omitted to save context>\nlast"
+            "Process exited with code 0 after 1.23s\nTool output exceeded 7 KiB and was saved to /fixture/blob.dat.\nPreview of saved output:\nfirst\n<3 lines omitted to save context>\nlast"
         );
         let wide = ProcessResult {
             spill_preview: None,
@@ -984,7 +984,7 @@ pub(crate) mod tests {
         };
         assert_eq!(
             format_result_with_templates(&templates, &wide).unwrap(),
-            "Process exited with code 0 after 1.23s\nTool output exceeded 2 KiB and was saved to /fixture/blob.dat."
+            "Process exited with code 0 after 1.23s\nTool output exceeded 7 KiB and was saved to /fixture/blob.dat."
         );
         let plain = ProcessResult {
             exit_code: 2,

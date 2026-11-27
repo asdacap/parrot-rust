@@ -751,7 +751,7 @@ async fn exec_run_async_false_yields_as_soon_as_a_steer_arrives() {
 
 #[tokio::test]
 async fn real_completion_environment_and_owned_security_capture_reach_the_launcher() {
-    let fixture = Fixture::new();
+    let fixture = Fixture::with_configuration_and_spill_limit("", 2 * 1024);
     let result = fixture
         .exec(json!({"command":"printf out; printf err >&2; exit 7"}))
         .await;
@@ -788,7 +788,8 @@ async fn real_completion_environment_and_owned_security_capture_reach_the_launch
         .text
         .split_once(notice)
         .expect("inherited PATH output spills");
-    let durable = fs::read_to_string(Path::new(path.strip_suffix('.').unwrap())).unwrap();
+    let path = path.lines().next().unwrap().strip_suffix('.').unwrap();
+    let durable = fs::read_to_string(Path::new(path)).unwrap();
     assert!(durable.ends_with(&format!("\n[stdout]\n{}", std::env::var("PATH").unwrap())));
     let command =
         "printf '<%s>' \"$WORKDIR\" \"${SCRATCH_DIR}\" \"$AGENT_SCRATCH_DIR\" \"${AGENT_DIR}\"";
@@ -1027,7 +1028,7 @@ async fn exec_stderr_summary_preserves_combined_output_spill() {
         &result.text,
         0,
         &format!(
-            "s\nTool output exceeded 2 KiB and was saved to {}.",
+            "s\nTool output exceeded 7 KiB and was saved to {}.",
             path.display()
         ),
     );
@@ -1728,7 +1729,7 @@ async fn oversized_exec_output_is_really_spilled_into_the_fixture_blob_directory
         .exec(json!({"command":"for ((i=0;i<70000;i++)); do printf x; done"}))
         .await;
     assert!(result.text.starts_with("Process exited with code 0 after "));
-    let notice = "\nTool output exceeded 2 KiB and was saved to ";
+    let notice = "\nTool output exceeded 7 KiB and was saved to ";
     let (_, path) = result
         .text
         .split_once(notice)
@@ -1755,7 +1756,7 @@ async fn multiline_exec_spill_renders_the_templated_preview() {
     assert!(
         result
             .text
-            .contains("\nTool output exceeded 2 KiB and was saved to ")
+            .contains("\nTool output exceeded 7 KiB and was saved to ")
     );
     let preview = result
         .text
@@ -1766,6 +1767,26 @@ async fn multiline_exec_spill_renders_the_templated_preview() {
                     <69990 lines omitted to save context>\n\
                     line-69995\nline-69996\nline-69997\nline-69998\nline-69999";
     assert_eq!(preview, expected);
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn default_process_limit_keeps_output_near_seven_kib_inline_and_previews_larger_output() {
+    let fixture = Fixture::new();
+    let inline = fixture.exec(json!({"command":"printf '%07000d' 0"})).await;
+    completed(
+        &inline.text,
+        0,
+        &format!("s\n[stdout]\n{}", "0".repeat(7000)),
+    );
+    let spilled = fixture.exec(json!({"command":"printf '%08192d' 0"})).await;
+    assert!(spilled.text.contains("Tool output exceeded 7 KiB"));
+    let preview = spilled
+        .text
+        .split_once("\nPreview of saved output:\n")
+        .expect("output within the preview budget must render")
+        .1;
+    assert_eq!(preview, "0".repeat(8192));
     fixture.finish().await;
 }
 
