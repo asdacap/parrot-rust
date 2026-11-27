@@ -50,6 +50,18 @@ pub struct SessionMeta {
     pub extra_concurrent_tasks: Option<i32>,
     #[serde(rename = "FastMode", default, skip_serializing_if = "Option::is_none")]
     pub fast_mode: Option<bool>,
+    #[serde(
+        rename = "SafetyClassifierEnabled",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub safety_classifier_enabled: Option<bool>,
+    #[serde(
+        rename = "DecisionModel",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub decision_model: Option<String>,
     #[serde(rename = "LastOpenedAt", default)]
     pub last_opened_at: Option<String>,
     #[serde(rename = "CreatedAt", default)]
@@ -76,6 +88,8 @@ impl SessionMeta {
             mode: Some(String::new()),
             extra_concurrent_tasks: None,
             fast_mode: None,
+            safety_classifier_enabled: None,
+            decision_model: None,
             last_opened_at: Some(String::new()),
             created_at: Some(String::new()),
         }

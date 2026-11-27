@@ -4,6 +4,7 @@
 //! not resolve paths or confer authority independently of that adapter.
 
 mod asks;
+mod command_safety;
 mod pending;
 mod permissions;
 mod protocol;
@@ -11,6 +12,7 @@ mod questions;
 mod values;
 
 pub use asks::*;
+pub use command_safety::*;
 pub use permissions::*;
 pub use protocol::*;
 pub use questions::*;

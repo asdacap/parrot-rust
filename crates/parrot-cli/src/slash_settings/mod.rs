@@ -4,10 +4,12 @@
 //! operations use the same supplied terminal/browser consumer port as dispatch.
 
 pub mod auth;
+pub mod decision_model;
 pub mod fast_mode;
 pub mod model_alias;
 pub mod model_selection;
 pub mod model_wizard;
+pub mod safety_classifier;
 pub mod settings;
 
 use std::sync::Arc;
@@ -19,10 +21,12 @@ use tonic::Status;
 use crate::slash_sessions::SlashFailure;
 
 pub use auth::{AuthCommand, AuthPresetSelectCommand, AuthPresetSetCommand, AuthServices};
+pub use decision_model::DecisionModelCommand;
 pub use fast_mode::FastCommand;
 pub use model_alias::ModelAliasCommand;
 pub use model_selection::ModelSelection;
 pub use model_wizard::ModelWizard;
+pub use safety_classifier::SafetyClassifierEnabledCommand;
 pub use settings::{
     EffortCommand, ModelCommand, ModelPresetSelectCommand, ModelPresetSetCommand, ModelsCommand,
     SetContextLimitCommand,

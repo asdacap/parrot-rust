@@ -16,7 +16,8 @@ use crate::{
             user::{
                 AgentFactoryParts, AgentFactorySource, CatalogUserSkills, SessionEventLoadProgress,
                 UserServices, UserSessionFactory, UserSessionFactoryConfig,
-                durable_permission_factory, ordinary_workspace_resolver,
+                durable_command_permission_factory, durable_permission_factory,
+                ordinary_workspace_resolver,
             },
         },
         protocol::{
@@ -39,6 +40,7 @@ use parrot_domain::{
             AuthorizedReadService, BoundRead, FileMetadata, FileReadError, LinkPolicy,
             ReadConsumer, ReadRequest,
         },
+        safety::CommandClassifierResolver,
         security::SecurityProvider,
     },
     values::{config::PathPlatform, identifiers::Identifier},
@@ -140,6 +142,9 @@ pub struct ProductionHostConfig {
     pub roots: ApplicationRoots,
     pub launch_directory: PathBuf,
     pub providers: Arc<ProviderRegistry>,
+    /// Resolves the configured command safety classifier on demand; absent
+    /// leaves exec_command ungated.
+    pub command_classifier: Option<Arc<dyn CommandClassifierResolver>>,
     pub diagnostics: Arc<FileDiagnosticLog>,
     /// Its actual Runtime is retained by the executable until close completes.
     pub owner_runtime: tokio::runtime::Handle,
@@ -286,7 +291,13 @@ impl ProductionHost {
                     working_directory: workspace.launch_directory().to_string_lossy().into_owned(),
                 }))
             }),
-            permissions: durable_permission_factory(timeout, diagnostics),
+            permissions: durable_permission_factory(timeout, diagnostics.clone()),
+            command_permissions: durable_command_permission_factory(timeout, diagnostics),
+            command_classifier: config.command_classifier,
+            safety_classifier_defaults: (
+                configuration.models.safety_classifier.enabled,
+                configuration.models.decision_model.clone(),
+            ),
             user_input_timeout: timeout,
             agent_ask_timeout: Duration::from_millis(
                 configuration.runtime.agent_ask_timeout_ms as u64,

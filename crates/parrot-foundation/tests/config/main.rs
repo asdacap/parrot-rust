@@ -10,6 +10,7 @@ mod model_transaction;
 mod models;
 mod progress;
 mod runtime;
+mod safety_classifier_persistence;
 mod source_assertions;
 mod support;
 mod template_ordering;

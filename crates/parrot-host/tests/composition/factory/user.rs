@@ -580,6 +580,12 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
     let permissions =
         durable_permission_factory(None, diagnostics.clone())(lease.clone(), broker.clone(), true)
             .unwrap();
+    let command_permissions = durable_command_permission_factory(None, diagnostics.clone())(
+        lease.clone(),
+        broker.clone(),
+        true,
+    )
+    .unwrap();
     let provider_session_ids = Arc::new(
         crate::composition::provider_session_ids::FileProviderSessionIds::open(
             resources.root().join("provider_sessions.json"),
@@ -598,6 +604,14 @@ async fn actual_histories(lease: Arc<SessionResourceLease>) -> Histories<TestSec
             Arc::new(parrot_foundation::clock::SystemClock),
         )),
         permissions,
+        command_permissions,
+        command_classifier: None,
+        safety: Arc::new(
+            crate::composition::classifier::SafetyClassifierSetting::new(
+                true,
+                parrot_foundation::config::models::DEFAULT_DECISION_MODEL,
+            ),
+        ),
         skills,
         lifetime: Arc::new(Signal::new()),
         activation: Arc::new(parrot_runtime::agent_turn::lifecycle::StartupActivation::new()),

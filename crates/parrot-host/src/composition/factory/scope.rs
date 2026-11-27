@@ -10,6 +10,7 @@ use crate::composition::catalog::{
     ProcessFactories, SessionBindings, SessionFactories, TaskQueueFactories, TaskQueueServices,
     WebFetchFactory,
 };
+use crate::composition::classifier::DynamicCommandSafetyClassifier;
 use crate::composition::{
     agents::{AgentSessionServices, ScopedAgentRuntime},
     invocation::InvocationSelection,
@@ -23,6 +24,7 @@ use parrot_domain::{
             ScopeLifetime,
         },
         filesystem::{AuthorizedMutationService, AuthorizedReadService},
+        safety::CommandSafetyGate,
         security::RestrictableAccessSnapshot,
         status::ProcessStatusSource,
     },
@@ -80,7 +82,7 @@ use parrot_runtime::{
         ScopeParts, ServiceRegistration, SessionAdapter, SnapshotPublisher,
     },
     compaction::ContextController,
-    interactions::{AgentAskIdentity, AgentAsks},
+    interactions::{AgentAskIdentity, AgentAsks, CommandSafetyBroker},
     output_schema::OutputSchemaBlocker,
     plan_mode::{ModeResult, UserSessionModes},
     prompt_assembly::{
@@ -1677,6 +1679,16 @@ where
                         link: link.clone(),
                         templates: self.user.templates.clone(),
                         log: log.clone(),
+                    }),
+                    safety_gate: self.user.command_classifier.as_ref().map(|resolver| {
+                        Arc::new(CommandSafetyBroker::new(
+                            Arc::new(DynamicCommandSafetyClassifier::new(
+                                self.user.safety.clone(),
+                                resolver.clone(),
+                            )),
+                            self.user.command_permissions.clone(),
+                            identity.session.session_id.clone(),
+                        )) as Arc<dyn CommandSafetyGate>
                     }),
                 });
                 let config = self.config.clone();

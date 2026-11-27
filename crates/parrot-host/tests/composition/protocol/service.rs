@@ -1385,10 +1385,12 @@ async fn permissions_use_real_broker_preserve_targets_choices_and_errors() {
         PermissionTargetDescription {
             path: "/work/directory".into(),
             kind: PermissionTargetDescriptionKind::Directory,
+            scope: PermissionTargetDescriptionScope::Write,
         },
         PermissionTargetDescription {
             path: "/work/directory/file.txt".into(),
             kind: PermissionTargetDescriptionKind::File,
+            scope: PermissionTargetDescriptionScope::Write,
         },
     ];
     let requesting = tokio::spawn(async move {
@@ -1618,6 +1620,7 @@ async fn fresh_sessions_are_distinct_and_permissions_default_to_noninteractive()
             targets: vec![PermissionTargetDescription {
                 path: "/work/file".into(),
                 kind: PermissionTargetDescriptionKind::File,
+                scope: PermissionTargetDescriptionScope::Write,
             }],
             approval: approval.clone(),
         },

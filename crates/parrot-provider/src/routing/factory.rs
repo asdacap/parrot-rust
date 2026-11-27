@@ -30,6 +30,7 @@ pub enum ProviderImplementation {
     ChatGpt,
     OpenRouter,
     OpenRouterBatch,
+    OpenRouterDecisions,
     OpenCodeGo,
     KimiCode,
     KimiApi,
@@ -41,6 +42,7 @@ impl ProviderImplementation {
             "anthropic" => return Self::Anthropic,
             "openrouter" => return Self::OpenRouter,
             "openrouter-batch" => return Self::OpenRouterBatch,
+            "openrouter-decisions" => return Self::OpenRouterDecisions,
             _ => {}
         }
         match id {
@@ -48,6 +50,7 @@ impl ProviderImplementation {
             "chatgpt" => Self::ChatGpt,
             "openrouter" => Self::OpenRouter,
             "openrouter-batch" => Self::OpenRouterBatch,
+            "openrouter-decisions" => Self::OpenRouterDecisions,
             "opencode-go" => Self::OpenCodeGo,
             "kimi-code" => Self::KimiCode,
             "kimi-api" => Self::KimiApi,
@@ -55,6 +58,11 @@ impl ProviderImplementation {
         }
     }
     pub fn can_build(self, config: &ProviderConfig) -> bool {
+        if self == Self::OpenRouterDecisions {
+            // Decisions providers serve the command safety classifier, not the
+            // chat provider registry.
+            return false;
+        }
         self == Self::ChatGpt || !config.base_url.is_empty()
     }
 }

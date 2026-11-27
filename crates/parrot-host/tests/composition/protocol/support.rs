@@ -426,6 +426,8 @@ impl HostedSession for FakeHostedSession {
         mode: Option<String>,
         extra_concurrent_tasks: Option<i32>,
         fast_mode: Option<bool>,
+        safety_classifier_enabled: Option<bool>,
+        decision_model: Option<String>,
     ) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move {
             self.route(
@@ -448,6 +450,12 @@ impl HostedSession for FakeHostedSession {
             }
             if let Some(enabled) = fast_mode {
                 value.fast_mode = enabled;
+            }
+            if let Some(enabled) = safety_classifier_enabled {
+                value.safety_classifier_enabled = enabled;
+            }
+            if let Some(model) = decision_model {
+                value.decision_model = model;
             }
             Ok(())
         })

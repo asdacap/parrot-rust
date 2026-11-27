@@ -338,7 +338,7 @@ async fn real_factory_registers_source_order_and_terminal_workspace_completion()
         Some(application.clone()),
         "fixture-version",
     );
-    let expected = "/auth|/auth-preset-select|/auth-preset-set|/clear|/compact|/effort|/fast|/exit|/goal|/standing-instruction|/help|/mode|/model|/model-alias|/model-preset-select|/model-preset-set|/models|/modes|/sessions|/status|/sandbox_enable|/set-context-limit|/skills|/task-limit|/version";
+    let expected = "/auth|/auth-preset-select|/auth-preset-set|/clear|/compact|/effort|/fast|/safety-classifier-enabled|/decision-model|/exit|/goal|/standing-instruction|/help|/mode|/model|/model-alias|/model-preset-select|/model-preset-set|/models|/modes|/sessions|/status|/sandbox_enable|/set-context-limit|/skills|/task-limit|/version";
     assert_eq!(
         registry
             .descriptions()

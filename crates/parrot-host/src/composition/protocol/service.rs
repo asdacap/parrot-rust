@@ -432,6 +432,8 @@ impl ParrotService {
             || mode.is_some()
             || request.extra_concurrent_tasks.is_some()
             || request.fast_mode.is_some()
+            || request.safety_classifier_enabled.is_some()
+            || request.decision_model.is_some()
         {
             session
                 .update(
@@ -439,6 +441,8 @@ impl ParrotService {
                     mode,
                     request.extra_concurrent_tasks,
                     request.fast_mode,
+                    request.safety_classifier_enabled,
+                    request.decision_model.clone(),
                 )
                 .await?;
         }

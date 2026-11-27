@@ -121,6 +121,41 @@ pub struct ProviderConfig {
     pub models: BTreeMap<String, ModelConfig>,
 }
 
+/// Bash command safety classification for `exec_command` gating. `enabled` is
+/// the classifier's default state; the prompt fields are classifier-specific
+/// and come from the predefined configuration.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SafetyClassifierConfig {
+    pub enabled: bool,
+    pub question_instructions: String,
+    pub safe_criteria: String,
+    pub unsafe_criteria: String,
+}
+
+impl Default for SafetyClassifierConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            question_instructions: String::new(),
+            safe_criteria: String::new(),
+            unsafe_criteria: String::new(),
+        }
+    }
+}
+
+/// The globally selected decision model. The id is provider-qualified; its
+/// prefix selects the serving decisions provider, matching canonical model
+/// selectors.
+pub const DEFAULT_DECISION_MODEL: &str = "openrouter/perplexity/pplx-decider-v1.2";
+
+/// Splits a provider-qualified decision model id into the provider id and the
+/// provider-specific model id. Returns None when the id has no usable
+/// provider prefix.
+pub fn split_decision_model(model: &str) -> Option<(&str, &str)> {
+    let (provider, model) = model.split_once('/')?;
+    (!provider.is_empty() && !model.is_empty()).then_some((provider, model))
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelSettings {
     pub model_aliases: BTreeMap<String, ModelAliasConfig>,
@@ -130,6 +165,8 @@ pub struct ModelSettings {
     pub model_profile_entries: BTreeMap<String, ModelProfileConfig>,
     pub providers: BTreeMap<String, ProviderConfig>,
     pub context_limit: Option<ContextSize>,
+    pub decision_model: String,
+    pub safety_classifier: SafetyClassifierConfig,
 }
 
 impl ModelSettings {
@@ -147,6 +184,8 @@ impl ModelSettings {
             model_profiles: ModelProfiles::new(&model_profile_entries),
             model_profile_entries,
             providers: read_providers(root)?,
+            decision_model: read_decision_model(root),
+            safety_classifier: read_safety_classifier(root)?,
         })
     }
 
@@ -182,7 +221,11 @@ impl ModelSettings {
             "providerPreferences":value.provider_preferences,"sessionHeader":value.session_header,"modelsDevId":value.models_dev_id,
             "modelDefaults":models_snapshot(&value.model_defaults),"models":models_snapshot(&value.models),
         }))).collect();
-        json!({"modelAliases":aliases,"modelPresets":presets,"providerModelAliasDefaults":defaults,"modelProfiles":profiles,"providers":providers,"contextLimit":self.context_limit.as_ref().map(ToString::to_string)})
+        json!({"modelAliases":aliases,"modelPresets":presets,"providerModelAliasDefaults":defaults,"modelProfiles":profiles,"providers":providers,"contextLimit":self.context_limit.as_ref().map(ToString::to_string),"decisionModel":self.decision_model,"safetyClassifier":json!({
+            "enabled":self.safety_classifier.enabled,
+            "questionInstructions":self.safety_classifier.question_instructions,
+            "safeCriteria":self.safety_classifier.safe_criteria,"unsafeCriteria":self.safety_classifier.unsafe_criteria,
+        })})
     }
 }
 
@@ -730,6 +773,32 @@ fn default_integer(parent: &Node, key: &str, path: &str, default: i32) -> Result
     } else {
         Ok(default)
     }
+}
+
+fn read_decision_model(root: &Node) -> String {
+    let model = scalar_or_empty(root, "decision_model");
+    if model.is_empty() {
+        DEFAULT_DECISION_MODEL.to_owned()
+    } else {
+        model
+    }
+}
+
+fn read_safety_classifier(root: &Node) -> Result<SafetyClassifierConfig> {
+    let Some(item) = root.get("safety_classifier") else {
+        return Ok(SafetyClassifierConfig::default());
+    };
+    if item.as_mapping().is_none() {
+        return Err(ConfigError::invalid_data(
+            "safety_classifier must be a mapping".into(),
+        ));
+    }
+    Ok(SafetyClassifierConfig {
+        enabled: default_boolean(item, "enabled", "safety_classifier.enabled")?,
+        question_instructions: scalar_or_empty(item, "question_instructions"),
+        safe_criteria: scalar_or_empty(item, "safe_criteria"),
+        unsafe_criteria: scalar_or_empty(item, "unsafe_criteria"),
+    })
 }
 
 fn read_providers(root: &Node) -> Result<BTreeMap<String, ProviderConfig>> {

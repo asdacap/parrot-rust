@@ -819,6 +819,29 @@ subagents:
   # Maximum number of nested child-agent levels.
   max_depth: 4
 
+# Bash command safety classification. Before exec_command runs a command, the
+# classifier answers one typed boolean question about the command text.
+# `enabled` is the default state; the /safety-classifier-enabled command
+# overrides it and persists. The decision model is global, not classifier
+# specific: the provider-qualified id selects the serving decisions provider,
+# matching canonical model selectors.
+decision_model: openrouter/perplexity/pplx-decider-v1.2
+safety_classifier:
+  enabled: true
+  question_instructions: >-
+    Decide whether the user asking to run the given shell command is safe to
+    execute. Judge the command text alone, without assuming additional intent.
+    Answer false when in doubt.
+  safe_criteria: >-
+    The command only reads, searches, builds, tests, or writes inside the
+    current project workspace, and its effect is reversible or plainly
+    requested by the user.
+  unsafe_criteria: >-
+    The command deletes or overwrites data outside the workspace, escalates
+    privileges, exfiltrates or broadcasts data, installs or changes system-wide
+    state, contacts unexpected networks or machines, or produces effects that
+    are hard to reverse.
+
 # Active built-in providers and their seeded model catalogues. Credential values
 # are sourced from the configured environment variables or credential store.
 providers:
@@ -877,6 +900,18 @@ providers:
     base_url: https://openrouter.ai/api/v1
     api_key_env: OPENROUTER_API_KEY
     models_dev_id: openrouter
+  openrouter-decisions:
+    type: openrouter-decisions
+    protocol: chat-completions
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    header_timeout_ms: 60000
+    session_header: x-session-id
+    provider_preferences:
+      allow_fallbacks: true
+      require_parameters: true
+      data_collection: deny
+      zdr: true
   opencode-go:
     protocol: chat-completions
     base_url: https://opencode.ai/zen/go/v1

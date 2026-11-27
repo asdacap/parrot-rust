@@ -3,6 +3,8 @@ use super::super::{
     agents::CallerSignal,
     protocol::{self, HostedSession, HostedSessionFactory, RpcCode, RpcError, SessionEventStream},
 };
+use crate::composition::classifier::SafetyClassifierSetting;
+use parrot_domain::contracts::safety::CommandClassifierResolver;
 use parrot_domain::{
     contracts::{
         async_ops::{BoxFuture, Cancellation, Clock, OperationError},
@@ -43,9 +45,9 @@ use parrot_runtime::{
     },
     event_broker::{EventBroker, Subscription},
     interactions::{
-        AgentAskBroker, InteractionDiagnostics, InteractionError, PermissionBroker,
-        PermissionTargetDescription, PermissionTargetDescriptionKind, QuestionBroker,
-        map_pending_permission,
+        AgentAskBroker, CommandTarget, InteractionDiagnostics, InteractionError, PermissionBroker,
+        PermissionTargetDescription, PermissionTargetDescriptionKind,
+        PermissionTargetDescriptionScope, QuestionBroker, map_pending_permission,
     },
     output_schema::{OutputSchema, OutputSchemaGate},
     plan_mode::{
@@ -127,6 +129,13 @@ pub struct UserServices<S: RestrictableAccessSnapshot + 'static> {
     pub questions: Arc<QuestionBroker>,
     pub asks: Arc<AgentAskBroker>,
     pub permissions: Arc<PermissionBroker<WriteTarget>>,
+    pub command_permissions: Arc<PermissionBroker<CommandTarget>>,
+    /// The live safety classifier toggle and decision model, shared with the
+    /// slash commands through the session update path.
+    pub safety: Arc<SafetyClassifierSetting>,
+    /// Resolves the classifier for the live decision model; absent leaves
+    /// commands ungated.
+    pub command_classifier: Option<Arc<dyn CommandClassifierResolver>>,
     pub skills: Arc<dyn UserSkills<S>>,
     pub lifetime: Arc<Signal>,
     pub activation: Arc<StartupActivation>,
@@ -232,6 +241,7 @@ impl parrot_runtime::interactions::PermissionEvents<WriteTarget> for DurablePerm
                         WriteTargetKind::File => PermissionTargetDescriptionKind::File,
                         WriteTargetKind::Directory => PermissionTargetDescriptionKind::Directory,
                     },
+                    scope: PermissionTargetDescriptionScope::Write,
                 }
             }));
             let stored = self
@@ -275,6 +285,86 @@ pub fn durable_permission_factory(
     })
 }
 
+/// The injected adapter must append and publish the SAME command permission
+/// event, in order, mirroring the write-target contract.
+pub type UserCommandPermissionFactory = Arc<
+    dyn Fn(
+            Arc<SessionResourceLease>,
+            Arc<EventBroker>,
+            bool,
+        ) -> protocol::Result<Arc<PermissionBroker<CommandTarget>>>
+        + Send
+        + Sync,
+>;
+
+pub struct DurableCommandPermissionEvents {
+    lease: Arc<SessionResourceLease>,
+    broker: Arc<EventBroker>,
+}
+impl parrot_runtime::interactions::PermissionEvents<CommandTarget>
+    for DurableCommandPermissionEvents
+{
+    fn append<'a>(
+        &'a self,
+        pending: &'a parrot_runtime::interactions::PendingPermission<CommandTarget>,
+    ) -> BoxFuture<'a, Result<Committed<wire::Event>, InteractionError>> {
+        Box::pin(async move {
+            let mut event = wire::Event::new();
+            event.id = Identifier::event_id().map_err(|error| {
+                InteractionError::new(
+                    parrot_runtime::interactions::InteractionErrorKind::Identifier,
+                    error.to_string(),
+                )
+            })?;
+            event.agent_session_id = pending.agent_session_id.clone();
+            event.set_permission_pending(map_pending_permission(pending, |target| {
+                PermissionTargetDescription {
+                    path: target.command.clone(),
+                    kind: PermissionTargetDescriptionKind::Command,
+                    scope: PermissionTargetDescriptionScope::Execute,
+                }
+            }));
+            let stored = self
+                .lease
+                .events
+                .append(event, None)
+                .await
+                .map_err(|error| {
+                    InteractionError::new(
+                        parrot_runtime::interactions::InteractionErrorKind::Permission,
+                        error.to_string(),
+                    )
+                })?;
+            Ok(Committed::after_commit(stored.stored.event))
+        })
+    }
+    fn publish<'a>(
+        &'a self,
+        event: &'a Committed<wire::Event>,
+    ) -> BoxFuture<'a, Result<(), InteractionError>> {
+        Box::pin(async move {
+            self.broker.publish_retained(event.value());
+            Ok(())
+        })
+    }
+}
+
+pub fn durable_command_permission_factory(
+    timeout: Option<Duration>,
+    diagnostics: Arc<dyn InteractionDiagnostics>,
+) -> UserCommandPermissionFactory {
+    Arc::new(move |lease, broker, interactive| {
+        PermissionBroker::new(
+            interactive,
+            timeout,
+            diagnostics.clone(),
+            Arc::new(DurableCommandPermissionEvents { lease, broker }),
+        )
+        .map(Arc::new)
+        .map_err(invalid)
+    })
+}
+
 pub struct UserSessionFactoryConfig<S: RestrictableAccessSnapshot + 'static> {
     pub agent_limits: parrot_foundation::config::runtime::AgentLimitsConfig,
     pub extra_concurrent_tasks: i32,
@@ -293,6 +383,12 @@ pub struct UserSessionFactoryConfig<S: RestrictableAccessSnapshot + 'static> {
     pub launch_directory: std::path::PathBuf,
     pub skills: UserSkillsFactory<S>,
     pub permissions: UserPermissionFactory,
+    pub command_permissions: UserCommandPermissionFactory,
+    /// Resolves the classifier for the live decision model; absent leaves
+    /// commands ungated.
+    pub command_classifier: Option<Arc<dyn CommandClassifierResolver>>,
+    /// Enabled flag and model id applied when session state has no override.
+    pub safety_classifier_defaults: (bool, String),
     pub user_input_timeout: Option<Duration>,
     pub agent_ask_timeout: Duration,
     pub mcp_servers: BTreeMap<String, parrot_foundation::config::runtime::McpServerConfig>,
@@ -646,6 +742,11 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             broker.clone(),
             initialization.interactive_permissions,
         )?;
+        let command_permissions = (config.command_permissions)(
+            lease.clone(),
+            broker.clone(),
+            initialization.interactive_permissions,
+        )?;
         let mcp = McpServerManager::connect(&config.mcp_servers).await;
         for (name, _) in mcp.failures() {
             lease.write_diagnostic(&DiagnosticEvent {
@@ -683,6 +784,8 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 question_clock.clone(),
             )),
             permissions,
+            command_permissions,
+            command_classifier: config.command_classifier.clone(),
             skills: (config.skills)(resources.workspace())?,
             lifetime: lifetime.clone(),
             activation: Arc::new(StartupActivation::new()),
@@ -696,6 +799,15 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             ),
             fast_mode: Arc::new(parrot_provider::sessions::FastMode::new(
                 initialization.fast_mode.unwrap_or(config.fast_mode),
+            )),
+            safety: Arc::new(SafetyClassifierSetting::new(
+                initialization
+                    .safety_classifier_enabled
+                    .unwrap_or(config.safety_classifier_defaults.0),
+                initialization
+                    .decision_model
+                    .clone()
+                    .unwrap_or_else(|| config.safety_classifier_defaults.1.clone()),
             )),
             provider_session_ids,
             standing: StandingInstruction::new(config.templates.clone()),
@@ -1193,6 +1305,8 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
             extra_concurrent_tasks: i32::try_from(self.services.task_concurrency.get_limit())
                 .expect("the session task limit fits in i32"),
             fast_mode: self.services.fast_mode.is_enabled(),
+            safety_classifier_enabled: self.services.safety.is_enabled(),
+            decision_model: self.services.safety.model(),
             working_directory: self
                 .services
                 .resources
@@ -1220,6 +1334,8 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
         mode: Option<String>,
         extra_concurrent_tasks: Option<i32>,
         fast_mode: Option<bool>,
+        safety_classifier_enabled: Option<bool>,
+        decision_model: Option<String>,
     ) -> protocol::Result<()> {
         let _gate = self.update_gate.lock().await;
         if let Some(enabled) = fast_mode {
@@ -1229,6 +1345,22 @@ impl<S: RestrictableAccessSnapshot + 'static> UserSessionCore<S> {
                 .update_fast_mode(enabled)
                 .map_err(internal)?;
             self.services.fast_mode.set_enabled(enabled);
+        }
+        if safety_classifier_enabled.is_some() || decision_model.is_some() {
+            let enabled =
+                safety_classifier_enabled.unwrap_or_else(|| self.services.safety.is_enabled());
+            let model = decision_model
+                .clone()
+                .unwrap_or_else(|| self.services.safety.model());
+            self.services
+                .lease
+                .metadata()
+                .update_safety_classifier(enabled, &model)
+                .map_err(internal)?;
+            self.services.safety.set_enabled(enabled);
+            if let Some(model) = decision_model {
+                self.services.safety.set_model(model);
+            }
         }
         if let Some(limit) = extra_concurrent_tasks {
             let capacity = usize::try_from(limit).map_err(invalid)?;
@@ -1898,10 +2030,19 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
         mode: Option<String>,
         extra_concurrent_tasks: Option<i32>,
         fast_mode: Option<bool>,
+        safety_classifier_enabled: Option<bool>,
+        decision_model: Option<String>,
     ) -> BoxFuture<'_, protocol::Result<()>> {
         self.core.owned_mutation(move |core| async move {
-            core.update(model, mode, extra_concurrent_tasks, fast_mode)
-                .await
+            core.update(
+                model,
+                mode,
+                extra_concurrent_tasks,
+                fast_mode,
+                safety_classifier_enabled,
+                decision_model,
+            )
+            .await
         })
     }
     fn update_selection(&self, model: ResolvedModelSelection) -> ConfigurationResult<()> {
@@ -1992,6 +2133,7 @@ impl<S: RestrictableAccessSnapshot + 'static> HostedSession for HostedCore<S> {
                                 PermissionTargetDescriptionKind::Directory
                             }
                         },
+                        scope: PermissionTargetDescriptionScope::Write,
                     })
                 })
                 .collect())

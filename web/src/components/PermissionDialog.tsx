@@ -71,7 +71,12 @@ export function PermissionDialog({ userSessionId, agents, onFailure }: Permissio
           {permission.targets.map((target) => (
             <li key={target.path} className="truncate">
               {target.scope === PermissionTargetScope.WRITE && "write "}
-              {target.kind === PermissionTargetKind.DIRECTORY ? "dir " : "file "}
+              {target.scope === PermissionTargetScope.EXECUTE && "run "}
+              {target.kind === PermissionTargetKind.DIRECTORY
+                ? "dir "
+                : target.kind === PermissionTargetKind.COMMAND
+                  ? "command "
+                  : "file "}
               {target.path}
             </li>
           ))}

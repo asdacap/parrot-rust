@@ -6,12 +6,15 @@
 use std::{io::Write, sync::Arc};
 
 use parrot_domain::contracts::async_ops::{BoxFuture, Cancellation, OperationError, OwnedWork};
+use parrot_domain::contracts::safety::CommandClassifierResolver;
 use parrot_foundation::{
     config::Configuration,
+    config::models::ModelSettings,
     credentials::{Credential, CredentialStore, CredentialType},
     oauth::{ApiKeyEnvironment, CredentialStorage, OAuthClient},
 };
 use parrot_provider::{
+    decisions::DecisionClassifierSource,
     http_stream::{HttpError, ProviderHttpClient, ProviderHttpClientCatalog, ReqwestTransport},
     image_generation::bucket::{CredentialSource, StoredCredential, SystemClock},
     routing::{
@@ -27,6 +30,22 @@ use parrot_provider::{
 use parrot_runtime::agent_turn::lifecycle::Signal;
 
 use super::{DispatchError, EXIT_SUCCESS};
+
+struct ConfiguredDecisionClassifier {
+    source: DecisionClassifierSource,
+    settings: ModelSettings,
+}
+impl CommandClassifierResolver for ConfiguredDecisionClassifier {
+    fn resolve(
+        &self,
+        model: &str,
+    ) -> Result<Option<Arc<dyn parrot_domain::contracts::safety::CommandSafetyClassifier>>, String>
+    {
+        self.source
+            .resolve_for_model(&self.settings, model)
+            .map_err(|error| error.to_string())
+    }
+}
 
 /// Retains the HTTP catalog and OAuth refresh owner used by this exact registry.
 /// A bare registry does not own the catalog's authority-scoped HTTP clients.
@@ -48,6 +67,24 @@ impl ProviderCatalog {
             .as_ref()
             .expect("provider catalog is closed")
             .clone()
+    }
+
+    /// Builds the runtime command classifier resolver. Resolution consults
+    /// this catalog's credentials and HTTP clients; a model whose provider
+    /// prefix is unknown or not a decisions provider resolves to None.
+    pub fn decision_classifier_resolver(
+        &self,
+        settings: ModelSettings,
+    ) -> Result<Arc<dyn CommandClassifierResolver>, DispatchError> {
+        let Some(clients) = self.clients.clone() else {
+            return Err(DispatchError::Command(
+                "the provider catalog is closed".into(),
+            ));
+        };
+        Ok(Arc::new(ConfiguredDecisionClassifier {
+            source: DecisionClassifierSource::new(self.credentials.clone(), clients),
+            settings,
+        }))
     }
 
     /// Joins accepted OAuth refresh work without caller cancellation. The caller

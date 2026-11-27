@@ -109,6 +109,8 @@ pub struct SessionInitialization {
     pub mode: String,
     pub extra_concurrent_tasks: Option<i32>,
     pub fast_mode: Option<bool>,
+    pub safety_classifier_enabled: Option<bool>,
+    pub decision_model: Option<String>,
     pub interactive_permissions: bool,
     pub resumed: bool,
 }
@@ -897,6 +899,12 @@ impl SessionStore {
                     .as_ref()
                     .and_then(|metadata| metadata.extra_concurrent_tasks),
                 fast_mode: existing.as_ref().and_then(|metadata| metadata.fast_mode),
+                safety_classifier_enabled: existing
+                    .as_ref()
+                    .and_then(|metadata| metadata.safety_classifier_enabled),
+                decision_model: existing
+                    .as_ref()
+                    .and_then(|metadata| metadata.decision_model.clone()),
                 interactive_permissions: interactive,
                 resumed: existing.is_some(),
             };
@@ -952,6 +960,8 @@ impl SessionStore {
                 metadata.mode = Some(initialization.mode.clone());
                 metadata.extra_concurrent_tasks = initialization.extra_concurrent_tasks;
                 metadata.fast_mode = initialization.fast_mode;
+                metadata.safety_classifier_enabled = initialization.safety_classifier_enabled;
+                metadata.decision_model = initialization.decision_model.clone();
                 metadata.created_at = Some(timestamp());
                 lease
                     .index

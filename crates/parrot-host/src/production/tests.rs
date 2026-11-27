@@ -141,6 +141,7 @@ impl Fixture {
                     )
                     .unwrap(),
                 ),
+                command_classifier: None,
                 diagnostics: self.diagnostics.clone(),
                 owner_runtime: tokio::runtime::Handle::current(),
             },

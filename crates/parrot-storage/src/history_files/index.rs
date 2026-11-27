@@ -210,6 +210,14 @@ impl SessionIndex {
         })
     }
 
+    pub fn update_safety_classifier(&self, enabled: bool, model: &str) -> Result<()> {
+        self.update(|metadata| {
+            metadata.safety_classifier_enabled = Some(enabled);
+            metadata.decision_model = Some(model.to_owned());
+            Ok(true)
+        })
+    }
+
     pub fn record_opened(&self, opened_at: &str) -> Result<()> {
         self.update(|metadata| {
             metadata.last_opened_at = Some(opened_at.into());
