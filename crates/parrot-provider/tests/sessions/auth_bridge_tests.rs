@@ -314,27 +314,28 @@ async fn drain(
     (events, failure)
 }
 #[tokio::test]
-async fn auth_domains_exhaust_six_calls_and_five_retries_in_session_mode() {
+async fn auth_domains_exhaust_eleven_calls_and_ten_retries_in_session_mode() {
     for (auth, _, _) in auth_cases() {
         let error = Error::from(auth.clone());
         let (script, provider, sleeper) = fixture(error.clone(), false);
         let (events, failure) = drain(call(&provider), &Cancel::default()).await;
         assert_eq!(failure, error);
-        assert_eq!(script.calls.load(Ordering::SeqCst), 6);
-        assert_eq!(events.len(), 5);
+        assert_eq!(script.calls.load(Ordering::SeqCst), 11);
+        assert_eq!(events.len(), 10);
         for (index, event) in events.iter().enumerate() {
             assert_eq!(
                 event,
                 &Event::Retry {
                     attempt: index as i32 + 1,
-                    retry_after: Duration::from_millis(200 << index),
+                    retry_after: Duration::from_millis(200 << index.min(7)),
                     reason: "Provider connection or protocol failure. Retrying.".into()
                 }
             );
         }
         assert_eq!(
             *sleeper.0.lock().unwrap(),
-            [200, 400, 800, 1600, 3200].map(Duration::from_millis)
+            [200, 400, 800, 1600, 3200, 6400, 12800, 25600, 25600, 25600]
+                .map(Duration::from_millis)
         );
     }
 }
@@ -569,8 +570,8 @@ async fn websocket_wrapped_auth_exhaustion_requests_fallback_but_bare_auth_does_
     let auth = Error::from(AuthError::Message("auth-private-sentinel"));
     let (script, provider, sleeper) = fixture(websocket_wrapper(auth.clone()), false);
     let (events, failure) = drain(call(&provider), &Cancel::default()).await;
-    assert_eq!(script.calls.load(Ordering::SeqCst), 6);
-    assert_eq!(events.len(), 5);
+    assert_eq!(script.calls.load(Ordering::SeqCst), 11);
+    assert_eq!(events.len(), 10);
     assert_eq!(
         failure,
         Error::InvalidOperation(
@@ -579,13 +580,13 @@ async fn websocket_wrapped_auth_exhaustion_requests_fallback_but_bare_auth_does_
     );
     assert_eq!(
         *sleeper.0.lock().unwrap(),
-        [200, 400, 800, 1600, 3200].map(Duration::from_millis)
+        [200, 400, 800, 1600, 3200, 6400, 12800, 25600, 25600, 25600].map(Duration::from_millis)
     );
     let (script, provider, _) = fixture(auth.clone(), false);
     let (events, failure) = drain(call(&provider), &Cancel::default()).await;
     assert_eq!(failure, auth);
-    assert_eq!(script.calls.load(Ordering::SeqCst), 6);
-    assert_eq!(events.len(), 5);
+    assert_eq!(script.calls.load(Ordering::SeqCst), 11);
+    assert_eq!(events.len(), 10);
 }
 #[tokio::test]
 async fn websocket_diagnostics_recurse_through_actual_causes_without_crossing_provider_wrappers() {
@@ -696,8 +697,8 @@ fn typed_http_cases() -> Vec<(
             HttpError::Transport(message.clone()),
             Failure::Network,
             "http",
-            6,
-            5,
+            11,
+            10,
         ),
         (
             HttpError::Provider(message),
@@ -751,7 +752,8 @@ async fn typed_provider_http_and_request_cancelled_are_terminal_but_native_trans
         } else {
             assert_eq!(
                 *sleeper.0.lock().unwrap(),
-                [200, 400, 800, 1600, 3200].map(Duration::from_millis)
+                [200, 400, 800, 1600, 3200, 6400, 12800, 25600, 25600, 25600]
+                    .map(Duration::from_millis)
             );
         }
     }

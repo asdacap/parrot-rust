@@ -144,7 +144,7 @@ struct Counts {
 }
 #[derive(Clone, Copy)]
 enum KeyScript {
-    AuthSixThenKey,
+    AuthElevenThenKey,
     AuthAlways,
     Missing,
     Cancel,
@@ -152,7 +152,7 @@ enum KeyScript {
 impl KeyScript {
     fn parse(value: &str) -> Result<Self, Error> {
         match value {
-            "auth_six_then_key" => Ok(Self::AuthSixThenKey),
+            "auth_eleven_then_key" => Ok(Self::AuthElevenThenKey),
             "auth_always" => Ok(Self::AuthAlways),
             "missing" => Ok(Self::Missing),
             "cancel" => Ok(Self::Cancel),
@@ -178,8 +178,8 @@ impl ApiKeySource for Keys {
                 return Err(Error::Cancelled);
             }
             match self.script {
-                KeyScript::AuthSixThenKey if call > 6 => Ok("synthetic-key".into()),
-                KeyScript::AuthSixThenKey | KeyScript::AuthAlways => Err(Error::Authentication(
+                KeyScript::AuthElevenThenKey if call > 11 => Ok("synthetic-key".into()),
+                KeyScript::AuthElevenThenKey | KeyScript::AuthAlways => Err(Error::Authentication(
                     AuthError::Message("synthetic auth failure"),
                 )),
                 KeyScript::Missing => Ok(String::new()),

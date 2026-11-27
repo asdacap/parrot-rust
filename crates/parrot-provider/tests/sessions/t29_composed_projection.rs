@@ -486,7 +486,7 @@ async fn observe(case: &Case) -> Result<(Value, Value), Error> {
         }
         "exhausted" => {
             let (independent_record, independent_socket) = socket();
-            let mut outcomes = (0..6)
+            let mut outcomes = (0..11)
                 .map(|_| {
                     Connection::Failure(if case.upgrade_failure {
                         ws::WebSocketError::Upgrade {
@@ -535,7 +535,7 @@ async fn observe(case: &Case) -> Result<(Value, Value), Error> {
         }
         "fresh_budget" => {
             let connector = Connector::new(
-                (0..6)
+                (0..11)
                     .map(|_| Connection::Failure(ws::WebSocketError::Transport("dropped".into())))
                     .collect(),
             );

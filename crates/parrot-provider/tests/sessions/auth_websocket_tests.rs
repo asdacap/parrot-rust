@@ -313,15 +313,15 @@ fn ordinary() -> Vec<Error> {
 }
 
 #[tokio::test]
-async fn six_websocket_credential_failures_recover_over_http_for_both_actual_providers() {
+async fn eleven_websocket_credential_failures_recover_over_http_for_both_actual_providers() {
     for kind in KINDS {
         for error in ordinary() {
-            let rig = rig(kind, error.clone(), 6, false);
+            let rig = rig(kind, error.clone(), 11, false);
             let actual = observe(retry_session(&rig).as_ref()).await;
             assert_eq!(actual.failure, None, "{kind:?}: {error:?}");
             assert!(actual.completed());
-            assert_eq!(actual.retries(), 6);
-            assert_eq!(rig.credentials.calls.load(Ordering::SeqCst), 7);
+            assert_eq!(actual.retries(), 11);
+            assert_eq!(rig.credentials.calls.load(Ordering::SeqCst), 12);
             assert_eq!(rig.http.0.load(Ordering::SeqCst), 1);
             assert_eq!(rig.connector.calls.load(Ordering::SeqCst), 0);
         }
@@ -358,20 +358,20 @@ async fn websocket_budget_exhaustion_resets_http_stream_budget_without_wrapping_
         for (original, attempts, retries) in [
             (
                 Error::from(AuthError::Message("secret-auth-message")),
-                12,
-                11,
+                22,
+                21,
             ),
             (
                 AuthError::InvalidOperation("secret-auth-invalid").into(),
-                12,
-                11,
+                22,
+                21,
             ),
-            (AuthError::Io.into(), 12, 11),
-            (AuthError::Transport.into(), 12, 11),
+            (AuthError::Io.into(), 22, 21),
+            (AuthError::Transport.into(), 22, 21),
             (
                 Error::Http(HttpError::ProviderHttp("secret-provider-http".into())),
-                7,
-                6,
+                12,
+                11,
             ),
         ] {
             let rig = rig(kind, original.clone(), usize::MAX, false);

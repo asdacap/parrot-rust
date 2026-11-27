@@ -705,7 +705,7 @@ async fn unsupported_upgrades_and_chatgpt_oversized_requests_select_sticky_actua
 async fn exhausted_retry_budget_is_sticky_session_local_and_http_gets_a_fresh_budget() {
     for upgrade_failure in [false, true] {
         let (independent_record, independent) = socket(vec![COMPLETED.into()]);
-        let mut outcomes: Vec<_> = (0..6)
+        let mut outcomes: Vec<_> = (0..11)
             .map(|_| {
                 if upgrade_failure {
                     upgrade(502)
@@ -723,27 +723,29 @@ async fn exhausted_retry_budget_is_sticky_session_local_and_http_gets_a_fresh_bu
         let retry = retries(&events);
         assert_eq!(
             retry.iter().map(|r| r.0).collect::<Vec<_>>(),
-            vec![1, 2, 3, 4, 5, 6]
+            (1..=11).collect::<Vec<_>>()
         );
         assert_eq!(
             retry.iter().map(|r| r.1).collect::<Vec<_>>(),
-            vec![200, 400, 800, 1600, 3200, 0]
+            vec![
+                200, 400, 800, 1600, 3200, 6400, 12800, 25600, 25600, 25600, 0
+            ]
         );
         assert_eq!(
-            retry[5].2,
+            retry[10].2,
             "WebSocket retry budget exhausted. Retrying over HTTP."
         );
         successful(session.as_ref(), request("two")).await;
         let independent = provider.open_session().unwrap();
         successful(independent.as_ref(), request("three")).await;
-        assert_eq!(connector.count(), 7);
+        assert_eq!(connector.count(), 12);
         assert_eq!(http.count(), 2);
         assert_eq!(sent(&independent_record).len(), 1);
         session.close().await.unwrap();
         independent.close().await.unwrap();
     }
     let connector = Connector::new(
-        (0..6)
+        (0..11)
             .map(|_| Connect::Fail(ws::WebSocketError::Transport("transport".into())))
             .collect(),
     );
@@ -759,7 +761,7 @@ async fn exhausted_retry_budget_is_sticky_session_local_and_http_gets_a_fresh_bu
     let provider = retrying(configured(false, connector.clone(), http.clone()));
     let session = provider.open_session().unwrap();
     successful(session.as_ref(), request("hello")).await;
-    assert_eq!(connector.count(), 6);
+    assert_eq!(connector.count(), 11);
     assert_eq!(http.count(), 2);
     session.close().await.unwrap();
 }

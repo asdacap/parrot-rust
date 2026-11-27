@@ -167,7 +167,7 @@ fn header_retries_are_configured_independent_and_capped() {
 }
 
 #[test]
-fn stream_failures_share_exactly_five_attempts_and_backoff() {
+fn stream_failures_share_exactly_ten_attempts_and_backoff() {
     let mut policy = RetryPolicy::new(0, 5);
     let failures = [
         Failure::Network,
@@ -178,11 +178,19 @@ fn stream_failures_share_exactly_five_attempts_and_backoff() {
             status: 502,
         },
         Failure::WebSocketTransport,
+        Failure::Network,
+        Failure::Protocol,
+        Failure::Network,
+        Failure::Protocol,
+        Failure::WebSocketTransport,
     ];
     for (index, failure) in failures.iter().enumerate() {
         let action = policy.classify(failure, false).unwrap();
         assert_eq!(action.attempt, index as u32 + 1);
-        assert_eq!(action.delay, Duration::from_millis(200 << index));
+        assert_eq!(
+            action.delay,
+            Duration::from_millis(200 << (index as u32).min(7))
+        );
         assert!(!action.reason.contains("private-sentinel"));
         assert!(!action.fallback_http);
     }
@@ -197,7 +205,7 @@ fn stream_failures_share_exactly_five_attempts_and_backoff() {
         },
     ] {
         let action = policy.classify(&failure, false).unwrap();
-        assert_eq!(action.attempt, 6);
+        assert_eq!(action.attempt, 11);
         assert_eq!(action.delay, Duration::ZERO);
         assert!(action.fallback_http);
         assert_eq!(
@@ -245,7 +253,7 @@ fn http_status_and_upgrade_permanence_are_source_shaped() {
 #[test]
 fn overload_budget_is_shared_between_http_and_stream_and_separate_from_network() {
     let mut policy = RetryPolicy::new(100, 1);
-    for attempt in 1..=5 {
+    for attempt in 1..=10 {
         let failure = if attempt % 2 == 0 {
             response(" OVERLOADED_ERROR ", "", "private-sentinel")
         } else {
@@ -259,7 +267,7 @@ fn overload_budget_is_shared_between_http_and_stream_and_separate_from_network()
         );
         assert_eq!(
             action.reason,
-            format!("Provider servers are overloaded. Retrying (attempt {attempt}/5).")
+            format!("Provider servers are overloaded. Retrying (attempt {attempt}/10).")
         );
     }
     for failure in [http(503, "", "", ""), response("overloaded_error", "", "")] {
@@ -348,7 +356,7 @@ fn reset_after_fallback_only_resets_stream_budget() {
     let detail = context_detail("180000", "180514", "147746", "32768");
     let context_failure = http(400, "", "", &detail);
     policy.classify(&context_failure, false).unwrap();
-    for _ in 0..5 {
+    for _ in 0..10 {
         policy
             .classify(&Failure::WebSocketTransport, false)
             .unwrap();
@@ -602,7 +610,7 @@ fn server_cooldowns_preserve_eligibility_visibility_and_independent_budgets() {
     }
     let mut policy = RetryPolicy::new(4096, 5);
     assert_eq!(policy.classify(&terminal, false), Err(terminal.clone()));
-    for attempt in 1..=5 {
+    for attempt in 1..=10 {
         for failure in [&rate_limit, &overload] {
             let action = policy.classify(failure, false).unwrap();
             assert_eq!(action.attempt, attempt);

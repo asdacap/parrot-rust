@@ -91,7 +91,7 @@ async fn actual_ws_wrapper_is_not_unwrapped_or_relabelled_as_bare_http_auth() {
 #[tokio::test(start_paused = true)]
 async fn actual_retry_fallback_sends_original_request_with_actual_raw_body_and_headers() {
     let output = run(false).await;
-    let result = observation(&output, "ws-retry_session-auth_six_then_key");
+    let result = observation(&output, "ws-retry_session-auth_eleven_then_key");
     assert!(result["error"].is_null());
     assert_eq!(result["fallback_calls"], 1);
     assert_eq!(result["http_sends"], 1);

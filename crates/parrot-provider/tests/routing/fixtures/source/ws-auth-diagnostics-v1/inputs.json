@@ -2,10 +2,10 @@
   "contract": "t32-ws-auth-diagnostics-source-v1",
   "cases": [
     {
-      "case_id": "ws-retry_session-auth_six_then_key",
+      "case_id": "ws-retry_session-auth_eleven_then_key",
       "mode": "retry_session",
       "disable_websocket": false,
-      "key_script": "auth_six_then_key"
+      "key_script": "auth_eleven_then_key"
     },
     {
       "case_id": "ws-retry_session-auth_always",
@@ -38,10 +38,10 @@
       "key_script": "missing"
     },
     {
-      "case_id": "http-retry_session-auth_six_then_key",
+      "case_id": "http-retry_session-auth_eleven_then_key",
       "mode": "retry_session",
       "disable_websocket": true,
-      "key_script": "auth_six_then_key"
+      "key_script": "auth_eleven_then_key"
     },
     {
       "case_id": "http-retry_session-auth_always",

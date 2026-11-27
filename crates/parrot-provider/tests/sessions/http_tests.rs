@@ -661,9 +661,9 @@ async fn composed_chat_parse_failures_retry_before_visible_output_then_complete(
 }
 
 #[tokio::test]
-async fn composed_chat_parse_failures_exhaust_five_stream_retries() {
+async fn composed_chat_parse_failures_exhaust_ten_stream_retries() {
     for malformed in [MALFORMED_CHAT, INVALID_CHAT_INTEGER] {
-        let (provider, wire) = retrying_chat(vec![malformed; 6].into());
+        let (provider, wire) = retrying_chat(vec![malformed; 11].into());
         let mut stream = provider
             .open_session()
             .unwrap()
@@ -693,9 +693,9 @@ async fn composed_chat_parse_failures_exhaust_five_stream_retries() {
         } else {
             assert!(message.contains("prompt_tokens"));
         }
-        assert_eq!(retries, 5);
-        assert_eq!(wire.requests.lock().unwrap().len(), 6);
-        assert_eq!(wire.drops.load(Ordering::SeqCst), 6);
+        assert_eq!(retries, 10);
+        assert_eq!(wire.requests.lock().unwrap().len(), 11);
+        assert_eq!(wire.drops.load(Ordering::SeqCst), 11);
         stream.close().await.unwrap();
     }
 }
@@ -1027,8 +1027,8 @@ async fn request_cancelled_wording_does_not_reclassify_ordinary_transport_errors
             };
             assert_eq!(failure, Error::Http(original));
             assert!(!cancel.is_cancelled());
-            assert_eq!(retries, 5);
-            assert_eq!(wire.requests.lock().unwrap().len(), 6);
+            assert_eq!(retries, 10);
+            assert_eq!(wire.requests.lock().unwrap().len(), 11);
             stream.close().await.unwrap();
             session.close().await.unwrap();
             let events = sink.0.lock().unwrap();
@@ -1041,7 +1041,7 @@ async fn request_cancelled_wording_does_not_reclassify_ordinary_transport_errors
                     )
                 })
                 .collect();
-            assert_eq!(terminals.len(), 7);
+            assert_eq!(terminals.len(), 12);
             for terminal in terminals {
                 assert_eq!(terminal.outcome.as_deref(), Some("failed"));
                 assert_eq!(terminal.severity, DiagnosticSeverity::Error);

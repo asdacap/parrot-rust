@@ -16,8 +16,8 @@ async fn review_projector_runs_actual_malformed_recovery_and_exhaustion() {
     assert_eq!(recover["timer_delays_ms"], serde_json::json!([200]));
     assert_eq!(recover["error"], serde_json::Value::Null);
     let exhaust = &output["cases"][1]["observation"];
-    assert_eq!(exhaust["http_calls"], 6);
-    assert_eq!(exhaust["body_disposals"], 6);
+    assert_eq!(exhaust["http_calls"], 11);
+    assert_eq!(exhaust["body_disposals"], 11);
     assert_eq!(
         exhaust["error"],
         serde_json::json!({"classification":"json_parse"})

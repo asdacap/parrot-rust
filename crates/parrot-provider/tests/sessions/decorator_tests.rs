@@ -293,14 +293,14 @@ async fn context_reduction_changes_only_cloned_request() {
 #[tokio::test(start_paused = true)]
 async fn socket_budget_exhaustion_falls_back_then_resets_stream_budget() {
     let socket = Error::Socket(WebSocketError::Transport("closed".into()));
-    let mut attempts = vec![vec![Err(socket)]; 6];
+    let mut attempts = vec![vec![Err(socket)]; 11];
     attempts.push(vec![Err(wire())]);
     attempts.push(vec![]);
     let (state, session) = setup(attempts, 5);
     state.fallback.store(true, Ordering::SeqCst);
     let mut stream = session.call(req()).unwrap();
     let cancel = Cancel::default();
-    for _ in 0..6 {
+    for _ in 0..11 {
         retry(stream.next(&cancel).await.unwrap());
     }
     assert_eq!(state.fallbacks.load(Ordering::SeqCst), 1);
@@ -309,7 +309,7 @@ async fn socket_budget_exhaustion_falls_back_then_resets_stream_budget() {
         Duration::from_millis(200)
     );
     assert_eq!(stream.next(&cancel).await.unwrap(), None);
-    assert_eq!(state.closes.load(Ordering::SeqCst), 8);
+    assert_eq!(state.closes.load(Ordering::SeqCst), 13);
 }
 #[tokio::test(start_paused = true)]
 async fn unsupported_fallback_reports_source_invalid_operation() {
@@ -318,10 +318,10 @@ async fn unsupported_fallback_reports_source_invalid_operation() {
         status: 503,
         message: "upgrade".into(),
     });
-    let (state, session) = setup(vec![vec![Err(original.clone())]; 6], 5);
+    let (state, session) = setup(vec![vec![Err(original.clone())]; 11], 5);
     let mut stream = session.call(req()).unwrap();
     let cancel = Cancel::default();
-    for _ in 0..5 {
+    for _ in 0..10 {
         retry(stream.next(&cancel).await.unwrap());
     }
     assert_eq!(
@@ -839,7 +839,7 @@ async fn canonical_idle_timeout_before_output_retries_with_bounded_exhaustion() 
                 Ok(Some(Event::HttpResponseHeadersReceived)),
                 Err(failure.clone())
             ];
-            if exhausted { 6 } else { 1 }
+            if exhausted { 11 } else { 1 }
         ];
         if !exhausted {
             attempts.push(vec![Ok(Some(canonical_completed(1, 1, "answer")))]);
@@ -857,10 +857,10 @@ async fn canonical_idle_timeout_before_output_retries_with_bounded_exhaustion() 
             result.unwrap();
             assert_eq!(canonical_kind(events.last().unwrap()), "Completed");
         }
-        assert_eq!(canonical_calls(&state), if exhausted { 6 } else { 2 });
+        assert_eq!(canonical_calls(&state), if exhausted { 11 } else { 2 });
         assert_eq!(
             canonical_retry_count(&events),
-            if exhausted { 5 } else { 1 }
+            if exhausted { 10 } else { 1 }
         );
         session.close().await.unwrap();
     }
@@ -1316,7 +1316,7 @@ async fn canonical_service_unavailable_uses_the_visible_overload_retry() {
             Some(Event::Retry {
                 attempt: 1,
                 retry_after: Duration::from_secs(2),
-                reason: "Provider servers are overloaded. Retrying (attempt 1/5).".into()
+                reason: "Provider servers are overloaded. Retrying (attempt 1/10).".into()
             })
         );
         assert_eq!(canonical_calls(&state), 1);
@@ -1450,7 +1450,7 @@ async fn canonical_exhausted_websocket_retries_preserve_the_unsupported_session_
             vec![Err(Error::Socket(WebSocketError::Transport(
                 "dropped".into()
             )))];
-            6
+            11
         ],
         5,
     );
@@ -1466,7 +1466,7 @@ async fn canonical_exhausted_websocket_retries_preserve_the_unsupported_session_
             "A provider call requested HTTP fallback without supporting it.".into()
         ))
     );
-    assert_eq!(canonical_calls(&state), 6);
+    assert_eq!(canonical_calls(&state), 11);
     session.close().await.unwrap();
 }
 
@@ -1477,14 +1477,14 @@ async fn upgrade_cooldown_survives_retry_budget_exhaustion_and_http_fallback() {
         status: 429,
         message: "cool down".into(),
     });
-    let mut attempts = vec![vec![Err(failure)]; 6];
+    let mut attempts = vec![vec![Err(failure)]; 11];
     attempts.push(vec![Ok(Some(Event::TextDelta("ok".into())))]);
     let (state, session) = setup(attempts, 5);
     state.fallback.store(true, Ordering::SeqCst);
     let mut stream = session.call(req()).unwrap();
     let cancel = Cancel::default();
     let start = tokio::time::Instant::now();
-    for attempt in 1..=6 {
+    for attempt in 1..=11 {
         assert_eq!(
             retry(stream.next(&cancel).await.unwrap()),
             Duration::from_secs(45)
@@ -1497,8 +1497,8 @@ async fn upgrade_cooldown_survives_retry_budget_exhaustion_and_http_fallback() {
         stream.next(&cancel).await.unwrap(),
         Some(Event::TextDelta("ok".into()))
     );
-    assert_eq!(start.elapsed(), Duration::from_secs(270));
-    assert_eq!(state.requests.lock().unwrap().len(), 7);
+    assert_eq!(start.elapsed(), Duration::from_secs(495));
+    assert_eq!(state.requests.lock().unwrap().len(), 12);
 }
 
 #[tokio::test(start_paused = true)]

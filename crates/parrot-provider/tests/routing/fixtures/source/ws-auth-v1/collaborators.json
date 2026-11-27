@@ -8,7 +8,7 @@
     "HasCredential":"returns true; not invoked by fixture",
     "ApiKey":"increments Gets, checks caller cancellation, then executes script",
     "scripts": {
-      "auth_six_then_key":"calls 1 through 6 throw new AuthException(\"synthetic auth failure\"); later calls return synthetic-key",
+      "auth_eleven_then_key":"calls 1 through 11 throw new AuthException(\"synthetic auth failure\"); later calls return synthetic-key",
       "auth_always":"every call throws new AuthException(\"synthetic auth failure\")",
       "missing":"returns empty string",
       "cancel":"cancels the shared caller CancellationTokenSource, then throws new OperationCanceledException(\"synthetic auth cancelled\", callerToken)"

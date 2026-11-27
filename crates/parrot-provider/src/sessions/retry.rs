@@ -223,7 +223,7 @@ impl RetryPolicy {
     }
 
     fn overload(&mut self, failure: &Failure) -> Result<RetryAction, Failure> {
-        if self.overload_attempt == 5 {
+        if self.overload_attempt == 10 {
             return Err(failure.clone());
         }
         self.overload_attempt += 1;
@@ -231,7 +231,7 @@ impl RetryPolicy {
             self.overload_attempt,
             slow_delay(self.overload_attempt - 1),
             format!(
-                "Provider servers are overloaded. Retrying (attempt {}/5).",
+                "Provider servers are overloaded. Retrying (attempt {}/10).",
                 self.overload_attempt
             ),
             false,
@@ -239,7 +239,7 @@ impl RetryPolicy {
     }
 
     fn take_stream(&mut self) -> bool {
-        if self.stream_attempt == 5 {
+        if self.stream_attempt == 10 {
             false
         } else {
             self.stream_attempt += 1;
@@ -258,7 +258,7 @@ impl RetryPolicy {
 
     fn fallback(&self) -> RetryAction {
         self.action(
-            6,
+            11,
             Duration::ZERO,
             "WebSocket retry budget exhausted. Retrying over HTTP.".into(),
             true,
